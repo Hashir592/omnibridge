@@ -10,7 +10,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Next task after it:** T-0102 Contract pipeline (normal), then T-0103 Envelope crypto (**high**: wait for Hashir's "go").
 - **Last checkpoint:** none yet. M01 halfway checkpoint comes after T-0103.
 - **Open findings:** none from S4. Self-review of T-0101 (/code-review, because the CodeRabbit CLI is not installed): 9 fixed, 1 deferred (CI image cache).
-- **Open questions:** PS-001 to PS-003 in `docs/DECISIONS.md` "Proposed (from sessions)" wait for S1.
+- **Open questions:** PS-001 to PS-005 in `docs/DECISIONS.md` "Proposed (from sessions)" wait for S1 (PS-004 lefthook 2.2.1 and PS-005 pnpm policies are already applied with Hashir's approval). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 
@@ -20,12 +20,12 @@ Local-first (ADR-029): everything is built and tested on local Docker with mocks
 
 - pnpm 12.14.0 monorepo in the ARCHITECTURE.md §3 layout; stub packages have one export and one test.
 - Stack (`infra/compose/compose.yaml` + `compose.dev.yaml`): web, worker, pii-vault, site, db-main, db-pii, migrate jobs, caddy, mailpit, provider-mocks, and clamd under the `scan` profile. Every service is limited and health-checked.
-- `scripts/verify.sh` is the full gate (`--quick`, `--help`). The local run passed in 877 s.
+- `scripts/verify.sh` is the full gate (`--quick`, `--help`). Local run: 513 s. First CI run of the gate on GitHub: 4 min 4 s.
 
 ## Next step
 
 1. Hashir reviews and merges the T-0101 PR after CI is green. S3 never merges.
-2. S1 rules on PS-001 to PS-003.
+2. S1 rules on PS-001 to PS-005 and amends ADR-019 (lefthook 2.2.1).
 3. S3 starts T-0102 after `/clear`.
 4. S2 starts M03 once T-0102 is merged.
 
