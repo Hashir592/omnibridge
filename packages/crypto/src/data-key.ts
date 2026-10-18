@@ -100,33 +100,40 @@ export function generateDataKey(
   };
 }
 
-export function unwrapDataKey(keyring: Keyring, stored: WrappedDataKey): DataKey {
+/** Opens a stored DEK; the only path that checks its prefix and builds its AAD. */
+function openWrapped(keyring: Keyring, stored: WrappedDataKey): Buffer {
   if (ciphertextKeyVersion(stored.wrapped) !== stored.kekVersion) {
     throw new CryptoError('Wrapped data key prefix does not match its KEK version');
   }
-  const key = keyring.unwrap(
+  return keyring.unwrap(
     stored.wrapped,
     wrapAad(keyring.purpose, stored.workspaceId, stored.version),
   );
-  return new DataKey(keyring.purpose, stored.workspaceId, stored.version, key);
+}
+
+export function unwrapDataKey(keyring: Keyring, stored: WrappedDataKey): DataKey {
+  return new DataKey(
+    keyring.purpose,
+    stored.workspaceId,
+    stored.version,
+    openWrapped(keyring, stored),
+  );
 }
 
 /**
- * KEK rotation: re-wraps a DEK under the active KEK. Only the 60-byte wrapped key changes; data
+ * KEK rotation: re-wraps a DEK under the active KEK. Only the 65-byte wrapped key changes; data
  * encrypted with the DEK is never touched (SEC-6). A DEK already under the active KEK is returned
  * as it is.
  */
 export function rewrapDataKey(keyring: Keyring, stored: WrappedDataKey): WrappedDataKey {
   if (stored.kekVersion === keyring.activeVersion) return stored;
-  const aad = wrapAad(keyring.purpose, stored.workspaceId, stored.version);
-  if (ciphertextKeyVersion(stored.wrapped) !== stored.kekVersion) {
-    throw new CryptoError('Wrapped data key prefix does not match its KEK version');
-  }
-  const key = keyring.unwrap(stored.wrapped, aad);
   return {
     workspaceId: stored.workspaceId,
     version: stored.version,
     kekVersion: keyring.activeVersion,
-    wrapped: keyring.wrap(key, aad),
+    wrapped: keyring.wrap(
+      openWrapped(keyring, stored),
+      wrapAad(keyring.purpose, stored.workspaceId, stored.version),
+    ),
   };
 }

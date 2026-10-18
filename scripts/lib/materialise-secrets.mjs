@@ -1,7 +1,15 @@
 // Writes each key of a decrypted SOPS JSON document (stdin) to <dir>/<key> as a Docker secret file
 // (T-0103, SEC-5). Prints names only, never values. An existing file with different content stops
 // the run unless --reset is given, because database volumes keep the passwords they started with.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 const [dir, mode] = process.argv.slice(2);
@@ -31,6 +39,15 @@ for (const [name, value] of Object.entries(doc)) {
   // Readable by the non-root container users that mount it (dev only).
   chmodSync(file, 0o644);
   console.log(`wrote ${name}`);
+}
+
+// A file whose entry left dev.sops.yaml is removed, so .secrets/ never drifts from the source.
+const wanted = new Set(Object.keys(doc));
+for (const name of readdirSync(dir)) {
+  if (/^[a-z][a-z0-9_]*$/.test(name) && !wanted.has(name)) {
+    rmSync(join(dir, name));
+    console.log(`removed ${name}`);
+  }
 }
 
 if (stale.length > 0) {

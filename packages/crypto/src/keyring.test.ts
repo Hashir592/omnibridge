@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { CryptoError } from './envelope.ts';
-import { generateKekLine, loadKeyring, parseKeyring } from './keyring.ts';
+import { generateKekLine, Keyring, loadKeyring, parseKeyring } from './keyring.ts';
 import { Secret } from './secret.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'ob-kek-'));
@@ -50,6 +50,31 @@ describe('master key keyrings (SEC-5, SEC-6)', () => {
         CryptoError,
       );
     }
+  });
+
+  it('[SEC-6] a keyring built directly also refuses out-of-order versions and short keys', () => {
+    const key = Buffer.alloc(32, 7);
+    expect(
+      () =>
+        new Keyring(
+          'secrets',
+          new Map([
+            [2, key],
+            [1, key],
+          ]),
+        ),
+    ).toThrow(CryptoError);
+    expect(() => new Keyring('secrets', new Map([[1, Buffer.alloc(16)]]))).toThrow(CryptoError);
+    expect(() => new Keyring('secrets', new Map())).toThrow(CryptoError);
+    expect(
+      new Keyring(
+        'secrets',
+        new Map([
+          [1, key],
+          [3, key],
+        ]),
+      ).activeVersion,
+    ).toBe(3);
   });
 
   it('[SEC-6] parse errors and the keyring itself never print key material', () => {

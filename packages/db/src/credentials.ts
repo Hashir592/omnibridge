@@ -62,7 +62,15 @@ export class CredentialRepository {
     if ((await this.#activeRow(db, ctx, ref, slot)) !== undefined) {
       throw new Error(`An active ${slot} credential of kind ${ref.kind} already exists`);
     }
-    return this.#insert(db, ctx, ref, slot, value, options.expiresAt ?? null);
+    try {
+      return await this.#insert(db, ctx, ref, slot, value, options.expiresAt ?? null);
+    } catch (err) {
+      // A concurrent store filled the slot between the check and the insert.
+      if (isUniqueViolation(err)) {
+        throw new Error(`An active ${slot} credential of kind ${ref.kind} already exists`);
+      }
+      throw err;
+    }
   }
 
   /** The active value in a slot, or undefined. */
@@ -72,9 +80,25 @@ export class CredentialRepository {
     ref: CredentialRef,
     slot: CredentialSlot = 'current',
   ): Promise<Secret | undefined> {
-    const row = await this.#activeRow(db, ctx, ref, slot);
+    // One round trip: the credential and the data key it was written under.
+    const row = await db
+      .selectFrom(TABLE)
+      .innerJoin('app.data_keys as k', (join) =>
+        join
+          .onRef('k.workspace_id', '=', `${TABLE}.workspace_id`)
+          .onRef('k.version', '=', `${TABLE}.key_version`),
+      )
+      .where(this.#slot(ctx, ref, slot))
+      .select([
+        `${TABLE}.id`,
+        `${TABLE}.encrypted_value`,
+        'k.version',
+        'k.kek_version',
+        'k.wrapped_key',
+      ])
+      .executeTakeFirst();
     if (row === undefined) return undefined;
-    const dataKey = await this.#dataKey(db, ctx, Number(row.key_version));
+    const dataKey = this.#unwrap(ctx, row);
     const plaintext = dataKey.decrypt(row.encrypted_value, this.#aad(ctx, row.id));
     return new Secret(plaintext.toString('utf8'));
   }
@@ -231,35 +255,40 @@ export class CredentialRepository {
     return db
       .selectFrom(TABLE)
       .where(this.#slot(ctx, ref, slot))
-      .select(['id', 'key_version', 'encrypted_value'])
+      .select('id')
       .executeTakeFirst();
   }
 
-  /** Filter for the active row of one slot of one credential, shared by select and update. */
+  /**
+   * Filter for the active row of one slot of one credential, shared by select and update. Columns
+   * are table-qualified because get() joins app.data_keys, which also has workspace_id.
+   */
   #slot(ctx: TenantContext, ref: CredentialRef, slot: CredentialSlot) {
     return (eb: ExpressionBuilder<MainDb, typeof TABLE>) =>
       eb.and([
-        eb('workspace_id', '=', ctx.workspaceId),
-        eb('kind', '=', ref.kind),
-        eb('channel_account_id', 'is not distinct from', ref.channelAccountId ?? null),
-        eb('slot', '=', slot),
-        eb('is_active', '=', true),
+        eb(`${TABLE}.workspace_id`, '=', ctx.workspaceId),
+        eb(`${TABLE}.kind`, '=', ref.kind),
+        eb(`${TABLE}.channel_account_id`, 'is not distinct from', ref.channelAccountId ?? null),
+        eb(`${TABLE}.slot`, '=', slot),
+        eb(`${TABLE}.is_active`, '=', true),
       ]);
   }
 
   /** The newest data key of the workspace, created on first use. */
   async #activeDataKey(db: Kysely<MainDb>, ctx: TenantContext): Promise<DataKey> {
-    const newest = await db
-      .selectFrom('app.data_keys')
-      .select('version')
-      .where('workspace_id', '=', ctx.workspaceId)
-      .orderBy('version', 'desc')
-      .limit(1)
-      .executeTakeFirst();
-    if (newest !== undefined) return this.#dataKey(db, ctx, Number(newest.version));
+    const newest = () =>
+      db
+        .selectFrom('app.data_keys')
+        .select(['version', 'kek_version', 'wrapped_key'])
+        .where('workspace_id', '=', ctx.workspaceId)
+        .orderBy('version', 'desc')
+        .limit(1)
+        .executeTakeFirst();
+    const existing = await newest();
+    if (existing !== undefined) return this.#unwrap(ctx, existing);
 
-    const { wrapped } = generateDataKey(this.#keyring, ctx.workspaceId, 1);
-    await db
+    const { dataKey, wrapped } = generateDataKey(this.#keyring, ctx.workspaceId, 1);
+    const inserted = await db
       .insertInto('app.data_keys')
       .values({
         workspace_id: ctx.workspaceId,
@@ -268,20 +297,18 @@ export class CredentialRepository {
         wrapped_key: wrapped.wrapped,
       })
       .onConflict((oc) => oc.columns(['workspace_id', 'version']).doNothing())
-      .execute();
-    // Re-read, so a key created by a concurrent transaction wins over ours.
-    return this.#dataKey(db, ctx, 1);
+      .executeTakeFirst();
+    if (Number(inserted.numInsertedOrUpdatedRows ?? 0n) === 1) return dataKey;
+    // A concurrent transaction created the key first: use theirs.
+    const theirs = await newest();
+    if (theirs === undefined) throw new Error('Data key vanished while it was being created');
+    return this.#unwrap(ctx, theirs);
   }
 
-  async #dataKey(db: Kysely<MainDb>, ctx: TenantContext, version: number): Promise<DataKey> {
-    const row = await db
-      .selectFrom('app.data_keys')
-      .select(['version', 'kek_version', 'wrapped_key'])
-      .where('workspace_id', '=', ctx.workspaceId)
-      .where('version', '=', String(version))
-      .executeTakeFirstOrThrow(
-        () => new Error(`Data key version ${String(version)} is missing for this workspace`),
-      );
+  #unwrap(
+    ctx: TenantContext,
+    row: { version: string; kek_version: string; wrapped_key: Buffer },
+  ): DataKey {
     return unwrapDataKey(this.#keyring, {
       workspaceId: ctx.workspaceId,
       version: Number(row.version),
@@ -293,4 +320,9 @@ export class CredentialRepository {
   #aad(ctx: TenantContext, rowId: string): FieldAad {
     return { workspaceId: ctx.workspaceId, table: TABLE, column: COLUMN, rowId };
   }
+}
+
+/** PostgreSQL unique_violation (23505), as raised through pg. */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && err.code === '23505';
 }

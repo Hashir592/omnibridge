@@ -1,51 +1,57 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Oct 2026 by S1.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Oct 2026 by S3.
 
 ## Now
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** S3: T-0103 Envelope crypto (HIGH risk, wait for go). Prompt: `docs/sessions/briefs/S3-T-0103.md`. S2: T-0301 Design mock-ups (M03, parallel). Brief: `docs/sessions/briefs/S2-kickoff.md`. T-0101 and T-0102 are done (PRs #1–#3 merged).
-- **Next:** M01 halfway checkpoint with S4 after T-0103 merges, then T-0104 and T-0105, then M01 end checkpoint.
-- **Last checkpoint:** none yet. M01 halfway checkpoint comes after T-0103.
-- **Open findings:** none from S4. Self-review of T-0102 (/code-review, CodeRabbit CLI not installed): 7 fixed, PS-006 since approved, 1 cosmetic follow-up.
-- **Open questions:** none (PS-006 approved, ADR-035). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Current task:** S3: T-0103 Envelope crypto is in **review**. The PR on branch `task/T-0103-envelope-crypto` is waiting for Hashir's approval and merge. S2: T-0301 Design mock-ups (M03, parallel).
+- **Next:** after T-0103 merges, S3 writes the M01 halfway checkpoint report (T-0101 to T-0103) and hands off to S4, then stops until S4's findings come back. After that come T-0104 and T-0105, then the M01 end checkpoint.
+- **Last checkpoint:** none yet.
+- **Open findings:** none from S4. T-0103 self-review used `/code-review` at high effort, because the CodeRabbit CLI is not installed: 7 findings, all fixed.
+- **Open questions:** none. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 
 Local-first (ADR-029): everything is built and tested on local Docker with mocks; servers arrive only in M22 Deploy, near the end. Local containers keep the production limits.
 
-## What T-0101 delivered
+## Done so far
 
-- pnpm 12.14.0 monorepo in the ARCHITECTURE.md §3 layout; stub packages have one export and one test.
-- Stack (`infra/compose/compose.yaml` + `compose.dev.yaml`): web, worker, pii-vault, site, db-main, db-pii, migrate jobs, caddy, mailpit, provider-mocks, and clamd under the `scan` profile. Every service is limited and health-checked.
-- `scripts/verify.sh` is the full gate (`--quick`, `--help`). Local run: 513 s. First CI run of the gate on GitHub: 4 min 4 s.
+- **T-0101 (done):** pnpm monorepo, the limited compose stack, `scripts/verify.sh` full gate, CI, lefthook.
+- **T-0102 (done):** contract registry with permission metadata, OpenAPI plus typed client, time, cache-key and error helpers.
 
-## What T-0102 delivers
+## What T-0103 delivers
 
-- `packages/contract`: `defineRoute` registry with permission metadata (auth, tab, adminOnly, companyScoped), RFC 9457 `ProblemSchema`, `listQuery` (default 50, max 200) and `pageOf`. `/healthz` is the first registry route.
-- `apps/web`: routes come only from the registry; startup fails on missing metadata, and any other route is refused.
-- Committed `packages/contract/openapi.json` + `src/client/schema.ts`; `pnpm contract:gen` regenerates, the `openapi` gate step fails on drift.
-- `@omnibridge/contract/client` (openapi-fetch) for apps/ui; example in `apps/ui/src/api.ts`.
-- `packages/core`: London time helpers (`@omnibridge/core/time`), `Pence` stub, `cacheKey`/`companySetHash`, `ApiError`. `packages/testkit`: `walkRoutes` stub.
+- `packages/crypto`: AES-256-GCM with a random 96-bit nonce, a key-version prefix, and AAD binding workspace, table, column and row. DEK/KEK envelope with versioned keyrings; KEK rotation re-wraps DEKs only. `Secret` never prints its value.
+- Two master keys as Docker secrets: `secrets_kek` (web, worker) and `pii_kek` (pii-vault only), both loaded at boot.
+- Migration 0002: `app.data_keys` and `app.credentials` (current/next slots, forced RLS). `CredentialRepository` in `packages/db`. `TenantContext` type in core (T-0201 extends it).
+- Dev secrets: SOPS 3.13.3 image plus the DEV ONLY age key in `infra/secrets/`. Run `bash scripts/dev-secrets.sh` (or `--reset` after `down -v`). Register: `docs/ops/secrets-register.md`. PS-007 (approved).
+- **Local dev note:** dev DB passwords are now the SOPS values. Any machine with older volumes needs one `docker compose … down -v`, then `bash scripts/dev-secrets.sh --reset`.
+
+## Follow-ups noted (not in T-0103 scope)
+
+- M05: platform app-secrets table (PLAT-4, AMZ-10 LWA current/next) on the same crypto.
+- T-0201: workspace foreign keys on `app.data_keys` and `app.credentials`; tenant transaction wrapper.
+- T-0201 + T-0104: an all-workspace KEK re-wrap job.
+- M07: `channel_account_id` foreign key; LWA expiry reminders.
 
 ## Next step
 
-1. S1 rules on PS-006. Hashir reviews and merges the T-0102 PR after CI is green. S3 never merges.
-2. S2 starts M03 on the merged contract (`@omnibridge/contract/client`).
-3. S3 posts the T-0103 plan after `/clear` and waits for Hashir's "go".
+1. Hashir reviews and merges the T-0103 PR after CI is green. S3 never merges.
+2. S3 writes `docs/reviews/M01-halfway-report.md` and the S4 handoff, then stops.
 
 ## Prerequisites outstanding (Hashir)
 
 | Needed for | Item | Status |
 |---|---|---|
-| Code review | CodeRabbit CLI is not installed on this machine, so `/code-review` ran instead (ADR-030) | open (optional) |
-| Local full gate | WSL 2 has 3.8 GiB (host 7.9 GB, no `.wslconfig`); the full stack with clamd fits but is tight. 8 GB is recommended, which this host cannot give | open |
+| Code review | CodeRabbit CLI is not installed on this machine, so `/code-review` runs instead (ADR-030) | open (optional) |
+| Local full gate | WSL 2 has 3.8 GiB (host 7.9 GB, no `.wslconfig`); the full stack with clamd fits but is tight | open |
 | Local tooling | Node 24.15 on the host; repo pins 24.22.0 (warning only). corepack needs `COREPACK_HOME` on drive D: (EXDEV error) | open |
 | M22 (deploy, near the end) | netcup VPS 2000 G12.5 + failover IPv4; VPS 1000 G12.5 (staging) | open |
 | M22 | GoDaddy DNS for `omnibridge.co.uk`, `www`, `app`, staging hostnames | open |
 | M22 | Backblaze B2 account (EU Central); Scaleway TEM account; UptimeRobot free account | open |
+| M22 | Production age key for the private ops repo (secrets register) | open |
 | M06 | Zoho Mail Lite (2 users + aliases); Operator legal name, number, address | open |
 
 ## Plan diagram
@@ -54,4 +60,4 @@ Lucid: https://lucid.app/lucidchart/f5dc0dc1-254a-47c4-959c-0b27cb5ca1fc/view (p
 
 ## Key files
 
-`CLAUDE.md` · `docs/PRD.md` (v1.3) · `docs/ARCHITECTURE.md` · `docs/DECISIONS.md` · `docs/plan/MODULES.md` · `docs/backlog.json` · `docs/sessions/` · `README.md` (Run locally) · `docs/ops/github-settings.md`
+`CLAUDE.md` · `docs/PRD.md` (v1.3) · `docs/ARCHITECTURE.md` · `docs/DECISIONS.md` · `docs/plan/MODULES.md` · `docs/backlog.json` · `docs/sessions/` · `README.md` (Run locally) · `docs/ops/github-settings.md` · `docs/ops/secrets-register.md`

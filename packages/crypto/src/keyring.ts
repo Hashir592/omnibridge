@@ -42,6 +42,16 @@ export class Keyring {
     const versions = [...keys.keys()];
     const active = versions.at(-1);
     if (active === undefined) throw new CryptoError(`The ${purpose} keyring is empty`);
+    // The last version is the active one, so versions must strictly increase in order.
+    for (const [index, version] of versions.entries()) {
+      assertKeyVersion(version);
+      if (index > 0 && version <= (versions[index - 1] ?? 0)) {
+        throw new CryptoError(`The ${purpose} keyring versions must increase`);
+      }
+      if (keys.get(version)?.length !== KEY_BYTES) {
+        throw new CryptoError(`The ${purpose} keyring holds a key that is not 32 bytes`);
+      }
+    }
     this.#keys = keys;
     this.purpose = purpose;
     this.versions = versions;
