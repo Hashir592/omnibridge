@@ -206,7 +206,7 @@ Adapters implement `ChannelAdapter`, `AdsAdapter` and `ShippingProvider` (SHIP-3
 
 ### Isolation (OPS-8, OPS-9)
 
-OmniBridge has its own Linux user `omnibridge`, directory `/srv/omnibridge`, Compose project `omnibridge`, networks (`ob_edge`, `ob_app`, `ob_db`, `ob_pii` internal, `scan_ob`), secrets, backups and deploy pipeline. Module order is in `docs/plan/MODULES.md`; tasks are in `docs/backlog.json`.
+OmniBridge has its own Linux user `omnibridge`, directory `/srv/omnibridge`, Compose project `omnibridge`, networks (`ob_edge`, `ob_app`, `ob_db` and `ob_pii` internal, `scan_ob`), secrets, backups and deploy pipeline. Module order is in `docs/plan/MODULES.md`; tasks are in `docs/backlog.json`.
 
 ### Shared host layer (P-004)
 
