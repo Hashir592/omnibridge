@@ -10,3 +10,4 @@ playwright-report/
 test-results/
 infra/compose/.secrets/
 infra/compose/.local/
+infra/secrets/dev.sops.yaml

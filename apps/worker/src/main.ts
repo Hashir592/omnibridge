@@ -1,9 +1,16 @@
 import { readSecretFile, requireEnv } from '@omnibridge/core';
+import { loadKeyring } from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { createWorkerBoss, startHeartbeat } from './heartbeat.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
 const log = createLogger({ service: 'worker', version });
+// Fail at boot, not at first use, if the secrets master key is missing or malformed (SEC-6).
+const secretsKeyring = loadKeyring('secrets');
+log.info(
+  { event: 'keyring.loaded', kekVersion: secretsKeyring.activeVersion },
+  'secrets KEK loaded',
+);
 
 const boss = createWorkerBoss({
   host: requireEnv('DB_MAIN_HOST'),

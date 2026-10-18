@@ -1,10 +1,17 @@
 import { requireEnv } from '@omnibridge/core';
+import { loadKeyring } from '@omnibridge/crypto';
 import { createPool, mainDbConfig, ping } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import { buildWebApp } from './app.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
 const logger = createLogger({ service: 'web', version });
+// Fail at boot, not at first use, if the secrets master key is missing or malformed (SEC-6).
+const secretsKeyring = loadKeyring('secrets');
+logger.info(
+  { event: 'keyring.loaded', kekVersion: secretsKeyring.activeVersion },
+  'secrets KEK loaded',
+);
 const pool = createPool(mainDbConfig('omnibridge-web', 10));
 const piiVaultUrl = requireEnv('PII_VAULT_URL');
 

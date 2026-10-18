@@ -2,6 +2,13 @@
 [extend]
 useDefault = true
 
+# A raw master key line (`<version>:<base64 of 32 bytes>`, the keyring format in packages/crypto).
+# Master keys reach containers only as Docker secrets; one in a tracked file is a leak (SEC-6).
+[[rules]]
+id = "omnibridge-kek-line"
+description = "OmniBridge master key (KEK) line"
+regex = '''(?m)^\s*[1-9][0-9]{0,8}:[A-Za-z0-9+/]{43}=\s*$'''
+
 [allowlist]
 description = "Generated or third-party trees"
 paths = [
@@ -11,9 +18,13 @@ paths = [
   '''(^|/)pnpm-lock\.yaml$''',
   '''(^|/)playwright-report/''',
   '''(^|/)test-results/''',
-  # Dev-only random secrets (git-ignored) and the exported local CA certificate.
-  '''^infra/compose/\.secrets/''',
-  '''^infra/compose/\.local/''',
+  # Dev-only secret files (git-ignored) and the exported local CA certificate. `dir` scans see
+  # absolute paths (/repo/...), so each path is anchored at a slash or the start.
+  '''(^|/)infra/compose/\.secrets/''',
+  '''(^|/)infra/compose/\.local/''',
+  # The DEV ONLY age key that decrypts infra/secrets/dev.sops.yaml (synthetic values), committed on
+  # purpose so a clean clone can run the stack (T-0103, PS-007). Only this exact file.
+  '''(^|/)infra/secrets/dev\.age\.key$''',
 ]
 # Public GitHub advisory IDs (e.g. the one cited in ADR-008) look like generic API keys.
 regexes = [

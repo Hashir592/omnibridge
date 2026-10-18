@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@omnibridge/core": "workspace:*",
+    "@omnibridge/crypto": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/pii-db": "workspace:*",
     "fastify": "5.12.7",

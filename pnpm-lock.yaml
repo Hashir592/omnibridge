@@ -242,6 +242,9 @@ importers:
       '@omnibridge/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
@@ -278,6 +281,9 @@ importers:
       '@omnibridge/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@omnibridge/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -312,6 +318,9 @@ importers:
       '@omnibridge/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
@@ -355,13 +364,20 @@ importers:
 
   packages/core: {}
 
-  packages/crypto: {}
+  packages/crypto:
+    dependencies:
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/db:
     dependencies:
       '@omnibridge/core':
         specifier: workspace:*
         version: link:../core
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../logger
