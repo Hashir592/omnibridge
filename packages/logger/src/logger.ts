@@ -42,6 +42,13 @@ export const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
   'db_main',
   'db_pii',
   'err',
+  // Credential store (T-0103): ids, kinds, slots and counts only, never values.
+  'credentialId',
+  'credentialKind',
+  'slot',
+  'keyVersion',
+  'kekVersion',
+  'count',
 ]);
 
 const REDACTED = '[REDACTED]';

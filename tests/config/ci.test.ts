@@ -32,7 +32,7 @@ describe('CI workflow and gate', () => {
   it('[SEC-4] gate tool images are pinned by digest', () => {
     const images = readRepoFile('scripts/lib/images.sh');
     const pinned = [...images.matchAll(/_IMAGE='([^']+)'/g)].map((m) => m[1]);
-    expect(pinned).toHaveLength(4);
+    expect(pinned).toHaveLength(5); // gitleaks, osv-scanner, actionlint, caddy, sops (PS-007)
     for (const image of pinned) expect(image).toMatch(/@sha256:[0-9a-f]{64}$/);
   });
 });

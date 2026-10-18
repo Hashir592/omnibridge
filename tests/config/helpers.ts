@@ -28,6 +28,10 @@ export interface ComposeModel {
   services: Record<string, ComposeService>;
   networks: Record<string, { name?: string; internal?: boolean; external?: boolean }>;
   volumes?: Record<string, { external?: boolean }>;
+  secrets?: Record<
+    string,
+    { name?: string; file?: string; environment?: string; external?: boolean }
+  >;
 }
 
 let cached: ComposeModel | undefined;

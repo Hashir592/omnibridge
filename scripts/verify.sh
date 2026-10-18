@@ -107,8 +107,9 @@ caddy_validate() {
       "$CADDY_IMAGE" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 }
 
+# The migration runner wraps each file in one transaction (sql-migrations.ts), so squawk is told so.
 squawk() {
-  "${pnpm[@]}" exec squawk --pg-version 18 packages/db/migrations/*.sql packages/pii-db/migrations/*.sql
+  "${pnpm[@]}" exec squawk --pg-version 18 --assume-in-transaction packages/db/migrations/*.sql packages/pii-db/migrations/*.sql
 }
 
 # Steps run inside `if` (see step), where set -e is off, so every multi-command step chains with &&.

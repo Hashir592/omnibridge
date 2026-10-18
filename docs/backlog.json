@@ -99,7 +99,7 @@
         "changing a schema without regenerating openapi.json makes verify.sh fail"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0103",
@@ -137,7 +137,7 @@
         "gitleaks finds no secret in the repo history"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0104",

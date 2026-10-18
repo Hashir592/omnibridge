@@ -37,9 +37,16 @@ and a commit-message check (Conventional Commits plus a `Refs:` line of PRD IDs)
 
 ### Start the stack
 
+Write the dev secret files. They are decrypted from `infra/secrets/dev.sops.yaml` with the committed
+DEV ONLY age key, using a pinned SOPS image, so nothing needs installing. All values are synthetic.
+
 ```bash
 bash scripts/dev-secrets.sh
 ```
+
+If it reports that files differ (for example after the dev secrets change), the database volumes
+still hold the old passwords. Run `docker compose … down -v`, then `bash scripts/dev-secrets.sh --reset`.
+Every secret is listed in `docs/ops/secrets-register.md`.
 
 ```bash
 docker compose -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml up -d --build --wait

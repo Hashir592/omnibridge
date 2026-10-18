@@ -18,9 +18,10 @@
   },
   "dependencies": {
     "@omnibridge/core": "workspace:*",
+    "@omnibridge/crypto": "workspace:*",
     "@omnibridge/logger": "workspace:*",
-    "pg-boss": "12.38.0",
-    "@omnibridge/queue": "workspace:*"
+    "@omnibridge/queue": "workspace:*",
+    "pg-boss": "12.38.0"
   },
   "devDependencies": {
     "@omnibridge/db": "workspace:*",
