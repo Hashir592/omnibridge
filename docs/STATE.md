@@ -6,11 +6,11 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** T-0102 Contract pipeline. Status: `todo`, waiting for the S1 brief. T-0101 is `done` (PR #1 merged; S1 rulings in a follow-up PR).
+- **Current task:** T-0102 Contract pipeline. Status: `todo`. Brief written: `docs/sessions/briefs/S3-T-0102.md`. T-0101 is `done` (PR #1 merged; S1 rulings in a follow-up PR).
 - **Next task after it:** T-0102 Contract pipeline (normal), then T-0103 Envelope crypto (**high**: wait for Hashir's "go").
 - **Last checkpoint:** none yet. M01 halfway checkpoint comes after T-0103.
 - **Open findings:** none from S4. Self-review of T-0101 (/code-review, because the CodeRabbit CLI is not installed): 9 fixed, 1 deferred (CI image cache).
-- **Open questions:** PS-001 to PS-005 in `docs/DECISIONS.md` "Proposed (from sessions)" wait for S1 (PS-004 lefthook 2.2.1 and PS-005 pnpm policies are already applied with Hashir's approval). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Open questions:** none. PS-001 to PS-005 approved by S1 (ADR-019, 032, 033, 034). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 
