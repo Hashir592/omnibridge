@@ -1,0 +1,16 @@
+# OmniBridge routes for the shared edge Caddy (P-004, ADR-015). The edge project imports every
+# app's file with `import sites/*.caddy` and owns TLS, global options and the `waf` snippet
+# (Coraza + CRS). OmniBridge changes only this file. First used on a server in M22.
+#
+# Upstreams are the OmniBridge network aliases on ob_edge (compose.yaml), never bare service
+# names, so they cannot collide with another app's containers on the same host.
+
+omnibridge.co.uk, www.omnibridge.co.uk {
+	import waf
+	reverse_proxy omnibridge-site:8080
+}
+
+app.omnibridge.co.uk {
+	import waf
+	reverse_proxy omnibridge-web:8080
+}

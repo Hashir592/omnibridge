@@ -1,0 +1,12 @@
+# S1-owned documents are not reformatted by tooling.
+docs/
+CLAUDE.md
+pnpm-lock.yaml
+**/dist/
+**/.astro/
+**/*.astro
+coverage/
+playwright-report/
+test-results/
+infra/compose/.secrets/
+infra/compose/.local/

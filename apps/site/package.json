@@ -1,0 +1,12 @@
+{
+  "name": "@omnibridge/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "astro build"
+  },
+  "dependencies": {
+    "astro": "7.4.0"
+  }
+}

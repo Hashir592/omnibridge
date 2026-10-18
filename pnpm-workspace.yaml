@@ -1,0 +1,97 @@
+packages:
+  - apps/*
+  - packages/*
+  - packages/governors/*
+  - packages/providers/*
+  - mocks/*
+
+# Dependency build scripts are denied unless listed as true (pnpm 12 fails on unlisted ones).
+allowBuilds:
+  cpu-features: false # optional native speed-up for ssh2 (Testcontainers); not needed
+  lefthook: false # hooks are installed by the root "prepare" script instead
+  protobufjs: false # postinstall only prints a version check
+  ssh2: false # optional native crypto add-on; pure-JS fallback is used
+
+# Supply-chain hardening (Semgrep pnpm rules, SEC-4):
+blockExoticSubdeps: true # sub-dependencies may come only from the registry, never git/tarball URLs
+minimumReleaseAge: 10080 # minutes (7 days)
+trustPolicy: no-downgrade # refuse an update whose publish provenance is weaker than before
+# Exact versions S1 vetted in the ADR table on 18 Oct 2026 that are still under 7 days old,
+# plus their sub-dependencies of the same age (75 entries). Exact versions only: any newer
+# version still waits 7 days. Delete this list after 25 Oct 2026 (PS-005).
+minimumReleaseAgeExclude:
+  - '@astrojs/compiler-binding-android-arm64@0.5.2'
+  - '@astrojs/compiler-binding-darwin-arm64@0.5.2'
+  - '@astrojs/compiler-binding-darwin-x64@0.5.2'
+  - '@astrojs/compiler-binding-linux-arm64-gnu@0.5.2'
+  - '@astrojs/compiler-binding-linux-arm64-musl@0.5.2'
+  - '@astrojs/compiler-binding-linux-x64-gnu@0.5.2'
+  - '@astrojs/compiler-binding-linux-x64-musl@0.5.2'
+  - '@astrojs/compiler-binding-wasm32-wasi@0.5.2'
+  - '@astrojs/compiler-binding-win32-arm64-msvc@0.5.2'
+  - '@astrojs/compiler-binding-win32-x64-msvc@0.5.2'
+  - '@astrojs/compiler-binding@0.5.2'
+  - '@astrojs/compiler-rs@0.5.2'
+  - '@astrojs/internal-helpers@0.13.0'
+  - '@astrojs/markdown-satteri@0.4.4'
+  - '@astrojs/prism@4.1.0'
+  - '@astrojs/telemetry@3.4.0'
+  - '@oxc-project/types@0.154.0'
+  - '@playwright/test@1.64.1'
+  - '@rolldown/binding-android-arm-eabi@1.2.14'
+  - '@rolldown/binding-android-arm64@1.2.14'
+  - '@rolldown/binding-darwin-arm64@1.2.14'
+  - '@rolldown/binding-darwin-x64@1.2.14'
+  - '@rolldown/binding-freebsd-x64@1.2.14'
+  - '@rolldown/binding-linux-arm-gnueabihf@1.2.14'
+  - '@rolldown/binding-linux-arm64-gnu@1.2.14'
+  - '@rolldown/binding-linux-arm64-musl@1.2.14'
+  - '@rolldown/binding-linux-ppc64-gnu@1.2.14'
+  - '@rolldown/binding-linux-s390x-gnu@1.2.14'
+  - '@rolldown/binding-linux-x64-gnu@1.2.14'
+  - '@rolldown/binding-linux-x64-musl@1.2.14'
+  - '@rolldown/binding-openharmony-arm64@1.2.14'
+  - '@rolldown/binding-win32-arm64-msvc@1.2.14'
+  - '@rolldown/binding-win32-x64-msvc@1.2.14'
+  - '@squawk-cli/darwin-arm64@2.70.0'
+  - '@squawk-cli/darwin-x64@2.70.0'
+  - '@squawk-cli/linux-arm64-musl@2.70.0'
+  - '@squawk-cli/linux-arm64@2.70.0'
+  - '@squawk-cli/linux-x64-musl@2.70.0'
+  - '@squawk-cli/linux-x64@2.70.0'
+  - '@squawk-cli/win32-x64@2.70.0'
+  - '@testcontainers/postgresql@12.2.1'
+  - '@typescript-eslint/eslint-plugin@8.71.2'
+  - '@typescript-eslint/parser@8.71.2'
+  - '@typescript-eslint/project-service@8.71.2'
+  - '@typescript-eslint/scope-manager@8.71.2'
+  - '@typescript-eslint/tsconfig-utils@8.71.2'
+  - '@typescript-eslint/type-utils@8.71.2'
+  - '@typescript-eslint/types@8.71.2'
+  - '@typescript-eslint/typescript-estree@8.71.2'
+  - '@typescript-eslint/utils@8.71.2'
+  - '@typescript-eslint/visitor-keys@8.71.2'
+  - '@vitest/mocker@5.0.5'
+  - '@vitest/spy@5.0.5'
+  - 'astro@7.4.0'
+  - 'bare-url@2.5.5'
+  - 'dependency-cruiser@18.6.0'
+  - 'devalue@6.0.3'
+  - 'es-module-lexer@3.0.4'
+  - 'eslint@10.13.0'
+  - 'fastify@5.12.7'
+  - 'kysely@0.29.7'
+  - 'p-queue@9.3.5'
+  - 'pg-boss@12.38.0'
+  - 'playwright-core@1.64.1'
+  - 'playwright@1.64.1'
+  - 'postcss@8.5.30'
+  - 'rolldown@1.2.14'
+  - 'set-cookie-parser@3.1.4'
+  - 'squawk-cli@2.70.0'
+  - 'testcontainers@12.2.1'
+  - 'typescript-eslint@8.71.2'
+  - 'undici@8.12.2'
+  - 'unstorage@1.17.6'
+  - 'vitest@5.0.5'
+  - 'zod@4.6.7'

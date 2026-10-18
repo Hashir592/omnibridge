@@ -56,7 +56,7 @@
         "the CI workflow file passes actionlint and every 'uses:' is pinned to a 40-character SHA"
       ],
       "risk": "normal",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0102",

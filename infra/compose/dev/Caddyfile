@@ -1,0 +1,23 @@
+# Local HTTPS edge for development. Production uses the shared edge project and
+# infra/edge/sites/omnibridge.caddy instead.
+{
+	local_certs
+	skip_install_trust
+	admin off
+	auto_https disable_redirects
+}
+
+# App (web): https://localhost:8443
+https://localhost:8443 {
+	reverse_proxy web:8080
+}
+
+# Public site: https://localhost:8444
+https://localhost:8444 {
+	reverse_proxy site:8080
+}
+
+# Container healthcheck only; not published.
+http://:8081 {
+	respond /healthz 200
+}

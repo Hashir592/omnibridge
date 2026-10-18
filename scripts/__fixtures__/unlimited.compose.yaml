@@ -1,0 +1,27 @@
+# Fixture for the [OPS-10] check-limits test: every service here breaks one rule.
+name: check-limits-fixture
+services:
+  unlimited:
+    image: busybox
+    healthcheck:
+      test: [CMD, 'true']
+  no-health:
+    image: busybox
+    mem_limit: 32m
+    cpus: 0.1
+    pids_limit: 16
+    networks: [ob_app]
+  foreign-net:
+    image: busybox
+    mem_limit: 32m
+    cpus: 0.1
+    pids_limit: 16
+    healthcheck:
+      test: [CMD, 'true']
+    networks: [foreign_net]
+networks:
+  ob_app:
+    name: ob_app
+  foreign_net:
+    name: other_app_net
+    external: true
