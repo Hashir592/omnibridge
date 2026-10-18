@@ -1,16 +1,16 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Oct 2026 by S3.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Oct 2026 by S1.
 
 ## Now
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** T-0102 Contract pipeline. Status: `review` (PR open on `task/T-0102-contract-pipeline`; full gate passed locally in 495 s). T-0101 is `done`.
-- **Next task after it:** T-0103 Envelope crypto (**high**: S3 posts its plan and waits for Hashir's "go").
+- **Current task:** S3: T-0103 Envelope crypto (HIGH risk, wait for go). Prompt: `docs/sessions/briefs/S3-T-0103.md`. S2: T-0301 Design mock-ups (M03, parallel). Brief: `docs/sessions/briefs/S2-kickoff.md`. T-0101 and T-0102 are done (PRs #1–#3 merged).
+- **Next:** M01 halfway checkpoint with S4 after T-0103 merges, then T-0104 and T-0105, then M01 end checkpoint.
 - **Last checkpoint:** none yet. M01 halfway checkpoint comes after T-0103.
-- **Open findings:** none from S4. Self-review of T-0102 (/code-review, CodeRabbit CLI not installed): 7 fixed, 1 waits on S1 (PS-006), 1 cosmetic follow-up.
-- **Open questions:** PS-006 in `docs/DECISIONS.md` (openapi-types 12.1.3; openapi-typescript's TypeScript ^5 peer warning; Intl instead of date-fns). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Open findings:** none from S4. Self-review of T-0102 (/code-review, CodeRabbit CLI not installed): 7 fixed, PS-006 since approved, 1 cosmetic follow-up.
+- **Open questions:** none (PS-006 approved, ADR-035). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 
