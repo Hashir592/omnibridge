@@ -1,0 +1,112 @@
+@import 'tailwindcss';
+
+/*
+ * OmniBridge tokens (T-0301, locked 19/10/2026). Source: docs/design/DIRECTION.md §2-§4, with Hashir's
+ * overrides of 18-19/10/2026 (petrol accent instead of navy, graphite sidebar, softer radii),
+ * logged in docs/design/README.md.
+ * Contrast on white: brand-700 6.3:1 (white text on it 6.3:1), brand-600 5.4:1,
+ * ink-muted 6.0:1, success 5.0:1, warning 5.0:1, danger 6.5:1.
+ */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  /* Accent: deep petrol. One accent family only. */
+  --color-brand-900: #0b5a55; /* text on brand tints */
+  --color-brand-800: #0b5a55; /* hover of primary buttons */
+  --color-brand-700: #0f6b66; /* primary buttons */
+  --color-brand-600: #0f766e; /* links, focus ring, status progress */
+  --color-brand-50: #ecf6f4; /* highlight behind brand text (command palette) */
+
+  /* Cool neutrals: grey page, white cards, so panels stand out. */
+  --color-ink: #121519;
+  --color-ink-muted: #5c6370;
+  --color-ink-faint: #9aa1ab; /* decorative only */
+  --color-surface: #eef0f3; /* app background */
+  --color-rail: #f7f8fa; /* table header */
+  --color-card: #ffffff;
+  --color-hover: #f5f7f9;
+  --color-border: #dde1e7;
+  --color-divider: #eceef2;
+
+  /* Graphite: sidebar, bulk-action bar and active selections. Neutral, so the petrol accent
+   * stays for primary actions. Text on it 12.7:1, muted labels 6.6:1. */
+  --color-side: #181b21;
+  --color-side-hover: #23272f;
+  --color-side-active: #2e333d;
+  --color-side-text: #d9dce2;
+  --color-side-muted: #9aa0ab;
+
+  /* Selected table rows: soft blue-grey, clearly not a status or accent colour. */
+  --color-selected: #e9eef6;
+
+  --color-success: #15803d;
+  --color-success-bg: #e8f4ea;
+  --color-warning: #b45309;
+  --color-warning-bg: #fcf1e3;
+  --color-danger: #b91c1c;
+  --color-danger-bg: #fbeaea;
+
+  /* Company badges: muted categorical set, never a status or accent hue (TEN-2). */
+  --color-co-teal: #2f7f7a;
+  --color-co-violet: #7357b0;
+  --color-co-cyan: #2a7f9e;
+  --color-co-magenta: #a3477f;
+  --color-co-olive: #7a7a2e;
+  --color-co-brown: #8a5a3c;
+  --color-co-indigo: #4b5bb0;
+  --color-co-slate: #5f6b7d;
+
+  /* Shape rule: controls 8 px, cards 12 px, chips and counts fully round. */
+  --radius-ctl: 8px;
+  --radius-card: 12px;
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 1px rgba(16, 24, 40, 0.03);
+  --shadow-pop: 0 8px 24px rgba(16, 24, 40, 0.14);
+
+  --text-13: 0.8125rem;
+  --text-13--line-height: 1.125rem;
+}
+
+@layer base {
+  html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-size: 14px;
+    line-height: 20px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 1px;
+  }
+  input[type='checkbox'] {
+    accent-color: var(--color-side);
+  }
+  /* Touch screens (shipping desk tablets): every control is at least 40 px tall (DIRECTION §4). */
+  @media (pointer: coarse) {
+    button,
+    nav a,
+    [role='tab'],
+    input:not([type='checkbox']) {
+      min-height: 40px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0ms !important;
+      animation-duration: 0ms !important;
+    }
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+}
+@utility ref {
+  font-variant-numeric: tabular-nums;
+}

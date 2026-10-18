@@ -1,16 +1,16 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Oct 2026 by S3.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 19 Oct 2026 by S2.
 
 ## Now
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** **M01 halfway checkpoint with S4.** S3 has stopped: report `docs/reviews/M01-halfway-report.md`, handoff `docs/handoffs/20261018-2153-S3-to-S4.md`. T-0101, T-0102 and T-0103 are done (PRs #1, #2, #3, #5 merged). S2: T-0301 Design mock-ups (M03, parallel).
+- **Current task:** **M01 halfway checkpoint with S4.** S3 has stopped: report `docs/reviews/M01-halfway-report.md`, handoff `docs/handoffs/20261018-2153-S3-to-S4.md`. T-0101, T-0102 and T-0103 are done (PRs #1, #2, #3, #5 merged). S2: T-0301 Design mock-ups (M03, parallel) is in **review**: direction locked by Hashir and S1 on 19 Oct 2026; PR from `design/m03` waits for CI and Hashir. Tokens and overrides: `docs/design/README.md`; proposals PS-008 to PS-011.
 - **Next:** S4 reviews and writes `docs/reviews/M01-halfway-findings.md`. S3 fixes every Blocker and Major (at most 2 rounds), then starts T-0104 and T-0105, then the M01 end checkpoint.
 - **Last checkpoint:** M01 halfway, handed to S4 on 18 Oct 2026 (findings pending).
 - **Open findings:** none from S4. T-0103 self-review used `/code-review` at high effort, because the CodeRabbit CLI is not installed: 7 findings, all fixed.
-- **Open questions:** none. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Open questions:** S1 to rule on PS-008 to PS-011 (ADR-003/028 step-downs, UI dev deps, UI build/test layout and jsdom, API shapes for S3). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 

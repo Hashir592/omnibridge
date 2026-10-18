@@ -79,7 +79,7 @@ module.exports = {
     enhancedResolveOptions: {
       conditionNames: ['@omnibridge/source', 'import', 'default'],
       exportsFields: ['exports'],
-      extensions: ['.ts', '.mjs', '.js'],
+      extensions: ['.ts', '.tsx', '.mjs', '.js'], // .tsx: the React SPA in apps/ui
     },
     preserveSymlinks: false,
   },
