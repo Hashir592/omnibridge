@@ -64,7 +64,11 @@ Owner: S1. Other sessions add entries only to the **Proposed (from sessions)** s
 
 ## Proposed (from sessions)
 
-_None yet._
+| ID | From | Proposal | Status |
+|---|---|---|---|
+| PS-001 | S3, T-0101 | **Dev dependencies without an ADR line:** @types/node 24.19.2 (MIT) and @types/pg 8.23.1 (MIT). Type definitions only, dev-only, no runtime or RAM cost; needed by TypeScript for Node built-ins and `pg`. Also: Vite 8.3.4 (ADR-003) is installed at the repo root because it is Vitest 5's peer dependency. | Proposed |
+| PS-002 | S3, T-0101 | **pg-boss as `ob_app`:** pg-boss 12 does DDL when it installs its schema, creates a queue (one partition per queue) and rebuilds indexes. So the migrate job (as `ob_owner`) installs the schema and creates queues, and the worker runs with `migrate`, `createSchema` and `reindex` off. T-0104 should schedule index maintenance as an owner job. | Proposed |
+| PS-003 | S3, T-0101 | **`ob_db` network:** ARCHITECTURE.md §7 marks only `ob_pii` (and, in T-0101, `scan_ob`) internal. `ob_db` holds only PostgreSQL and its clients, so marking it `internal: true` would remove the database's internet egress at no cost. Not changed in T-0101; S1 to decide. | Proposed |
 
 ## Review log
 

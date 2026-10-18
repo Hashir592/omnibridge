@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "customConditions": [],
+    "declaration": true,
+    "sourceMap": true,
+    "noEmit": false
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@omnibridge/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "@omnibridge/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@omnibridge/core": "workspace:*",
+    "@omnibridge/db": "workspace:*",
+    "@omnibridge/logger": "workspace:*",
+    "fastify": "5.12.7",
+    "pg": "8.23.1"
+  }
+}

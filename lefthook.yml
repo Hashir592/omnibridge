@@ -1,0 +1,22 @@
+# Git hooks (ADR-019). Installed by `pnpm install` (root "prepare" script).
+# Tools run from node_modules/.bin so the hooks work without a global pnpm on PATH.
+pre-commit:
+  parallel: true
+  commands:
+    prettier:
+      glob: '*.{ts,tsx,js,mjs,cjs,json,yaml,yml,css}'
+      exclude:
+        - 'docs/**'
+        - 'pnpm-lock.yaml'
+      run: node_modules/.bin/prettier --write {staged_files}
+      stage_fixed: true
+    eslint:
+      glob: '*.{ts,tsx,js,mjs,cjs}'
+      run: node_modules/.bin/eslint --max-warnings 0 {staged_files}
+    gitleaks:
+      run: bash scripts/gitleaks.sh staged
+
+commit-msg:
+  commands:
+    conventional-refs:
+      run: node scripts/commit-msg.mjs {1}

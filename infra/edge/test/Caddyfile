@@ -1,0 +1,10 @@
+# Validation harness for infra/edge/sites/omnibridge.caddy (used by scripts/verify.sh).
+# The real edge project defines `waf` with Coraza; an empty stand-in is enough to validate syntax.
+{
+	admin off
+}
+
+(waf) {
+}
+
+import sites/*.caddy

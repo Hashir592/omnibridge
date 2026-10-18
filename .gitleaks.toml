@@ -1,0 +1,21 @@
+# gitleaks 8.30.1 (ADR-019, SEC-5): the default rule set, plus paths that never hold our secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated or third-party trees"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)dist/''',
+  '''(^|/)\.astro/''',
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)playwright-report/''',
+  '''(^|/)test-results/''',
+  # Dev-only random secrets (git-ignored) and the exported local CA certificate.
+  '''^infra/compose/\.secrets/''',
+  '''^infra/compose/\.local/''',
+]
+# Public GitHub advisory IDs (e.g. the one cited in ADR-008) look like generic API keys.
+regexes = [
+  '''^GHSA(-[23456789cfghjmpqrvwx]{4}){3}$''',
+]

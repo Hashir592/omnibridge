@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.astro
+.git
+.verify
+coverage
+playwright-report
+test-results
+infra/compose/.secrets
+infra/compose/.local
+docs
+*.md

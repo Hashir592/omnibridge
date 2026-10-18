@@ -1,0 +1,4 @@
+# Everything is LF so shell scripts and SQL run unchanged inside Linux containers.
+* text=auto eol=lf
+*.png binary
+*.ico binary

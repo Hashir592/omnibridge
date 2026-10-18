@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+  - packages/governors/*
+  - packages/providers/*
+  - mocks/*
+
+# Dependency build scripts are denied unless listed as true (pnpm 12 fails on unlisted ones).
+allowBuilds:
+  cpu-features: false # optional native speed-up for ssh2 (Testcontainers); not needed
+  lefthook: false # hooks are installed by the root "prepare" script instead
+  protobufjs: false # postinstall only prints a version check
+  ssh2: false # optional native crypto add-on; pure-JS fallback is used
+
+minimumReleaseAgeExclude:
+  - kysely@0.29.7
