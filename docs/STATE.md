@@ -6,9 +6,9 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** S3: T-0103 Envelope crypto is in **review**. The PR on branch `task/T-0103-envelope-crypto` is waiting for Hashir's approval and merge. S2: T-0301 Design mock-ups (M03, parallel).
-- **Next:** after T-0103 merges, S3 writes the M01 halfway checkpoint report (T-0101 to T-0103) and hands off to S4, then stops until S4's findings come back. After that come T-0104 and T-0105, then the M01 end checkpoint.
-- **Last checkpoint:** none yet.
+- **Current task:** **M01 halfway checkpoint with S4.** S3 has stopped: report `docs/reviews/M01-halfway-report.md`, handoff `docs/handoffs/20261018-2153-S3-to-S4.md`. T-0101, T-0102 and T-0103 are done (PRs #1, #2, #3, #5 merged). S2: T-0301 Design mock-ups (M03, parallel).
+- **Next:** S4 reviews and writes `docs/reviews/M01-halfway-findings.md`. S3 fixes every Blocker and Major (at most 2 rounds), then starts T-0104 and T-0105, then the M01 end checkpoint.
+- **Last checkpoint:** M01 halfway, handed to S4 on 18 Oct 2026 (findings pending).
 - **Open findings:** none from S4. T-0103 self-review used `/code-review` at high effort, because the CodeRabbit CLI is not installed: 7 findings, all fixed.
 - **Open questions:** none. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
@@ -19,9 +19,10 @@ Local-first (ADR-029): everything is built and tested on local Docker with mocks
 ## Done so far
 
 - **T-0101 (done):** pnpm monorepo, the limited compose stack, `scripts/verify.sh` full gate, CI, lefthook.
+- **T-0103 (done):** see below.
 - **T-0102 (done):** contract registry with permission metadata, OpenAPI plus typed client, time, cache-key and error helpers.
 
-## What T-0103 delivers
+## What T-0103 delivered
 
 - `packages/crypto`: AES-256-GCM with a random 96-bit nonce, a key-version prefix, and AAD binding workspace, table, column and row. DEK/KEK envelope with versioned keyrings; KEK rotation re-wraps DEKs only. `Secret` never prints its value.
 - Two master keys as Docker secrets: `secrets_kek` (web, worker) and `pii_kek` (pii-vault only), both loaded at boot.
@@ -38,8 +39,8 @@ Local-first (ADR-029): everything is built and tested on local Docker with mocks
 
 ## Next step
 
-1. Hashir reviews and merges the T-0103 PR after CI is green. S3 never merges.
-2. S3 writes `docs/reviews/M01-halfway-report.md` and the S4 handoff, then stops.
+1. Hashir merges the checkpoint docs PR (`docs/M01-halfway-checkpoint`) and pastes the handoff into Session 4.
+2. S4's findings come back to S3, which fixes Blockers and Majors, then continues with T-0104.
 
 ## Prerequisites outstanding (Hashir)
 
