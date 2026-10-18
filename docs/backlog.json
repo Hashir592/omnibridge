@@ -28,7 +28,7 @@
       "scope": [
         "pnpm 12 monorepo with the layout in ARCHITECTURE.md §3 (empty packages may be stubs with one export and one test)",
         "apps/web (Fastify) with GET /healthz returning {status, db_main, db_pii, version}; apps/worker with a pg-boss heartbeat job every minute; apps/pii-vault with GET /healthz; apps/site Astro placeholder page",
-        "infra/compose: compose.yaml + compose.dev.yaml; services web, worker, pii-vault, site, db-main, db-pii, clamd (dev stand-in for the shared host clamd), mailpit, provider-mocks (one placeholder route); every service has mem_limit, cpus, pids_limit and a healthcheck; networks ob_edge, ob_app, ob_db, ob_pii (internal) as in ARCHITECTURE.md §7",
+        "infra/compose: compose.yaml + compose.dev.yaml; services web, worker, pii-vault, site, db-main, db-pii, clamd (dev stand-in for the shared host clamd), mailpit, provider-mocks (one placeholder route); every service has mem_limit, cpus, pids_limit and a healthcheck; networks ob_edge, ob_app, ob_db (internal), ob_pii (internal) as in ARCHITECTURE.md §7",
         "db-main and db-pii on PostgreSQL 18.6 images pinned by digest; roles ob_owner, ob_app (no BYPASSRLS), ob_platform on db-main and vault_owner, vault_app on db-pii; first forward-only migration runner (Kysely Migrator, no down) and squawk lint",
         "packages/logger: pino with field allowlist and redaction; test that a PIIMARK- value in a log call never reaches output",
         "infra/edge/sites/omnibridge.caddy route file (run locally in M01b, live in M22) and a local Caddy in dev for HTTPS on localhost",
@@ -56,7 +56,7 @@
         "the CI workflow file passes actionlint and every 'uses:' is pinned to a 40-character SHA"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0102",

@@ -99,6 +99,7 @@ describe('compose stack: isolation (NFR-1, NFR-2, OPS-7, OPS-8, OPS-9)', () => {
     const names = Object.values(model.networks).map((n) => n.name);
     expect(names.sort()).toEqual(['ob_app', 'ob_db', 'ob_edge', 'ob_pii', 'scan_ob']);
     expect(model.networks.ob_pii?.internal).toBe(true);
+    expect(model.networks.ob_db?.internal).toBe(true);
   });
 
   it('[OPS-7] the stack needs nothing outside itself (no external networks or volumes)', () => {
