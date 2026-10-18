@@ -9,7 +9,7 @@ Usage: scripts/verify.sh [mode] [--keep-stack]
 
 Modes:
   (none), --full  The full gate. Required before any merge; CI always runs this.
-  --quick         Lint, typecheck and unit tests only, for use while working.
+  --quick         Lint, typecheck, contract drift and unit tests only, for use while working.
   --help          Show this help.
 
 Options:
@@ -20,21 +20,22 @@ Full gate, in order:
    1 install       pnpm install --frozen-lockfile
    2 lint          ESLint (strict type-checked) and Prettier check
    3 typecheck     tsc over the whole workspace
-   4 depcruise     architecture rules (.dependency-cruiser.cjs)
-   5 names         hard-coded workspace/company/account names (scripts/check-names.sh)
-   6 coverage      requirement-ID coverage (scripts/req-coverage.mjs)
-   7 limits        container limits and isolation (scripts/check-limits.sh)
-   8 squawk        migration lint
-   9 actionlint    CI workflow lint, every action pinned to a commit SHA
-  10 caddy         validate the dev Caddyfile and infra/edge/sites/omnibridge.caddy
-  11 unit          Vitest unit project
-  12 integration   Vitest + Testcontainers PostgreSQL 18
-  13 contract      adapter stubs against provider-mocks
-  14 build         pnpm -r build
-  15 stack         build images, then compose up --wait with the scan profile
-  16 e2e           Playwright against https://localhost:8443 and :8444
-  17 gitleaks      secrets in git history and the working tree
-  18 audit         osv-scanner and pnpm audit; high or critical fails
+   4 openapi       openapi.json and the client types match the route registry (pnpm contract:check)
+   5 depcruise     architecture rules (.dependency-cruiser.cjs)
+   6 names         hard-coded workspace/company/account names (scripts/check-names.sh)
+   7 coverage      requirement-ID coverage (scripts/req-coverage.mjs)
+   8 limits        container limits and isolation (scripts/check-limits.sh)
+   9 squawk        migration lint
+  10 actionlint    CI workflow lint, every action pinned to a commit SHA
+  11 caddy         validate the dev Caddyfile and infra/edge/sites/omnibridge.caddy
+  12 unit          Vitest unit project
+  13 integration   Vitest + Testcontainers PostgreSQL 18
+  14 contract      adapter stubs against provider-mocks
+  15 build         pnpm -r build
+  16 stack         build images, then compose up --wait with the scan profile
+  17 e2e           Playwright against https://localhost:8443 and :8444
+  18 gitleaks      secrets in git history and the working tree
+  19 audit         osv-scanner and pnpm audit; high or critical fails
 EOF
 }
 
@@ -156,6 +157,7 @@ audit() {
 if [[ "$mode" == quick ]]; then
   step lint lint
   step typecheck "${pnpm[@]}" exec tsc -p tsconfig.json
+  step openapi "${pnpm[@]}" run --silent contract:check
   step unit "${pnpm[@]}" exec vitest run --project unit
   printf '\n\033[32mverify --quick passed in %ss (not a merge gate; run the full gate before merging)\033[0m\n' \
     "$(($(date +%s) - started))"
@@ -167,6 +169,7 @@ trap stack_down EXIT
 step install "${pnpm[@]}" install --frozen-lockfile
 step lint lint
 step typecheck "${pnpm[@]}" exec tsc -p tsconfig.json
+step openapi "${pnpm[@]}" run --silent contract:check
 step depcruise "${pnpm[@]}" exec depcruise apps packages mocks --config .dependency-cruiser.cjs
 step names bash scripts/check-names.sh
 step coverage node scripts/req-coverage.mjs

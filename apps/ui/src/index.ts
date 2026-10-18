@@ -5,3 +5,5 @@
  * ARCHITECTURE.md §3 is real from day one.
  */
 export const PACKAGE_NAME = '@omnibridge/ui';
+
+export { getHealth, type HealthResult } from './api.ts';

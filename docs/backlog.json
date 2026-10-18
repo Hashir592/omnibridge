@@ -99,7 +99,7 @@
         "changing a schema without regenerating openapi.json makes verify.sh fail"
       ],
       "risk": "normal",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0103",

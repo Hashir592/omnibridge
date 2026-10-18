@@ -18,6 +18,8 @@
     "test:contract": "vitest run --project contract",
     "test:e2e": "playwright test",
     "build": "pnpm -r run build",
+    "contract:gen": "node --conditions=@omnibridge/source apps/web/src/gen-contract.ts",
+    "contract:check": "node --conditions=@omnibridge/source apps/web/src/gen-contract.ts --check",
     "verify": "bash scripts/verify.sh"
   },
   "devDependencies": {

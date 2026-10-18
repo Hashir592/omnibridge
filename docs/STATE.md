@@ -6,11 +6,11 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** T-0102 Contract pipeline. Status: `todo`, waiting for the S1 brief. T-0101 is `done` (PR #1 merged; S1 rulings in a follow-up PR).
-- **Next task after it:** T-0102 Contract pipeline (normal), then T-0103 Envelope crypto (**high**: wait for Hashir's "go").
+- **Current task:** T-0102 Contract pipeline. Status: `review` (PR open on `task/T-0102-contract-pipeline`; full gate passed locally in 495 s). T-0101 is `done`.
+- **Next task after it:** T-0103 Envelope crypto (**high**: S3 posts its plan and waits for Hashir's "go").
 - **Last checkpoint:** none yet. M01 halfway checkpoint comes after T-0103.
-- **Open findings:** none from S4. Self-review of T-0101 (/code-review, because the CodeRabbit CLI is not installed): 9 fixed, 1 deferred (CI image cache).
-- **Open questions:** PS-001 to PS-005 in `docs/DECISIONS.md` "Proposed (from sessions)" wait for S1 (PS-004 lefthook 2.2.1 and PS-005 pnpm policies are already applied with Hashir's approval). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Open findings:** none from S4. Self-review of T-0102 (/code-review, CodeRabbit CLI not installed): 7 fixed, 1 waits on S1 (PS-006), 1 cosmetic follow-up.
+- **Open questions:** PS-006 in `docs/DECISIONS.md` (openapi-types 12.1.3; openapi-typescript's TypeScript ^5 peer warning; Intl instead of date-fns). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 
@@ -22,12 +22,19 @@ Local-first (ADR-029): everything is built and tested on local Docker with mocks
 - Stack (`infra/compose/compose.yaml` + `compose.dev.yaml`): web, worker, pii-vault, site, db-main, db-pii, migrate jobs, caddy, mailpit, provider-mocks, and clamd under the `scan` profile. Every service is limited and health-checked.
 - `scripts/verify.sh` is the full gate (`--quick`, `--help`). Local run: 513 s. First CI run of the gate on GitHub: 4 min 4 s.
 
+## What T-0102 delivers
+
+- `packages/contract`: `defineRoute` registry with permission metadata (auth, tab, adminOnly, companyScoped), RFC 9457 `ProblemSchema`, `listQuery` (default 50, max 200) and `pageOf`. `/healthz` is the first registry route.
+- `apps/web`: routes come only from the registry; startup fails on missing metadata, and any other route is refused.
+- Committed `packages/contract/openapi.json` + `src/client/schema.ts`; `pnpm contract:gen` regenerates, the `openapi` gate step fails on drift.
+- `@omnibridge/contract/client` (openapi-fetch) for apps/ui; example in `apps/ui/src/api.ts`.
+- `packages/core`: London time helpers (`@omnibridge/core/time`), `Pence` stub, `cacheKey`/`companySetHash`, `ApiError`. `packages/testkit`: `walkRoutes` stub.
+
 ## Next step
 
-1. Hashir reviews and merges the T-0101 PR after CI is green. S3 never merges.
-2. S1 rules on PS-001 to PS-005 and amends ADR-019 (lefthook 2.2.1).
-3. S3 starts T-0102 after `/clear`.
-4. S2 starts M03 once T-0102 is merged.
+1. S1 rules on PS-006. Hashir reviews and merges the T-0102 PR after CI is green. S3 never merges.
+2. S2 starts M03 on the merged contract (`@omnibridge/contract/client`).
+3. S3 posts the T-0103 plan after `/clear` and waits for Hashir's "go".
 
 ## Prerequisites outstanding (Hashir)
 

@@ -78,4 +78,17 @@ bash scripts/verify.sh
 ```
 
 The full gate must pass before any merge; CI runs the same script. `bash scripts/verify.sh --quick`
-(lint, typecheck, unit tests) is for use while working, and `--help` lists every step.
+(lint, typecheck, contract drift, unit tests) is for use while working, and `--help` lists every
+step.
+
+### API contract
+
+Routes are declared once in `packages/contract` (Zod). After changing a route or schema, regenerate
+the committed `packages/contract/openapi.json` and the typed client types, and commit both:
+
+```bash
+corepack pnpm contract:gen
+```
+
+The gate runs `contract:check` and fails if either file is out of date. The SPA calls the API
+through `@omnibridge/contract/client` (see `apps/ui/src/api.ts`).

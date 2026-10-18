@@ -53,6 +53,15 @@ module.exports = {
       to: { path: '^packages/db/' },
     },
     {
+      name: 'ui-uses-contract-client-only',
+      comment:
+        'ADR-004: the SPA talks to the API only through the generated typed client ' +
+        '(@omnibridge/contract/client), never the Zod registry or server code.',
+      severity: 'error',
+      from: { path: '^apps/ui/' },
+      to: { path: '^packages/contract/', pathNot: '^packages/contract/src/client/' },
+    },
+    {
       name: 'mocks-and-testkit-only-in-tests',
       comment: 'Provider mocks and the testkit never ship inside production code paths.',
       severity: 'error',

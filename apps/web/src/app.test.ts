@@ -21,15 +21,20 @@ describe('web proxy trust', () => {
         checks,
         ...(trustedProxies ? { trustedProxies } : {}),
       });
-      app.get('/ip', (request) => ({ ip: request.ip }));
-      const res = await app.inject({
+      // Routes come only from the contract, so read request.ip in a hook on /healthz.
+      let ip = '';
+      app.addHook('onRequest', (request, _reply, done) => {
+        ip = request.ip;
+        done();
+      });
+      await app.inject({
         method: 'GET',
-        url: '/ip',
+        url: '/healthz',
         remoteAddress: '10.0.0.5',
         headers: { 'x-forwarded-for': '203.0.113.9' },
       });
       await app.close();
-      return res.json<{ ip: string }>().ip;
+      return ip;
     };
     expect(await ipOf()).toBe('10.0.0.5');
     expect(await ipOf('10.0.0.0/8')).toBe('203.0.113.9');

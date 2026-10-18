@@ -2,5 +2,5 @@
   "extends": "../../tsconfig.build.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts", "src/gen-contract.ts"]
 }
