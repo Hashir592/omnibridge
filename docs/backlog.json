@@ -137,7 +137,7 @@
         "gitleaks finds no secret in the repo history"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0104",
