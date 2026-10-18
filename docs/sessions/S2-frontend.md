@@ -27,7 +27,7 @@ You own OmniBridge's design system and screens: tokens, components, layout, the 
 2. Your task in `docs/backlog.json`
 3. The cited PRD sections. Always include NFR-8, NFR-9, PERM-3/PERM-4 (which tabs exist and who sees them), TEN-5 (company switcher) and ORD-5 (PII masking).
 4. `docs/ARCHITECTURE.md` §3 (layout) and §5 invariants 4–8
-5. `docs/design/README.md`, once it exists
+5. `docs/design/DIRECTION.md` (S1 design brief: colours, type, density, speed budget, anti-slop list) and `docs/design/README.md`, once it exists
 
 ## UI rules
 
@@ -39,9 +39,31 @@ You own OmniBridge's design system and screens: tokens, components, layout, the 
 - **Signal labels:** marks such as Provisional, Estimate, Allocated estimate, data age and Native/Derived/Estimate must be visible wherever the PRD asks for them.
 - **Visual standard:** no decorative animation and no third-party fonts or scripts loaded at runtime. Self-host fonts. The CSP is strict.
 
-## Workflow for each task
+## Where you work: your own worktree
 
-Steps 1–10 of the S3 workflow apply to you unchanged (see `docs/sessions/S3-builder.md`), with these differences:
+S3 works in `D:Work Projectsomnibridge` and switches branches there. So you work in a **separate git worktree**, and your uncommitted changes never mix with S3's:
+
+```bash
+cd "/d/Work Projects/omnibridge" && git fetch && git worktree add "../omnibridge-ui" -b design/m03 origin/main
+cd "/d/Work Projects/omnibridge-ui" && corepack pnpm install --frozen-lockfile
+```
+
+Run the UI with the Vite dev server and MSW mocks (no Docker needed, so it uses little RAM). Give Hashir the `http://localhost:<port>` link to look at.
+
+## Design iteration mode (Hashir's rule, ADR-037)
+
+Hashir will look at the UI often and ask for many small changes ("change this button", "make this colour lighter"). While he is iterating:
+
+1. Make the change straight away and show it. No plan, no verify.sh, no code review and no report for each small change. A one-line "done, refresh" is enough.
+2. **Do not commit and do not push** until Hashir says so (for example "merge", "push it" or "lock it in").
+3. Keep the rules in "UI rules" and `docs/design/DIRECTION.md` even while iterating, unless Hashir explicitly overrides one. Note each override in `docs/design/README.md`.
+4. When Hashir says to merge, run the full workflow below once for everything changed: tests, `scripts/verify.sh`, code review, commit, push, PR. Hashir merges the PR.
+
+If a session is about to end with uncommitted work, remind Hashir that the work lives only in the worktree.
+
+## Workflow when Hashir says "merge"
+
+Steps 5–10 of the S3 workflow (`docs/sessions/S3-builder.md`) apply; steps 1–4 already happened during iteration. Differences:
 
 - **Plan in chat:** list the screens and components, the states you will cover (loading, empty, error, permission-denied, long text) and the reference screenshots you will produce.
 - **Tests:**
