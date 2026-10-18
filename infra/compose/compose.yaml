@@ -287,6 +287,7 @@ networks:
     name: ob_app
   ob_db:
     name: ob_db
+    internal: true # ADR-034: PostgreSQL needs no internet egress
   ob_pii:
     name: ob_pii
     internal: true
