@@ -11,6 +11,11 @@
       "@omnibridge/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./time": {
+      "@omnibridge/source": "./src/time.ts",
+      "types": "./dist/time.d.ts",
+      "default": "./dist/time.js"
     }
   },
   "scripts": {

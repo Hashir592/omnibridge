@@ -17,6 +17,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@omnibridge/contract": "workspace:*",
     "@testcontainers/postgresql": "12.2.1"
   }
 }

@@ -1,0 +1,156 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OmniBridge API",
+    "version": "0.1.0",
+    "description": "Generated from packages/contract. Do not edit by hand: run `pnpm contract:gen`."
+  },
+  "components": {
+    "schemas": {
+      "ProblemInput": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "integer", "minimum": 400, "maximum": 599 },
+          "code": {
+            "type": "string",
+            "enum": [
+              "bad_request",
+              "validation_failed",
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "method_not_allowed",
+              "conflict",
+              "payload_too_large",
+              "unsupported_media_type",
+              "rate_limited",
+              "internal_error",
+              "service_unavailable"
+            ]
+          },
+          "detail": { "type": "string" },
+          "request_id": { "type": "string" },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "location": { "type": "string", "enum": ["params", "query", "body", "headers"] },
+                "path": { "type": "string" },
+                "message": { "type": "string" }
+              },
+              "required": ["location", "path", "message"]
+            }
+          }
+        },
+        "required": ["type", "title", "status", "code"]
+      },
+      "HealthInput": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["ok", "degraded"] },
+          "db_main": { "type": "string", "enum": ["ok", "error"] },
+          "db_pii": { "type": "string", "enum": ["ok", "error"] },
+          "version": { "type": "string" }
+        },
+        "required": ["status", "db_main", "db_pii", "version"]
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "integer", "minimum": 400, "maximum": 599 },
+          "code": {
+            "type": "string",
+            "enum": [
+              "bad_request",
+              "validation_failed",
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "method_not_allowed",
+              "conflict",
+              "payload_too_large",
+              "unsupported_media_type",
+              "rate_limited",
+              "internal_error",
+              "service_unavailable"
+            ]
+          },
+          "detail": { "type": "string" },
+          "request_id": { "type": "string" },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "location": { "type": "string", "enum": ["params", "query", "body", "headers"] },
+                "path": { "type": "string" },
+                "message": { "type": "string" }
+              },
+              "required": ["location", "path", "message"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["type", "title", "status", "code"],
+        "additionalProperties": false
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["ok", "degraded"] },
+          "db_main": { "type": "string", "enum": ["ok", "error"] },
+          "db_pii": { "type": "string", "enum": ["ok", "error"] },
+          "version": { "type": "string" }
+        },
+        "required": ["status", "db_main", "db_pii", "version"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Service and database health",
+        "x-permissions": {
+          "auth": "public",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Health" } }
+            }
+          },
+          "503": {
+            "description": "Declared response, or an RFC 9457 problem",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Health" } },
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
