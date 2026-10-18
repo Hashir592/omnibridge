@@ -1,0 +1,77 @@
+# OmniBridge decisions
+
+Owner: S1. Other sessions add entries only to the **Proposed (from sessions)** section. Full reasoning for each decision is in `docs/plan/PLAN_REVIEW.md` (to be written) and the S1 plan, revision 2.
+
+## Questions
+
+| ID | Question | Answer |
+|---|---|---|
+| Q-001 | SEC-16 requires a PR "reviewed by a second developer", but the builders are AI sessions. | **Approved (round 1).** Every merge goes through a GitHub PR. Merging needs green CI and Hashir's approval. S4 checkpoint findings count as review evidence. |
+
+## ADR log (versions checked 18 Oct 2026 against the npm registry and GitHub releases unless marked)
+
+| ADR | Decision |
+|---|---|
+| 001 | **Runtime:** Node.js 24.22.0 LTS + TypeScript 6.0.3.<br>Move to Node 26 LTS in Q1 2027 (LTS date 28 Oct 2026, *unverified*).<br>TypeScript 7 is postponed because typescript-eslint 8.71.2 only supports TypeScript below 6.1. |
+| 002 | **API server:** Fastify 5.12.7 (MIT), with @fastify/helmet 13.2.0 and @fastify/rate-limit 11.2.1. |
+| 003 | **UI:** React 19.3.1 SPA on Vite 8.3.4.<br>TanStack Router 1.170.45, Query 5.104.4, Table 9.3.1, Virtual 3.14.21.<br>shadcn/ui components on Base UI 1.9.0, with Tailwind 4.3.3, React Hook Form 7.90.0 and Recharts 3.10.1.<br>Rejected: Next.js (server RAM, SSR not needed). Mantine 9.7.3 was the runner-up. |
+| 003b | **Public site:** Astro 7.4.0 static build, served by static-web-server 2.44.1 in its own container. |
+| 004 | **Shared contract:** a Zod 4.6.7 route registry with permission metadata.<br>It feeds fastify-type-provider-zod 7.0.0 and @fastify/swagger 9.9.2, which produce a committed `openapi.json` (CI fails on any diff).<br>The client is generated with openapi-typescript 7.13.0 and openapi-fetch 0.17.0.<br>Rejected: tRPC (no portable HTTP contract). |
+| 005 | **Database:** PostgreSQL 18.6 (19 is only at RC1; confirmed on postgresql.org).<br>Kysely 0.29.7, pg 8.23.1, kysely-codegen 0.20.0.<br>Migrations are forward-only SQL, linted with squawk 2.70.0 (Apache-2.0), using expand/contract. No PgBouncer.<br>Rejected: Drizzle (still RC), Prisma. |
+| 006 | **Tenancy:**<br>• `workspace_id` on every tenant row, with composite foreign keys.<br>• Row-level security ENABLE + FORCE, plus company policies.<br>• DB roles `ob_owner` / `ob_app` / `ob_platform`; `SET LOCAL` per transaction.<br>• App code must pass a TenantContext.<br>• An RLS coverage SQL test, and a route walker over every contract route (AT-1). |
+| 007 | **PII vault:** a separate `db-pii` cluster, reachable only by the `pii-vault` service.<br>• Capability tokens: ingest, read-full, mask, search, delete.<br>• AES-256-GCM per field, per-workspace data key wrapped by a PII master key held as a Docker secret.<br>• Blind-index search; every read logged.<br>• Label files kept inside the PII boundary. |
+| 008 | **Auth:** built in-house on @node-rs/argon2 2.2.2 and @oslojs/otp 1.1.0.<br>• Sessions in the DB; CSRF via SameSite=Strict + Origin check + token.<br>• Offline breached-password filter built from HIBP Pwned Passwords.<br>• USR-5 hard lock kept (the PRD fixes it), plus per-IP progressive delays (1→30 s after 3 failures) and an alert on every lock.<br>Rejected:<br>• Better Auth (2FA bypass GHSA-xg6x-h9c9-2m83; the CVE number is *unverified*)<br>• Keycloak (RAM)<br>• Zitadel (AGPL)<br>• Ory Kratos (no lockout or password history) |
+| 009 | **Queue:** pg-boss 12.38.0 (MIT) in the main DB.<br>Rejected: Graphile Worker (0.17 unreleased, no dead-letter queue), BullMQ (needs Valkey). |
+| 010 | **Rate governors:** separate `governors/amazon` (reactive token bucket) and `governors/ebay` (count-before-send) packages.<br>dependency-cruiser forbids any shared code between them (RL-3). |
+| 011 | **Provider adapters and mocks:** adapters behind INT-1 interfaces.<br>One `provider-mocks` container, used in dev, CI and staging only.<br>An egress allowlist blocks live hosts unless `PROVIDER_MODE=live`. |
+| 012 | **Files:** encrypted local volume behind a `FileStore` interface; S3 or B2 can be swapped in later without code changes.<br>Labels never leave the PII boundary.<br>Rejected: MinIO (AGPL), Garage (AGPL). |
+| 013 | **PDF:** @cantoo/pdf-lib 2.11.1 and PDFKit 0.20.2. The original pdf-lib has been unmaintained since 2021. |
+| 014 | **Secrets:**<br>• Infra secrets: SOPS 3.13.3 + age 1.3.2 files in a private ops repo, injected as Docker secrets.<br>• Provider tokens: envelope-encrypted in the DB under a separate secrets master key, with current/next slots.<br>• `docs/ops/secrets-register.md` lists owner and rotation date.<br>Rejected: OpenBao. |
+| 015 | **Edge proxy:** a shared `edge` project running Caddy 2.11.7 with coraza-caddy 2.6.2 and CRS 4.30.0, one route file per app.<br>**Deploys:** blue/green; GitHub Actions → GHCR → deploy over WireGuard; production deploys need approval.<br>**Fixed IP:** all carrier and website egress leaves through a **netcup failover IPv4** (SNAT). netcup does not document whether the main IP survives a plan change (*unverified*); the runbook covers re-allowlisting as a fallback. |
+| 016 | **Backups:** restic 0.19.1 → Backblaze B2 EU Central, with separate buckets, keys and passwords for main and PII.<br>• Encryption happens on our side and no key leaves our side, so a US provider is acceptable.<br>• Ransomware protection: the server's keys have no `deleteFiles` capability (restic only hides files), and lifecycle rules delete hidden files after 14 days (main) or 1 day (PII).<br>• forget/prune run only from a GitHub Actions `backup-admin` environment.<br>• Main DB keeps 7 daily + 4 weekly + 6 monthly snapshots.<br>• Amazon's guidance requires deletion "from live data stores as well as any backups". So each account-level deletion run triggers a purge of every older main snapshot within days.<br>• PII: see P-010. |
+| 017 | **Observability, ≤500 MB in total:**<br>• VictoriaMetrics 1.154.0, VictoriaLogs 1.53.0, vmalert, Alertmanager 0.34.1.<br>• fluent-bit 5.1.4, node_exporter 1.12.1, postgres_exporter 0.20.1 (multi-target).<br>• cAdvisor 0.60.6 (60 s housekeeping) behind docker-socket-proxy 0.5.0.<br>• Gatus 5.37.0 on each server, plus the external check from P-011.<br>• Logging with pino 10.4.0 (field allowlist + redaction); metrics with prom-client 15.1.3.<br>Not used: Sentry, Grafana. |
+| 018 | **Testing:** Vitest 5.0.5, Testcontainers 12.2.1, Playwright 1.64.1, fast-check 4.10.2.<br>Load tests use k6 2.3.0 (AGPL, dev only, unmodified). A PII marker scan runs in CI. |
+| 019 | **Repo and CI:** pnpm 12.14.0, ESLint 10.13.0 + typescript-eslint 8.71.2, Prettier 3.9.10.<br>dependency-cruiser 18.6.0, lefthook 2.2.2, gitleaks 8.30.1, osv-scanner 2.7.0, Semgrep 1.181.0, Trivy 0.76.0.<br>All Actions are pinned by SHA because of the March 2026 Trivy Action tag hijack (the CVE number is *unverified*). |
+| 020 | **Email:** Scaleway Transactional Email over SMTP: 300 emails/month free, then €0.25 per 1,000, so under €2/month.<br>Fallback: Brevo free tier. Library: Nodemailer 10.1.2. Dev: Mailpit 1.31.6.<br>Mailboxes: see P-009. |
+| 021 | **Virus scanning:** **one** clamd (ClamAV 1.5.4, `ConcurrentDatabaseReload no`, 1.4 GB), owned by the `edge` host layer.<br>OmniBridge reaches it over its own `scan_ob` network. The host scan uses the same daemon.<br>If clamd is down, uploads stay "scanning" and are never treated as clean. |
+| 022 | **Money and time:** integer pence, half-up rounding; `tax_point_date` (London date) stored on the record; date-fns 4 + @date-fns/tz 1.5.0. |
+| 023 | **Host security:** Debian 13, Docker 29.9.1, Compose 5.6.0.<br>WireGuard, SSH with key + TOTP, nftables default deny.<br>auditd, AIDE, fail2ban, unattended-upgrades. |
+| 024 | **Resource budget, production VPS 2000 G12.5 (16 GB):**<br>• Host layer 1.0 GB, shared clamd 1.4 GB, JeezMart ≤3 GB.<br>• OmniBridge ≈3.3 GB today and ≈5.7 GB at design capacity.<br>• Worst-case peak ≈12.1 GB.<br>Disk ≈166 GB of 256 GB at the design horizon, with alerts at 70% and 85%.<br>Staging: VPS 1000 G12.5.<br>AT-25 and the first AT-24 run on production before go-live. |
+| 025 | **Module order:** M01 → M02 → M01b → M06 (site + minimal EBAY-2) → M04 → M05 → M07…M21. M03 (S2) runs in parallel from T-0102. |
+| 026 | **M02 exit:** requires S4 APPROVED **and** an S5 audit of T-0203 with no open Blocker or Major findings. |
+| 027 | **Coverage rule:** a task's `prd_ids` may list only IDs owned by its own module (MODULES.md). IDs owned elsewhere that the task helps with go in `supports`. `scripts/req-coverage.mjs` counts only `prd_ids`, so every ID keeps exactly one owner (round 2 fix). |
+| 029 | **Local-first delivery (Hashir, supersedes the order in ADR-025):**<br>• Design, develop, then deploy. Every module is built and tested on local Docker with provider mocks.<br>• No VPS until **M22 Deploy**, which runs after M20 and before M21 hardening.<br>• M01b becomes "Ops stack (local)": observability, backup and restore scripts against a local restic repository, and the edge config, all in local Docker.<br>• Ownership moved:<br>&nbsp;&nbsp;– OPS-1, OPS-2, OPS-3, SEC-7, SEC-8, SEC-9, SEC-10, SEC-13 and CAP-9 → M22<br>&nbsp;&nbsp;– AT-23 → M22 (from M06)<br>• Local containers keep the production limits, so the 16 GB budget is tested from day one.<br>• **Accepted cost:** the Amazon, Ads and eBay approvals start only in M22. An early mini-deploy of the public site and eBay endpoint stays available on request. |
+| 030 | **Code review step (Hashir's standing instruction):**<br>• First choice: CodeRabbit, via the `coderabbit:code-review` plugin skill or the `coderabbit` CLI.<br>• If it cannot run (CLI missing, auth or plugin error): use Claude Code's `/code-review` skill on the task diff instead, and record which reviewer ran in the report.<br>• Review is never skipped. Fix real findings and list false positives with reasons. |
+| 031 | **Dev and CI tooling approved for T-0101:**<br>• actionlint 1.7.12 (MIT)<br>• squawk-cli 2.70.0 (Apache-2.0 OR MIT) via npm<br>• gitleaks 8.30.1, osv-scanner 2.7.0, Semgrep CE 1.181.0 and actionlint run as digest-pinned Docker images, so nothing is installed on the host<br>• pnpm via corepack `packageManager`<br>Any other new dependency still needs a Proposed entry. |
+| 028 | **UI test and mock tools (dev only, never shipped):** MSW 3.0.3 (MIT) mocks API routes before S3 builds them; @testing-library/react 16.3.3 (MIT) for component tests; @axe-core/playwright 4.14.0 (MPL-2.0, unmodified) for the accessibility checks in Playwright. |
+
+## Proposed PRD changes
+
+| ID | Change | Status |
+|---|---|---|
+| P-001 | PRD header v1.0 → v1.1, matching the change log. | Approved; applied in PRD v1.2 |
+| P-002 | Give the §9.1 targets IDs CAP-1…10. | Approved; applied in PRD v1.2 |
+| P-003 | DP-7: allow ingestion to write, the deletion service to delete, and DEL-4/DEL-5 to search. | Approved; applied in PRD v1.2 |
+| P-004 | OPS-9: add the host security layer (WAF, IDS, VPN, anti-malware) and a single shared clamd. | Approved; applied in PRD v1.2 |
+| P-005 | NFR-5: label files are PII. Keep them under the PII boundary, never back them up, delete them at the earlier of 30 days or PII expiry. | Approved; applied in PRD v1.2 |
+| P-006 | Tombstones re-applied after restore; AMZ-13 deletion moved to day 21; main DB schedule 7 daily + 4 weekly + 6 monthly with purge after account-level deletions (ADR-016). The PII backup history was set by P-010. | Approved; applied in PRD v1.2 (AMZ-13, SEC-11, AT-11) |
+| P-007 | OPS-1 and §13.2: production is a netcup VPS 2000 G12.5, shared; VPS 4000 is the upgrade target; JeezMart ≤3 GB / 2 cores; failover IP; upgrade runbook with triggers. | Applied in PRD v1.2 |
+| P-008 | SEC-11: off-site backups go to Backblaze B2 EU Central (ADR-016). | Applied in PRD v1.2 |
+| P-009 | MAIL-1: Zoho Mail Lite with 2 users; support@, privacy@, developer@ and notifications@ as aliases. MAIL-2: per ADR-020. | Applied in PRD v1.2 |
+| P-010 | Live PII expiry at delivery (or dispatch) + 25 days, with 3 daily PII snapshots, so backup copies are gone within Amazon's 30 days. Both are settings. | Approved (round 2); applied in PRD v1.2 |
+| P-011 | OPS-11: allow one free external uptime checker (no PII) on the public site and `/healthz`. | Approved (round 2); applied in PRD v1.2 |
+| P-012 | §12.1: local-first delivery. All phases built and tested locally; servers, going live and the provider applications move to a new phase 8 (Deploy) before hardening (ADR-029). | Directed by Hashir; applied in PRD v1.3 |
+
+## Proposed (from sessions)
+
+_None yet._
+
+## Review log
+
+- **Hashir, 18 Oct 2026 (after round 2):**
+  - Build everything locally and deploy last (ADR-029, P-012, PRD v1.3).
+  - Code review falls back to `/code-review` when CodeRabbit cannot run (ADR-030).
+  - The GitHub repo is `Hashir592/omnibridge`.
+  - A one-time docs-only bootstrap commit straight to `main` is allowed, so the first PR has a base.
+- **Round 2, 18 Oct 2026:** approved. P-010 and P-011 approved as written. Fix applied: non-owned IDs moved from `prd_ids` to `supports` (T-0101 DP-8, T-0102 SEC-3 and CAP-7, T-0103 INT-3), recorded as ADR-027. PRD amended to v1.2. Phase B started.
+- **Round 1, 18 Oct 2026:** approved with changes P-007 to P-009, the 16 GB budget, the build order, Q-001, and P-001 to P-006 as noted above.

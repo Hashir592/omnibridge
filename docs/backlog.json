@@ -1,0 +1,465 @@
+{
+  "version": 2,
+  "updated": "2026-10-18",
+  "owner": "S1",
+  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk 'high' means the session waits for Hashir's 'go' before implementing. Checkpoints: M01 halfway after T-0103, M01 end after T-0105; M02 halfway after T-0203, M02 end after T-0206. Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only.",
+  "tasks": [
+    {
+      "id": "T-0101",
+      "module": "M01",
+      "session": "S3",
+      "title": "Walking skeleton (local Docker only)",
+      "goal": "One command brings up a working, limited, isolated OmniBridge stack locally, and one command proves its quality.",
+      "prd_ids": [
+        "NFR-1",
+        "NFR-2",
+        "OPS-7",
+        "OPS-8",
+        "OPS-9",
+        "OPS-10",
+        "OPS-11",
+        "SEC-4",
+        "SEC-5",
+        "SEC-16"
+      ],
+      "supports": [
+        "DP-8"
+      ],
+      "scope": [
+        "pnpm 12 monorepo with the layout in ARCHITECTURE.md §3 (empty packages may be stubs with one export and one test)",
+        "apps/web (Fastify) with GET /healthz returning {status, db_main, db_pii, version}; apps/worker with a pg-boss heartbeat job every minute; apps/pii-vault with GET /healthz; apps/site Astro placeholder page",
+        "infra/compose: compose.yaml + compose.dev.yaml; services web, worker, pii-vault, site, db-main, db-pii, clamd (dev stand-in for the shared host clamd), mailpit, provider-mocks (one placeholder route); every service has mem_limit, cpus, pids_limit and a healthcheck; networks ob_edge, ob_app, ob_db, ob_pii (internal) as in ARCHITECTURE.md §7",
+        "db-main and db-pii on PostgreSQL 18.6 images pinned by digest; roles ob_owner, ob_app (no BYPASSRLS), ob_platform on db-main and vault_owner, vault_app on db-pii; first forward-only migration runner (Kysely Migrator, no down) and squawk lint",
+        "packages/logger: pino with field allowlist and redaction; test that a PIIMARK- value in a log call never reaches output",
+        "infra/edge/sites/omnibridge.caddy route file (run locally in M01b, live in M22) and a local Caddy in dev for HTTPS on localhost",
+        "scripts/verify.sh: install (frozen lockfile), lint (ESLint strict type-checked + Prettier check), typecheck, dependency-cruiser, unit, integration (Testcontainers PG 18), contract (adapter stub vs provider-mocks), e2e (Playwright opens the site and /healthz), build, gitleaks, osv-scanner + pnpm audit (high/critical fails), scripts/check-limits.sh, scripts/req-coverage.mjs (rules in docs/sessions/S3-builder.md §Coverage: index equals PRD IDs; each ID has exactly one owner in MODULES.md; each prd_ids entry is owned by the task's module; every ID owned by a module that has tasks appears in at least one of its tasks' prd_ids; supports may cite any indexed ID; every ID of a done task is cited by at least one test title), hard-coded-name grep gate (Jeez, Sidson, Kyyz, JeezMart outside seed files)",
+        "verify.sh modes: default = full gate (required before merge); --quick = lint, typecheck, unit; --help lists modes. CI always runs the full gate",
+        "one passing test of each kind: unit, integration, contract, e2e",
+        ".github/workflows/ci.yml running verify.sh with every action pinned by commit SHA; Semgrep CE job; branch protection documented in docs/ops/github-settings.md (PR + green CI + Hashir approval, per Q-001)",
+        "lefthook pre-commit: Prettier, ESLint on staged files, gitleaks; commit-msg: conventional commit with PRD ID footer",
+        "README section 'Run locally' (Windows Git Bash + Docker Desktop)"
+      ],
+      "out_of_scope": [
+        "Any server, staging or production deploy (M22)",
+        "Business tables",
+        "Auth",
+        "Full observability stack (M01b)"
+      ],
+      "depends_on": [],
+      "acceptance": [
+        "scripts/verify.sh exits 0 on a clean clone",
+        "docker compose -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml up -d --wait reports every service healthy",
+        "curl -fsS https://localhost:8443/healthz returns status ok with db_main ok and db_pii ok",
+        "scripts/check-limits.sh fails when any service lacks mem_limit, cpus or pids_limit (proved by test [OPS-10] check-limits rejects unlimited service)",
+        "test '[DP-8] logger redacts PII markers' passes",
+        "scripts/req-coverage.mjs reports 324 IDs indexed, 324 owned, 0 unmapped, 0 prd_ids outside their module",
+        "the CI workflow file passes actionlint and every 'uses:' is pinned to a 40-character SHA"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0102",
+      "module": "M01",
+      "session": "S3",
+      "title": "Shared API contract pipeline",
+      "goal": "One schema source drives server validation, the OpenAPI document and the typed client, so S2 and S3 cannot drift apart.",
+      "prd_ids": [
+        "NFR-1",
+        "NFR-6",
+        "NFR-7"
+      ],
+      "supports": [
+        "SEC-3",
+        "CAP-7"
+      ],
+      "scope": [
+        "packages/contract: defineRoute({method, path, params, query, body, responses, auth, tab, adminOnly, companyScoped}) registry using Zod 4",
+        "server registration via fastify-type-provider-zod; the server refuses to start if a route lacks auth/tab/adminOnly metadata",
+        "standard error model (RFC 9457 problem+json with error code); cursor pagination with default 50 and max 200",
+        "openapi.json generated by script and committed; verify.sh fails on diff",
+        "typed client package generated with openapi-typescript + openapi-fetch, consumed by apps/ui",
+        "date/time helpers in packages/core: UTC storage, Europe/London display, londonDate() for VAT dates; money type stub Pence (full in M08)",
+        "cache-key helper requiring workspace_id and a company-set hash (NFR-6)",
+        "packages/testkit route walker stub that enumerates the registry (filled in by T-0201)"
+      ],
+      "out_of_scope": [
+        "Business routes",
+        "Auth implementation (M02)"
+      ],
+      "depends_on": [
+        "T-0101"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "test '[SEC-3] server refuses route without permission metadata' passes",
+        "test '[CAP-7] list routes default to 50 rows and cap at 200' passes",
+        "test '[NFR-7] londonDate maps 2026-03-29T00:30Z and BST boundaries correctly' passes",
+        "test '[NFR-6] cache key includes workspace and company set' passes",
+        "changing a schema without regenerating openapi.json makes verify.sh fail"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0103",
+      "module": "M01",
+      "session": "S3",
+      "title": "Envelope encryption and secrets handling",
+      "goal": "Secrets never sit in the repo, images or logs; tokens and keys at rest use AES-256-GCM envelope encryption with rotation.",
+      "prd_ids": [
+        "SEC-5",
+        "SEC-6"
+      ],
+      "supports": [
+        "INT-3"
+      ],
+      "scope": [
+        "packages/crypto: AES-256-GCM with random 96-bit nonce, AAD binding (workspace_id, table, column, row id), key-version prefix; DEK generation, wrap/unwrap with KEK; KEK rotation re-wraps DEKs without re-encrypting data",
+        "two KEKs: secrets KEK (db-main credentials) and PII KEK (pii-vault only), loaded from Docker secrets files, never from env vars or the DB",
+        "credential table in db-main: kind, encrypted_value, key_version, is_active, slot (current/next), expires_at, rotated_at; repository API that never returns plaintext to logs",
+        "local dev secrets via SOPS + age: infra/secrets/dev.sops.yaml with a dev-only age key (clearly marked, synthetic values); script materialises Docker secrets files",
+        "docs/ops/secrets-register.md listing every secret, owner, where it lives, rotation interval and next rotation date"
+      ],
+      "out_of_scope": [
+        "Production secrets (M22)",
+        "Platform console UI for app secrets (M05)",
+        "PII field encryption usage (M04)"
+      ],
+      "depends_on": [
+        "T-0101"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "tests '[SEC-6] encrypt/decrypt round trip', '[SEC-6] tampered ciphertext or wrong AAD fails', '[SEC-6] KEK rotation re-wraps DEKs and old data still decrypts' pass",
+        "test '[INT-3] credential repository never logs plaintext' passes (log capture with marker value)",
+        "test '[SEC-5] containers receive secrets only as /run/secrets files' passes (compose config inspection)",
+        "gitleaks finds no secret in the repo history"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0104",
+      "module": "M01",
+      "session": "S3",
+      "title": "Durable job queue and scheduler",
+      "goal": "All background work runs through a durable, idempotent queue with retries, dead-letter, cron and concurrency caps.",
+      "prd_ids": [
+        "NFR-3",
+        "NFR-4",
+        "OPS-10"
+      ],
+      "supports": [],
+      "scope": [
+        "packages/queue on pg-boss 12: job envelope {workspace_id, channel_account_id?, idempotency_key, attempt, type, payload}; Zod-validated payloads",
+        "retry policies (exponential backoff), dead-letter queue per job type, redrive API",
+        "per-account serial queues (key_strict_fifo by channel_account_id) and a PostgreSQL semaphore for N-parallel caps",
+        "cron registration with Europe/London awareness and a 'heavy job' flag that schedules in low-traffic hours",
+        "global worker concurrency cap from config; graceful shutdown (stop accepting, finish or release within 30 s)",
+        "job progress records and GET /jobs/{id} progress route through the contract (NFR-4)",
+        "queue metrics exported via prom-client (depth, age, failures, DLQ size)"
+      ],
+      "out_of_scope": [
+        "Provider governors (M07/M15/M18)",
+        "Platform console screens (M05)"
+      ],
+      "depends_on": [
+        "T-0102"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "test '[NFR-3] job survives worker restart' passes (kill worker mid-job, job completes after restart)",
+        "test '[NFR-3] same idempotency key runs once' passes",
+        "test '[NFR-3] job exceeding attempts lands in DLQ and redrive re-runs it' passes",
+        "test '[OPS-10] per-account cap of 4 never exceeded under 50 concurrent jobs' passes",
+        "test '[NFR-4] progress route reports percent and result' passes"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0105",
+      "module": "M01",
+      "session": "S3",
+      "title": "File storage, upload scanning and system email",
+      "goal": "Files are stored encrypted and served only via short-lived signed links; uploads are virus-scanned; system email goes out via SMTP without PII.",
+      "prd_ids": [
+        "NFR-5",
+        "SEC-2",
+        "MAIL-2"
+      ],
+      "supports": [],
+      "scope": [
+        "packages/files: FileStore interface (put, get stream, delete, signedUrl) with encrypted local-volume implementation; per-workspace file DEKs; random IDs; delete_after support; interface must allow an S3/B2 implementation later without caller changes",
+        "signed download links: HMAC, 5-minute expiry, bound to user session and file ID, issued only after a permission callback",
+        "upload pipeline: size limit (config, default 10 MB), magic-byte type check (PDF/JPG/PNG), clamd INSTREAM scan in a worker job; state scanning → clean | infected | scan_failed; never readable until clean",
+        "packages/mail: SMTP adapter (Nodemailer) configured for Scaleway TEM in prod and Mailpit in dev; plain branded base template; a template lint that rejects PII marker values and secrets",
+        "baseline security headers on web: strict CSP, HSTS, frame-ancestors none, Referrer-Policy (helmet)"
+      ],
+      "out_of_scope": [
+        "Label storage (pii-vault, M04)",
+        "Notification emails (M05)",
+        "Shared host clamd setup (M01b)"
+      ],
+      "depends_on": [
+        "T-0103",
+        "T-0104"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "test '[NFR-5] expired or tampered signed link returns 403' passes",
+        "test '[NFR-5] stored file bytes are not plaintext on disk' passes",
+        "test '[SEC-2] EICAR upload is marked infected and never served' passes against local clamd",
+        "test '[SEC-2] file renamed .pdf with PNG bytes is rejected' passes",
+        "test '[MAIL-2] invite email delivered to Mailpit with no PII marker' passes",
+        "test '[SEC-2] CSP header present and blocks inline script' passes"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0201",
+      "module": "M02",
+      "session": "S3",
+      "title": "Tenancy core and isolation harness",
+      "goal": "Workspaces and companies exist, and no request or job can read or write another workspace's rows, proved for every route.",
+      "prd_ids": [
+        "TEN-1",
+        "TEN-2",
+        "TEN-3",
+        "TEN-4",
+        "TEN-6",
+        "TEN-10",
+        "SEC-3",
+        "AT-1"
+      ],
+      "supports": [],
+      "scope": [
+        "migrations: workspace (plan free_internal, limits, settings incl. timezone, GBP, default VAT 20%, PII retention days read-only), company (TEN-2 fields, flags, badge colour; single-company defaults), membership skeleton, platform_admin flag on user",
+        "RLS ENABLE + FORCE on every tenant table; policies on app.workspace_id and app.company_ids; composite FKs (workspace_id, id)",
+        "TenantContext type; request plugin opens one transaction per request with SET LOCAL; job wrapper does the same from the job envelope",
+        "rls-coverage SQL test: fails if any table with workspace_id lacks RLS+FORCE+policy",
+        "testkit route walker: seeds workspaces A and B with marker data; for every registry route calls as A with B's IDs and as anonymous; asserts 401/403/404 and no B markers in body",
+        "platform API (platform auth stub until T-0203): create workspace and companies; TEN-3 rule that a channel account's company cannot change once it has orders (schema + check, used from M07)",
+        "seed script with synthetic launch data from PRD §0.3 (names only in seed files)"
+      ],
+      "out_of_scope": [
+        "Login (T-0203)",
+        "Roles and ticks (T-0204)",
+        "UI beyond a minimal admin screen"
+      ],
+      "depends_on": [
+        "T-0105"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "test '[TEN-1] rls-coverage: every workspace_id table is forced RLS' passes",
+        "test '[TEN-1][AT-1] route walker: no cross-workspace read or write on any route' passes and lists the route count",
+        "test '[TEN-1] raw SQL as ob_app without SET LOCAL returns zero rows' passes",
+        "test '[TEN-1] job without workspace in envelope is rejected' passes",
+        "test '[TEN-4] hard-coded-name gate' passes",
+        "test '[TEN-10] limits enforced only when set' passes"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0202",
+      "module": "M02",
+      "session": "S3",
+      "title": "Append-only audit log",
+      "goal": "Every security and business event the PRD lists can be recorded once, never edited or deleted, and viewed and exported by admins.",
+      "prd_ids": [
+        "AUD-1",
+        "AUD-2",
+        "AUD-3",
+        "AUD-4"
+      ],
+      "supports": [],
+      "scope": [
+        "audit_event table (UTC timestamp, user, action, entity type/id, before/after JSON, reason, IP); ob_app has INSERT and SELECT only; trigger rejects UPDATE and DELETE",
+        "audit writer used inside the same transaction as the change; before/after diff helper with field allowlist so PII can never be written",
+        "admin routes: list with filters (user, action, entity, date), CSV export (export itself is audited)",
+        "retention job: delete events older than 6 years (the only deletion path, run as ob_owner by the retention job)",
+        "event catalogue constant listing every AUD-2 event type, used by later modules"
+      ],
+      "out_of_scope": [
+        "Login events wiring (T-0203 calls the writer)",
+        "Finance events (M16/M17)"
+      ],
+      "depends_on": [
+        "T-0201"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "test '[AUD-1] UPDATE and DELETE on audit_event fail for ob_app' passes",
+        "test '[AUD-3] PII marker in before/after is rejected' passes",
+        "test '[AUD-4] child user gets 403 on audit routes' passes",
+        "test '[AUD-4] export is itself audited' passes"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0203",
+      "module": "M02",
+      "session": "S3",
+      "title": "Passwords, MFA, lockout and sessions",
+      "goal": "Login is impossible without MFA, passwords meet USR-3, brute force is stopped, and sessions expire and revoke as the PRD requires.",
+      "prd_ids": [
+        "USR-2",
+        "USR-3",
+        "USR-4",
+        "USR-5",
+        "USR-6",
+        "USR-7",
+        "SEC-1",
+        "AT-3"
+      ],
+      "supports": [],
+      "scope": [
+        "argon2id hashing (@node-rs/argon2) with parameters recorded in ADR-008; password policy: ≥12 chars, not containing name or email local part, offline breached-password filter (HIBP-derived, loaded from file), last 10 not reused, max age 365 days, min age 1 day",
+        "TOTP enrolment (@oslojs/otp) mandatory before any workspace access; secret encrypted with crypto package; 10 single-use recovery codes stored as argon2id hashes; MFA changes audited",
+        "lockout: 10 failures in 15 minutes locks for 15 minutes; per-IP progressive delay (after 3 failures, 1 s doubling to 30 s); user and admins notified (email now, in-app via M05 later); login rate limit on the route",
+        "sessions: 256-bit token, SHA-256 hash stored, cookie Secure/HttpOnly/SameSite=Strict, idle 30 min, absolute 12 h, sign out on all devices; CSRF Origin check + double-submit token on state-changing routes",
+        "password reset by email link valid 30 minutes, single use, MFA still required",
+        "workspace picker after login for multi-workspace users (USR-2); platform admin login path with MFA",
+        "minimal login, MFA enrol, recovery and reset screens (S2 restyles in M03)"
+      ],
+      "out_of_scope": [
+        "Invites and roles (T-0204)",
+        "Public sign-up (T-0205)",
+        "VPN IP allowlist for /platform (M22/M05)"
+      ],
+      "depends_on": [
+        "T-0202"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "test '[USR-4][AT-3] no workspace route is reachable before MFA is set up and verified' passes",
+        "test '[USR-5][AT-3] 10 failures lock for 15 minutes and notify' passes",
+        "tests '[USR-3] rejects breached, short, name-containing and reused passwords' pass",
+        "test '[USR-6] idle 30 min and absolute 12 h expiry' passes (fake clock)",
+        "test '[USR-7] reset link expires after 30 minutes and reset does not bypass MFA' passes",
+        "test '[SEC-1] state-changing request without CSRF token is rejected' passes",
+        "Playwright e2e '[AT-3] login with TOTP' passes"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0204",
+      "module": "M02",
+      "session": "S3",
+      "title": "Invites, roles, tab and company ticks",
+      "goal": "Admins invite named users, set Admin or Child with tab and company ticks, and every permission is enforced on the server and takes effect immediately.",
+      "prd_ids": [
+        "TEN-5",
+        "TEN-7",
+        "USR-1",
+        "USR-8",
+        "USR-9",
+        "PERM-1",
+        "PERM-2",
+        "PERM-3",
+        "PERM-4",
+        "PERM-5",
+        "PERM-6",
+        "PERM-7",
+        "AT-2"
+      ],
+      "supports": [],
+      "scope": [
+        "invites: email, role, tabs[], company_ids[], token hash, 72 h expiry; first-admin invite by platform admin; invite screen states shared logins are prohibited",
+        "membership roles admin/child; tab list from PERM-4; admin-only tabs (Connections, Users, Settings, Audit Log); new child starts with nothing",
+        "route enforcement from contract metadata (tab, adminOnly, companyScoped) and app.company_ids for RLS; Combined = permitted companies only",
+        "company switcher API (list permitted companies + Combined)",
+        "permission change or removal revokes active sessions immediately; last admin cannot be removed or demoted",
+        "quarterly access review: task record every 90 days per workspace admin, completion audited (notification wiring in M05)",
+        "users management screens (minimal; S2 restyles)"
+      ],
+      "out_of_scope": [
+        "Notification centre (M05)",
+        "Business tabs content"
+      ],
+      "depends_on": [
+        "T-0203"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "test '[PERM-3][AT-2] child with {Orders} and one company sees only that company in Combined, search and lists; other tabs 403' passes using fixture routes for every tab",
+        "test '[USR-8] removing a user ends their session on the next request' passes",
+        "test '[PERM-7] last admin cannot be removed or demoted' passes",
+        "test '[PERM-6] new child has no tabs and no companies' passes",
+        "test '[TEN-7] invite expires after 72 hours' passes",
+        "route walker re-run with child-without-ticks role passes"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0205",
+      "module": "M02",
+      "session": "S3",
+      "title": "Public sign-up flag and first-run wizard",
+      "goal": "Open sign-up exists but is switched off, and a new workspace admin is guided through setup steps they can skip and resume.",
+      "prd_ids": [
+        "TEN-8",
+        "TEN-9"
+      ],
+      "supports": [],
+      "scope": [
+        "platform feature flag public_signup (default off); sign-up page, email verification link, workspace creation; when off, the page shows 'Request access'",
+        "sign-up and verification rate-limited",
+        "first-run wizard state per workspace: MFA → companies → connect channels (placeholder until M07) → connect carriers (placeholder until M12) → invite users; skip and resume"
+      ],
+      "out_of_scope": [
+        "Channel and carrier connection flows"
+      ],
+      "depends_on": [
+        "T-0204"
+      ],
+      "acceptance": [
+        "scripts/verify.sh exits 0",
+        "test '[TEN-8] sign-up routes return 404/Request access when flag is off' passes",
+        "test '[TEN-8] sign-up with flag on requires email verification before workspace creation' passes",
+        "test '[TEN-9] wizard step can be skipped and resumed' passes"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0206",
+      "module": "M02",
+      "session": "S5",
+      "title": "Security audit of authentication (T-0203)",
+      "goal": "An independent security audit of the in-house auth confirms it before M02 can be approved.",
+      "prd_ids": [
+        "USR-3",
+        "USR-4",
+        "USR-5",
+        "USR-6",
+        "SEC-1"
+      ],
+      "supports": [],
+      "scope": [
+        "Hashir runs S5 with Cloudflare's security audit skill against the auth code and running local stack",
+        "covers password storage, MFA, recovery codes, lockout, sessions, CSRF, reset flow, rate limits",
+        "findings written to docs/reviews/security/<YYYYMMDD>-findings.md; S1 turns them into fix tasks for S3"
+      ],
+      "out_of_scope": [
+        "Infrastructure audit (later)"
+      ],
+      "depends_on": [
+        "T-0203"
+      ],
+      "acceptance": [
+        "docs/reviews/security/<YYYYMMDD>-findings.md exists for this audit",
+        "every Blocker and Major finding has a recorded resolution verified by S4"
+      ],
+      "risk": "high",
+      "status": "todo"
+    }
+  ]
+}
