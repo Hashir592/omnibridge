@@ -10,7 +10,8 @@ cd "$dir"
 
 # Built from fragments so this file does not match itself.
 names=("Jee""z" "Sids""on" "Kyy""z")
-pattern="$(IFS='|'; echo "${names[*]}")"
+pattern="$(printf '%s|' "${names[@]}")"
+pattern="${pattern%|}"
 
 # git grep exits 0 on a match, 1 on no match, and >1 on an error; an error must fail the gate.
 code=0

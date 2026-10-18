@@ -28,7 +28,7 @@
     "@types/pg": "8.23.1",
     "dependency-cruiser": "18.6.0",
     "eslint": "10.13.0",
-    "lefthook": "2.2.2",
+    "lefthook": "2.2.1",
     "prettier": "3.9.10",
     "squawk-cli": "2.70.0",
     "testcontainers": "12.2.1",
