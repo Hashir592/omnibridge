@@ -39,10 +39,21 @@ describe('CI workflow and gate', () => {
   it('[SEC-16] the gate e2e step starts its own UI server and never reuses another one', () => {
     const verify = readRepoFile('scripts/verify.sh');
     expect(verify).toMatch(/OB_UI_PORT=\d+ OB_E2E_OWN_SERVER=1 .*playwright test/);
-    const config = readRepoFile('playwright.config.ts');
-    expect(config).toContain(
-      'reuseExistingServer: !process.env.CI && !process.env.OB_E2E_OWN_SERVER',
-    );
-    expect(config).toContain('--port ${uiPort} --strictPort');
+  });
+
+  it('[SEC-16] with the gate settings, Playwright starts its own UI server on that port', async () => {
+    const saved = { ...process.env };
+    try {
+      delete process.env.OB_UI_URL;
+      process.env.OB_UI_PORT = '5199';
+      process.env.OB_E2E_OWN_SERVER = '1';
+      const { default: config } = await import('../../playwright.config.ts');
+      const server = Array.isArray(config.webServer) ? config.webServer[0] : config.webServer;
+      expect(server?.reuseExistingServer).toBe(false);
+      expect(server?.url).toBe('http://localhost:5199');
+      expect(server?.command).toContain('--port 5199 --strictPort');
+    } finally {
+      process.env = saved;
+    }
   });
 });

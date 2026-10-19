@@ -97,6 +97,8 @@ export class CredentialRepository {
     ref: CredentialRef,
     slot: CredentialSlot = 'current',
   ): Promise<Secret | undefined> {
+    // A mistyped kind is an error, never an empty slot that looks like a disconnected account.
+    assertKnownKind(ref.kind);
     // One round trip: the credential and the data key it was written under.
     const row = await db
       .selectFrom(TABLE)
@@ -300,7 +302,7 @@ export class CredentialRepository {
    * ends, and refuses kinds outside CREDENTIAL_KINDS for callers that bypass the type.
    */
   async #lock(db: Kysely<MainDb>, ctx: TenantContext, ref: CredentialRef): Promise<void> {
-    if (!KNOWN_KINDS.has(ref.kind)) throw new Error(`Unknown credential kind ${ref.kind}`);
+    assertKnownKind(ref.kind);
     const key = ['app.credentials', ctx.workspaceId, ref.kind, ref.channelAccountId ?? ''].join(
       '|',
     );
@@ -376,6 +378,11 @@ export class CredentialRepository {
   #aad(ctx: TenantContext, rowId: string): FieldAad {
     return { workspaceId: ctx.workspaceId, table: TABLE, column: COLUMN, rowId };
   }
+}
+
+/** Refuses kinds outside CREDENTIAL_KINDS, for callers that bypass the type (F-M01-halfway-05). */
+function assertKnownKind(kind: string): void {
+  if (!KNOWN_KINDS.has(kind)) throw new Error(`Unknown credential kind ${kind}`);
 }
 
 /** PostgreSQL unique_violation (23505), as raised through pg. */

@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DOCKER_SETUP_TIMEOUT_MS, readRepoFile, repoRoot } from './helpers.ts';
 
 /** A fresh random KEK line, made at run time and never committed. */
@@ -35,10 +35,16 @@ const gitleaksImage = () => {
 describe('gitleaks master-key rule (SEC-5, SEC-6)', () => {
   let findings: Finding[] = [];
   let exitCode: number | null = null;
+  let base = '';
+
+  // The key-shaped files never outlive the test.
+  afterAll(() => {
+    if (base !== '') rmSync(base, { recursive: true, force: true });
+  });
 
   // One pinned-image `dir` scan, run outside every test's timeout.
   beforeAll(() => {
-    const base = mkdtempSync(join(tmpdir(), 'ob-gitleaks-'));
+    base = mkdtempSync(join(tmpdir(), 'ob-gitleaks-'));
     const scan = join(base, 'scan');
     const out = join(base, 'out');
     mkdirSync(scan);

@@ -286,6 +286,9 @@ describe('credential store (SEC-6, INT-3)', () => {
         repo().replaceCurrent(trx, E, typo, new Secret(marker()), { retainOldForMs: 0 }),
       ),
     ).rejects.toThrow(/Unknown credential kind/);
+    await expect(asTenant(E, (trx) => repo().get(trx, E, typo))).rejects.toThrow(
+      /Unknown credential kind/,
+    );
   });
 
   it('[SEC-6] re-wrap leaves DEKs under a newer KEK alone during a rollout', async () => {
