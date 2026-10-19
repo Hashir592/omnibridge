@@ -58,7 +58,11 @@ Required fix:
 2. Check the `dev-secrets.sh` exit status and throw on failure.
 3. Do not weaken or skip any assertion.
 4. Prove it with three consecutive full `verify.sh` runs from a clean state (after `down -v` and `dev-secrets.sh --reset`), all rc=0.
-Resolution: (S3 fills in)
+Resolution: FIXED in `44a9919` and `b1c55a3` (branch `task/M01-halfway-fixes`).
+- The compose model is now built by `loadComposeModel()` in each file's `beforeAll` with `DOCKER_SETUP_TIMEOUT_MS` (120 s). The two `check-limits.sh` runs in compose.test.ts also moved into `beforeAll`. No test body calls Docker, and no assertion changed.
+- `loadComposeModel()` now checks the `dev-secrets.sh` exit status and throws with its stderr. `composeModel()` throws if it is called before the model is loaded.
+- **The first three-run attempt found a second gate defect.** Run 1 failed at `e2e`, not `unit`, because Playwright (`reuseExistingServer: !CI`) had reused S2's Vite dev server from the `omnibridge-ui` worktree on port 5173. That server holds uncommitted T-0302 code (`bg-[#d9dee5]`), so the gate tested code that is not in this checkout. Fix `b1c55a3`: verify.sh runs Playwright with `OB_UI_PORT=5199 OB_E2E_OWN_SERVER=1`, and `--strictPort` makes a taken port fail instead of being reused. A config test pins this: `[SEC-16] the gate e2e step starts its own UI server and never reuses another one`.
+- Evidence (three consecutive full runs on `b1c55a3`, each after `down -v` and `dev-secrets.sh --reset`, with S2's server still listening on 5173): run 1 rc=0 in 678 s, run 2 rc=0 in 451 s, run 3 rc=0 in 461 s (19:10Z to 19:25Z on 19 Oct 2026). Each run: unit 40 files and 138 tests, integration 4 files and 19 tests, contract 2, e2e 16 (chromium + ui), gitleaks no leaks, req-coverage 324/324/0/0.
 
 ## F-M01-halfway-02 — Major — The gitleaks KEK rule misses a key in an env, YAML, JSON or code line
 Area: 4 Security  IDs: SEC-5, SEC-6 (invariant 22)
@@ -67,7 +71,11 @@ Required fix:
 1. Match the key wherever it appears, for example `(?:^|[^A-Za-z0-9+/])[1-9][0-9]{0,8}:[A-Za-z0-9+/]{43}=(?:[^A-Za-z0-9+/=]|$)`. Optionally add `keywords` or an allowlist for known false positives.
 2. Add a gate test that writes the variants above, using random keys generated at run time and never committed, to a temp directory, runs `scripts/gitleaks.sh`-style `dir` scans on it, and expects every one to be flagged.
 3. Prove that `gitleaks git` and `dir` on the repo stay clean.
-Resolution: (S3 fills in)
+Resolution: FIXED in `44a9919`.
+- The rule is now `(?m)(?:^|[^A-Za-z0-9+/])[1-9][0-9]{0,8}:[A-Za-z0-9+/]{43}=(?:[^A-Za-z0-9+/=]|$)`.
+- New gate test `tests/config/gitleaks.test.ts`, `[SEC-6] flags a KEK line in bare, env, YAML, JSON and code files`. It writes 7 variants (bare, indented YAML, quoted YAML, .env, JSON, TypeScript, a two-version keyring) using keys generated at run time and never committed. It scans them with the pinned gitleaks image and the repo config, and expects every variant flagged and a near-miss file not flagged. Against the old rule the test fails (`quoted.yaml` not flagged); against the new one it passes.
+- `scripts/gitleaks.sh full` (git history + dir) reports no leaks.
+- Not covered: a bare 32-byte base64 key with no `<version>:` prefix. That shape is the same as any base64 SHA-256 digest, so a rule for it would flag ordinary hashes. The keyring format always carries the prefix.
 
 ## F-M01-halfway-03 — Minor — The KEK rotation runbook's "check no old kek_version is left" cannot run under FORCE RLS
 Area: 1 Correctness / 9 Invariants  IDs: SEC-6
@@ -76,39 +84,59 @@ Required fix:
 1. Give step 3 its exact query and the role that runs it, for example the db-main superuser over a one-off `psql` with no app role.
 2. Add a note that it must return 0 before the old line is removed.
 3. Note in T-0201/T-0104 (the all-workspace re-wrap job) that the job reports the remaining count across all workspaces and refuses to call rotation done otherwise.
-Resolution: (S3 fills in)
+Resolution: FIXED in `44a9919`. `docs/ops/secrets-register.md` → "Rotate a master key", step 3, now says:
+- FORCE RLS hides rows from every app role, `ob_owner` included.
+- The exact superuser query to run, as `postgres` through `docker compose exec db-main psql`.
+- That it must return no rows before the old line is removed, and why (data loss).
+- A new step 4 removes the old line.
+- Follow-up for T-0201/T-0104: the all-workspace re-wrap job must report the remaining count across all workspaces and refuse to call the rotation done unless it is 0. This is noted in STATE.md follow-ups.
 
 ## F-M01-halfway-04 — Minor — `credentials.expires_at` has two meanings; split out `delete_after` now
 Area: 1 Correctness / 7 Migration safety  IDs: SEC-6, INT-3 (AMZ-8)
 Evidence: This is S3's open question. `credentials.ts:250` (`#retireCurrent`) overwrites `expires_at` with `now + retainOldForMs`, so a retired row loses its provider expiry. `purgeExpired` (`:147`) deletes on `NOT is_active AND expires_at <= now`. Any future path that sets `is_active = false` without rewriting `expires_at` (for example an M07 revocation) would therefore purge at the provider expiry: at once if that date is past, which breaks AMZ-8's 7-day retention, or months late. The CHECK `credentials_inactive_expire` cannot tell the two meanings apart.
 Judgement: split it. Add `delete_after timestamptz` (required when `is_active` is false, by CHECK), and keep `expires_at` for the provider expiry only. The table holds no data yet, so this is a cheap expand migration (0003) now; after M07 it needs a backfill.
 Required fix: Migration 0003 adds `delete_after` with that CHECK and moves the purge index onto it. The repository retires by setting `delete_after`, and purges on `delete_after`. The integration tests prove the AMZ-8 7-day retention and that the provider `expires_at` survives retirement.
-Resolution: (S3 fills in)
+Resolution: DEFERRED to M07, before any credential is stored, under proposal **PS-012** in DECISIONS.md.
+- The split needs migration 0003 to drop `credentials_inactive_expire`; otherwise a retired refresh token with no provider expiry violates it. squawk's `ban-drop-constraint` flags every DROP CONSTRAINT.
+- CLAUDE.md forbids disabling a lint rule to get green, and S4 area 7 requires a clean squawk. So the fix needs S1 to rule on a reviewed `-- squawk-ignore` for the contract step of an expand/contract pair.
+- I drafted 0003 (add `delete_after`, a NOT VALID CHECK, drop the old CHECK, move the purge index) and reverted it when squawk flagged 4 issues.
+- `app.credentials` stays empty until M07, so the split stays a no-backfill change until then. The code now marks the dual meaning at `#retireCurrent`.
 
 ## F-M01-halfway-05 — Minor — Credential `kind` is a free string; a typo silently reads or writes another slot
 Area: 1 Correctness  IDs: INT-3
 Evidence: This is S3's other open question. The DB checks only `kind ~ '^[a-z][a-z0-9_.]{1,63}$'` (`0002_credentials.sql:37`), and `CredentialRef.kind` is `string` (`credentials.ts:20`). `get(…, { kind: 'amazon.refresh_tokn' })` returns `undefined`, which looks like a disconnected account. A mistyped `store` creates a credential that no reader finds.
 Judgement: the DB pattern is fine for now; an enum in SQL would need a migration per provider. But code should not pass free strings.
 Required fix: Add a closed TypeScript union or registry of credential kinds in `packages/db` (or `core`), seeded from the secrets register's rows: `amazon.refresh_token`, `ads.refresh_token`, `ebay.refresh_token`, `evri.api_key`, `dpd.api_key`. Type `CredentialRef.kind` as that union. Provider modules extend the list. This can wait until M07 if S1 prefers; then log it as a follow-up.
-Resolution: (S3 fills in)
+Resolution: FIXED in `44a9919`.
+- `CREDENTIAL_KINDS` / `CredentialKind` (exported from `@omnibridge/db`) lists the five kinds in the secrets register, and `CredentialRef.kind` is that union.
+- `#lock` also refuses an unknown kind at runtime, for callers that bypass the type.
+- Test: `[INT-3] unknown credential kinds are refused, not silently stored` (store and replaceCurrent).
 
 ## F-M01-halfway-06 — Minor — The rewrap job aborts if a DEK is wrapped under a newer KEK than the process holds
 Area: 1 Correctness  IDs: SEC-6
 Evidence: `credentials.ts:171` selects `kek_version <> activeVersion`, which includes versions newer than this process's keyring, and `openWrapped` then throws `no KEK version N`, rolling back the whole workspace's re-wrap. The scenario is rotation step 1 mid-rollout: web on [v1, v2] creates a DEK under v2 while a worker on [v1] runs the re-wrap.
 Required fix: Select `kek_version < activeVersion` only, and log (count only) any newer ones. Add an integration test with keyrings [v1] and [v1, v2] working on one workspace.
-Resolution: (S3 fills in)
+Resolution: FIXED in `44a9919`.
+- `rewrapDataKeys` now selects `kek_version < active` only.
+- Data keys under a newer KEK are counted and logged as `data_keys.newer_kek` (count only), and left alone.
+- Test: `[SEC-6] re-wrap leaves DEKs under a newer KEK alone during a rollout`. Workspace F has a v2 key and is re-wrapped by a [v1] repository: 0 re-wrapped, F stays on v2 and still decrypts. Workspace G (v1) is re-wrapped by a [v1, v2] repository as normal.
 
 ## F-M01-halfway-07 — Minor — `replaceCurrent` lets a concurrent unique violation through as a raw pg error
 Area: 1 Correctness  IDs: INT-3 (AMZ-8)
 Evidence: `credentials.ts:142-143` retires, then inserts, but has no `isUniqueViolation` translation, unlike `store()` (`:69`). Two OAuth returns racing for one account give `duplicate key value violates unique constraint "credentials_one_active"`, which becomes an unhandled 500 at M07.
 Required fix: Translate 23505 the same way as `store()`, or serialise per ref with `pg_advisory_xact_lock(hashtext(workspace‖kind‖account))`. Add an integration test with two concurrent `replaceCurrent` calls.
-Resolution: (S3 fills in)
+Resolution: FIXED in `44a9919`.
+- I chose the advisory-lock option: `#lock` runs `pg_advisory_xact_lock(hashtextextended('app.credentials|ws|kind|account', 0))` at the start of `store`, `promoteNext` and `replaceCurrent`. Writers of one credential therefore run one after the other, and a second re-authorisation retires the first one's token (AMZ-8) instead of failing.
+- `store` keeps its 23505 translation as defence in depth.
+- Test: `[SEC-6] concurrent re-authorisations of one account both succeed, one after the other`. Two `replaceCurrent` calls run concurrently: both fulfil, leaving 1 active row and 2 retained.
 
 ## F-M01-halfway-08 — Minor — `.dockerignore` lets `infra/secrets/` into the image build stage
 Area: 4 Security  IDs: SEC-5
 Evidence: `.dockerignore` excludes `infra/compose/.secrets` but not `infra/secrets`. `infra/docker/node-app.Dockerfile:18` runs `COPY . .` in the build stage, so `dev.age.key` and `dev.sops.yaml` sit in a build-stage layer. The runtime images are clean today: I scanned web, worker and pii-vault and found nothing. But a build-cache export (for example `--cache-to type=registry,mode=max` in the M22 GHCR pipeline) or a remote builder would carry the dev key.
 Required fix: Add `infra/secrets` (and `infra/secrets/**`) to `.dockerignore`, and add a config test that asserts both secrets paths are excluded.
-Resolution: (S3 fills in)
+Resolution: FIXED in `44a9919`.
+- `.dockerignore` now excludes `infra/secrets` and `infra/secrets/**`.
+- Test: `[SEC-5] secret files and the dev age key never enter a Docker build context` checks `infra/compose/.secrets`, `infra/secrets` and `infra/secrets/**`.
 
 ## Follow-ups (not findings)
 
