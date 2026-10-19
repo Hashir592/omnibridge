@@ -304,7 +304,7 @@
       "module": "M03",
       "session": "S2",
       "risk": "normal",
-      "status": "todo",
+      "status": "done",
       "id": "T-0302",
       "title": "Design tokens, component kit and app shell",
       "goal": "A reusable, fast, accessible component kit that every later screen is built from.",
@@ -318,7 +318,7 @@
       "scope": [
         "Tailwind 4 tokens from docs/design/README.md; shadcn/ui components on Base UI; lucide-react icons; self-hosted Inter (ADR-036)",
         "Components: button, input, select, combobox, date picker (DD/MM/YYYY), dialog, sheet, toast, tabs, badge, status chip (icon + text), company badge, money and number cells (tabular, right-aligned), skeleton, empty, error and permission-denied states",
-        "Data table on TanStack Table + Virtual: sticky header, pinned first column, density toggle (36/44 px), column picker, URL-synced filters as chips, bulk-action bar, server pagination of 50",
+        "Data table on TanStack Table + Virtual: sticky header, pinned first column, 56 px rows (ADR-041), column picker, URL-synced filters as chips, bulk-action bar, numbered pages of 20/50/100 in the URL (ADR-040)",
         "App shell: sidebar filtered by permitted tabs, top bar with company switcher incl. Combined, Ctrl+K command palette, notification bell placeholder",
         "Dev-only gallery route /__ui showing every component and state",
         "Iteration mode until Hashir says merge (ADR-037)",
@@ -337,7 +337,7 @@
         "[NFR-9] money, number and date cells render £1,234.56, DD/MM/YYYY and London time (unit tests)",
         "[NFR-8] table renders 10,000 rows with smooth scroll: under 16 ms per frame in a Playwright performance trace",
         "Initial JS bundle of the shell under 200 KB gzip (build report)",
-        "Screenshot tests match docs/design/reference/",
+        "Screenshot tests match docs/design/reference/ for the key screens it touches (ADR-046)",
         "scripts/verify.sh exits 0 at merge time"
       ]
     },
@@ -345,7 +345,7 @@
       "module": "M03",
       "session": "S2",
       "risk": "normal",
-      "status": "done",
+      "status": "todo",
       "id": "T-0303",
       "title": "Auth screens",
       "goal": "Login, MFA set-up and recovery screens ready for S3 to wire in M02.",
@@ -363,7 +363,8 @@
         "Screens: sign in, TOTP code, MFA enrolment with QR and the 10 recovery codes, recovery-code sign in, forgot password, reset password (shows the USR-3 rules), accept invite, workspace picker",
         "Built on the T-0302 kit against MSW mocks with proposed route shapes; propose the shapes in DECISIONS.md so S3 matches them in T-0203/T-0204",
         "Error and lockout states (USR-5 message, no account enumeration)",
-        "Iteration mode until Hashir says merge (ADR-037)"
+        "Iteration mode until Hashir says merge (ADR-037)",
+        "Screenshot scope (ADR-046): add the Sign in reference (Linux + Windows); remove the Home, Orders-tablet and Shipping-desktop references and their tests"
       ],
       "out_of_scope": [
         "Real auth logic (S3, M02)"
@@ -374,7 +375,7 @@
       "acceptance": [
         "[NFR-8] axe zero serious or critical violations on every auth screen",
         "Proposed route shapes recorded in DECISIONS.md Proposed (from sessions)",
-        "Screenshot tests match docs/design/reference/",
+        "Screenshot tests match docs/design/reference/ for the 4 key screens only (ADR-046)",
         "scripts/verify.sh exits 0 at merge time"
       ]
     },
