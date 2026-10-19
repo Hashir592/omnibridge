@@ -7,7 +7,8 @@ useDefault = true
 [[rules]]
 id = "omnibridge-kek-line"
 description = "OmniBridge master key (KEK) line"
-regex = '''(?m)^\s*[1-9][0-9]{0,8}:[A-Za-z0-9+/]{43}=\s*$'''
+# It matches the key wherever it sits: a bare line, an env file, YAML, JSON or code (F-M01-halfway-02).
+regex = '''(?m)(?:^|[^A-Za-z0-9+/])[1-9][0-9]{0,8}:[A-Za-z0-9+/]{43}=(?:[^A-Za-z0-9+/=]|$)'''
 
 [allowlist]
 description = "Generated or third-party trees"

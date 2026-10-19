@@ -6,7 +6,11 @@ import { defineConfig, devices } from '@playwright/test';
 //   reason for ignoreHTTPSErrors, and it applies to these localhost URLs only.
 // - "ui": the design mock-up screens (apps/ui) on the Vite dev server with MSW synthetic data,
 //   compared against the locked reference screenshots in docs/design/reference (T-0301).
-const uiUrl = process.env.OB_UI_URL ?? 'http://localhost:5173';
+// OB_UI_PORT lets scripts/verify.sh start its own Vite server on a port no developer or other
+// session uses, and OB_E2E_OWN_SERVER stops Playwright reusing a server it did not start: the gate
+// must test this checkout, never another worktree's dev server on 5173 (F-M01-halfway-01 round 1).
+const uiPort = process.env.OB_UI_PORT ?? '5173';
+const uiUrl = process.env.OB_UI_URL ?? `http://localhost:${uiPort}`;
 
 export default defineConfig({
   timeout: 30_000,
@@ -39,10 +43,10 @@ export default defineConfig({
     ? {}
     : {
         webServer: {
-          command: 'node ../../node_modules/vite/bin/vite.js --port 5173 --strictPort',
+          command: `node ../../node_modules/vite/bin/vite.js --port ${uiPort} --strictPort`,
           cwd: 'apps/ui',
           url: uiUrl,
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: !process.env.CI && !process.env.OB_E2E_OWN_SERVER,
           timeout: 120_000,
         },
       }),

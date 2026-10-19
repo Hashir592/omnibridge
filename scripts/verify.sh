@@ -133,7 +133,17 @@ e2e() {
   local install=(install chromium)
   if [[ -n "${CI:-}" && "$(uname -s)" == Linux ]]; then install=(install --with-deps chromium); fi
   "${pnpm[@]}" exec playwright "${install[@]}" &&
-    "${pnpm[@]}" exec playwright test
+    # Its own Vite server on a port nobody else uses: a developer's or another session's dev server
+    # on 5173 is never reused, so the gate always tests this checkout.
+    OB_UI_PORT=5199 OB_E2E_OWN_SERVER=1 "${pnpm[@]}" exec playwright test || {
+    local code=$?
+    # Keep the evidence before stack_down removes the containers (git-ignored).
+    mkdir -p .verify &&
+      "${compose[@]}" logs --no-color --timestamps >.verify/e2e-stack-logs.txt 2>&1
+    docker stats --no-stream >.verify/e2e-docker-stats.txt 2>&1
+    echo "e2e failed: stack logs and docker stats saved under .verify/" >&2
+    return "$code"
+  }
 }
 
 audit() {

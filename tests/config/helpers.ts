@@ -36,10 +36,21 @@ export interface ComposeModel {
 
 let cached: ComposeModel | undefined;
 
-/** The resolved dev stack (compose.yaml + compose.dev.yaml, every profile on). */
-export function composeModel(): ComposeModel {
+/**
+ * Docker work (the SOPS image, then `docker compose config`) takes seconds on a cold machine, so it
+ * runs once per file in `beforeAll` with this timeout, never inside a test's 5 s budget (F-01).
+ */
+export const DOCKER_SETUP_TIMEOUT_MS = 120_000;
+
+/** Builds the resolved dev stack (compose.yaml + compose.dev.yaml, every profile on). Call from beforeAll. */
+export function loadComposeModel(): ComposeModel {
   if (cached) return cached;
-  spawnSync('bash', [`${repoRoot}scripts/dev-secrets.sh`], { stdio: 'ignore' });
+  const secrets = spawnSync('bash', [`${repoRoot}scripts/dev-secrets.sh`], { encoding: 'utf8' });
+  if (secrets.status !== 0) {
+    throw new Error(
+      `scripts/dev-secrets.sh failed (exit ${String(secrets.status)}): ${secrets.stderr}`,
+    );
+  }
   const json = execFileSync(
     'docker',
     [
@@ -56,6 +67,12 @@ export function composeModel(): ComposeModel {
     { encoding: 'utf8', env: { ...process.env, COMPOSE_PROFILES: '*' } },
   );
   cached = JSON.parse(json) as ComposeModel;
+  return cached;
+}
+
+/** The model built by loadComposeModel() in the file's beforeAll. */
+export function composeModel(): ComposeModel {
+  if (!cached) throw new Error('Call loadComposeModel() in beforeAll before using composeModel()');
   return cached;
 }
 

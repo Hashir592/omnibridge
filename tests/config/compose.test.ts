@@ -1,12 +1,26 @@
 import { POSTGRES_IMAGE } from '@omnibridge/testkit';
-import { describe, expect, it } from 'vitest';
-import { composeModel, networksOf, runScript, service } from './helpers.ts';
+import { beforeAll, describe, expect, it } from 'vitest';
+import {
+  composeModel,
+  DOCKER_SETUP_TIMEOUT_MS,
+  loadComposeModel,
+  networksOf,
+  runScript,
+  service,
+} from './helpers.ts';
+
+// Docker runs once here, outside every test's timeout (F-M01-halfway-01).
+let unlimited: ReturnType<typeof runScript>;
+let realStack: ReturnType<typeof runScript>;
+beforeAll(() => {
+  loadComposeModel();
+  unlimited = runScript('scripts/check-limits.sh', ['scripts/__fixtures__/unlimited.compose.yaml']);
+  realStack = runScript('scripts/check-limits.sh');
+}, DOCKER_SETUP_TIMEOUT_MS);
 
 describe('compose stack: limits (OPS-10)', () => {
   it('[OPS-10] check-limits rejects unlimited service', () => {
-    const res = runScript('scripts/check-limits.sh', [
-      'scripts/__fixtures__/unlimited.compose.yaml',
-    ]);
+    const res = unlimited;
     expect(res.code).toBe(1);
     expect(res.stderr).toContain('unlimited: no mem_limit');
     expect(res.stderr).toContain('unlimited: no cpus limit');
@@ -15,7 +29,7 @@ describe('compose stack: limits (OPS-10)', () => {
   });
 
   it('[OPS-10] check-limits accepts the real stack', () => {
-    const res = runScript('scripts/check-limits.sh');
+    const res = realStack;
     expect(res.stderr).toBe('');
     expect(res.code).toBe(0);
   });

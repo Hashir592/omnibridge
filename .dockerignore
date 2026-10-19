@@ -10,3 +10,6 @@ infra/compose/.secrets
 infra/compose/.local
 docs
 *.md
+# Dev-only SOPS file and the DEV ONLY age key never enter a build context (F-M01-halfway-08).
+infra/secrets
+infra/secrets/**

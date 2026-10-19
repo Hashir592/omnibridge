@@ -1,16 +1,17 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 19 Oct 2026 by S1.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S3.
 
 ## Now
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** S4: M01 halfway review (T-0101 to T-0103), prompt `docs/sessions/briefs/S4-kickoff.md`. S3: idle until S4 findings come back. S2: T-0302 component kit, prompt `docs/sessions/briefs/S2-T-0302.md`. Done: T-0101, T-0102, T-0103, T-0301 (PRs #1 to #7).
-- **Next:** after S4 halfway findings: fixes, then T-0104, T-0105, T-0106 (numbered pages + tooling), then the M01 end checkpoint.
-- **Last checkpoint:** M01 halfway, handed to S4 on 18 Oct 2026 (findings pending).
-- **Open findings:** none from S4. T-0103 self-review used `/code-review` at high effort, because the CodeRabbit CLI is not installed: 7 findings, all fixed.
-- **Open questions:** none; PS-007 to PS-011 approved (ADR-038 to ADR-042). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Current task:** M01 halfway findings are fixed (PR #9, `task/M01-halfway-fixes`), with **no round 2 to S4** (Hashir's flow; the rule change is with S1, `docs/handoffs/20261020-0105-S3-to-S1.md`). Leftovers for S4 are saved in `docs/reviews/M01-halfway-carryover.md`. S2: T-0302 component kit, prompt `docs/sessions/briefs/S2-T-0302.md`. Done: T-0101, T-0102, T-0103, T-0301 (PRs #1 to #7).
+- **Next:** S1 rules on the checkpoint flow and on PS-012. Hashir merges PR #9 after CI. Then T-0104, T-0105, T-0106, then the M01 end checkpoint, whose report also passes on the halfway carry-over.
+- **Last checkpoint:** M01 halfway: S4 round 1 found FIX REQUIRED (1 Blocker, 1 Major, 6 Minors); S3 fixed 7 and deferred F-04 (PS-012) on 20 Oct 2026. No round 2, per Hashir.
+- **Review (S4, 19 Oct 2026):** M01 halfway round 1 is **FIX REQUIRED**: 1 Blocker (config tests time out in the gate, so verify.sh is flaky), 1 Major (gitleaks KEK rule misses keys in env, YAML, JSON and code lines), 6 Minors. Acceptance 14/18. See `docs/reviews/M01-halfway-findings.md`.
+- **Round 1 fixes (S3, 20 Oct 2026):** F-01, F-02, F-03 and F-05 to F-08 fixed; F-04 deferred (PS-012). The F-01 proof also found that the local gate reused another worktree's Vite server on 5173, which is now fixed. Three clean-state `verify.sh` runs in a row: rc=0, 0, 0. Afterwards 2 of 4 more gate runs failed in a T-0101 chromium e2e test (observation O-1, carried to the M01 end checkpoint; the gate now saves stack logs on e2e failure). Resolutions are in the findings file.
+- **Open questions:** PS-012 (S1): may the contract step of an expand/contract migration carry a reviewed `-- squawk-ignore ban-drop-constraint`? It decides F-04 (`credentials.delete_after`), deferred to M07. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 
@@ -34,8 +35,10 @@ Local-first (ADR-029): everything is built and tested on local Docker with mocks
 
 - M05: platform app-secrets table (PLAT-4, AMZ-10 LWA current/next) on the same crypto.
 - T-0201: workspace foreign keys on `app.data_keys` and `app.credentials`; tenant transaction wrapper.
-- T-0201 + T-0104: an all-workspace KEK re-wrap job.
-- M07: `channel_account_id` foreign key; LWA expiry reminders.
+- T-0201 + T-0104: an all-workspace KEK re-wrap job, which reports the count of data keys left under the old KEK across all workspaces and refuses to call the rotation done unless it is 0 (F-03).
+- T-0201: the `rls-coverage` test must include `app.data_keys` and `app.credentials` (S4).
+- M07: `channel_account_id` foreign key; LWA expiry reminders; F-04 `credentials.delete_after`, as PS-012 rules; new provider credential kinds go into `CREDENTIAL_KINDS`.
+- Housekeeping: an orphaned `docker stats` loop from S4's session (PID 1135, read-only) still runs on this host; ending it is up to Hashir.
 
 ## Next step
 

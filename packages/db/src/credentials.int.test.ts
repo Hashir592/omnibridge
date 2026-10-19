@@ -6,7 +6,7 @@ import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CredentialRepository } from './credentials.ts';
+import { CredentialRepository, type CredentialRef } from './credentials.ts';
 import { migrateMain } from './migrate.ts';
 import type { MainDb } from './schema.ts';
 
@@ -51,7 +51,7 @@ describe('credential store (SEC-6, INT-3)', () => {
   it('[SEC-6] stored credentials hold ciphertext only, bound to their row', async () => {
     const value = marker();
     const r = repo();
-    const ref = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
+    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
     const id = await asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret(value)));
 
     const row = await asTenant(A, (trx) =>
@@ -70,7 +70,7 @@ describe('credential store (SEC-6, INT-3)', () => {
     expect(got?.reveal()).toBe(value);
 
     // Ciphertext copied onto another row does not decrypt there (AAD binds the row id).
-    const other = { kind: 'ebay.refresh_token' };
+    const other: CredentialRef = { kind: 'ebay.refresh_token' };
     const otherId = await asTenant(A, (trx) => r.store(trx, A, other, 'current', new Secret('x')));
     await asTenant(A, (trx) =>
       trx
@@ -84,7 +84,7 @@ describe('credential store (SEC-6, INT-3)', () => {
 
   it('[SEC-6] RLS keeps each workspace’s credentials and data keys apart', async () => {
     const r = repo();
-    const ref = { kind: 'dpd.api_key' };
+    const ref: CredentialRef = { kind: 'dpd.api_key' };
     await asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret(marker())));
 
     expect(await asTenant(B, (trx) => r.get(trx, B, ref))).toBeUndefined();
@@ -124,7 +124,7 @@ describe('credential store (SEC-6, INT-3)', () => {
 
   it('[SEC-6] next is promoted to current; the old current stays inactive, then is purged', async () => {
     const r = repo();
-    const ref = { kind: 'amazon.lwa_client_secret' };
+    const ref: CredentialRef = { kind: 'ads.refresh_token' };
     const [oldValue, newValue] = [marker(), marker()];
     const expiresAt = new Date(Date.now() + 180 * DAY_MS);
     await asTenant(A, async (trx) => {
@@ -173,7 +173,7 @@ describe('credential store (SEC-6, INT-3)', () => {
 
   it('[SEC-6] replacing current keeps the old token inactive for 7 days, then deletes it', async () => {
     const r = repo();
-    const ref = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
+    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
     const [first, second] = [marker(), marker()];
     await asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret(first)));
     await asTenant(A, (trx) =>
@@ -185,7 +185,7 @@ describe('credential store (SEC-6, INT-3)', () => {
       trx
         .selectFrom('app.credentials')
         .select(['expires_at', 'is_active'])
-        .where('channel_account_id', '=', ref.channelAccountId)
+        .where('channel_account_id', '=', ref.channelAccountId ?? null)
         .where('is_active', '=', false)
         .executeTakeFirstOrThrow(),
     );
@@ -198,7 +198,7 @@ describe('credential store (SEC-6, INT-3)', () => {
       trx
         .selectFrom('app.credentials')
         .select('is_active')
-        .where('channel_account_id', '=', ref.channelAccountId)
+        .where('channel_account_id', '=', ref.channelAccountId ?? null)
         .execute(),
     );
     expect(remaining).toEqual([{ is_active: true }]);
@@ -207,7 +207,7 @@ describe('credential store (SEC-6, INT-3)', () => {
   it('[SEC-6] KEK rotation re-wraps DEKs in the database; stored data is untouched and decrypts', async () => {
     const C: TenantContext = { workspaceId: randomUUID() };
     const value = marker();
-    const ref = { kind: 'ebay.refresh_token' };
+    const ref: CredentialRef = { kind: 'ebay.refresh_token' };
     await asTenant(C, (trx) => repo([kek1]).store(trx, C, ref, 'current', new Secret(value)));
     const before = await asTenant(C, (trx) =>
       trx.selectFrom('app.credentials').select('encrypted_value').executeTakeFirstOrThrow(),
@@ -241,7 +241,7 @@ describe('credential store (SEC-6, INT-3)', () => {
     const r = repo([kek1], logger);
     const D: TenantContext = { workspaceId: randomUUID() };
     const values = [marker(), marker(), marker()];
-    const ref = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
+    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
 
     await asTenant(D, async (trx) => {
       await r.store(trx, D, ref, 'current', new Secret(values[0] ?? ''));
@@ -272,5 +272,75 @@ describe('credential store (SEC-6, INT-3)', () => {
     expect(output).toContain('credential read failed');
     for (const value of values) expect(output).not.toContain(value);
     expect(output).not.toContain('SECRETMARK-');
+  });
+
+  it('[INT-3] unknown credential kinds are refused, not silently stored', async () => {
+    const E: TenantContext = { workspaceId: randomUUID() };
+    // A caller that bypasses the CredentialKind type (plain JS, a cast) still cannot write a typo.
+    const typo = { kind: 'amazon.refresh_tokn' } as unknown as CredentialRef;
+    await expect(
+      asTenant(E, (trx) => repo().store(trx, E, typo, 'current', new Secret(marker()))),
+    ).rejects.toThrow(/Unknown credential kind/);
+    await expect(
+      asTenant(E, (trx) =>
+        repo().replaceCurrent(trx, E, typo, new Secret(marker()), { retainOldForMs: 0 }),
+      ),
+    ).rejects.toThrow(/Unknown credential kind/);
+    await expect(asTenant(E, (trx) => repo().get(trx, E, typo))).rejects.toThrow(
+      /Unknown credential kind/,
+    );
+  });
+
+  it('[SEC-6] re-wrap leaves DEKs under a newer KEK alone during a rollout', async () => {
+    const F: TenantContext = { workspaceId: randomUUID() };
+    const G: TenantContext = { workspaceId: randomUUID() };
+    // A container already on [v1, v2] creates F's data key under v2 ...
+    await asTenant(F, (trx) =>
+      repo([kek1, kek2]).store(trx, F, { kind: 'dpd.api_key' }, 'current', new Secret('x')),
+    );
+    // ... and one on [v1] creates G's under v1.
+    await asTenant(G, (trx) =>
+      repo([kek1]).store(trx, G, { kind: 'dpd.api_key' }, 'current', new Secret('y')),
+    );
+    // A worker still on [v1] re-wraps F: nothing older than v1, and the v2 key is left alone.
+    expect(await asTenant(F, (trx) => repo([kek1]).rewrapDataKeys(trx, F))).toBe(0);
+    const keyF = await asTenant(F, (trx) =>
+      trx.selectFrom('app.data_keys').select('kek_version').executeTakeFirstOrThrow(),
+    );
+    expect(Number(keyF.kek_version)).toBe(2);
+    // The [v1, v2] container re-wraps G as normal.
+    expect(await asTenant(G, (trx) => repo([kek1, kek2]).rewrapDataKeys(trx, G))).toBe(1);
+    expect(
+      (
+        await asTenant(F, (trx) => repo([kek1, kek2]).get(trx, F, { kind: 'dpd.api_key' }))
+      )?.reveal(),
+    ).toBe('x');
+  });
+
+  it('[SEC-6] concurrent re-authorisations of one account both succeed, one after the other', async () => {
+    const H: TenantContext = { workspaceId: randomUUID() };
+    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
+    await asTenant(H, (trx) => repo().store(trx, H, ref, 'current', new Secret(marker())));
+    const [first, second] = [marker(), marker()];
+    const results = await Promise.allSettled([
+      asTenant(H, (trx) =>
+        repo().replaceCurrent(trx, H, ref, new Secret(first), { retainOldForMs: DAY_MS }),
+      ),
+      asTenant(H, (trx) =>
+        repo().replaceCurrent(trx, H, ref, new Secret(second), { retainOldForMs: DAY_MS }),
+      ),
+    ]);
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+    const rows = await asTenant(H, (trx) =>
+      trx
+        .selectFrom('app.credentials')
+        .select(['is_active'])
+        .where('channel_account_id', '=', ref.channelAccountId ?? '')
+        .execute(),
+    );
+    expect(rows.filter((r) => r.is_active)).toHaveLength(1);
+    expect(rows.filter((r) => !r.is_active)).toHaveLength(2);
+    const current = (await asTenant(H, (trx) => repo().get(trx, H, ref)))?.reveal();
+    expect([first, second]).toContain(current);
   });
 });
