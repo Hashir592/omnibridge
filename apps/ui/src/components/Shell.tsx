@@ -1,5 +1,6 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { Menu } from '@base-ui/react/menu';
+import { Popover } from '@base-ui/react/popover';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useNavigate } from '@tanstack/react-router';
 import { Bell, Check, ChevronsUpDown, Menu as MenuIcon, Search, X } from 'lucide-react';
@@ -90,15 +91,7 @@ export function Shell() {
               Ctrl K
             </kbd>
           </button>
-          <button
-            className="relative grid size-9 place-items-center rounded-full text-ink-muted hover:bg-hover hover:text-ink"
-            aria-label="Notifications, 4 unread"
-          >
-            <Bell className="size-[18px]" aria-hidden />
-            <span className="num absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-brand-700 px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-card">
-              4
-            </span>
-          </button>
+          <NotificationBell />
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">
           <Outlet />
@@ -301,6 +294,39 @@ function CompanySwitcher() {
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>
+  );
+}
+
+/** Placeholder until the notification centre lands in M05. The count is mock data. */
+function NotificationBell() {
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        className="relative grid size-9 place-items-center rounded-full text-ink-muted hover:bg-hover hover:text-ink"
+        aria-label="Notifications, 4 unread"
+      >
+        <Bell className="size-[18px]" aria-hidden />
+        <span className="num absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-brand-700 px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-card">
+          4
+        </span>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner align="end" sideOffset={6} className="z-50">
+          <Popover.Popup className="w-80 rounded-card border border-border bg-card shadow-pop outline-none">
+            <div className="flex h-11 items-center border-b border-divider px-4">
+              <Popover.Title className="text-sm font-semibold">Notifications</Popover.Title>
+            </div>
+            <div className="flex flex-col items-center gap-1.5 px-6 py-8 text-center">
+              <Bell className="size-5 text-ink-muted" aria-hidden />
+              <Popover.Description className="text-13 text-ink-muted">
+                Alerts such as oversold stock and failed labels will appear here once the
+                notification centre is built.
+              </Popover.Description>
+            </div>
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
