@@ -10,7 +10,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Next:** S4 round 2 (the last round allowed; after that disputes go to S1). On APPROVED: T-0104, T-0105, T-0106, then the M01 end checkpoint.
 - **Last checkpoint:** M01 halfway, round 1 findings fixed by S3 on 20 Oct 2026; round 2 pending.
 - **Review (S4, 19 Oct 2026):** M01 halfway round 1 is **FIX REQUIRED**: 1 Blocker (config tests time out in the gate, so verify.sh is flaky), 1 Major (gitleaks KEK rule misses keys in env, YAML, JSON and code lines), 6 Minors. Acceptance 14/18. See `docs/reviews/M01-halfway-findings.md`.
-- **Round 1 fixes (S3, 20 Oct 2026):** F-01, F-02, F-03 and F-05 to F-08 fixed; F-04 deferred (PS-012). The F-01 proof also found that the local gate reused another worktree's Vite server on 5173, which is now fixed. Three clean-state `verify.sh` runs in a row: rc=0, 0, 0. Resolutions are in the findings file.
+- **Round 1 fixes (S3, 20 Oct 2026):** F-01, F-02, F-03 and F-05 to F-08 fixed; F-04 deferred (PS-012). The F-01 proof also found that the local gate reused another worktree's Vite server on 5173, which is now fixed. Three clean-state `verify.sh` runs in a row: rc=0, 0, 0. Afterwards 2 of 4 more gate runs failed in a T-0101 chromium e2e test (open observation O-1, not reproducible outside the gate; the gate now saves stack logs on e2e failure). Resolutions are in the findings file.
 - **Open questions:** PS-012 (S1): may the contract step of an expand/contract migration carry a reviewed `-- squawk-ignore ban-drop-constraint`? It decides F-04 (`credentials.delete_after`), deferred to M07. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
