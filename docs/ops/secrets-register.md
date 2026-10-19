@@ -1,6 +1,6 @@
 # Secrets register
 
-Every secret OmniBridge uses: what it is, who owns it, where it lives, which containers get it, and when it is rotated (SEC-5, SEC-6, ADR-014). Last updated: 18 Oct 2026 by S3 (T-0103).
+Every secret OmniBridge uses: what it is, who owns it, where it lives, which containers get it, and when it is rotated (SEC-5, SEC-6, ADR-014). Last updated: 19 Oct 2026 by S3 (M01 halfway fixes).
 
 **Rules**
 
@@ -66,6 +66,13 @@ These are not Docker secrets. Each value is encrypted with AES-256-GCM under a p
 
 1. Append a new line (`generateKekLine(n + 1)` from `@omnibridge/crypto`) to the secret and redeploy. New data keys are wrapped under the new version, and old ones still open.
 2. Run `CredentialRepository.rewrapDataKeys` for every workspace. It re-wraps each data key; credential rows are not re-encrypted. (The all-workspace job arrives with the workspace list in T-0201 and the queue in T-0104.)
-3. Check that no `app.data_keys` row still has the old `kek_version`, then remove the old line and redeploy.
+3. Check that no data key is still under an old KEK version. **Every app role is filtered by row-level security** (FORCE RLS applies to `ob_owner` too), so they all see 0 rows without a workspace. Only the db-main superuser sees every workspace. Run this as `postgres` in a one-off psql session, with `<N>` as the new active version:
+
+   ```bash
+   docker compose -f infra/compose/compose.yaml exec db-main psql -U postgres -d omnibridge -c "SELECT kek_version, count(*) FROM app.data_keys WHERE kek_version < <N> GROUP BY kek_version"
+   ```
+
+   **It must return no rows** before you remove the old line. If any rows remain, re-run step 2 for their workspaces (`SELECT DISTINCT workspace_id …` with the same filter). Removing the line while any remain makes every credential in those workspaces undecryptable (`no KEK version …`), which is data loss (F-M01-halfway-03).
+4. Remove the old line and redeploy.
 
 **Suspected leak.** Rotate the affected secret at once, then record the incident and the new next-rotation date here.

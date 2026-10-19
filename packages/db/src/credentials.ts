@@ -10,14 +10,30 @@ import {
   type Keyring,
 } from '@omnibridge/crypto';
 import type { Logger } from '@omnibridge/logger';
-import type { ExpressionBuilder, Kysely } from 'kysely';
+import { sql, type ExpressionBuilder, type Kysely } from 'kysely';
 import type { CredentialsTable, MainDb } from './schema.ts';
 
 export type CredentialSlot = CredentialsTable['slot'];
 
-/** Which credential: its kind (for example `amazon.refresh_token`) and, if it has one, its account. */
+/**
+ * Every credential kind the store accepts, one per row of docs/ops/secrets-register.md
+ * (F-M01-halfway-05). Provider modules add their kinds here; a typo is a type error, not an
+ * empty slot.
+ */
+export const CREDENTIAL_KINDS = [
+  'amazon.refresh_token',
+  'ads.refresh_token',
+  'ebay.refresh_token',
+  'evri.api_key',
+  'dpd.api_key',
+] as const;
+export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
+
+const KNOWN_KINDS: ReadonlySet<string> = new Set(CREDENTIAL_KINDS);
+
+/** Which credential: its kind and, if it has one, its account. */
 export interface CredentialRef {
-  readonly kind: string;
+  readonly kind: CredentialKind;
   readonly channelAccountId?: string | null;
 }
 
@@ -59,13 +75,14 @@ export class CredentialRepository {
     value: Secret,
     options: { expiresAt?: Date } = {},
   ): Promise<string> {
+    await this.#lock(db, ctx, ref);
     if ((await this.#activeRow(db, ctx, ref, slot)) !== undefined) {
       throw new Error(`An active ${slot} credential of kind ${ref.kind} already exists`);
     }
     try {
       return await this.#insert(db, ctx, ref, slot, value, options.expiresAt ?? null);
     } catch (err) {
-      // A concurrent store filled the slot between the check and the insert.
+      // Defence in depth: the advisory lock already serialises writers of one credential.
       if (isUniqueViolation(err)) {
         throw new Error(`An active ${slot} credential of kind ${ref.kind} already exists`);
       }
@@ -113,6 +130,7 @@ export class CredentialRepository {
     ref: CredentialRef,
     options: { retainOldForMs: number },
   ): Promise<void> {
+    await this.#lock(db, ctx, ref);
     const next = await this.#activeRow(db, ctx, ref, 'next');
     if (next === undefined) throw new Error(`There is no next credential of kind ${ref.kind}`);
     await this.#retireCurrent(db, ctx, ref, options.retainOldForMs);
@@ -139,6 +157,9 @@ export class CredentialRepository {
     value: Secret,
     options: { retainOldForMs: number; expiresAt?: Date },
   ): Promise<string> {
+    // Two re-authorisations racing for one account run one after the other: the later one retires
+    // the earlier one's token instead of failing on the unique index (F-M01-halfway-07).
+    await this.#lock(db, ctx, ref);
     await this.#retireCurrent(db, ctx, ref, options.retainOldForMs);
     return this.#insert(db, ctx, ref, 'current', value, options.expiresAt ?? null);
   }
@@ -162,15 +183,36 @@ export class CredentialRepository {
   /**
    * KEK rotation for one workspace: every data key still wrapped by an older KEK version is
    * re-wrapped under the active one. Credential rows are not touched (SEC-6).
+   *
+   * Data keys under a newer KEK than this process holds (another container already on the next
+   * keyring, mid-rollout) are left alone and only counted (F-M01-halfway-06).
    */
   async rewrapDataKeys(db: Kysely<MainDb>, ctx: TenantContext): Promise<number> {
+    const active = String(this.#keyring.activeVersion);
     const stale = await db
       .selectFrom('app.data_keys')
       .select(['version', 'kek_version', 'wrapped_key'])
       .where('workspace_id', '=', ctx.workspaceId)
-      .where('kek_version', '<>', String(this.#keyring.activeVersion))
+      .where('kek_version', '<', active)
       .forUpdate()
       .execute();
+    const newer = await db
+      .selectFrom('app.data_keys')
+      .select((eb) => eb.fn.countAll<string>().as('count'))
+      .where('workspace_id', '=', ctx.workspaceId)
+      .where('kek_version', '>', active)
+      .executeTakeFirstOrThrow();
+    if (Number(newer.count) > 0) {
+      this.#log.warn(
+        {
+          event: 'data_keys.newer_kek',
+          workspaceId: ctx.workspaceId,
+          kekVersion: this.#keyring.activeVersion,
+          count: Number(newer.count),
+        },
+        'data keys under a newer KEK than this process holds were left alone',
+      );
+    }
     for (const row of stale) {
       const next = rewrapDataKey(this.#keyring, {
         workspaceId: ctx.workspaceId,
@@ -247,8 +289,22 @@ export class CredentialRepository {
     await db
       .updateTable(TABLE)
       .where(this.#slot(ctx, ref, 'current'))
+      // On a retired row expires_at is when the purge deletes it. Splitting this into its own
+      // delete_after column is F-M01-halfway-04, deferred to M07 (PS-012).
       .set({ is_active: false, rotated_at: now, expires_at: new Date(now.getTime() + retainForMs) })
       .execute();
+  }
+
+  /**
+   * Serialises every writer of one credential (workspace, kind, account) until the transaction
+   * ends, and refuses kinds outside CREDENTIAL_KINDS for callers that bypass the type.
+   */
+  async #lock(db: Kysely<MainDb>, ctx: TenantContext, ref: CredentialRef): Promise<void> {
+    if (!KNOWN_KINDS.has(ref.kind)) throw new Error(`Unknown credential kind ${ref.kind}`);
+    const key = ['app.credentials', ctx.workspaceId, ref.kind, ref.channelAccountId ?? ''].join(
+      '|',
+    );
+    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`.execute(db);
   }
 
   #activeRow(db: Kysely<MainDb>, ctx: TenantContext, ref: CredentialRef, slot: CredentialSlot) {

@@ -9,7 +9,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Current task:** S4: M01 halfway review (T-0101 to T-0103), prompt `docs/sessions/briefs/S4-kickoff.md`. S3: idle until S4 findings come back. S2: T-0302 component kit, prompt `docs/sessions/briefs/S2-T-0302.md`. Done: T-0101, T-0102, T-0103, T-0301 (PRs #1 to #7).
 - **Next:** after S4 halfway findings: fixes, then T-0104, T-0105, T-0106 (numbered pages + tooling), then the M01 end checkpoint.
 - **Last checkpoint:** M01 halfway, handed to S4 on 18 Oct 2026 (findings pending).
-- **Open findings:** none from S4. T-0103 self-review used `/code-review` at high effort, because the CodeRabbit CLI is not installed: 7 findings, all fixed.
+- **Review (S4, 19 Oct 2026):** M01 halfway round 1 is **FIX REQUIRED**: 1 Blocker (config tests time out in the gate, so verify.sh is flaky), 1 Major (gitleaks KEK rule misses keys in env, YAML, JSON and code lines), 6 Minors. Acceptance 14/18. See `docs/reviews/M01-halfway-findings.md`.
 - **Open questions:** none; PS-007 to PS-011 approved (ADR-038 to ADR-042). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model

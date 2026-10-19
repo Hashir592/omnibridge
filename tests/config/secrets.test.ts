@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { composeModel, readRepoFile, service } from './helpers.ts';
+import { beforeAll, describe, expect, it } from 'vitest';
+import {
+  composeModel,
+  DOCKER_SETUP_TIMEOUT_MS,
+  loadComposeModel,
+  readRepoFile,
+  service,
+} from './helpers.ts';
+
+// Docker runs once here, outside every test's timeout (F-M01-halfway-01).
+beforeAll(() => {
+  loadComposeModel();
+}, DOCKER_SETUP_TIMEOUT_MS);
 
 const SECRETISH = /PASSWORD|SECRET|TOKEN|KEY|KEK/;
 /** A KEK line or any long base64 run: never allowed as a plain environment value. */
@@ -112,6 +123,15 @@ describe('secrets handling (SEC-5)', () => {
         owner: expect.stringMatching(/\S/) as unknown,
         rotation: expect.stringMatching(/\d+ (months|days)/) as unknown,
       });
+    }
+  });
+
+  it('[SEC-5] secret files and the dev age key never enter a Docker build context', () => {
+    const ignored = readRepoFile('.dockerignore')
+      .split(/\r?\n/)
+      .map((line) => line.trim());
+    for (const path of ['infra/compose/.secrets', 'infra/secrets', 'infra/secrets/**']) {
+      expect({ path, ignored: ignored.includes(path) }).toEqual({ path, ignored: true });
     }
   });
 });
