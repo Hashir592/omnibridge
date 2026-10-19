@@ -6,10 +6,11 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** M01 halfway fixes in PR #9 (no round 2, ADR-044). Next is the **batch T-0104 + T-0105 + T-0106** on one branch and one PR (ADR-043). S2: T-0302 component kit. Done: T-0101, T-0102, T-0103, T-0301 (PRs #1 to #8).
+- **Current task:** S3: batch T-0104 + T-0105 + T-0106, draft PR #12 (ADR-043). S2: idle; next is T-0303 Auth screens (prompt `docs/sessions/briefs/S2-T-0303.md`), started after S3 (one session at a time). Done: T-0101, T-0102, T-0103, T-0301, T-0302 (PRs #1 to #11).
 - **Sessions:** Hashir runs **one session at a time** (ADR-043).
 - **Workflow tiers (ADR-043):** light = `verify.sh --quick`, no code review, CI full gate; normal = `--quick` + `/code-review` medium, CI full gate; high = full local gate + `/code-review` high, then CI. S3 does not wait for CI.
 - **Last checkpoint:** M01 halfway: S4 found FIX REQUIRED (1 Blocker, 1 Major, 6 Minors). S3 fixed 7; F-04 moves into T-0106 as migration 0003 (PS-012 approved, ADR-045). Carry-over for the M01 end review: `docs/reviews/M01-halfway-carryover.md` (O-1 e2e flake, now in T-0106 scope).
+- **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
 - **Open questions:** none. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
@@ -41,7 +42,7 @@ Local-first (ADR-029): everything is built and tested on local Docker with mocks
 
 ## Next step
 
-1. Hashir merges PR #9, then the S1 docs PR (workflow tiers, checkpoint flow, PS-012).
+1. Hashir merges the S1 docs PR for PS-013.
 2. S3 runs the batch T-0104, T-0105, T-0106 (draft PR after T-0104; no waiting on CI).
 3. M01 end checkpoint: S3 report plus the halfway carry-over → S4 (up to 2 fix rounds).
 
