@@ -1,6 +1,6 @@
 # OmniBridge design direction
 
-From S1, 18 Oct 2026. This is the starting brief for S2. S2 refines it with Hashir, then records the final tokens in `docs/design/README.md`. Decisions here are recorded as ADR-036 (palette and type) and ADR-037 (design workflow) in `docs/DECISIONS.md`.
+From S1, 18 Oct 2026; updated 19 Oct 2026 with Hashir's locked overrides (ADR-041). **Exact token values live in `docs/design/README.md`, which wins over this file.** This is the starting brief for S2. S2 refines it with Hashir, then records the final tokens in `docs/design/README.md`. Decisions here are recorded as ADR-036 (palette and type) and ADR-037 (design workflow) in `docs/DECISIONS.md`.
 
 ## 1. What the UI must feel like
 
@@ -10,9 +10,9 @@ A calm, fast, professional back office that people use for hours a day: packing 
 
 ## 2. Colour (decided by S1; S2 may tune shades, not the roles)
 
-**We keep the JeezMart navy, and we do not use the orange as an accent.**
+**One accent family: deep petrol (Hashir chose it over the first navy on 18/10). No orange accent. A graphite sidebar marks where you are.**
 
-- **Why navy:** it is calm, trustworthy and accessible on white. It also suits finance figures.
+- **Why petrol:** calm, readable on white, and not a status colour. Navy felt dated. Graphite (`#181B21`) is used for "where you are and what you picked": sidebar, active tab, current page, bulk bar.
 - **Why no orange:**
   - In a back office, orange means *warning*. Design systems such as Salesforce Spark and J.P. Morgan Salt reserve it for warnings and keep accents out of the status colours.
   - OmniBridge shows many alerts (Oversold, Tracking not confirmed, health amber), so an orange "Create label" button would compete with them.
@@ -20,9 +20,10 @@ A calm, fast, professional back office that people use for hours a day: packing 
 
 | Token | Value | Use |
 |---|---|---|
-| `brand-900` | `#1B2A6B` | Primary buttons, active navigation, brand mark |
-| `brand-600` | `#3550C8` (tune for 4.5:1 on white) | Links, focus rings, selected states, info |
-| `brand-100` | `#DDE5FC` | Selected rows, active filter chips, subtle highlights |
+| `brand-700` | `#0F6B66` | Primary buttons |
+| `brand-600` | `#0F766E` | Links, focus ring, status progress |
+| `side` | `#181B21` | Sidebar, active tab, current page, bulk bar |
+| `selected` | `#E9EEF6` | Selected rows, active filter chips |
 | `ink` | `#0B1221` | Body text |
 | `ink-muted` | slate ~`#5B6475` (≥4.5:1 on white) | Secondary text, column headers |
 | `surface` | `#F0F2F5` | App background |
@@ -48,16 +49,16 @@ A calm, fast, professional back office that people use for hours a day: packing 
   - labels 12 px
   - page titles 20–24 px
   - weights 400 / 500 / 600 only
-- **Numbers:** every number, money and date uses `font-variant-numeric: tabular-nums`, so columns line up. Order refs and IDs also use the slashed-zero feature (`zero`).
+- **Numbers:** every number, money and date uses `font-variant-numeric: tabular-nums`, so columns line up. Order refs use tabular numbers only (no slashed zero).
 - **Alignment:** money and quantities are right-aligned. Pounds are shown as £1,234.56; dates as DD/MM/YYYY; times in Europe/London (NFR-9).
 - **Icons:** one icon set only, lucide-react 1.55.0 (ISC). No emoji in the UI.
 
 ## 4. Layout and density
 
 - **App shell:** left sidebar showing only the tabs the user may see. The top bar holds the company switcher with "Combined" (TEN-5), global search (Ctrl+K command palette) and the notification bell.
-- **Spacing:** a 4 px grid. Corner radius 6 px on controls and 8 px on cards, used consistently, not "rounded everything".
+- **Spacing:** a 4 px grid. Corner radius 8 px on controls and 12 px on cards; tabs, chips, counts and search are fully round.
 - **Tables:**
-  - default row 36 px, "comfortable" 44 px
+  - one row height everywhere: 56 px, two-line cells (value + 12 px subtext); no density toggle
   - sticky header, first column pinned
   - thin row dividers (no zebra by default)
   - secondary info as subtext under the main value, rather than an extra column
@@ -68,7 +69,8 @@ A calm, fast, professional back office that people use for hours a day: packing 
 ## 5. Speed budget (S4 checks these)
 
 - Initial JavaScript ≤ 200 KB gzip. Each tab is a separate code-split route, prefetched on hover.
-- Lists of any size render through TanStack Virtual, with server pagination at 50 rows.
+- Lists use numbered pages of 20, 50 or 100 rows (default 50) in the URL (ADR-040); each page renders through TanStack Virtual.
+- Status is a coloured icon plus a plain label (no pill chips).
 - Show a skeleton only if loading takes longer than 300 ms. No layout shift when data arrives.
 - Use optimistic updates for small edits (mark read, toggle).
 - Motion is at most 150 ms and only for state changes such as open/close or toast. It respects `prefers-reduced-motion`.
