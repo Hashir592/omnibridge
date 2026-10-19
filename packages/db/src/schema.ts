@@ -56,9 +56,26 @@ export interface JobLeasesTable {
   expires_at: ColumnType<Date, Date | string, Date | string>;
 }
 
+export interface FilesTable {
+  id: string;
+  workspace_id: string;
+  content_type: 'application/pdf' | 'image/png' | 'image/jpeg';
+  size_bytes: ColumnType<string, number, number>;
+  key_version: ColumnType<string, number, number>;
+  state: ColumnType<
+    'scanning' | 'clean' | 'infected' | 'scan_failed',
+    'scanning' | undefined,
+    'scanning' | 'clean' | 'infected' | 'scan_failed'
+  >;
+  scanned_at: Date | null;
+  delete_after: Date | null;
+  created_at: Generated<Date>;
+}
+
 export interface MainDb {
   'app.data_keys': DataKeysTable;
   'app.credentials': CredentialsTable;
   'app.job_records': JobRecordsTable;
   'app.job_leases': JobLeasesTable;
+  'app.files': FilesTable;
 }

@@ -216,7 +216,7 @@
         "test '[SEC-2] CSP header present and blocks inline script' passes"
       ],
       "risk": "normal",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0106",

@@ -16,7 +16,9 @@ const B: TenantContext = { workspaceId: randomUUID() };
 /** Test-only stand-in for M02 sessions: the workspace comes from a header. */
 const fromHeader = (request: { headers: Record<string, unknown> }) => {
   const ws = request.headers['x-test-workspace'];
-  return typeof ws === 'string' ? { workspaceId: ws } : undefined;
+  return typeof ws === 'string'
+    ? { ctx: { workspaceId: ws }, sessionId: 'test-session' }
+    : undefined;
 };
 
 describe('GET /jobs/:id (NFR-4)', () => {
@@ -59,7 +61,7 @@ describe('GET /jobs/:id (NFR-4)', () => {
       version: '0',
       checks,
       jobs: records,
-      resolveTenant: fromHeader,
+      resolveSession: fromHeader,
     });
     const get = () =>
       app.inject({
@@ -92,7 +94,7 @@ describe('GET /jobs/:id (NFR-4)', () => {
       version: '0',
       checks,
       jobs: records,
-      resolveTenant: fromHeader,
+      resolveSession: fromHeader,
     });
     const other = await app.inject({
       method: 'GET',

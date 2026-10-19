@@ -41,4 +41,4 @@ export {
   type WorkTuning,
 } from './runtime.ts';
 export { queueMetrics, type QueueMetricsOptions } from './metrics.ts';
-export { JOBS } from './registry.ts';
+export { filesScanJob, JOBS } from './registry.ts';

@@ -15,5 +15,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@omnibridge/core": "workspace:*",
+    "@omnibridge/crypto": "workspace:*",
+    "@omnibridge/queue": "workspace:*"
   }
 }

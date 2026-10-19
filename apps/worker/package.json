@@ -20,6 +20,7 @@
     "@omnibridge/core": "workspace:*",
     "@omnibridge/crypto": "workspace:*",
     "@omnibridge/db": "workspace:*",
+    "@omnibridge/files": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/queue": "workspace:*",
     "kysely": "0.29.7",
@@ -29,6 +30,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@omnibridge/testkit": "workspace:*"
+    "@omnibridge/testkit": "workspace:*",
+    "testcontainers": "12.2.1"
   }
 }

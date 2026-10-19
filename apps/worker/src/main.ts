@@ -2,17 +2,20 @@ import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   createPool,
+  FileRepository,
   JobLeaseRepository,
   JobRecordRepository,
   mainDbConfig,
   type MainDb,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
+import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
 import { Kysely, PostgresDialect } from 'kysely';
 import { registerHandlers } from './handlers.ts';
 import { createWorkerBoss, startHeartbeat } from './heartbeat.ts';
 import { startMetricsServer } from './metrics-server.ts';
+import { scanFileHandler } from './scan.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
 const log = createLogger({ service: 'worker', version });
@@ -53,7 +56,19 @@ await startHeartbeat({
   log,
   healthFile: process.env.WORKER_HEALTH_FILE ?? '/tmp/worker-heartbeat',
 });
-await registerHandlers(queue);
+const filesDir = requireEnv('FILES_DIR');
+const files = new EncryptedLocalFileStore({
+  root: filesDir,
+  keys: new FileKeyStore(filesDir, secretsKeyring),
+  metadata: new FileRepository(db),
+});
+await registerHandlers(queue, {
+  'files.scan': scanFileHandler({
+    files,
+    clamd: { host: requireEnv('CLAMD_HOST'), port: Number(process.env.CLAMD_PORT ?? '3310') },
+    logger: log,
+  }),
+});
 const metrics = await startMetricsServer(
   queueMetrics({ boss, types: JOBS.map((def) => def.type) }),
   Number(process.env.METRICS_PORT ?? '9464'),

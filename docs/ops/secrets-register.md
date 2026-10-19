@@ -25,6 +25,7 @@ Production dates are set when each secret is first created in M22. "Next rotatio
 | `vault_owner_password` | db-pii migration role `vault_owner` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, migrate-pii | 12 months | set in M22 |
 | `vault_app_password` | db-pii app role `vault_app` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, pii-vault | 12 months | set in M22 |
 | `secrets_kek` | Secrets master key: wraps the data keys of `app.credentials` in db-main | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web, worker | 12 months | set in M22 |
+| `file_link_hmac_key` | HMAC key for 5-minute signed download links (NFR-5, T-0105) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web | 12 months | set in M22 |
 | `pii_kek` | PII master key: wraps the per-workspace PII data keys (used from M04) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | pii-vault | 12 months | set in M22 |
 
 The master keys are never in a database, an image or a backup (SEC-6, invariant 9). The main backups hold only wrapped data keys, so a backup alone cannot decrypt anything.
@@ -54,7 +55,6 @@ These are not Docker secrets. Each value is encrypted with AES-256-GCM under a p
 | `amazon.lwa_client_secret` | LWA client ID/secret, `current` + `next` during Amazon's 7-day overlap (PLAT-4, AMZ-10); platform-level, table added in M05 | Hashir | mock only | platform credential store (M05) | worker, web | 180 days; reminders on day 150, 165, 173 | set in M07 |
 | `ads.client_secret`, `ebay.keyset` | Ads client secret and eBay app keyset (PLAT-4) | Hashir | mock only | platform credential store (M05) | worker, web | 12 months | set in M15/M18 |
 | `pii_vault_service_tokens` | Capability tokens for web and worker calling pii-vault (ADR-007) | Hashir | `dev.sops.yaml` (M04) | ops repo → tmpfs | web, worker, pii-vault | 12 months | set in M04 |
-| `file_link_hmac_key` | HMAC key for 5-minute signed download links (NFR-5) | Hashir | `dev.sops.yaml` (T-0105) | ops repo → tmpfs | web | 12 months | set in T-0105 |
 | `smtp_password` | Scaleway TEM SMTP credentials | Hashir | Mailpit needs none | ops repo → tmpfs | web, worker | 12 months | set in M22 |
 | `b2_main_key`, `b2_pii_key`, `restic_main_password`, `restic_pii_password` | Backblaze B2 application keys (no delete) and restic passwords, separate for main and PII (ADR-016) | Hashir | local restic repo (M01b) | ops repo → tmpfs | backup jobs | 12 months | set in M22 |
 

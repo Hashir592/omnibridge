@@ -17,11 +17,13 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@fastify/helmet": "13.1.2",
     "@fastify/swagger": "9.9.2",
     "@omnibridge/contract": "workspace:*",
     "@omnibridge/core": "workspace:*",
     "@omnibridge/crypto": "workspace:*",
     "@omnibridge/db": "workspace:*",
+    "@omnibridge/files": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "fastify": "5.12.7",
     "fastify-type-provider-zod": "7.0.0",

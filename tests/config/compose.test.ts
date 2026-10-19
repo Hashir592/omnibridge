@@ -161,7 +161,7 @@ describe('compose stack: secrets (SEC-5)', () => {
 
   it('[SEC-5] each secret is mounted only into the containers that need it', () => {
     const secretsOf = (name: string) => (service(name).secrets ?? []).map((s) => s.source).sort();
-    expect(secretsOf('web')).toEqual(['ob_app_password', 'secrets_kek']);
+    expect(secretsOf('web')).toEqual(['file_link_hmac_key', 'ob_app_password', 'secrets_kek']);
     expect(secretsOf('worker')).toEqual(['ob_app_password', 'secrets_kek']);
     expect(secretsOf('pii-vault')).toEqual(['pii_kek', 'vault_app_password']);
     expect(secretsOf('migrate-main')).toEqual(['ob_owner_password']);

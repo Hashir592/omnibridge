@@ -1,11 +1,12 @@
 import { getHealth } from './routes/health.ts';
+import { getFile } from './routes/files.ts';
 import { getJob } from './routes/jobs.ts';
 
 /**
  * Every route the web app serves. The server registers routes only from this list, and the
  * route walker (packages/testkit) checks every entry. Add new routes here.
  */
-export const contractRoutes = [getHealth, getJob] as const;
+export const contractRoutes = [getHealth, getJob, getFile] as const;
 
 export type ContractRoutes = typeof contractRoutes;
 

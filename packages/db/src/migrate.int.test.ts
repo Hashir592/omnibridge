@@ -52,6 +52,7 @@ describe('db-main roles and migrations', () => {
       '0001_baseline',
       '0002_credentials',
       '0003_job_records',
+      '0004_files',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

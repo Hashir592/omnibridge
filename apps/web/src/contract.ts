@@ -3,7 +3,9 @@ import fastifySwagger from '@fastify/swagger';
 import {
   assertRouteMetadata,
   ContractError,
+  FileDownloadSchema,
   OPENAPI_INFO,
+  type FileDownload,
   PROBLEM_CONTENT_TYPE,
   ProblemSchema,
   type AnyRoute,
@@ -12,6 +14,7 @@ import {
   type RouteResult,
 } from '@omnibridge/contract';
 import { ApiError, type ErrorCode } from '@omnibridge/core';
+import { z } from 'zod';
 import type {
   FastifyBaseLogger,
   FastifyError,
@@ -55,6 +58,9 @@ export interface InstallOptions {
   openapi?: boolean;
 }
 
+/** The body of a file download in the OpenAPI document. */
+const BinaryBody = z.string().meta({ format: 'binary', description: 'File bytes' });
+
 /** Every route answers problems as RFC 9457 problem+json. */
 const problemResponse = (description: string) => ({
   description,
@@ -71,6 +77,14 @@ function responseSchemas(responses: AnyRoute['responses']) {
     '5xx': problemResponse('Server error (RFC 9457 problem)'),
   };
   for (const [status, schema] of Object.entries(responses)) {
+    if (schema === FileDownloadSchema) {
+      out[status] = {
+        description: 'File content',
+        // Described for OpenAPI only: Fastify never serialises a stream payload.
+        content: { 'application/octet-stream': { schema: BinaryBody } },
+      };
+      continue;
+    }
     out[status] =
       Number(status) >= 400
         ? {
@@ -256,6 +270,18 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
           body: route.body ? request.body : undefined,
           request,
         } as RouteInput<AnyRoute> & { request: FastifyRequest });
+        if (route.responses[result.status] === FileDownloadSchema) {
+          // A file stream (NFR-5): sent as is, never cached, never sniffed by the browser.
+          const file = result.body as FileDownload;
+          return reply
+            .code(result.status)
+            .header('content-type', file.contentType)
+            .header('content-length', String(file.sizeBytes))
+            .header('content-disposition', 'attachment')
+            .header('cache-control', 'private, no-store')
+            .header('x-content-type-options', 'nosniff')
+            .send(file.stream);
+        }
         return reply.code(result.status).send(result.body);
       },
     });
