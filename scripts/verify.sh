@@ -133,7 +133,9 @@ e2e() {
   local install=(install chromium)
   if [[ -n "${CI:-}" && "$(uname -s)" == Linux ]]; then install=(install --with-deps chromium); fi
   "${pnpm[@]}" exec playwright "${install[@]}" &&
-    "${pnpm[@]}" exec playwright test
+    # Its own Vite server on a port nobody else uses: a developer's or another session's dev server
+    # on 5173 is never reused, so the gate always tests this checkout.
+    OB_UI_PORT=5199 OB_E2E_OWN_SERVER=1 "${pnpm[@]}" exec playwright test
 }
 
 audit() {

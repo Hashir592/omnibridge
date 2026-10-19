@@ -35,4 +35,14 @@ describe('CI workflow and gate', () => {
     expect(pinned).toHaveLength(5); // gitleaks, osv-scanner, actionlint, caddy, sops (PS-007)
     for (const image of pinned) expect(image).toMatch(/@sha256:[0-9a-f]{64}$/);
   });
+
+  it('[SEC-16] the gate e2e step starts its own UI server and never reuses another one', () => {
+    const verify = readRepoFile('scripts/verify.sh');
+    expect(verify).toMatch(/OB_UI_PORT=\d+ OB_E2E_OWN_SERVER=1 .*playwright test/);
+    const config = readRepoFile('playwright.config.ts');
+    expect(config).toContain(
+      'reuseExistingServer: !process.env.CI && !process.env.OB_E2E_OWN_SERVER',
+    );
+    expect(config).toContain('--port ${uiPort} --strictPort');
+  });
 });
