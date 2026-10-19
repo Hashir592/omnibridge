@@ -61,7 +61,7 @@ It runs:
 - hard-coded-name check
 - requirement-ID coverage check
 
-It must pass completely before any merge. `scripts/verify.sh --help` lists the faster partial modes for use while you work. A task is done only when the full run passes.
+It must pass completely before any merge; CI runs it on every PR. Locally, use `scripts/verify.sh --quick` while you work. Run the full gate locally only for **high**-risk tasks and at checkpoints (ADR-043). A task is done only when the full run passes in CI.
 
 ## Conventions
 
