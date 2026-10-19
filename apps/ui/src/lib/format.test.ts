@@ -6,6 +6,7 @@ import {
   formatInt,
   formatPence,
   formatTime,
+  overdueText,
 } from './format.ts';
 import { pageList } from './paging.ts';
 
@@ -38,6 +39,15 @@ describe('UK formats', () => {
     expect(daysFromToday('2026-10-19T22:59:00Z', now)).toBe(0); // 23:59 London, same day
     expect(daysFromToday('2026-10-19T23:30:00Z', now)).toBe(1); // 00:30 London, next day
     expect(daysFromToday('2026-10-17T12:00:00Z', now)).toBe(-2);
+  });
+});
+
+describe('ship-by wording', () => {
+  it('[NFR-9] counts overdue days in London calendar days', () => {
+    const now = new Date('2026-10-19T10:00:00Z');
+    expect(overdueText('2026-10-19T08:00:00Z', now)).toBe('Overdue today');
+    expect(overdueText('2026-10-18T22:00:00Z', now)).toBe('Overdue 1 day');
+    expect(overdueText('2026-10-10T09:00:00Z', now)).toBe('Overdue 9 days');
   });
 });
 

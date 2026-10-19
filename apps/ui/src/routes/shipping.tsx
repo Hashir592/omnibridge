@@ -12,9 +12,17 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAppState } from '../app/session.tsx';
+import { NumberField, parseKg, parseParcels } from '../components/NumberField.tsx';
 import { ChannelMark, FLAG } from '../components/badges.tsx';
 import { cn } from '../lib/cn.ts';
-import { daysFromToday, formatDate, formatInt, formatPence, formatTime } from '../lib/format.ts';
+import {
+  daysFromToday,
+  formatDate,
+  formatInt,
+  formatPence,
+  formatTime,
+  overdueText,
+} from '../lib/format.ts';
 import { mockApi } from '../mocks/api.ts';
 import {
   LABEL_FORMAT,
@@ -327,11 +335,10 @@ function Pill({
 function ShipByText({ o }: { o: OrderRow }) {
   const d = daysFromToday(o.shipBy);
   if (isLate(o)) {
-    const late = Math.max(1, -d);
     return (
       <span className="flex items-center justify-end gap-1 font-medium text-danger">
         <OctagonAlert className="size-3.5" aria-hidden />
-        {d === 0 ? 'Overdue today' : `Overdue ${String(late)} day${late === 1 ? '' : 's'}`}
+        {overdueText(o.shipBy)}
       </span>
     );
   }
@@ -599,14 +606,13 @@ function LabelPanel(props: {
             </select>
             <label className="flex h-8 items-center rounded-ctl border border-border pr-2 focus-within:border-brand-600">
               <span className="sr-only">Weight for {o.ref} in kg</span>
-              <input
+              <NumberField
                 inputMode="decimal"
-                value={kg(weights[o.id] ?? 0)}
-                onChange={(e) => {
-                  setWeights({
-                    ...weights,
-                    [o.id]: Math.round(Number(e.target.value) * 1000) || 0,
-                  });
+                value={weights[o.id] ?? 0}
+                format={kg}
+                parse={parseKg}
+                onCommit={(g) => {
+                  setWeights({ ...weights, [o.id]: g });
                 }}
                 className="num w-full min-w-0 bg-transparent pl-2 text-right text-xs outline-none"
               />
@@ -717,23 +723,23 @@ function Single(props: {
         </label>
         <label className="text-xs font-medium text-ink-muted">
           Parcels
-          <input
+          <NumberField
             inputMode="numeric"
             value={props.parcels}
-            onChange={(e) => {
-              props.setParcels(Math.max(1, Math.min(9, Number(e.target.value) || 1)));
-            }}
+            format={String}
+            parse={parseParcels}
+            onCommit={props.setParcels}
             className={cn(field, 'num mt-1.5 font-normal text-ink')}
           />
         </label>
         <label className="text-xs font-medium text-ink-muted">
           Weight (kg)
-          <input
+          <NumberField
             inputMode="decimal"
-            value={kg(props.grams)}
-            onChange={(e) => {
-              props.setGrams(Math.round(Number(e.target.value) * 1000) || 0);
-            }}
+            value={props.grams}
+            format={kg}
+            parse={parseKg}
+            onCommit={props.setGrams}
             className={cn(field, 'num mt-1.5 font-normal text-ink')}
           />
         </label>

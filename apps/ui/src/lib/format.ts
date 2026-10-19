@@ -48,6 +48,13 @@ function dayNumber(d: Date): number {
   return Date.parse(`${dayKeyFmt.format(d)}T00:00:00Z`) / 86_400_000;
 }
 
+/** "Overdue today" or "Overdue 3 days" for a ship-by that has passed (London calendar days). */
+export function overdueText(iso: string, now = new Date()): string {
+  const late = -daysFromToday(iso, now);
+  if (late <= 0) return 'Overdue today';
+  return `Overdue ${String(late)} day${late === 1 ? '' : 's'}`;
+}
+
 /** Whole London calendar days from today to the given instant (negative = past). */
 export function daysFromToday(iso: string, now = new Date()): number {
   return dayNumber(new Date(iso)) - dayNumber(now);

@@ -19,13 +19,7 @@ import { lastOrdersSearch } from '../app/lastSearch.ts';
 import { useAppState } from '../app/session.tsx';
 import { ChannelMark, CompanySwatch, StatusChip } from '../components/badges.tsx';
 import { cn } from '../lib/cn.ts';
-import {
-  daysFromToday,
-  formatDate,
-  formatDateTime,
-  formatPence,
-  formatTime,
-} from '../lib/format.ts';
+import { overdueText, formatDate, formatDateTime, formatPence, formatTime } from '../lib/format.ts';
 import { mockApi } from '../mocks/api.ts';
 import type { OrderDetail, OrderRow } from '../mocks/types.ts';
 
@@ -234,14 +228,10 @@ function Alerts({ o }: { o: OrderRow }) {
     body: string;
   }> = [];
   if (o.status === 'awaiting_dispatch' && Date.parse(o.shipBy) < Date.now()) {
-    const late = Math.max(1, -daysFromToday(o.shipBy));
     items.push({
       tone: 'danger',
       icon: OctagonAlert,
-      title:
-        daysFromToday(o.shipBy) === 0
-          ? 'Past ship-by today'
-          : `Past ship-by by ${String(late)} day${late === 1 ? '' : 's'}`,
+      title: `Past ship-by: ${overdueText(o.shipBy).toLowerCase()}`,
       body: `It was due by ${formatDateTime(o.shipBy)}. Late dispatch counts against account health.`,
     });
   }

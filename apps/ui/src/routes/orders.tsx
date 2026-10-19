@@ -26,7 +26,14 @@ import {
 } from '../components/badges.tsx';
 import { cn } from '../lib/cn.ts';
 import { PAGE_SIZES, pageList, type PageSize } from '../lib/paging.ts';
-import { daysFromToday, formatDate, formatInt, formatPence, formatTime } from '../lib/format.ts';
+import {
+  daysFromToday,
+  formatDate,
+  formatInt,
+  formatPence,
+  formatTime,
+  overdueText,
+} from '../lib/format.ts';
 import { mockApi } from '../mocks/api.ts';
 import type { OrderFlag, OrderRow, OrderStatus } from '../mocks/types.ts';
 
@@ -130,12 +137,13 @@ export function OrdersPage() {
     search.status,
     search.flag,
   ];
-  useEffect(() => {
-    setSelected(new Set());
-  }, filterKey);
-
   const size: PageSize = search.size ?? 50;
   const page = search.page ?? 1;
+
+  // Selection belongs to the page on screen, so the bulk counts always match the rows shown.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [...filterKey, page, size]);
 
   const query = useQuery({
     queryKey: ['orders', ...filterKey, page, size],
@@ -160,6 +168,12 @@ export function OrdersPage() {
   const pageCount = Math.max(1, Math.ceil(total / size));
   const from = total === 0 ? 0 : (page - 1) * size + 1;
   const to = Math.min(page * size, total);
+
+  // A page past the end (an old link, or fewer orders after switching company) goes to the last page.
+  useEffect(() => {
+    if (query.data && page > pageCount)
+      setSearch({ page: pageCount === 1 ? undefined : pageCount });
+  }, [query.data, page, pageCount]);
 
   const cols = COLS.filter((c) => !hidden.has(c.id));
   const grid = cols.map((c) => c.width).join(' ');
@@ -247,7 +261,7 @@ export function OrdersPage() {
 
   const clearAll = () => {
     setQDraft('');
-    void navigate({ search: { view: search.view }, replace: true });
+    void navigate({ search: { view: search.view, size: search.size }, replace: true });
   };
 
   const selectedRows = rows.filter((r) => selected.has(r.id));
@@ -500,7 +514,7 @@ export function OrdersPage() {
                   <div
                     key={o.id}
                     role="row"
-                    aria-rowindex={vi.index + 2}
+                    aria-rowindex={(page - 1) * size + vi.index + 2}
                     aria-selected={isSel}
                     className={cn(
                       'group absolute inset-x-0 grid border-b border-divider text-13',
@@ -785,12 +799,11 @@ function ShipBy({ o }: { o: OrderRow }) {
     return <span className="num text-13 text-ink-muted">{date}</span>;
   const d = daysFromToday(o.shipBy);
   if (Date.parse(o.shipBy) < Date.now()) {
-    const late = Math.max(1, -d);
     return (
       <>
         <span className="flex items-center gap-1 text-13 leading-[18px] font-medium whitespace-nowrap text-danger">
           <OctagonAlert className="size-3.5 shrink-0" aria-hidden />
-          {d === 0 ? 'Overdue today' : `Overdue ${String(late)} day${late === 1 ? '' : 's'}`}
+          {overdueText(o.shipBy)}
         </span>
         <Sub className="num">was due {date}</Sub>
       </>
