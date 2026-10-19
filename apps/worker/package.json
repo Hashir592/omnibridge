@@ -19,12 +19,16 @@
   "dependencies": {
     "@omnibridge/core": "workspace:*",
     "@omnibridge/crypto": "workspace:*",
+    "@omnibridge/db": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/queue": "workspace:*",
-    "pg-boss": "12.38.0"
+    "kysely": "0.29.7",
+    "pg": "8.23.1",
+    "pg-boss": "12.38.0",
+    "prom-client": "15.1.3",
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@omnibridge/db": "workspace:*",
     "@omnibridge/testkit": "workspace:*"
   }
 }

@@ -8,9 +8,13 @@ import { PgBoss, type ConstructorOptions } from 'pg-boss';
  * the migrate job instead: schema install and upgrades (migrate, createSchema), queue creation,
  * and index rebuilds (reindex needs table ownership).
  */
-export function createWorkerBoss(connection: ConstructorOptions): PgBoss {
+export function createWorkerBoss(
+  connection: ConstructorOptions,
+  overrides: Pick<ConstructorOptions, 'monitorIntervalSeconds' | 'superviseIntervalSeconds'> = {},
+): PgBoss {
   return new PgBoss({
     ...connection,
+    ...overrides,
     schema: QUEUE_SCHEMA,
     max: 8,
     migrate: false,

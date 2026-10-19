@@ -29,7 +29,36 @@ export interface CredentialsTable {
   created_at: Generated<Date>;
 }
 
+export interface JobRecordsTable {
+  id: string;
+  workspace_id: string;
+  type: string;
+  idempotency_key: string;
+  state: ColumnType<
+    'queued' | 'active' | 'retrying' | 'completed' | 'failed',
+    'queued' | undefined,
+    'queued' | 'active' | 'retrying' | 'completed' | 'failed'
+  >;
+  /** bigint columns with a default: read as string, written as number. */
+  attempt: ColumnType<string, number | undefined, number>;
+  percent: ColumnType<string, number | undefined, number>;
+  result: ColumnType<unknown, string | null, string | null> | null;
+  error_code: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface JobLeasesTable {
+  workspace_id: string;
+  scope_key: string;
+  slot: ColumnType<string, number, number>;
+  holder: string;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+}
+
 export interface MainDb {
   'app.data_keys': DataKeysTable;
   'app.credentials': CredentialsTable;
+  'app.job_records': JobRecordsTable;
+  'app.job_leases': JobLeasesTable;
 }

@@ -17,6 +17,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/jobs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Progress and result of a background job */
+    get: operations['getJob'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -38,6 +55,40 @@ export interface components {
       /** @enum {string} */
       status: 'ok' | 'degraded';
       version: string;
+    };
+    JobProgress: {
+      attempt: number;
+      /** Format: date-time */
+      created_at: string;
+      error_code: string | null;
+      /** Format: uuid */
+      id: string;
+      percent: number;
+      result: {
+        [key: string]: unknown;
+      } | null;
+      /** @enum {string} */
+      state: 'queued' | 'active' | 'retrying' | 'completed' | 'failed';
+      type: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    JobProgressInput: {
+      attempt: number;
+      /** Format: date-time */
+      created_at: string;
+      error_code: string | null;
+      /** Format: uuid */
+      id: string;
+      percent: number;
+      result: {
+        [key: string]: unknown;
+      } | null;
+      /** @enum {string} */
+      state: 'queued' | 'active' | 'retrying' | 'completed' | 'failed';
+      type: string;
+      /** Format: date-time */
+      updated_at: string;
     };
     Problem: {
       /** @enum {string} */
@@ -146,6 +197,46 @@ export interface operations {
         content: {
           'application/json': components['schemas']['Health'];
           'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  getJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobProgress'];
         };
       };
     };

@@ -1,12 +1,12 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S1.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S3.
 
 ## Now
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** M01 halfway fixes in PR #9 (no round 2, ADR-044). Next is the **batch T-0104 + T-0105 + T-0106** on one branch and one PR (ADR-043). S2: T-0302 component kit. Done: T-0101, T-0102, T-0103, T-0301 (PRs #1 to #8).
+- **Current task:** S3 batch T-0104 + T-0105 + T-0106 on `task/T-0104-T-0106-m01-rest`, one draft PR (ADR-043). **T-0104 done on the branch** (status review): pg-boss job registry and envelope, DLQ and redrive, per-account FIFO and a PostgreSQL lease semaphore for caps, global worker cap, London cron and heavy window, job records and GET /jobs/:id (401 until M02 sessions), worker /metrics. Next: T-0105. S2: T-0302 component kit. Done: T-0101, T-0102, T-0103, T-0301 (PRs #1 to #10).
 - **Sessions:** Hashir runs **one session at a time** (ADR-043).
 - **Workflow tiers (ADR-043):** light = `verify.sh --quick`, no code review, CI full gate; normal = `--quick` + `/code-review` medium, CI full gate; high = full local gate + `/code-review` high, then CI. S3 does not wait for CI.
 - **Last checkpoint:** M01 halfway: S4 found FIX REQUIRED (1 Blocker, 1 Major, 6 Minors). S3 fixed 7; F-04 moves into T-0106 as migration 0003 (PS-012 approved, ADR-045). Carry-over for the M01 end review: `docs/reviews/M01-halfway-carryover.md` (O-1 e2e flake, now in T-0106 scope).

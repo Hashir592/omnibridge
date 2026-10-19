@@ -176,7 +176,7 @@
         "test '[NFR-4] progress route reports percent and result' passes"
       ],
       "risk": "normal",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0105",

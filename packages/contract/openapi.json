@@ -57,6 +57,55 @@
         },
         "required": ["status", "db_main", "db_pii", "version"]
       },
+      "JobProgressInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "type": { "type": "string" },
+          "state": {
+            "type": "string",
+            "enum": ["queued", "active", "retrying", "completed", "failed"]
+          },
+          "attempt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": { "type": "string" },
+                "additionalProperties": {}
+              },
+              { "type": "null" }
+            ]
+          },
+          "error_code": { "type": ["string", "null"] },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "state",
+          "attempt",
+          "percent",
+          "result",
+          "error_code",
+          "created_at",
+          "updated_at"
+        ]
+      },
       "Problem": {
         "type": "object",
         "properties": {
@@ -109,6 +158,56 @@
         },
         "required": ["status", "db_main", "db_pii", "version"],
         "additionalProperties": false
+      },
+      "JobProgress": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "type": { "type": "string" },
+          "state": {
+            "type": "string",
+            "enum": ["queued", "active", "retrying", "completed", "failed"]
+          },
+          "attempt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": { "type": "string" },
+                "additionalProperties": {}
+              },
+              { "type": "null" }
+            ]
+          },
+          "error_code": { "type": ["string", "null"] },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "state",
+          "attempt",
+          "percent",
+          "result",
+          "error_code",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
       }
     }
   },
@@ -135,6 +234,50 @@
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Health" } },
               "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{id}": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "Progress and result of a background job",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/JobProgress" } }
             }
           },
           "4XX": {

@@ -1,6 +1,7 @@
-import { contractRoutes, type Health } from '@omnibridge/contract';
+import { contractRoutes, type Health, type JobProgress } from '@omnibridge/contract';
+import { ApiError, type TenantContext } from '@omnibridge/core';
 import type { Logger } from '@omnibridge/logger';
-import Fastify from 'fastify';
+import Fastify, { type FastifyRequest } from 'fastify';
 import { contractRoutesPlugin, installContract, type Handlers } from './contract.ts';
 
 export interface HealthChecks {
@@ -8,6 +9,27 @@ export interface HealthChecks {
   dbMain: () => Promise<boolean>;
   /** pii-vault reports db-pii healthy. web never connects to db-pii itself (invariant 5). */
   dbPii: () => Promise<boolean>;
+}
+
+/** Reads a job's progress inside the caller's workspace (packages/db JobRecordRepository). */
+export interface JobProgressReader {
+  get(
+    ctx: TenantContext,
+    id: string,
+  ): Promise<
+    | {
+        id: string;
+        type: string;
+        state: JobProgress['state'];
+        attempt: number;
+        percent: number;
+        result: Record<string, unknown> | null;
+        errorCode: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+      }
+    | undefined
+  >;
 }
 
 export interface WebAppOptions {
@@ -19,6 +41,13 @@ export interface WebAppOptions {
    * none, so request.ip is the direct peer and cannot be set by a client header.
    */
   trustedProxies?: string;
+  /** Job progress for GET /jobs/:id (NFR-4). */
+  jobs?: JobProgressReader;
+  /**
+   * The signed-in user's workspace for `session` routes. Sessions arrive in M02; until then
+   * production passes nothing, so every session route answers 401 and none is ever open.
+   */
+  resolveTenant?: (request: FastifyRequest) => TenantContext | undefined;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
 }
@@ -31,7 +60,15 @@ async function check(fn: () => Promise<boolean>): Promise<Health['db_main']> {
   }
 }
 
-export function buildWebApp({ logger, version, checks, trustedProxies, openapi }: WebAppOptions) {
+export function buildWebApp({
+  logger,
+  version,
+  checks,
+  trustedProxies,
+  openapi,
+  jobs,
+  resolveTenant,
+}: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false });
 
@@ -46,6 +83,26 @@ export function buildWebApp({ logger, version, checks, trustedProxies, openapi }
         version,
       };
       return healthy ? { status: 200, body } : { status: 503, body };
+    },
+    getJob: async ({ params, request }) => {
+      const ctx = resolveTenant?.(request);
+      if (ctx === undefined) throw new ApiError({ status: 401, code: 'unauthorized' });
+      if (jobs === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
+      const job = await jobs.get(ctx, params.id);
+      // Another workspace's job looks exactly like a missing one (RLS hides it).
+      if (job === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      const body: JobProgress = {
+        id: job.id,
+        type: job.type,
+        state: job.state,
+        attempt: job.attempt,
+        percent: job.percent,
+        result: job.result,
+        error_code: job.errorCode,
+        created_at: job.createdAt.toISOString(),
+        updated_at: job.updatedAt.toISOString(),
+      };
+      return { status: 200, body };
     },
   };
 

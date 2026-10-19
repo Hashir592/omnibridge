@@ -342,6 +342,9 @@ importers:
       fastify-type-provider-zod:
         specifier: 7.0.0
         version: 7.0.0(@fastify/swagger@9.9.2(supports-color@10.2.2))(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7)
+      kysely:
+        specifier: 0.29.7
+        version: 0.29.7
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -367,19 +370,31 @@ importers:
       '@omnibridge/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
+      '@omnibridge/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      kysely:
+        specifier: 0.29.7
+        version: 0.29.7
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
       pg-boss:
         specifier: 12.38.0
         version: 12.38.0(@opentelemetry/api@1.9.1)
+      prom-client:
+        specifier: 15.1.3
+        version: 15.1.3
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
-      '@omnibridge/db':
-        specifier: workspace:*
-        version: link:../../packages/db
       '@omnibridge/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit
@@ -503,7 +518,23 @@ importers:
 
   packages/providers/website: {}
 
-  packages/queue: {}
+  packages/queue:
+    dependencies:
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../core
+      '@omnibridge/logger':
+        specifier: workspace:*
+        version: link:../logger
+      pg-boss:
+        specifier: 12.38.0
+        version: 12.38.0(@opentelemetry/api@1.9.1)
+      prom-client:
+        specifier: 15.1.3
+        version: 15.1.3
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/testkit:
     dependencies:
@@ -1799,6 +1830,9 @@ packages:
   bcrypt-pbkdf@1.0.2:
     resolution: {integrity: sha512-qeFIXtP4MSoi6NLqO12WfqARWWuCKi2Rn/9hJLEmtB5yTNr9DqFWkJRCf2qShWzPeAMRnOgCrq0sg/KLv5ES9w==}
 
+  bintrees@1.0.2:
+    resolution: {integrity: sha512-VOMgTMwjAaUG580SXn3LacVgjurrbMme7ZZNYGSSV7mmtY6QQRh0Eg3pwIcntQ77DErK1L0NxkbetjcoXzVwKw==}
+
   bl@4.1.0:
     resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
 
@@ -3053,6 +3087,11 @@ packages:
     resolution: {integrity: sha512-cdGef/drWFoydD1JsMzuFf8100nZl+GT+yacc2bEced5f9Rjk4z+WtFUTBu9PhOi9j/jfmBPu0mMEY4wIdAF8A==}
     engines: {node: '>= 0.6.0'}
 
+  prom-client@15.1.3:
+    resolution: {integrity: sha512-6ZiOBfCywsD4k1BN9IX0uZhF+tJkV8q8llP64G5Hajs4JOeVLPCwpPVcpXy3BwYiUGgyJzsJJQeOIv7+hDSq8g==}
+    engines: {node: ^16 || ^18 || >=20}
+    deprecated: prom-client has been replaced by @prometheus-io/client
+
   prompts@2.4.2:
     resolution: {integrity: sha512-NxNv/kLguCA7p3jE8oL2aEBsrJWgAakBpgmgK6lpPWV+WuOmY6r2/zbAVnP+T8bQlA0nzHXSJSJW0Hq7ylaD2Q==}
     engines: {node: '>= 6'}
@@ -3384,6 +3423,9 @@ packages:
 
   tar-stream@3.2.2:
     resolution: {integrity: sha512-+8NeqHRjQWH9nYlwo2gamAMImZCVzI4UoEgDpWorBt9OEfppiZn+uSkskzQKPWIZyji/C8fpWO7u69G0DX0tbg==}
+
+  tdigest@0.1.3:
+    resolution: {integrity: sha512-zbRt+lT+/H4fRItHshczHErVCQnitJk8MfMT24MqFJf3YL7SJJPqGIGeuOdvxXxM/AHFzKBl7WoyaYwqO9s3Kw==}
 
   teex@1.0.1:
     resolution: {integrity: sha512-eYE6iEI62Ni1H8oIa7KlDU6uQBtqr4Eajni3wX7rpfXD8ysFx8z0+dri+KWEPWpBsxXfxu58x/0jvTVT1ekOSg==}
@@ -5077,6 +5119,8 @@ snapshots:
     dependencies:
       tweetnacl: 0.14.5
 
+  bintrees@1.0.2: {}
+
   bl@4.1.0:
     dependencies:
       buffer: 5.7.1
@@ -6264,6 +6308,11 @@ snapshots:
 
   process@0.11.10: {}
 
+  prom-client@15.1.3:
+    dependencies:
+      '@opentelemetry/api': 1.9.1
+      tdigest: 0.1.3
+
   prompts@2.4.2:
     dependencies:
       kleur: 3.0.3
@@ -6690,6 +6739,10 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
+
+  tdigest@0.1.3:
+    dependencies:
+      bintrees: 1.0.2
 
   teex@1.0.1:
     dependencies:

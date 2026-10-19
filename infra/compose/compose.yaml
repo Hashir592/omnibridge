@@ -217,6 +217,9 @@ services:
       DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
       SECRETS_KEK_FILE: /run/secrets/secrets_kek
       WORKER_HEALTH_FILE: /tmp/worker-heartbeat
+      # Most jobs at once across all queues; /metrics on an unpublished port (T-0104).
+      WORKER_CONCURRENCY: '8'
+      METRICS_PORT: '9464'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=384
     secrets: [ob_app_password, secrets_kek]
