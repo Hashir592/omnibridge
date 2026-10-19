@@ -2,7 +2,7 @@
   "version": 3,
   "updated": "2026-10-18",
   "owner": "S1",
-  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk 'high' means the session waits for Hashir's 'go' before implementing. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206. Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway after T-0302, end after T-0303.",
+  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. Batch now: T-0104, T-0105, T-0106. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206. Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway after T-0302, end after T-0303.",
   "tasks": [
     {
       "id": "T-0101",
@@ -222,8 +222,8 @@
       "id": "T-0106",
       "module": "M01",
       "session": "S3",
-      "title": "Numbered-page lists and tooling follow-ups",
-      "goal": "Lists support the numbered pages Hashir chose, and the small tooling gaps S2 found are closed.",
+      "title": "Numbered-page lists, CI speed-ups and tooling follow-ups",
+      "goal": "Lists support the numbered pages Hashir chose, CI is faster with a docs-only fast path, and the small tooling gaps are closed.",
       "prd_ids": [
         "SEC-4",
         "NFR-1"
@@ -236,7 +236,11 @@
         "Regenerate openapi.json and the typed client; update the testkit route-walker stub for page-based routes",
         "scripts/ui-refs.sh: refresh Linux reference screenshots in the digest-pinned Playwright image (ADR-039), callable by S2",
         "scripts/gitleaks.sh: run the git-history scan correctly from a git worktree (mount the common git dir), or fail loudly instead of scanning nothing",
-        "tests/config/secrets.test.ts [SEC-5]: remove the flaky 5 s timeout risk (raise the per-test timeout or move the docker compose call to a fixture)"
+        "tests/config/secrets.test.ts [SEC-5]: remove the flaky 5 s timeout risk (raise the per-test timeout or move the docker compose call to a fixture)",
+        "CI speed-up (ADR-043): split the verify job into parallel jobs (static checks; unit + integration + contract; build + stack + e2e) behind one required check, cache Docker image layers, and keep cancel-in-progress",
+        "Docs-only fast path (ADR-043): when a PR changes only docs/**, *.md or docs/backlog.json, CI runs format check, req-coverage and gitleaks only, and still reports the same required check name. Add a matching verify.sh --docs mode",
+        "Observation O-1 (M01 halfway carry-over): find and fix the cause of the intermittent e2e failure in the full gate, using .verify/e2e-stack-logs.txt",
+        "F-M01-halfway-04 (ADR-045): migration 0003 adds credentials.delete_after with CHECK (is_active OR delete_after IS NOT NULL), then drops credentials_inactive_expire on the contract step with the annotated squawk waiver; prove the waiver line is needed and works"
       ],
       "out_of_scope": [
         "Real list routes (M10 and later)",
@@ -246,11 +250,15 @@
         "T-0102"
       ],
       "acceptance": [
-        "scripts/verify.sh exits 0",
+        "scripts/verify.sh exits 0 in CI on the batch PR",
         "test [CAP-7] page-based list: limit 20/50/100 accepted, 201 rejected, default 50",
         "test [CAP-7] total capped at 10,000 with totalCapped=true (unit, fake count)",
         "test [SEC-4] gitleaks history scan finds a planted fake secret when run from a worktree (fixture repo)",
-        "scripts/ui-refs.sh regenerates one Linux reference image identically twice"
+        "scripts/ui-refs.sh regenerates one Linux reference image identically twice",
+        "a docs-only PR finishes CI on the fast path in under 2 minutes and reports the same required check name",
+        "a code PR runs the full gate as parallel jobs; wall time recorded before and after in the report",
+        "O-1: cause found and fixed, or 5 consecutive full-gate runs green with the evidence in the report",
+        "test [SEC-4] migration 0003: retired credential without delete_after is rejected; squawk fails on the DROP CONSTRAINT without the waiver line and passes with it"
       ],
       "risk": "normal",
       "status": "todo"

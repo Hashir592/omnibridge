@@ -57,7 +57,7 @@ Hashir will look at the UI often and ask for many small changes ("change this bu
 1. Make the change straight away and show it. No plan, no verify.sh, no code review and no report for each small change. A one-line "done, refresh" is enough.
 2. **Do not commit and do not push** until Hashir says so (for example "merge", "push it" or "lock it in").
 3. Keep the rules in "UI rules" and `docs/design/DIRECTION.md` even while iterating, unless Hashir explicitly overrides one. Note each override in `docs/design/README.md`.
-4. When Hashir says to merge, run the full workflow below once for everything changed: tests, `scripts/verify.sh`, code review, commit, push, PR. Hashir merges the PR.
+4. When Hashir says to merge, run the workflow below once for everything changed: tests, the checks for the task's tier (ADR-043), commit, push, PR. Hashir merges the PR.
 
 If a session is about to end with uncommitted work, remind Hashir that the work lives only in the worktree.
 
@@ -72,7 +72,7 @@ Steps 5â€“10 of the S3 workflow (`docs/sessions/S3-builder.md`) apply; steps 1â€
   - an axe accessibility check on each screen with zero serious or critical violations
   - test titles cite IDs, for example `[NFR-8]`
 - **Acceptance for UI:** the screenshot comparison passes within the agreed threshold. Changing a reference image needs Hashir's approval, so mention it in your report.
-- **Gate:** `scripts/verify.sh` and the code review step (CodeRabbit, else `/code-review`), exactly as for S3.
+- **Gate:** by the task's tier, exactly as for S3 (ADR-043): light = `verify.sh --quick`, no code review, CI runs the full gate; normal = `--quick` plus `/code-review` medium, CI runs the full gate; high = full local `verify.sh` plus `/code-review` high, then CI.
 - **Report:** the same 15-line format as S3, plus `Screens:` with reference image paths.
 
 ## Checkpoints

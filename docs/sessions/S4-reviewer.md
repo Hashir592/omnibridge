@@ -81,9 +81,9 @@ Verdict: FIX REQUIRED | CONTINUE | APPROVED | BLOCKED
 
 ## Verdicts
 
-- **Halfway checkpoint:** `CONTINUE` when there are no open Blockers or Majors; otherwise `FIX REQUIRED`.
-- **Module end:** review **all** of the module's tasks, plus every earlier findings file for the module, and confirm each Blocker and Major resolution yourself.
+- **Halfway checkpoint:** `CONTINUE` when there are no open Blockers or Majors; otherwise `FIX REQUIRED`. Either way there is **no round 2** at halfway (ADR-044): S3 fixes the findings and records them in `docs/reviews/<module>-halfway-carryover.md`, which you check at the module end.
+- **Module end:** review **all** of the module's tasks, plus every earlier findings file and the halfway carry-over for the module, and confirm each Blocker and Major resolution yourself. Check every `squawk-ignore` waiver against ADR-045.
   - Declare **APPROVED** only if every Blocker and Major is resolved and verified, `verify.sh` passes, and every acceptance item passes.
   - Otherwise declare **BLOCKED**, listing exactly what blocks it.
 - **M02 exception:** M02 also needs the S5 audit (T-0206) to have no open Blocker or Major findings, with each resolution verified by you.
-- **Escalation:** after **2 fix rounds** on one checkpoint with a finding still disputed, stop. Print a `PASTE INTO SESSION 1` block summarising both positions and the evidence. S1 decides.
+- **Escalation:** after **2 fix rounds** at the module-end checkpoint with a finding still disputed, stop. Print a `PASTE INTO SESSION 1` block summarising both positions and the evidence. S1 decides.

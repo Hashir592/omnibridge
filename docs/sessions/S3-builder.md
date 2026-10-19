@@ -36,22 +36,28 @@ You build OmniBridge one task at a time from `docs/backlog.json`. Each task cove
 1. Read the documents above. Then inspect the existing code your task touches.
 2. Write a short plan in chat (at most 15 lines): files, approach, the tests you will write first, and risks.
 3. **If the task has `"risk": "high"`, stop and wait for Hashir to say "go".** Otherwise continue.
-4. Set the task's `status` to `in_progress`. Create the branch `task/<id>-<slug>`.
+4. Set the task's `status` to `in_progress`. Create the branch `task/<id>-<slug>`. If STATE.md names a **batch** (ADR-043, up to 3 light or normal tasks of one module), all of its tasks share one branch `task/<first-id>-<last-id>-<slug>` and one PR.
 5. Implement it with tests:
    - Write tests **first** for money, VAT, deletion, tenancy and permissions.
    - Every test title names the IDs it proves, for example `it('[USR-5] locks after 10 failures', …)`.
    - Use only synthetic data. PII-like fixture values carry the `PIIMARK-` prefix so the marker scan can find leaks.
-6. Run `scripts/verify.sh` (the full gate). It must pass completely.
+6. **Check by tier** (the task's `risk`, ADR-043). While working, run `scripts/verify.sh --quick`. Then:
+   - **light** and **normal**: no local full run. CI runs the full gate on the PR and must be green before merge.
+   - **high**: run `scripts/verify.sh` (the full gate) locally. It must pass completely before the PR, then CI runs it again.
    - Never weaken, skip or delete a test.
    - Never add `eslint-disable`, `@ts-ignore` or `@ts-expect-error` to get green.
    - Never lower a threshold.
-7. Run a **code review** on your diff (ADR-030):
+7. Run a **code review** on your diff (ADR-030), by tier:
+   - **light**: no code review.
+   - **normal**: `/code-review` at medium effort (or CodeRabbit).
+   - **high**: `/code-review` at high effort (or CodeRabbit).
    - **First choice: CodeRabbit.** Use the `/coderabbit:code-review` plugin skill, or the `coderabbit` CLI if it is installed.
    - **Fallback: `/code-review`.** If CodeRabbit cannot run (CLI missing, not logged in, plugin error), run Claude Code's `/code-review` skill on the task diff instead. Say in your report which reviewer ran and why.
    - Fix the real findings and re-run until the review is clean, or until only false positives remain. List each false positive with a one-line reason.
-   - **Never skip the review.** If neither reviewer can run, say so and stop.
+   - **Never skip the review on normal or high tasks.** If neither reviewer can run, say so and stop.
 8. Commit using Conventional Commits with a `Refs:` footer of PRD IDs.
-   - Push the branch and open a PR to `main`. The PR description includes the report from step 9.
+   - Push the branch and open a PR to `main`. The PR description includes the report from step 9. In a batch, open it as a **draft** after the first task, add each task's report to it, and mark it ready when the last task is done and CI is green.
+   - **Do not wait for CI.** Start the next task (or the next batch task) straight away. If CI goes red, fix it on the same branch first.
    - Merge only after CI is green **and** Hashir approves.
 9. Close with a report of **at most 15 lines**:
 
@@ -93,8 +99,9 @@ Run: scripts/verify.sh (and any extra commands listed in the report)
 ````
 
 3. **Stop.** Do not start the next task until S4's findings come back.
-4. Fix every **Blocker** and **Major** finding. Under each one in `docs/reviews/<module>-<checkpoint>-findings.md`, add `Resolution:` with the commit and the evidence. Minor findings may become follow-ups.
-5. Send the fixes back to S4 the same way. At most **2 fix rounds** are allowed per checkpoint. After that, the disagreement goes to S1 as a decision.
+4. Fix every **Blocker** and **Major** finding. Under each one in `docs/reviews/<module>-<checkpoint>-findings.md`, add `Resolution:` with the commit and the evidence. Minor findings may become follow-ups. Treat the fix PR as **high** tier (full local gate, `/code-review` high), and give each Blocker fix a regression test.
+5. **Halfway (ADR-044): no round 2.** Do not send the fixes back to S4. Write `docs/reviews/<module>-halfway-carryover.md` with every fix (finding, commit, test), every deferred item and every observation S4 should see. Then continue with the next task once Hashir merges the fix PR.
+   **Module end:** send the fixes back to S4 the same way, and include the halfway carry-over in the end report. At most **2 fix rounds** at module end; after that the disagreement goes to S1.
 6. The next module starts only after S4 declares the module **APPROVED**. For M02, the S5 audit (T-0206) must also have no open Blocker or Major findings.
 
 ## Coverage rules (`scripts/req-coverage.mjs`, built in T-0101)
