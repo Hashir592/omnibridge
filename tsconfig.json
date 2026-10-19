@@ -14,5 +14,7 @@
     "tests/**/*.ts",
     "*.config.ts"
   ],
-  "exclude": ["**/dist/**", "**/node_modules/**"]
+  // apps/ui is a browser app (DOM, JSX, Vite types); it is typechecked by its own tsconfig in its
+  // build step (pnpm -r build), so server code here never sees DOM globals.
+  "exclude": ["**/dist/**", "**/node_modules/**", "apps/ui/**"]
 }

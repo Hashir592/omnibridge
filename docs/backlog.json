@@ -222,7 +222,7 @@
       "module": "M03",
       "session": "S2",
       "risk": "normal",
-      "status": "todo",
+      "status": "review",
       "id": "T-0301",
       "title": "Design direction and mock-ups",
       "goal": "Hashir (and the client) pick and lock the look from real, clickable screens before the component kit is built.",
