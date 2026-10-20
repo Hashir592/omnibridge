@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { TenantContext } from '@omnibridge/core';
+import type { TenantContext, TenantRunner } from '@omnibridge/core';
 import type { Logger } from '@omnibridge/logger';
 import type { Db, JobWithMetadata, PgBoss, SendOptions, WorkOptions } from 'pg-boss';
 import type { z } from 'zod';
@@ -93,10 +93,15 @@ export interface SendInput<T> {
 export interface RunningJob<T> {
   readonly envelope: JobEnvelope<T>;
   readonly payload: T;
+  /**
+   * The job's tenant context, bound to the one transaction the handler runs in (invariant 3):
+   * every repository call made with it joins that transaction, which commits when the handler
+   * resolves and rolls back when it throws.
+   */
   readonly ctx: TenantContext;
   /** 1 on the first run, 2 on the first retry, and so on. */
   readonly attempt: number;
-  /** Records progress for GET /jobs/{id} (NFR-4). */
+  /** Records progress for GET /jobs/{id} (NFR-4); commits at once, outside the job's transaction. */
   progress(percent: number): Promise<void>;
 }
 
@@ -109,10 +114,16 @@ export type WorkTuning = Pick<WorkOptions, 'localConcurrency' | 'pollingInterval
 /**
  * Sends and runs workspace jobs through pg-boss (ADR-009) with the envelope of invariant 19,
  * idempotency keys, per-account ordering or caps, progress records and dead-letter redrive.
+ *
+ * Each handler runs in one tenant transaction opened from its envelope (TEN-1, invariant 3).
+ * The job record and lease bookkeeping run in their own short tenant transactions instead, so
+ * progress and slots are visible while the job runs (PS-017). Give them a pool of their own, so
+ * they never wait behind handler connections.
  */
 export class JobQueue {
   readonly #boss: PgBoss;
   readonly #records: JobRecordStore;
+  readonly #tenancy: TenantRunner;
   readonly #limiter: ConcurrencyLimiter | undefined;
   readonly #gate: Gate | undefined;
   readonly #log: Logger;
@@ -120,6 +131,8 @@ export class JobQueue {
   constructor(options: {
     boss: PgBoss;
     records: JobRecordStore;
+    /** Opens the one tenant transaction each handler runs in. */
+    tenancy: TenantRunner;
     /** Required to run job types with a perAccountCap. */
     limiter?: ConcurrencyLimiter;
     /** Most jobs this process runs at once, across all queues (WORKER_CONCURRENCY). */
@@ -136,6 +149,7 @@ export class JobQueue {
       options.globalConcurrency === undefined ? undefined : new Gate(options.globalConcurrency);
     this.#boss = options.boss;
     this.#records = options.records;
+    this.#tenancy = options.tenancy;
     this.#limiter = options.limiter;
     this.#log = options.logger.child({ component: 'queue' });
   }
@@ -233,7 +247,8 @@ export class JobQueue {
       );
       return;
     }
-    const ctx: TenantContext = { workspaceId: envelope.workspace_id };
+    // For the bookkeeping only: job records and leases carry no company data.
+    const ctx: TenantContext = { workspaceId: envelope.workspace_id, companyIds: [] };
     const key = { type: def.type, idempotencyKey: envelope.idempotency_key };
     const attempt = job.retryCount + 1;
     const fields = { workspaceId: ctx.workspaceId, jobId: job.id, jobName: def.type, attempt };
@@ -241,17 +256,21 @@ export class JobQueue {
     try {
       // Inside the try, so a failed update still releases the slot (F-M01-end-01).
       await this.#records.update(ctx, key, { state: 'active', attempt, errorCode: null });
-      const result = await handler({
-        envelope: { ...envelope, attempt },
-        payload: envelope.payload,
-        ctx,
-        attempt,
-        progress: (percent) =>
-          this.#records.update(ctx, key, {
-            state: 'active',
-            percent: Math.max(0, Math.min(100, Math.round(percent))),
+      const result = await this.#tenancy.runWorkspace(
+        { workspaceId: envelope.workspace_id },
+        (tenant) =>
+          handler({
+            envelope: { ...envelope, attempt },
+            payload: envelope.payload,
+            ctx: tenant,
+            attempt,
+            progress: (percent) =>
+              this.#records.update(ctx, key, {
+                state: 'active',
+                percent: Math.max(0, Math.min(100, Math.round(percent))),
+              }),
           }),
-      });
+      );
       await this.#records.update(ctx, key, {
         state: 'completed',
         percent: 100,
@@ -286,7 +305,7 @@ export class JobQueue {
     if (typeof workspaceId !== 'string' || typeof idempotencyKey !== 'string') return;
     await this.#records
       .update(
-        { workspaceId },
+        { workspaceId, companyIds: [] },
         { type: def.type, idempotencyKey },
         {
           state: 'failed',

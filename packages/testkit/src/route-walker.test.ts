@@ -9,9 +9,9 @@ import {
 } from '@omnibridge/contract';
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { walkRoutes } from './route-walker.ts';
+import { walkIsolation, walkRoutes } from './route-walker.ts';
 
-describe('route walker (stub until T-0201)', () => {
+describe('route walker metadata', () => {
   it('[SEC-3] enumerates every registry route with its permission metadata', () => {
     const walked = walkRoutes(contractRoutes);
     expect(walked.map((r) => r.id)).toEqual(contractRoutes.map((r) => r.id));
@@ -55,5 +55,64 @@ describe('route walker (stub until T-0201)', () => {
     const [health] = contractRoutes;
     const withoutTab = Object.fromEntries(Object.entries(health).filter(([k]) => k !== 'tab'));
     expect(() => walkRoutes([withoutTab as unknown as AnyRoute])).toThrow(/getHealth: tab/);
+  });
+});
+
+describe('isolation walk (TEN-1, AT-1)', () => {
+  const meta = { tab: 'none', adminOnly: false, companyScoped: false } as const;
+  const getThing = defineRoute({
+    ...meta,
+    auth: 'session',
+    id: 'getThing',
+    method: 'GET',
+    path: '/things/:id',
+    params: z.object({ id: z.string() }),
+    responses: { 200: z.object({ id: z.string() }) },
+  });
+  const listThings = defineRoute({
+    ...meta,
+    auth: 'session',
+    id: 'listThings',
+    method: 'GET',
+    path: '/things',
+    responses: { 200: z.object({ items: z.array(z.string()) }) },
+  });
+  const base = {
+    anonymous: {},
+    workspaceA: { 'x-test-session': 'a' },
+    markers: ['B-MARKER'],
+  };
+
+  it('[TEN-1] fails a route that has no walker call', async () => {
+    await expect(
+      walkIsolation({
+        ...base,
+        routes: [getThing, listThings],
+        againstB: { getThing: { params: { id: 'b1' } } },
+        inject: () => Promise.resolve({ statusCode: 401, body: '' }),
+      }),
+    ).rejects.toThrow(/listThings/);
+  });
+
+  it('[TEN-1] flags a leaked marker, and a session route that answers 200 for an id of B', async () => {
+    const outcomes = await walkIsolation({
+      ...base,
+      routes: [getThing, listThings],
+      againstB: { getThing: { params: { id: 'b1' } }, listThings: {} },
+      inject: (req) => {
+        if (req.headers['x-test-session'] === undefined) {
+          return Promise.resolve({ statusCode: 401, body: '{}' });
+        }
+        return Promise.resolve(
+          req.url === '/things/b1'
+            ? { statusCode: 200, body: '{"id":"b1"}' }
+            : { statusCode: 200, body: '{"items":["B-MARKER"]}' },
+        );
+      },
+    });
+    expect(outcomes.filter((o) => !o.ok)).toEqual([
+      expect.objectContaining({ route: 'getThing', caller: 'workspace-a', status: 200 }),
+      expect.objectContaining({ route: 'listThings', caller: 'workspace-a', leaked: ['B-MARKER'] }),
+    ]);
   });
 });

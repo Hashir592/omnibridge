@@ -74,7 +74,82 @@ export interface FilesTable {
   created_at: Generated<Date>;
 }
 
+/** bigint columns that may be null: read as string or null, written as number or null. */
+type NullableBigInt = ColumnType<string | null, number | null | undefined, number | null>;
+type NullableTime = ColumnType<Date | null, Date | null | undefined, Date | null>;
+
+export interface WorkspacesTable {
+  id: string;
+  name: string;
+  plan: Generated<'free_internal'>;
+  max_channel_accounts: NullableBigInt;
+  max_users: NullableBigInt;
+  timezone: Generated<string>;
+  currency: Generated<'GBP'>;
+  default_vat_rate_bp: ColumnType<string, number | undefined, number>;
+  /** Fixed at 25 and never written (TEN-6). */
+  pii_retention_days: ColumnType<string, never, never>;
+  created_at: Generated<Date>;
+}
+
+export type VatPeriod = 'stagger_1' | 'stagger_2' | 'stagger_3' | 'monthly';
+
+export interface CompaniesTable {
+  id: string;
+  workspace_id: string;
+  legal_name: string;
+  trading_name: string;
+  company_number: string | null;
+  vat_number: string | null;
+  address_line1: string;
+  address_line2: string | null;
+  address_city: string;
+  address_postcode: string;
+  address_country: Generated<string>;
+  vat_period: Generated<VatPeriod>;
+  is_fulfilment_provider: Generated<boolean>;
+  is_purchasing_company: Generated<boolean>;
+  badge_colour: Generated<string>;
+  created_at: Generated<Date>;
+}
+
+export type ChannelProvider = 'amazon' | 'amazon_ads' | 'ebay' | 'website';
+
+export interface ChannelAccountsTable {
+  id: string;
+  workspace_id: string;
+  company_id: string;
+  provider: ChannelProvider;
+  display_name: string;
+  orders_seen_at: NullableTime;
+  archived_at: NullableTime;
+  created_at: Generated<Date>;
+}
+
+export interface UsersTable {
+  id: string;
+  email: string;
+  name: string;
+  /** Never written by ob_app (column grants, migration 0007). */
+  platform_admin: ColumnType<boolean, never, never>;
+  created_at: Generated<Date>;
+}
+
+export type MembershipRole = 'admin' | 'member';
+
+export interface MembershipsTable {
+  workspace_id: string;
+  user_id: string;
+  role: MembershipRole;
+  created_at: Generated<Date>;
+}
+
 export interface MainDb {
+  'app.workspaces': WorkspacesTable;
+  'app.companies': CompaniesTable;
+  'app.channel_accounts': ChannelAccountsTable;
+  'app.users': UsersTable;
+  'app.memberships': MembershipsTable;
   'app.data_keys': DataKeysTable;
   'app.credentials': CredentialsTable;
   'app.job_records': JobRecordsTable;

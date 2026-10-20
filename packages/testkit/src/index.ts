@@ -1,7 +1,8 @@
 /**
  * Fixtures, synthetic data with PII markers, and the route walker (later tasks).
  *
- * T-0101 adds the PostgreSQL helper that integration tests use; T-0102 the route walker stub.
+ * T-0101 adds the PostgreSQL helper that integration tests use; T-0102 the route walker stub;
+ * T-0201 the isolation walk and the stub auth used until T-0203.
  */
 export const PACKAGE_NAME = '@omnibridge/testkit';
 
@@ -9,4 +10,20 @@ export const PACKAGE_NAME = '@omnibridge/testkit';
 export const PII_MARKER = 'PIIMARK-';
 
 export { POSTGRES_IMAGE, startRoleCluster, type RoleCluster } from './postgres.ts';
-export { walkRoutes, type WalkedRoute } from './route-walker.ts';
+export {
+  walkIsolation,
+  walkRoutes,
+  type InjectRequest,
+  type IsolationWalk,
+  type WalkCall,
+  type WalkedRoute,
+  type WalkOutcome,
+} from './route-walker.ts';
+export {
+  platformHeaders,
+  sessionHeaders,
+  stubAuth,
+  TEST_PLATFORM_HEADER,
+  TEST_SESSION_HEADER,
+  type StubAuth,
+} from './auth-stub.ts';

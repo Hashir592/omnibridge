@@ -28,6 +28,15 @@ export { PROBLEM_CONTENT_TYPE, ProblemSchema, type Problem } from './problem.ts'
 export { contractRoutes, OPENAPI_INFO, type ContractRoutes } from './registry.ts';
 export { getJob, JobProgressSchema, type JobProgress } from './routes/jobs.ts';
 export { getFile } from './routes/files.ts';
+export {
+  AddressSchema,
+  CompanySchema,
+  createCompany,
+  createWorkspace,
+  listCompanies,
+  NewCompanySchema,
+  type Company,
+} from './routes/tenancy.ts';
 export { FileDownloadSchema, type FileDownload } from './download.ts';
 export {
   assertRouteMetadata,

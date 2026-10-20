@@ -13,7 +13,14 @@ import {
   type RouteInput,
   type RouteResult,
 } from '@omnibridge/contract';
-import { ApiError, type ErrorCode } from '@omnibridge/core';
+import {
+  ApiError,
+  type ErrorCode,
+  type PlatformActor,
+  type SessionActor,
+  type TenantContext,
+  type TenantRunner,
+} from '@omnibridge/core';
 import { z } from 'zod';
 import type {
   FastifyBaseLogger,
@@ -39,9 +46,34 @@ declare module 'fastify' {
   }
 }
 
+/**
+ * What the route's `auth` kind adds to a handler's input (SEC-3): a session route gets the
+ * signed-in user and a tenant context bound to the request's one transaction (invariant 3); a
+ * platform route gets the operator, and opens tenant transactions itself for the workspace it
+ * acts on.
+ */
+export type AuthInput<T extends AnyRoute> = T['auth'] extends 'session'
+  ? { session: SessionActor; tenant: TenantContext }
+  : T['auth'] extends 'platform'
+    ? { platform: PlatformActor }
+    : unknown;
+
 export type RouteHandler<T extends AnyRoute> = (
-  input: RouteInput<T> & { request: FastifyRequest },
+  input: RouteInput<T> & { request: FastifyRequest } & AuthInput<T>,
 ) => Promise<RouteResult<T>>;
+
+/** Who is calling, resolved before validation, so an anonymous caller learns nothing more. */
+export interface AuthOptions {
+  /**
+   * The signed-in user of a `session` route. Until T-0203 production passes none, so every
+   * session route answers 401: closed, never open.
+   */
+  resolveSession?: (request: FastifyRequest) => SessionActor | undefined;
+  /** The operator of a `platform` route; none in production until T-0203, so 401. */
+  resolvePlatform?: (request: FastifyRequest) => PlatformActor | undefined;
+  /** Opens the request's one tenant transaction (required with resolveSession). */
+  tenancy?: TenantRunner;
+}
 
 /** One handler per route id. A missing handler is a type error and a startup failure. */
 export type Handlers<R extends readonly AnyRoute[]> = {
@@ -51,6 +83,40 @@ export type Handlers<R extends readonly AnyRoute[]> = {
 export interface RegisterOptions<R extends readonly AnyRoute[]> {
   /** Per-route log level, e.g. quiet health checks. Keys must be route ids. */
   logLevels?: Readonly<Partial<Record<R[number]['id'], 'warn' | 'error'>>>;
+  auth?: AuthOptions;
+}
+
+type Actor =
+  | { kind: 'public' }
+  | { kind: 'session'; session: SessionActor }
+  | { kind: 'platform'; platform: PlatformActor };
+
+/** The caller of each request, set by the route's onRequest hook. */
+const actors = new WeakMap<FastifyRequest, Actor>();
+
+/**
+ * Resolves the caller for the route's auth kind, or throws 401 (SEC-3). `service` and
+ * `signed-webhook` have no check yet, so they fail closed until the module that needs them
+ * builds one.
+ */
+function authenticate(route: AnyRoute, request: FastifyRequest, auth: AuthOptions): Actor {
+  const unauthorized = () => new ApiError({ status: 401, code: 'unauthorized' });
+  switch (route.auth) {
+    case 'public':
+      return { kind: 'public' };
+    case 'session': {
+      const session = auth.resolveSession?.(request);
+      if (session === undefined) throw unauthorized();
+      return { kind: 'session', session };
+    }
+    case 'platform': {
+      const platform = auth.resolvePlatform?.(request);
+      if (platform === undefined) throw unauthorized();
+      return { kind: 'platform', platform };
+    }
+    default:
+      throw unauthorized();
+  }
 }
 
 export interface InstallOptions {
@@ -229,9 +295,13 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
   app: App<L>,
   routes: R,
   handlers: Handlers<R>,
-  { logLevels }: RegisterOptions<R> = {},
+  { logLevels, auth = {} }: RegisterOptions<R> = {},
 ): void {
   const levels: Readonly<Record<string, 'warn' | 'error' | undefined>> = logLevels ?? {};
+  const { tenancy } = auth;
+  if (auth.resolveSession !== undefined && tenancy === undefined) {
+    throw new ContractError('Session routes need a tenancy to open their tenant transaction');
+  }
   const seen = new Set<string>();
   const byId = handlers as unknown as Readonly<Record<string, RouteHandler<AnyRoute> | undefined>>;
   for (const route of routes) {
@@ -263,13 +333,39 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
         ...(route.body ? { body: route.body } : {}),
         response: responseSchemas(route.responses),
       },
+      // Before validation: an anonymous caller gets 401, never a field-by-field 400.
+      onRequest: (request, _reply, done) => {
+        try {
+          actors.set(request, authenticate(route, request, auth));
+          done();
+        } catch (err) {
+          done(err as Error);
+        }
+      },
       handler: async (request, reply) => {
-        const result = await handler({
+        const input = {
           params: route.params ? request.params : undefined,
           query: route.query ? request.query : undefined,
           body: route.body ? request.body : undefined,
           request,
-        } as RouteInput<AnyRoute> & { request: FastifyRequest });
+        };
+        const actor = actors.get(request) ?? { kind: 'public' };
+        const call = handler as (input: object) => Promise<RouteResult<AnyRoute>>;
+        let result: RouteResult<AnyRoute>;
+        if (actor.kind === 'session') {
+          // One tenant transaction for the whole request (invariant 3), committed before the
+          // response is sent; the handler's errors roll it back.
+          if (tenancy === undefined) throw new ApiError({ status: 401, code: 'unauthorized' });
+          const { session } = actor;
+          result = await tenancy.runWorkspace(
+            { workspaceId: session.workspaceId, userId: session.userId },
+            (tenant) => call({ ...input, session, tenant }),
+          );
+        } else if (actor.kind === 'platform') {
+          result = await call({ ...input, platform: actor.platform });
+        } else {
+          result = await call(input);
+        }
         if (route.responses[result.status] === FileDownloadSchema) {
           // A file stream (NFR-5): sent as is, never cached, never sniffed by the browser.
           const file = result.body as FileDownload;

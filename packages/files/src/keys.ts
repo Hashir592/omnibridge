@@ -71,10 +71,15 @@ export class FileKeyStore {
     return unwrapDataKey(this.#keyring, fromFile(workspaceId, JSON.parse(text) as KeyFile));
   }
 
-  /** KEK rotation for files: re-wraps every workspace's file keys; file bodies are untouched. */
+  /**
+   * KEK rotation for files: re-wraps every workspace's file keys; file bodies are untouched. Keys
+   * under a newer KEK than this process holds (another container already on the next keyring,
+   * mid-rollout) are left alone; `countNewer` reports them (R2-02).
+   */
   async rewrapAll(): Promise<number> {
     let count = 0;
     for await (const { workspaceId, path, file } of this.#keyFiles()) {
+      if (file.kekVersion > this.#keyring.activeVersion) continue;
       const stored = fromFile(workspaceId, file);
       const next = rewrapDataKey(this.#keyring, stored);
       if (next === stored) continue;
@@ -96,6 +101,15 @@ export class FileKeyStore {
     let count = 0;
     for await (const { file } of this.#keyFiles()) {
       if (file.kekVersion < this.#keyring.activeVersion) count += 1;
+    }
+    return count;
+  }
+
+  /** How many file keys are under a newer KEK than this process holds (rotation check, R2-02). */
+  async countNewer(): Promise<number> {
+    let count = 0;
+    for await (const { file } of this.#keyFiles()) {
+      if (file.kekVersion > this.#keyring.activeVersion) count += 1;
     }
     return count;
   }

@@ -3,18 +3,19 @@ import type { TenantContext } from '@omnibridge/core';
 import { CryptoError, generateKekLine, parseKeyring, Secret } from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
-import { Kysely, PostgresDialect, sql } from 'kysely';
+import { Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CredentialRepository, type CredentialRef } from './credentials.ts';
 import { migrateMain } from './migrate.ts';
+import { withTenantTransaction } from './tenant.ts';
 import type { MainDb } from './schema.ts';
 
 const ROLES = ['ob_owner', 'ob_app', 'ob_platform'] as const;
 const DAY_MS = 86_400_000;
 
-const A: TenantContext = { workspaceId: randomUUID() };
-const B: TenantContext = { workspaceId: randomUUID() };
+const A: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
+const B: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
 const marker = () => `SECRETMARK-${randomUUID()}`;
 
 describe('credential store (SEC-6, INT-3)', () => {
@@ -26,10 +27,17 @@ describe('credential store (SEC-6, INT-3)', () => {
   const repo = (lines: string[] = [kek1], logger = silent) =>
     new CredentialRepository({ keyring: parseKeyring('secrets', lines.join('\n')), logger });
 
-  /** One transaction with SET LOCAL app.workspace_id, as T-0201's wrappers will open. */
+  /**
+   * One tenant transaction, as the request and job wrappers open (T-0201). Each test workspace is
+   * created on first use: the workspace foreign keys (migrations 0008, 0009) require the row.
+   */
   const asTenant = <T>(ctx: TenantContext, fn: (trx: Kysely<MainDb>) => Promise<T>) =>
-    db.transaction().execute(async (trx) => {
-      await sql`SELECT set_config('app.workspace_id', ${ctx.workspaceId}, true)`.execute(trx);
+    withTenantTransaction(db, ctx, async (trx) => {
+      await trx
+        .insertInto('app.workspaces')
+        .values({ id: ctx.workspaceId, name: 'Credential test' })
+        .onConflict((oc) => oc.column('id').doNothing())
+        .execute();
       return fn(trx);
     });
 
@@ -210,7 +218,7 @@ describe('credential store (SEC-6, INT-3)', () => {
   });
 
   it('[SEC-6] KEK rotation re-wraps DEKs in the database; stored data is untouched and decrypts', async () => {
-    const C: TenantContext = { workspaceId: randomUUID() };
+    const C: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
     const value = marker();
     const ref: CredentialRef = { kind: 'ebay.refresh_token' };
     await asTenant(C, (trx) => repo([kek1]).store(trx, C, ref, 'current', new Secret(value)));
@@ -244,7 +252,7 @@ describe('credential store (SEC-6, INT-3)', () => {
       destination: { write: (line: string) => lines.push(line) },
     });
     const r = repo([kek1], logger);
-    const D: TenantContext = { workspaceId: randomUUID() };
+    const D: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
     const values = [marker(), marker(), marker()];
     const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
 
@@ -280,7 +288,7 @@ describe('credential store (SEC-6, INT-3)', () => {
   });
 
   it('[INT-3] unknown credential kinds are refused, not silently stored', async () => {
-    const E: TenantContext = { workspaceId: randomUUID() };
+    const E: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
     // A caller that bypasses the CredentialKind type (plain JS, a cast) still cannot write a typo.
     const typo = { kind: 'amazon.refresh_tokn' } as unknown as CredentialRef;
     await expect(
@@ -297,8 +305,8 @@ describe('credential store (SEC-6, INT-3)', () => {
   });
 
   it('[SEC-6] re-wrap leaves DEKs under a newer KEK alone during a rollout', async () => {
-    const F: TenantContext = { workspaceId: randomUUID() };
-    const G: TenantContext = { workspaceId: randomUUID() };
+    const F: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
+    const G: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
     // A container already on [v1, v2] creates F's data key under v2 ...
     await asTenant(F, (trx) =>
       repo([kek1, kek2]).store(trx, F, { kind: 'dpd.api_key' }, 'current', new Secret('x')),
@@ -323,7 +331,7 @@ describe('credential store (SEC-6, INT-3)', () => {
   });
 
   it('[SEC-6] concurrent re-authorisations of one account both succeed, one after the other', async () => {
-    const H: TenantContext = { workspaceId: randomUUID() };
+    const H: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
     const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
     await asTenant(H, (trx) => repo().store(trx, H, ref, 'current', new Secret(marker())));
     const [first, second] = [marker(), marker()];

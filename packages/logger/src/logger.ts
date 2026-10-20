@@ -36,6 +36,9 @@ export const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
   'queue',
   'attempt',
   'workspaceId',
+  // Tenancy (T-0201): ids only. A user id is a random UUID, never a name or an email.
+  'companyId',
+  'userId',
   'channelAccountId',
   'migration',
   'status',

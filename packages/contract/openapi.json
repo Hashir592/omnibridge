@@ -106,6 +106,85 @@
           "updated_at"
         ]
       },
+      "AddressInput": {
+        "type": "object",
+        "properties": {
+          "line1": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "line2": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "city": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "postcode": { "type": "string", "minLength": 2, "maxLength": 10 },
+          "country": { "type": "string", "pattern": "^[A-Z]{2}$" }
+        },
+        "required": ["line1", "city", "postcode"]
+      },
+      "NewCompanyInput": {
+        "type": "object",
+        "properties": {
+          "legal_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "trading_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "company_number": {
+            "anyOf": [{ "type": "string", "pattern": "^[A-Z0-9]{8}$" }, { "type": "null" }]
+          },
+          "vat_number": {
+            "anyOf": [
+              { "type": "string", "pattern": "^GB([0-9]{9}|[0-9]{12})$" },
+              { "type": "null" }
+            ]
+          },
+          "registered_address": { "$ref": "#/components/schemas/AddressInput" },
+          "vat_period": {
+            "type": "string",
+            "enum": ["stagger_1", "stagger_2", "stagger_3", "monthly"]
+          },
+          "is_fulfilment_provider": { "type": "boolean" },
+          "is_purchasing_company": { "type": "boolean" },
+          "badge_colour": { "type": "string", "pattern": "^#[0-9A-F]{6}$" }
+        },
+        "required": ["legal_name", "trading_name", "registered_address"]
+      },
+      "CompanyInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "legal_name": { "type": "string" },
+          "trading_name": { "type": "string" },
+          "company_number": { "type": ["string", "null"] },
+          "vat_number": { "type": ["string", "null"] },
+          "vat_period": {
+            "type": "string",
+            "enum": ["stagger_1", "stagger_2", "stagger_3", "monthly"]
+          },
+          "is_fulfilment_provider": { "type": "boolean" },
+          "is_purchasing_company": { "type": "boolean" },
+          "badge_colour": { "type": "string" }
+        },
+        "required": [
+          "id",
+          "legal_name",
+          "trading_name",
+          "company_number",
+          "vat_number",
+          "vat_period",
+          "is_fulfilment_provider",
+          "is_purchasing_company",
+          "badge_colour"
+        ]
+      },
+      "CreatedInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["id"]
+      },
       "Problem": {
         "type": "object",
         "properties": {
@@ -207,6 +286,89 @@
           "created_at",
           "updated_at"
         ],
+        "additionalProperties": false
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "line1": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "line2": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "city": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "postcode": { "type": "string", "minLength": 2, "maxLength": 10 },
+          "country": { "type": "string", "pattern": "^[A-Z]{2}$" }
+        },
+        "required": ["line1", "city", "postcode"],
+        "additionalProperties": false
+      },
+      "NewCompany": {
+        "type": "object",
+        "properties": {
+          "legal_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "trading_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "company_number": {
+            "anyOf": [{ "type": "string", "pattern": "^[A-Z0-9]{8}$" }, { "type": "null" }]
+          },
+          "vat_number": {
+            "anyOf": [
+              { "type": "string", "pattern": "^GB([0-9]{9}|[0-9]{12})$" },
+              { "type": "null" }
+            ]
+          },
+          "registered_address": { "$ref": "#/components/schemas/Address" },
+          "vat_period": {
+            "type": "string",
+            "enum": ["stagger_1", "stagger_2", "stagger_3", "monthly"]
+          },
+          "is_fulfilment_provider": { "type": "boolean" },
+          "is_purchasing_company": { "type": "boolean" },
+          "badge_colour": { "type": "string", "pattern": "^#[0-9A-F]{6}$" }
+        },
+        "required": ["legal_name", "trading_name", "registered_address"],
+        "additionalProperties": false
+      },
+      "Company": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "legal_name": { "type": "string" },
+          "trading_name": { "type": "string" },
+          "company_number": { "type": ["string", "null"] },
+          "vat_number": { "type": ["string", "null"] },
+          "vat_period": {
+            "type": "string",
+            "enum": ["stagger_1", "stagger_2", "stagger_3", "monthly"]
+          },
+          "is_fulfilment_provider": { "type": "boolean" },
+          "is_purchasing_company": { "type": "boolean" },
+          "badge_colour": { "type": "string" }
+        },
+        "required": [
+          "id",
+          "legal_name",
+          "trading_name",
+          "company_number",
+          "vat_number",
+          "vat_period",
+          "is_fulfilment_provider",
+          "is_purchasing_company",
+          "badge_colour"
+        ],
+        "additionalProperties": false
+      },
+      "Created": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["id"],
         "additionalProperties": false
       }
     }
@@ -336,6 +498,158 @@
               "application/octet-stream": {
                 "schema": { "type": "string", "format": "binary", "description": "File bytes" }
               }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/companies": {
+      "get": {
+        "operationId": "listCompanies",
+        "summary": "Companies the signed-in user may see",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Company" }
+                    }
+                  },
+                  "required": ["items"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/platform/workspaces": {
+      "post": {
+        "operationId": "createWorkspace",
+        "summary": "Create a workspace",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "max_channel_accounts": {
+                    "anyOf": [
+                      { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                      { "type": "null" }
+                    ]
+                  },
+                  "max_users": {
+                    "anyOf": [
+                      { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                      { "type": "null" }
+                    ]
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "platform",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Created" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/platform/workspaces/{workspaceId}/companies": {
+      "post": {
+        "operationId": "createCompany",
+        "summary": "Add a company to a workspace",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/NewCompanyInput" } }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "workspaceId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "platform",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Created" } }
             }
           },
           "4XX": {

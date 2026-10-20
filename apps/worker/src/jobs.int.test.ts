@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type { TenantContext } from '@omnibridge/core';
 import {
+  createMainDb,
   createQueues,
   JobLeaseRepository,
   JobRecordRepository,
   migrateMain,
+  Tenancy,
+  txTimeouts,
+  withTenantTransaction,
+  WorkspaceRepository,
   type MainDb,
+  type MainDbHandle,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import {
@@ -50,6 +56,11 @@ const cappedJob = defineJob({
 const wideA = defineJob({ type: 'test.wide_a', payload: z.object({}) });
 const wideB = defineJob({ type: 'test.wide_b', payload: z.object({}) });
 const idleJob = defineJob({ type: 'test.idle', payload: z.object({}) });
+const stuckJob = defineJob({
+  type: 'test.stuck',
+  payload: z.object({ mode: z.enum(['idle', 'slow']) }),
+  retry: { limit: 0, delaySeconds: 0 },
+});
 
 describe('durable job queue (NFR-3, OPS-10)', () => {
   let cluster: RoleCluster;
@@ -57,7 +68,9 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
   const bosses: PgBoss[] = [];
   const errors: unknown[] = [];
   const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
-  const ws: TenantContext = { workspaceId: randomUUID() };
+  const ws: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
+  /** Handler transactions get their own pool, apart from the bookkeeping one (PS-017). */
+  let handlers: MainDbHandle;
 
   const startBoss = async (overrides = {}) => {
     const boss = createWorkerBoss(cluster.connection('ob_app'), {
@@ -70,11 +83,12 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
     bosses.push(boss);
     return boss;
   };
-  const queueOn = (boss: PgBoss) =>
+  const queueOn = (boss: PgBoss, handlerDb: MainDbHandle = handlers) =>
     new JobQueue({
       boss,
       records: new JobRecordRepository(db),
       limiter: new JobLeaseRepository(db),
+      tenancy: new Tenancy(handlerDb.db),
       logger,
     });
 
@@ -93,12 +107,25 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
     cluster = await startRoleCluster('db-main', 'omnibridge', ROLES);
     const owner = cluster.connection('ob_owner');
     await migrateMain(owner);
-    await createQueues(owner, [restartJob, onceJob, flakyJob, cappedJob, wideA, wideB, idleJob]);
+    await createQueues(owner, [
+      restartJob,
+      onceJob,
+      flakyJob,
+      cappedJob,
+      wideA,
+      wideB,
+      idleJob,
+      stuckJob,
+    ]);
     db = new Kysely<MainDb>({
       dialect: new PostgresDialect({
         pool: new pg.Pool({ ...cluster.connection('ob_app'), max: 6 }),
       }),
     });
+    handlers = createMainDb({ ...cluster.connection('ob_app'), max: 6 });
+    await new Tenancy(handlers.db).run(ws, (ctx) =>
+      new WorkspaceRepository(handlers.db).create(ctx, { name: 'Worker test' }),
+    );
   });
 
   // Each test's pg-boss is closed after it, so the tests stay inside ob_app's connection limit.
@@ -109,14 +136,18 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
   });
 
   afterAll(async () => {
+    await handlers.destroy();
     await db.destroy();
     await cluster.container.stop();
   });
 
   it('[NFR-3] job survives worker restart', async () => {
     const first = await startBoss();
+    // The "dead" worker never releases its handler connection, as in a real crash, so it gets a
+    // pool of its own that is never closed; stopping the container ends it.
+    const dying = createMainDb({ ...cluster.connection('ob_app'), max: 1 });
     let started = false;
-    await queueOn(first).work(
+    await queueOn(first, dying).work(
       restartJob,
       () =>
         new Promise<never>(() => {
@@ -124,7 +155,7 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
         }),
       FAST,
     );
-    await queueOn(first).send(restartJob, {
+    await queueOn(first, dying).send(restartJob, {
       ctx: ws,
       idempotencyKey: 'restart-1',
       payload: { n: 1 },
@@ -258,6 +289,7 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
     const queue = new JobQueue({
       boss,
       records: new JobRecordRepository(db),
+      tenancy: new Tenancy(handlers.db),
       globalConcurrency: 3,
       logger,
     });
@@ -333,6 +365,57 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
       })
       .toBe(1);
     expect(runs).toBe(0);
+  });
+
+  it('[NFR-3] a stuck job is cut off by the worker transaction timeouts', async () => {
+    // The worker's settings (WORKER_TX_TIMEOUTS), shortened so the test runs in seconds.
+    const short = createMainDb({
+      ...cluster.connection('ob_app'),
+      max: 2,
+      ...txTimeouts({ statementMs: 1_000, idleInTransactionMs: 1_000 }),
+    });
+    try {
+      const boss = await startBoss();
+      const failures = new Map<string, string>();
+      await queueOn(boss, short).work(
+        stuckJob,
+        async (job) => {
+          const query = (text: string) =>
+            withTenantTransaction(short.db, job.ctx, (trx) => sql.raw(text).execute(trx));
+          try {
+            if (job.payload.mode === 'slow') {
+              await query('SELECT pg_sleep(5)');
+            } else {
+              await query('SELECT 1');
+              await new Promise((resolve) => setTimeout(resolve, 2_500)); // idle in transaction
+              await query('SELECT 1');
+            }
+          } catch (err) {
+            failures.set(job.payload.mode, String(err));
+            throw err;
+          }
+        },
+        FAST,
+      );
+      for (const mode of ['idle', 'slow'] as const) {
+        await queueOn(boss, short).send(stuckJob, {
+          ctx: ws,
+          idempotencyKey: `stuck-${mode}`,
+          payload: { mode },
+        });
+      }
+      for (const mode of ['idle', 'slow']) {
+        await expect
+          .poll(async () => (await record('test.stuck', `stuck-${mode}`))?.state, {
+            timeout: 60_000,
+          })
+          .toBe('failed');
+      }
+      expect(failures.get('slow')).toMatch(/statement timeout/);
+      expect(failures.get('idle')).toMatch(/idle-in-transaction|terminat|not queryable/i);
+    } finally {
+      await short.destroy();
+    }
   });
 
   it('[NFR-3] platform cron jobs are registered on Europe/London time', async () => {

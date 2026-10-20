@@ -248,6 +248,38 @@ services:
       retries: 3
       start_period: 30s
 
+  # KEK rotation for every workspace (SEC-6, runbook "Rotate a master key"). One-off and opt-in:
+  #   docker compose -f infra/compose/compose.yaml --profile ops run --rm rewrap-keys
+  # The only container with ob_platform (to list the workspaces), ob_app, the secrets KEK and a
+  # writable files volume, so web itself never holds ob_platform (T-0201).
+  rewrap-keys:
+    <<: *job-hardening
+    image: omnibridge/web:dev
+    build:
+      context: ../..
+      dockerfile: infra/docker/node-app.Dockerfile
+      args: { APP: web }
+    profiles: [ops]
+    command: [node, dist/rewrap-keys.js]
+    environment:
+      <<: *db-main-env
+      DB_MAIN_USER: ob_app
+      DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
+      DB_PLATFORM_USER: ob_platform
+      DB_PLATFORM_PASSWORD_FILE: /run/secrets/ob_platform_password
+      SECRETS_KEK_FILE: /run/secrets/secrets_kek
+      FILES_DIR: /data/files
+      APP_VERSION: ${APP_VERSION:-0.0.0-dev}
+    secrets: [ob_app_password, ob_platform_password, secrets_kek]
+    volumes:
+      - files_data:/data/files
+    networks: [ob_db]
+    depends_on:
+      migrate-main: { condition: service_completed_successfully }
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 64
+
   pii-vault:
     <<: *app-hardening
     image: omnibridge/pii-vault:dev
@@ -319,7 +351,8 @@ volumes:
 
 # Dev secret files are materialised by scripts/dev-secrets.sh from infra/secrets/dev.sops.yaml
 # (git-ignored, synthetic). Containers read them only as /run/secrets/<name> files (SEC-5). The two
-# master keys: secrets_kek only in web and worker, pii_kek only in pii-vault (ADR-007, ADR-014).
+# master keys: secrets_kek only in web, worker and the rewrap-keys ops job, pii_kek only in
+# pii-vault (ADR-007, ADR-014).
 # Register: docs/ops/secrets-register.md. Production secrets arrive in M22.
 secrets:
   db_main_superuser_password:

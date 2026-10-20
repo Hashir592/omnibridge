@@ -9,6 +9,8 @@ import {
   FileRepository,
   JobRecordRepository,
   migrateMain,
+  Tenancy,
+  WorkspaceRepository,
   type MainDb,
 } from '@omnibridge/db';
 import {
@@ -69,7 +71,7 @@ describe('upload scanning against clamd (SEC-2, NFR-5)', () => {
   let queue: JobQueue;
   const root = mkdtempSync(join(tmpdir(), 'ob-files-'));
   const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
-  const ws: TenantContext = { workspaceId: randomUUID() };
+  const ws: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
 
   beforeAll(async () => {
     [cluster, clamd] = await Promise.all([
@@ -88,6 +90,9 @@ describe('upload scanning against clamd (SEC-2, NFR-5)', () => {
         pool: new pg.Pool({ ...cluster.connection('ob_app'), max: 4 }),
       }),
     });
+    await new Tenancy(db).run(ws, (ctx) =>
+      new WorkspaceRepository(db).create(ctx, { name: 'Scan test' }),
+    );
     const keyring = parseKeyring('secrets', generateKekLine(1));
     store = new EncryptedLocalFileStore({
       root,
@@ -97,7 +102,12 @@ describe('upload scanning against clamd (SEC-2, NFR-5)', () => {
     boss = createWorkerBoss(cluster.connection('ob_app'), { monitorIntervalSeconds: 1 });
     boss.on('error', () => undefined);
     await boss.start();
-    queue = new JobQueue({ boss, records: new JobRecordRepository(db), logger });
+    queue = new JobQueue({
+      boss,
+      records: new JobRecordRepository(db),
+      tenancy: new Tenancy(db),
+      logger,
+    });
     await queue.work(
       filesScanJob,
       scanFileHandler({
@@ -160,7 +170,7 @@ describe('upload scanning against clamd (SEC-2, NFR-5)', () => {
       declaredType: 'application/pdf',
     });
     await expect.poll(() => stateOf(id), { timeout: 120_000 }).toBe('clean');
-    const other: TenantContext = { workspaceId: randomUUID() };
+    const other: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
     await expect(store.get(other, id)).rejects.toThrow(FileNotReadable);
   });
 });

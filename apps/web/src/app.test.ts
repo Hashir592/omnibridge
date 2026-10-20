@@ -1,4 +1,6 @@
+import { contractRoutes } from '@omnibridge/contract';
 import { createLogger } from '@omnibridge/logger';
+import { platformHeaders, sessionHeaders } from '@omnibridge/testkit';
 import { describe, expect, it } from 'vitest';
 import { buildWebApp, type HealthChecks } from './app.ts';
 
@@ -71,5 +73,31 @@ describe('web /healthz', () => {
     });
     expect(res.code).toBe(503);
     expect(res.body).toMatchObject({ db_main: 'error', db_pii: 'ok' });
+  });
+});
+
+describe('web authentication until T-0203 (SEC-3)', () => {
+  it('[SEC-3] production passes no resolvers: every session and platform route answers 401', async () => {
+    const checks = { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resolve(true) };
+    // What main.ts builds today: no session or platform resolver at all.
+    const app = buildWebApp({ logger, version: '1', checks });
+    const id = '00000000-0000-4000-8000-000000000001';
+    // The test headers mean nothing without the stub resolvers.
+    const headers = {
+      ...sessionHeaders({ workspaceId: id, userId: id, sessionId: 's' }),
+      ...platformHeaders(id),
+    };
+    const closed = contractRoutes.filter((route) => route.auth !== 'public');
+    expect(closed.map((r) => r.auth)).toEqual(expect.arrayContaining(['session', 'platform']));
+    for (const route of closed) {
+      const res = await app.inject({
+        method: route.method,
+        url: route.path.replace(/:[A-Za-z0-9_]+/g, id),
+        headers,
+        ...(route.method === 'GET' ? {} : { payload: {} }),
+      });
+      expect({ route: route.id, status: res.statusCode }).toEqual({ route: route.id, status: 401 });
+    }
+    await app.close();
   });
 });

@@ -19,6 +19,7 @@ export interface ComposeService {
   cpus?: number;
   pids_limit?: number;
   profiles?: string[];
+  restart?: string;
   ports?: { host_ip?: string; published?: string; target: number }[];
   volumes?: { type: string; source?: string; target: string }[];
 }

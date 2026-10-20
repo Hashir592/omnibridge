@@ -1,3 +1,4 @@
+import type { TenantContext, TenantRunner } from '@omnibridge/core';
 import { createLogger } from '@omnibridge/logger';
 import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import { describe, expect, it, vi } from 'vitest';
@@ -30,6 +31,22 @@ function job(id: string): JobWithMetadata<unknown> {
     retryCount: 0,
     retryLimit: 3,
   } as unknown as JobWithMetadata<unknown>;
+}
+
+/** A tenancy that records each transaction it opens and the context it hands the handler. */
+function spyTenancy() {
+  const opened: { workspaceId: string }[] = [];
+  const contexts: TenantContext[] = [];
+  const tenancy: TenantRunner = {
+    runWorkspace: (actor, fn) => {
+      opened.push({ workspaceId: actor.workspaceId });
+      const ctx: TenantContext = { workspaceId: actor.workspaceId, companyIds: ['company-1'] };
+      contexts.push(ctx);
+      return fn(ctx);
+    },
+    run: (ctx, fn) => fn(ctx),
+  };
+  return { tenancy, opened, contexts };
 }
 
 /** An in-memory semaphore with the same contract as the PostgreSQL one, counting each call. */
@@ -84,7 +101,8 @@ describe('JobQueue per-account lease', () => {
         version: '0',
         destination: { write: () => 0 },
       });
-      const queue = new JobQueue({ boss, records, limiter, logger });
+      const { tenancy } = spyTenancy();
+      const queue = new JobQueue({ boss, records, limiter, tenancy, logger });
       const handled: string[] = [];
       await queue.work(capped, ({ envelope }) => {
         handled.push(envelope.idempotency_key);
@@ -104,6 +122,81 @@ describe('JobQueue per-account lease', () => {
       expect(calls.release).toBe(2);
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('JobQueue tenant transactions (TEN-1)', () => {
+  const plain = defineJob({ type: 'test.plain', payload: z.object({}) });
+  const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
+
+  function harness() {
+    const spy = spyTenancy();
+    const updates: TenantContext[] = [];
+    const sent: string[] = [];
+    let run: ((jobs: JobWithMetadata<unknown>[]) => Promise<void>) | undefined;
+    const boss = {
+      work: (_name: string, _opts: unknown, cb: typeof run) => {
+        run = cb;
+        return Promise.resolve('worker-1');
+      },
+      send: (name: string) => {
+        sent.push(name);
+        return Promise.resolve('dlq-id');
+      },
+    } as unknown as PgBoss;
+    const records: JobRecordStore = {
+      createAndEnqueue: () => Promise.reject(new Error('unused')),
+      update: (ctx) => {
+        updates.push(ctx);
+        return Promise.resolve();
+      },
+    };
+    const queue = new JobQueue({ boss, records, tenancy: spy.tenancy, logger });
+    return { ...spy, updates, sent, queue, run: (jobs: JobWithMetadata<unknown>[]) => run?.(jobs) };
+  }
+
+  const data = (extra: Record<string, unknown> = {}) =>
+    ({
+      id: 'job-1',
+      name: plain.type,
+      data: { idempotency_key: 'k-1', attempt: 0, type: plain.type, payload: {}, ...extra },
+      retryCount: 0,
+      retryLimit: 3,
+    }) as unknown as JobWithMetadata<unknown>;
+
+  it('[TEN-1] job without workspace in envelope is rejected', async () => {
+    const h = harness();
+    const handled: unknown[] = [];
+    await h.queue.work(plain, (job) => {
+      handled.push(job);
+      return Promise.resolve();
+    });
+    await h.run([data()]);
+    await h.run([data({ workspace_id: 'not-a-uuid' })]);
+    expect(handled).toEqual([]);
+    expect(h.opened).toEqual([]);
+    expect(h.sent).toEqual(['test.plain.dlq', 'test.plain.dlq']);
+  });
+
+  it('[TEN-1] a handler runs in one tenant transaction opened from its envelope; bookkeeping stays outside it', async () => {
+    const h = harness();
+    const seen: TenantContext[] = [];
+    await h.queue.work(plain, async (job) => {
+      seen.push(job.ctx);
+      await job.progress(50);
+      return {};
+    });
+    await h.run([data({ workspace_id: WORKSPACE })]);
+    expect(h.opened).toEqual([{ workspaceId: WORKSPACE }]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(h.contexts[0]);
+    expect(seen[0]?.companyIds).toEqual(['company-1']);
+    // Progress and state updates commit on their own (PS-017): never the handler's context.
+    expect(h.updates.length).toBeGreaterThanOrEqual(3);
+    for (const ctx of h.updates) {
+      expect(ctx).not.toBe(seen[0]);
+      expect(ctx.workspaceId).toBe(WORKSPACE);
     }
   });
 });

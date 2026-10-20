@@ -80,6 +80,11 @@ describe('compose stack: limits (OPS-10)', () => {
     });
   });
 
+  it('[OPS-10] the KEK re-wrap job is opt-in through the ops profile and exits when done', () => {
+    expect(service('rewrap-keys').profiles).toEqual(['ops']);
+    expect(service('rewrap-keys').restart).toBe('no');
+  });
+
   it('[OPS-10] clamd is opt-in through the scan profile', () => {
     expect(service('clamd').profiles).toEqual(['scan']);
   });
@@ -165,6 +170,12 @@ describe('compose stack: secrets (SEC-5)', () => {
     expect(secretsOf('worker')).toEqual(['ob_app_password', 'secrets_kek']);
     expect(secretsOf('pii-vault')).toEqual(['pii_kek', 'vault_app_password']);
     expect(secretsOf('migrate-main')).toEqual(['ob_owner_password']);
+    // Only the one-off KEK re-wrap job holds ob_platform, which lists workspace ids (T-0201).
+    expect(secretsOf('rewrap-keys')).toEqual([
+      'ob_app_password',
+      'ob_platform_password',
+      'secrets_kek',
+    ]);
     expect(secretsOf('migrate-pii')).toEqual(['vault_owner_password']);
     expect(secretsOf('site')).toEqual([]);
   });

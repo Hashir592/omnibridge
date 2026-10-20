@@ -1,17 +1,17 @@
 import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
-  createPool,
+  createMainDb,
   FileRepository,
   JobLeaseRepository,
   JobRecordRepository,
   mainDbConfig,
-  type MainDb,
+  Tenancy,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
-import { Kysely, PostgresDialect } from 'kysely';
+import { workerHandlerDbConfig } from './db.ts';
 import { registerHandlers } from './handlers.ts';
 import { createWorkerBoss, startHeartbeat } from './heartbeat.ts';
 import { startMetricsServer } from './metrics-server.ts';
@@ -38,15 +38,22 @@ boss.on('error', (err) => {
   log.error({ err, event: 'queue.error' }, 'pg-boss error');
 });
 
-// Job records and lease slots, as ob_app inside tenant transactions.
-const db = new Kysely<MainDb>({
-  dialect: new PostgresDialect({ pool: createPool(mainDbConfig('omnibridge-worker-jobs', 4)) }),
-});
+const concurrency = Number(process.env.WORKER_CONCURRENCY ?? '8');
+const onDbError = (err: Error) => {
+  // An idle-in-transaction timeout ends the session; the stuck job's next query then fails.
+  log.warn({ event: 'db.connection_error', err }, 'db-main connection error');
+};
+// Job handlers: one tenant transaction each, under the transaction timeouts.
+const handlerDb = createMainDb(workerHandlerDbConfig(concurrency), onDbError);
+// Job records and lease slots: short transactions of their own, on a pool the handlers never
+// fill, so progress and leases always commit while jobs run (PS-017).
+const bookkeepingDb = createMainDb(mainDbConfig('omnibridge-worker-bookkeeping', 2), onDbError);
 const queue = new JobQueue({
   boss,
-  records: new JobRecordRepository(db),
-  limiter: new JobLeaseRepository(db),
-  globalConcurrency: Number(process.env.WORKER_CONCURRENCY ?? '8'),
+  records: new JobRecordRepository(bookkeepingDb.db),
+  limiter: new JobLeaseRepository(bookkeepingDb.db),
+  tenancy: new Tenancy(handlerDb.db),
+  globalConcurrency: concurrency,
   logger: log,
 });
 
@@ -60,7 +67,7 @@ const filesDir = requireEnv('FILES_DIR');
 const files = new EncryptedLocalFileStore({
   root: filesDir,
   keys: new FileKeyStore(filesDir, secretsKeyring),
-  metadata: new FileRepository(db),
+  metadata: new FileRepository(handlerDb.db),
 });
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
@@ -81,7 +88,8 @@ const shutdown = async (signal: string) => {
   log.info({ event: 'worker.stopping', status: signal }, 'worker stopping');
   metrics.close();
   await boss.stop({ graceful: true, timeout: 25_000 });
-  await db.destroy();
+  await handlerDb.destroy();
+  await bookkeepingDb.destroy();
   process.exit(0);
 };
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
