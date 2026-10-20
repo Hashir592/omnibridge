@@ -98,4 +98,14 @@ describe('CI workflow and gate', () => {
       process.env = saved;
     }
   });
+
+  it('[NFR-1] the gate waits for the stack to be ready, not just alive, before e2e (O-1)', () => {
+    // Liveness healthchecks accept 503 on purpose; readiness is checked through the edge.
+    expect(readRepoFile('apps/web/src/healthcheck.ts')).toContain('status === 503');
+    expect(verify).toMatch(/up -d --wait --wait-timeout \d+ &&\s*\n\s*wait_ready/);
+    expect(verify).toContain(
+      'curl -fsk --max-time 10 https://localhost:8443/healthz | grep -q \'"status":"ok"\'',
+    );
+    expect(verify).toContain('curl -fsk --max-time 10 -o /dev/null https://localhost:8444/');
+  });
 });

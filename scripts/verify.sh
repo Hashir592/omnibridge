@@ -130,7 +130,26 @@ stack_up() {
   if [[ -z "$("${compose[@]}" ps -q 2>/dev/null)" ]]; then stack_started=true; fi
   bash scripts/dev-secrets.sh &&
     build_images &&
-    "${compose[@]}" up -d --wait --wait-timeout 600
+    "${compose[@]}" up -d --wait --wait-timeout 600 &&
+    wait_ready
+}
+
+# `up --wait` only means every container is alive: web's and pii-vault's healthchecks accept a
+# 503 (degraded) on purpose, because they are liveness checks. The e2e step needs the stack ready,
+# so wait until /healthz through the edge reports ok and the public site answers (O-1). A stack
+# that is not ready in time fails here, with its logs kept under .verify/.
+wait_ready() {
+  local deadline=$(($(date +%s) + 120))
+  until curl -fsk --max-time 10 https://localhost:8443/healthz | grep -q '"status":"ok"' &&
+    curl -fsk --max-time 10 -o /dev/null https://localhost:8444/; do
+    if (($(date +%s) > deadline)); then
+      echo "stack: not ready within 120 s (healthz ok through the edge, site answering)" >&2
+      mkdir -p .verify &&
+        "${compose[@]}" logs --no-color --timestamps >.verify/stack-not-ready-logs.txt 2>&1
+      return 1
+    fi
+    sleep 2
+  done
 }
 
 # OB_BUILD_CACHE_DIR (set by CI): build the compose images with buildx bake and a local layer
