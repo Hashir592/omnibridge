@@ -8,8 +8,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M01 Platform foundations: CLOSED 20 Oct 2026.** S4 APPROVED in round 2.
 - **Current module:** M02 Identity, tenancy and audit (all S3 tasks high risk: Hashir says "go" before each).
 - **T-0201 Tenancy core and isolation harness: DONE.** Merged as PR #24 (25cd657).
-- **T-0202 Append-only audit log: in review** (PR #25), with S1's ADR-049 additions: the `ob_worker` role, the ob_platform module rule, and `validation_failed` on the export cap. Waiting for CI and Hashir's approval.
-- **Current task:** **T-0203 Passwords, MFA, lockout and sessions: in progress** (go from S1 with ADR-050 changes, 21 Oct 2026). Branch `task/T-0203-auth`, cut from the PR #25 tip.
+- **T-0202 Append-only audit log: DONE.** Merged as PR #25 (405cf7a). S1's ADR-049 additions arrived after the merge, so they are in their own PR from `task/T-0202-adr049-additions`: the `ob_worker` role, the ob_platform module rule, and `validation_failed` on the export cap. Waiting for CI and Hashir's approval.
+- **Current task:** **T-0203 Passwords, MFA, lockout and sessions: in progress** (go from S1 with ADR-050 changes, 21 Oct 2026). Branch `task/T-0203-auth`, cut from the ADR-049 additions branch.
 - **M02 order:** T-0201 ✓ → T-0202 → T-0203 → halfway checkpoint → T-0204 → T-0205 → T-0207 → T-0206 (S5 audit) → M02 end. Exit also needs the S5 audit clean (ADR-026).
 - **Workflow tiers (ADR-043):** light = `--quick`, no code review; normal = `--quick` + `/code-review` medium; high = full local gate + `/code-review` high. CI always runs the full gate.
 - **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
@@ -44,8 +44,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. CI runs the full gate on PR #25; Hashir reviews and approves the merge.
-2. S3 builds T-0203 on `task/T-0203-auth`; its PR opens against main once #25 is merged.
+1. CI runs the full gate on the ADR-049 additions PR; Hashir reviews and approves the merge.
+2. S3 builds T-0203 on `task/T-0203-auth`, cut from the additions branch; its PR opens against main once the additions are merged.
 
 ## Prerequisites outstanding (Hashir)
 
