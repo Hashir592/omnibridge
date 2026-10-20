@@ -48,7 +48,13 @@ describe('db-main roles and migrations', () => {
 
   it('[NFR-2] forward-only migrations apply once as ob_owner', async () => {
     const owner = cluster.connection('ob_owner');
-    expect((await migrateMain(owner)).applied).toEqual(['0001_baseline', '0002_credentials']);
+    expect((await migrateMain(owner)).applied).toEqual([
+      '0001_baseline',
+      '0002_credentials',
+      '0003_job_records',
+      '0004_files',
+      '0005_credentials_delete_after',
+    ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });
 

@@ -1,17 +1,17 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S1.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Oct 2026 by S3.
 
 ## Now
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** S3: batch T-0104 + T-0105 + T-0106, draft PR #12 (ADR-043). S2: idle; next is T-0303 Auth screens (prompt `docs/sessions/briefs/S2-T-0303.md`), started after S3 (one session at a time). Done: T-0101, T-0102, T-0103, T-0301, T-0302 (PRs #1 to #11).
+- **Current task:** S3: batch T-0104 + T-0105 + T-0106 done on `task/T-0104-T-0106-m01-rest`, PR #12 (all three in review). T-0106: F-04 as migration **0005** with the annotated squawk waiver (proven), numbered-page helper, gitleaks history scan from worktrees (fails loudly), `scripts/ui-refs.sh`, CI split into parallel jobs plus a docs fast path (`verify.sh --only` / `--docs`), and O-1 fixed (the gate now waits for the stack to be ready; 5 full local runs green). Next: PR #12 ready once CI is green, Hashir merges, then the M01 end report as a docs-only PR (it proves the fast path) and the S4 handoff. S2: idle; next is T-0303 Auth screens, after S3 (one session at a time). Done: T-0101, T-0102, T-0103, T-0301, T-0302 (PRs #1 to #11).
 - **Sessions:** Hashir runs **one session at a time** (ADR-043).
 - **Workflow tiers (ADR-043):** light = `verify.sh --quick`, no code review, CI full gate; normal = `--quick` + `/code-review` medium, CI full gate; high = full local gate + `/code-review` high, then CI. S3 does not wait for CI.
 - **Last checkpoint:** M01 halfway: S4 found FIX REQUIRED (1 Blocker, 1 Major, 6 Minors). S3 fixed 7; F-04 moves into T-0106 as migration 0003 (PS-012 approved, ADR-045). Carry-over for the M01 end review: `docs/reviews/M01-halfway-carryover.md` (O-1 e2e flake, now in T-0106 scope).
 - **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
-- **Open questions:** none. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Open questions:** PS-014 (S3, T-0105): nodemailer 10.1.0 and @fastify/helmet 13.1.2 instead of the ADR pins (7-day rule), @types/nodemailer 8.0.2, prom-client flagged deprecated. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 

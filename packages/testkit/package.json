@@ -19,5 +19,8 @@
   "dependencies": {
     "@omnibridge/contract": "workspace:*",
     "@testcontainers/postgresql": "12.2.1"
+  },
+  "devDependencies": {
+    "zod": "4.6.7"
   }
 }

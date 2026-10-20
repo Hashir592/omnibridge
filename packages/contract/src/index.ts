@@ -14,8 +14,21 @@ export {
   type Tab,
 } from './metadata.ts';
 export { listQuery, pageOf, PAGE_LIMIT_DEFAULT, PAGE_LIMIT_MAX } from './pagination.ts';
+export {
+  pagedOf,
+  pageOffset,
+  pageQuery,
+  pageResult,
+  PAGE_LIMITS,
+  PAGE_MAX,
+  TOTAL_COUNT_CAP,
+  type PageQuery,
+} from './pages.ts';
 export { PROBLEM_CONTENT_TYPE, ProblemSchema, type Problem } from './problem.ts';
 export { contractRoutes, OPENAPI_INFO, type ContractRoutes } from './registry.ts';
+export { getJob, JobProgressSchema, type JobProgress } from './routes/jobs.ts';
+export { getFile } from './routes/files.ts';
+export { FileDownloadSchema, type FileDownload } from './download.ts';
 export {
   assertRouteMetadata,
   ContractError,

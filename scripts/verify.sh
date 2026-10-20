@@ -8,8 +8,12 @@ usage() {
 Usage: scripts/verify.sh [mode] [--keep-stack]
 
 Modes:
-  (none), --full  The full gate. Required before any merge; CI always runs this.
+  (none), --full  The full gate. Required before any merge; CI runs all of it on every code PR.
   --quick         Lint, typecheck, contract drift and unit tests only, for use while working.
+  --only=a,b,...  Only the named full-gate steps, in gate order. CI splits the gate into parallel
+                  jobs this way (ADR-043); together they are the full gate.
+  --docs          Docs-only changes: install, format check, coverage and gitleaks (ADR-043). CI
+                  uses it when a PR touches only docs/**, *.md or docs/backlog.json.
   --help          Show this help.
 
 Options:
@@ -41,10 +45,16 @@ EOF
 
 mode=full
 keep_stack=false
+only=''
 for arg in "$@"; do
   case "$arg" in
     --full) mode=full ;;
     --quick) mode=quick ;;
+    --docs) mode=docs ;;
+    --only=*)
+      mode=only
+      only="${arg#--only=}"
+      ;;
     --keep-stack) keep_stack=true ;;
     --help | -h)
       usage
@@ -119,8 +129,54 @@ stack_up() {
   # A stack that was already running belongs to the developer: leave it running afterwards.
   if [[ -z "$("${compose[@]}" ps -q 2>/dev/null)" ]]; then stack_started=true; fi
   bash scripts/dev-secrets.sh &&
-    "${compose[@]}" build &&
-    "${compose[@]}" up -d --wait --wait-timeout 600
+    build_images &&
+    "${compose[@]}" up -d --wait --wait-timeout 600 &&
+    wait_ready
+}
+
+# `up --wait` only means every container is alive: web's and pii-vault's healthchecks accept a
+# 503 (degraded) on purpose, because they are liveness checks. The e2e step needs the stack ready,
+# so wait until /healthz through the edge reports ok and the public site answers (O-1). A stack
+# that is not ready in time fails here, with its logs kept under .verify/.
+wait_ready() {
+  local deadline=$(($(date +%s) + 120))
+  until curl -fsk --max-time 10 https://localhost:8443/healthz | grep -q '"status":"ok"' &&
+    curl -fsk --max-time 10 -o /dev/null https://localhost:8444/; do
+    if (($(date +%s) > deadline)); then
+      echo "stack: not ready within 120 s (healthz ok through the edge, site answering)" >&2
+      mkdir -p .verify &&
+        "${compose[@]}" logs --no-color --timestamps >.verify/stack-not-ready-logs.txt 2>&1
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+# OB_BUILD_CACHE_DIR (set by CI): build the compose images with buildx bake and a local layer
+# cache that the workflow saves between runs. The new cache replaces the old, so it never grows.
+# The migrate jobs reuse the web and pii-vault images, so only the five distinct images are built.
+# Bake resolves compose's `context: ../..` from the current directory, so it runs from
+# infra/compose, and it is granted exactly the repo (the build context) and the cache directory.
+# The targets build in parallel, so each exports its cache to its own directory: one shared
+# directory makes their writes of the same layer blobs collide.
+BAKE_TARGETS=(web worker pii-vault site provider-mocks)
+
+build_images() {
+  local cache="${OB_BUILD_CACHE_DIR:-}"
+  if [[ -z "$cache" ]]; then
+    "${compose[@]}" build
+    return
+  fi
+  local sets=() target
+  for target in "${BAKE_TARGETS[@]}"; do
+    mkdir -p "$cache/$target" || return 1
+    sets+=(--set "$target.cache-from=type=local,src=$cache/$target")
+    sets+=(--set "$target.cache-to=type=local,dest=$cache-new/$target,mode=max")
+  done
+  (cd infra/compose && docker buildx bake -f compose.yaml -f compose.dev.yaml \
+    --allow "fs.read=$root" --allow "fs=$(dirname "$cache")" \
+    "${sets[@]}" --load "${BAKE_TARGETS[@]}") &&
+    rm -rf "$cache" && mv "$cache-new" "$cache"
 }
 
 stack_down() {
@@ -165,6 +221,38 @@ audit() {
   "${pnpm[@]}" audit --audit-level high
 }
 
+# Every full-gate step, in gate order. --only picks from this list.
+FULL_STEPS=(install lint typecheck openapi depcruise names coverage limits squawk actionlint caddy
+  unit integration contract build stack e2e gitleaks audit)
+
+run_step() {
+  case "$1" in
+    install) step install "${pnpm[@]}" install --frozen-lockfile ;;
+    lint) step lint lint ;;
+    typecheck) step typecheck "${pnpm[@]}" exec tsc -p tsconfig.json ;;
+    openapi) step openapi "${pnpm[@]}" run --silent contract:check ;;
+    depcruise) step depcruise "${pnpm[@]}" exec depcruise apps packages mocks --config .dependency-cruiser.cjs ;;
+    names) step names bash scripts/check-names.sh ;;
+    coverage) step coverage node scripts/req-coverage.mjs ;;
+    limits) step limits bash scripts/check-limits.sh ;;
+    squawk) step squawk squawk ;;
+    actionlint) step actionlint actionlint ;;
+    caddy) step caddy caddy_validate ;;
+    unit) step unit "${pnpm[@]}" exec vitest run --project unit ;;
+    integration) step integration "${pnpm[@]}" exec vitest run --project integration ;;
+    contract) step contract "${pnpm[@]}" exec vitest run --project contract ;;
+    build) step build "${pnpm[@]}" -r run build ;;
+    stack) step stack stack_up ;;
+    e2e) step e2e e2e ;;
+    gitleaks) step gitleaks bash scripts/gitleaks.sh full ;;
+    audit) step audit audit ;;
+    *)
+      echo "verify: unknown step '$1'" >&2
+      exit 2
+      ;;
+  esac
+}
+
 if [[ "$mode" == quick ]]; then
   step lint lint
   step typecheck "${pnpm[@]}" exec tsc -p tsconfig.json
@@ -175,26 +263,37 @@ if [[ "$mode" == quick ]]; then
   exit 0
 fi
 
+if [[ "$mode" == docs ]]; then
+  run_step install
+  step format "${pnpm[@]}" exec prettier --check .
+  run_step coverage
+  run_step gitleaks
+  printf '\n\033[32mverify --docs passed in %ss (docs-only changes)\033[0m\n' "$(($(date +%s) - started))"
+  exit 0
+fi
+
+if [[ "$mode" == only ]]; then
+  IFS=',' read -r -a wanted <<<"$only"
+  if [[ ${#wanted[@]} -eq 0 ]]; then
+    echo "verify: --only needs at least one step (see --help)" >&2
+    exit 2
+  fi
+  for name in "${wanted[@]}"; do
+    if [[ " ${FULL_STEPS[*]} " != *" $name "* ]]; then
+      echo "verify: --only names an unknown step '$name' (see --help)" >&2
+      exit 2
+    fi
+  done
+fi
+
 trap stack_down EXIT
 
-step install "${pnpm[@]}" install --frozen-lockfile
-step lint lint
-step typecheck "${pnpm[@]}" exec tsc -p tsconfig.json
-step openapi "${pnpm[@]}" run --silent contract:check
-step depcruise "${pnpm[@]}" exec depcruise apps packages mocks --config .dependency-cruiser.cjs
-step names bash scripts/check-names.sh
-step coverage node scripts/req-coverage.mjs
-step limits bash scripts/check-limits.sh
-step squawk squawk
-step actionlint actionlint
-step caddy caddy_validate
-step unit "${pnpm[@]}" exec vitest run --project unit
-step integration "${pnpm[@]}" exec vitest run --project integration
-step contract "${pnpm[@]}" exec vitest run --project contract
-step build "${pnpm[@]}" -r run build
-step stack stack_up
-step e2e e2e
-step gitleaks bash scripts/gitleaks.sh full
-step audit audit
+for name in "${FULL_STEPS[@]}"; do
+  if [[ "$mode" == full || ",$only," == *",$name,"* ]]; then run_step "$name"; fi
+done
 
-printf '\n\033[32mverify: full gate passed in %ss\033[0m\n' "$(($(date +%s) - started))"
+if [[ "$mode" == only ]]; then
+  printf '\n\033[32mverify --only=%s passed in %ss\033[0m\n' "$only" "$(($(date +%s) - started))"
+else
+  printf '\n\033[32mverify: full gate passed in %ss\033[0m\n' "$(($(date +%s) - started))"
+fi

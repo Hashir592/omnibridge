@@ -10,3 +10,8 @@ export {
   type CredentialSlot,
 } from './credentials.ts';
 export type { MainDb } from './schema.ts';
+export { JobRecordRepository, type JobProgress } from './job-records.ts';
+export { createQueues } from './queue-schema.ts';
+export { withTenantTransaction } from './tenant.ts';
+export { JobLeaseRepository } from './job-leases.ts';
+export { FileRepository } from './files.ts';

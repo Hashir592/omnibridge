@@ -181,11 +181,16 @@ services:
       DB_MAIN_USER: ob_app
       DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
       SECRETS_KEK_FILE: /run/secrets/secrets_kek
+      FILE_LINK_HMAC_KEY_FILE: /run/secrets/file_link_hmac_key
+      FILES_DIR: /data/files
       PII_VAULT_URL: http://pii-vault:8080
       PORT: '8080'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=288
-    secrets: [ob_app_password, secrets_kek]
+    secrets: [ob_app_password, secrets_kek, file_link_hmac_key]
+    # Encrypted files (T-0105, ADR-012): the only writable path in the read-only container.
+    volumes:
+      - files_data:/data/files
     networks:
       ob_edge:
         aliases: [omnibridge-web]
@@ -217,9 +222,18 @@ services:
       DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
       SECRETS_KEK_FILE: /run/secrets/secrets_kek
       WORKER_HEALTH_FILE: /tmp/worker-heartbeat
+      # Most jobs at once across all queues; /metrics on an unpublished port (T-0104).
+      FILES_DIR: /data/files
+      CLAMD_HOST: clamd
+      CLAMD_PORT: '3310'
+      WORKER_CONCURRENCY: '8'
+      METRICS_PORT: '9464'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=384
     secrets: [ob_app_password, secrets_kek]
+    # The worker only reads files (to scan them); it never writes the volume.
+    volumes:
+      - files_data:/data/files:ro
     networks: [ob_app, ob_db, scan_ob]
     depends_on:
       migrate-main: { condition: service_completed_successfully }
@@ -301,6 +315,7 @@ networks:
 volumes:
   db_main_data:
   db_pii_data:
+  files_data:
 
 # Dev secret files are materialised by scripts/dev-secrets.sh from infra/secrets/dev.sops.yaml
 # (git-ignored, synthetic). Containers read them only as /run/secrets/<name> files (SEC-5). The two
@@ -325,3 +340,5 @@ secrets:
     file: ./.secrets/secrets_kek
   pii_kek:
     file: ./.secrets/pii_kek
+  file_link_hmac_key:
+    file: ./.secrets/file_link_hmac_key

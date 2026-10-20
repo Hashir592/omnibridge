@@ -11,6 +11,15 @@ export interface WalkedRoute extends RouteMetadata {
   id: string;
   method: AnyRoute['method'];
   path: string;
+  /** How the route pages a list (ADR-040), so T-0201 can walk every page shape. */
+  pagination: 'page' | 'cursor' | 'none';
+}
+
+function paginationOf(route: AnyRoute): WalkedRoute['pagination'] {
+  const keys = Object.keys(route.query?.shape ?? {});
+  if (keys.includes('page')) return 'page';
+  if (keys.includes('cursor')) return 'cursor';
+  return 'none';
 }
 
 /** Returns every route with its metadata, or throws listing every route that lacks it. */
@@ -22,13 +31,14 @@ export function walkRoutes(routes: readonly AnyRoute[]): WalkedRoute[] {
   if (failures.length > 0) {
     throw new Error(`Routes without valid permission metadata:\n${failures.join('\n')}`);
   }
-  return routes.map(({ id, method, path, auth, tab, adminOnly, companyScoped }) => ({
-    id,
-    method,
-    path,
-    auth,
-    tab,
-    adminOnly,
-    companyScoped,
+  return routes.map((route) => ({
+    id: route.id,
+    method: route.method,
+    path: route.path,
+    auth: route.auth,
+    tab: route.tab,
+    adminOnly: route.adminOnly,
+    companyScoped: route.companyScoped,
+    pagination: paginationOf(route),
   }));
 }

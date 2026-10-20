@@ -26,10 +26,58 @@ export interface CredentialsTable {
   is_active: Generated<boolean>;
   expires_at: Date | null;
   rotated_at: Date | null;
+  /** When the purge hard-deletes a retired row (migration 0005). */
+  delete_after: Date | null;
+  created_at: Generated<Date>;
+}
+
+export interface JobRecordsTable {
+  id: string;
+  workspace_id: string;
+  type: string;
+  idempotency_key: string;
+  state: ColumnType<
+    'queued' | 'active' | 'retrying' | 'completed' | 'failed',
+    'queued' | undefined,
+    'queued' | 'active' | 'retrying' | 'completed' | 'failed'
+  >;
+  /** bigint columns with a default: read as string, written as number. */
+  attempt: ColumnType<string, number | undefined, number>;
+  percent: ColumnType<string, number | undefined, number>;
+  result: ColumnType<unknown, string | null, string | null> | null;
+  error_code: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface JobLeasesTable {
+  workspace_id: string;
+  scope_key: string;
+  slot: ColumnType<string, number, number>;
+  holder: string;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+}
+
+export interface FilesTable {
+  id: string;
+  workspace_id: string;
+  content_type: 'application/pdf' | 'image/png' | 'image/jpeg';
+  size_bytes: ColumnType<string, number, number>;
+  key_version: ColumnType<string, number, number>;
+  state: ColumnType<
+    'scanning' | 'clean' | 'infected' | 'scan_failed',
+    'scanning' | undefined,
+    'scanning' | 'clean' | 'infected' | 'scan_failed'
+  >;
+  scanned_at: Date | null;
+  delete_after: Date | null;
   created_at: Generated<Date>;
 }
 
 export interface MainDb {
   'app.data_keys': DataKeysTable;
   'app.credentials': CredentialsTable;
+  'app.job_records': JobRecordsTable;
+  'app.job_leases': JobLeasesTable;
+  'app.files': FilesTable;
 }

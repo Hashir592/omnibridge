@@ -15,5 +15,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "nodemailer": "10.1.0"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "8.0.2",
+    "testcontainers": "12.2.1"
   }
 }
