@@ -43,20 +43,3 @@ export function mainDbConfig(
     ...(timeouts === undefined ? {} : txTimeouts(timeouts)),
   };
 }
-
-/**
- * Connection settings for ob_platform, which reads the workspace id list and nothing else
- * (invariant 2). Only one-off ops jobs and the scheduler fan-out use it.
- */
-export function platformDbConfig(applicationName: string, env: Env = process.env): PoolConfig {
-  return {
-    host: requireEnv('DB_MAIN_HOST', env),
-    port: Number(env.DB_MAIN_PORT ?? '5432'),
-    database: requireEnv('DB_MAIN_NAME', env),
-    user: requireEnv('DB_PLATFORM_USER', env),
-    password: readSecretFile('DB_PLATFORM_PASSWORD', env),
-    max: 1,
-    application_name: applicationName,
-    connectionTimeoutMillis: 5_000,
-  };
-}

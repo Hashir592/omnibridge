@@ -24,6 +24,14 @@ export interface ApiErrorInit {
   code: ErrorCode;
   /** Shown to the user. Never put buyer PII, secrets or internal details here. */
   detail?: string;
+  /** With `validation_failed`: one entry per field the caller must change. */
+  errors?: readonly ApiFieldError[];
+}
+
+export interface ApiFieldError {
+  location: 'params' | 'query' | 'body' | 'headers';
+  path: string;
+  message: string;
 }
 
 /** Throw from a route handler to answer with a problem+json response. */
@@ -31,8 +39,9 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code: ErrorCode;
   readonly detail: string | undefined;
+  readonly errors: readonly ApiFieldError[] | undefined;
 
-  constructor({ status, code, detail }: ApiErrorInit) {
+  constructor({ status, code, detail, errors }: ApiErrorInit) {
     if (!Number.isInteger(status) || status < 400 || status > 599) {
       throw new RangeError(`ApiError status must be 400-599, got ${String(status)}`);
     }
@@ -41,5 +50,6 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.errors = errors;
   }
 }

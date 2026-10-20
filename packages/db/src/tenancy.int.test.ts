@@ -18,7 +18,7 @@ import {
   type NewCompany,
 } from './index.ts';
 
-const ROLES = ['ob_owner', 'ob_app', 'ob_platform'] as const;
+const ROLES = ['ob_owner', 'ob_app', 'ob_worker', 'ob_platform'] as const;
 
 /** The tables M01 created before the workspace table existed (S4, M01 end). */
 const M01_TENANT_TABLES = [
@@ -213,6 +213,33 @@ describe('tenancy core (TEN-1, TEN-2, TEN-3, TEN-6, TEN-10)', () => {
         [randomUUID(), A],
       ),
     ).rejects.toThrow(/row-level security/);
+  });
+
+  it('[TEN-1] the policies written TO ob_app bind ob_worker too (ADR-049)', async () => {
+    // ob_worker is a member of ob_app: the restrictive company policy must still apply to it.
+    const client = await raw('ob_worker').connect();
+    const count = async (companyIds: string) => {
+      await client.query('BEGIN');
+      try {
+        await client.query(
+          `SELECT set_config('app.workspace_id', $1, true), set_config('app.company_ids', $2, true)`,
+          [A, companyIds],
+        );
+        const res = await client.query<{ n: string }>('SELECT count(*) AS n FROM app.companies');
+        return res.rows[0]?.n;
+      } finally {
+        await client.query('ROLLBACK');
+      }
+    };
+    try {
+      expect(await count('{}')).toBe('0');
+      expect(await count(`{${ids.a1}}`)).toBe('1');
+      // No SET LOCAL at all: nothing, as for ob_app.
+      const none = await client.query<{ n: string }>('SELECT count(*) AS n FROM app.companies');
+      expect(none.rows[0]?.n).toBe('0');
+    } finally {
+      client.release();
+    }
   });
 
   it('[TEN-1] a tenant transaction sees only its own workspace', async () => {

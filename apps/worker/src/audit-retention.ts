@@ -1,5 +1,5 @@
 import { londonDate } from '@omnibridge/core';
-import type { AuditLog, WorkspaceDirectory } from '@omnibridge/db';
+import type { AuditLog } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { auditRetentionJob, type JobHandler, type JobQueue } from '@omnibridge/queue';
 
@@ -30,7 +30,8 @@ export async function sweepAuditRetention({
   queue,
   now = new Date(),
 }: {
-  directory: Pick<WorkspaceDirectory, 'listIds'>;
+  /** The workspace id list (WorkspaceDirectory, read as ob_platform). */
+  directory: { listIds(): Promise<string[]> };
   queue: Pick<JobQueue, 'send'>;
   now?: Date;
 }): Promise<number> {

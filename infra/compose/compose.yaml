@@ -66,6 +66,7 @@ services:
       - db_main_superuser_password
       - ob_owner_password
       - ob_app_password
+      - ob_worker_password
       - ob_platform_password
     volumes:
       - db_main_data:/var/lib/postgresql
@@ -218,8 +219,9 @@ services:
       args: { APP: worker }
     environment:
       <<: *db-main-env
-      DB_MAIN_USER: ob_app
-      DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
+      # ob_worker: ob_app's rights plus the audit purge, nothing else (ADR-049).
+      DB_MAIN_USER: ob_worker
+      DB_MAIN_PASSWORD_FILE: /run/secrets/ob_worker_password
       # The scheduled fan-out lists workspace ids as ob_platform, nothing else (T-0202).
       DB_PLATFORM_USER: ob_platform
       DB_PLATFORM_PASSWORD_FILE: /run/secrets/ob_platform_password
@@ -233,7 +235,7 @@ services:
       METRICS_PORT: '9464'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=384
-    secrets: [ob_app_password, ob_platform_password, secrets_kek]
+    secrets: [ob_worker_password, ob_platform_password, secrets_kek]
     # The worker only reads files (to scan them); it never writes the volume.
     volumes:
       - files_data:/data/files:ro
@@ -365,6 +367,8 @@ secrets:
     file: ./.secrets/ob_owner_password
   ob_app_password:
     file: ./.secrets/ob_app_password
+  ob_worker_password:
+    file: ./.secrets/ob_worker_password
   ob_platform_password:
     file: ./.secrets/ob_platform_password
   db_pii_superuser_password:

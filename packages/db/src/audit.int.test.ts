@@ -17,7 +17,7 @@ import {
   type MainDbHandle,
 } from './index.ts';
 
-const ROLES = ['ob_owner', 'ob_app', 'ob_platform'] as const;
+const ROLES = ['ob_owner', 'ob_app', 'ob_worker', 'ob_platform'] as const;
 const SIX_YEARS_AGO_AND_A_DAY = "now() - interval '6 years 1 day'";
 
 describe('append-only audit log (AUD-1, AUD-3, AUD-4)', () => {
@@ -25,6 +25,8 @@ describe('append-only audit log (AUD-1, AUD-3, AUD-4)', () => {
   let main: MainDbHandle;
   let tenancy: Tenancy;
   let audit: AuditLog;
+  /** The worker's role, the only one allowed to run the purge (ADR-049). */
+  let worker: MainDbHandle;
   const pools: pg.Pool[] = [];
   const raw = (role: string) => {
     const pool = new pg.Pool({ ...cluster.connection(role), max: 2 });
@@ -82,6 +84,7 @@ describe('append-only audit log (AUD-1, AUD-3, AUD-4)', () => {
     main = createMainDb({ ...cluster.connection('ob_app'), max: 4 });
     tenancy = new Tenancy(main.db);
     audit = new AuditLog(main.db);
+    worker = createMainDb({ ...cluster.connection('ob_worker'), max: 2 });
     const workspaces = new WorkspaceRepository(main.db);
     const users = new UserRepository(main.db);
     const memberships = new MembershipRepository(main.db);
@@ -102,6 +105,7 @@ describe('append-only audit log (AUD-1, AUD-3, AUD-4)', () => {
 
   afterAll(async () => {
     await Promise.all(pools.map((p) => p.end()));
+    await worker.destroy();
     await main.destroy();
     await cluster.container.stop();
   });
@@ -369,7 +373,8 @@ describe('append-only audit log (AUD-1, AUD-3, AUD-4)', () => {
     const keptA = await insertAged(A, "now() - interval '5 years 11 months'");
     const oldB = await insertAged(B, SIX_YEARS_AGO_AND_A_DAY);
 
-    const deleted = await audit.purgeExpired(ctxA());
+    const purge = new AuditLog(worker.db);
+    const deleted = await purge.purgeExpired(ctxA());
     expect(deleted).toBe(1);
     const left = async (ws: string, id: string) =>
       (
@@ -384,6 +389,41 @@ describe('append-only audit log (AUD-1, AUD-3, AUD-4)', () => {
     expect(await left(A, keptA)).toBe('1');
     expect(await left(B, oldB)).toBe('1');
     // A second run finds nothing more.
-    expect(await audit.purgeExpired(ctxA())).toBe(0);
+    expect(await purge.purgeExpired(ctxA())).toBe(0);
+  });
+
+  it('[AUD-3] ob_app (web) cannot call the purge; ob_worker can', async () => {
+    await expect(audit.purgeExpired(ctxA())).rejects.toThrow(/permission denied/);
+    await expect(asRole('ob_app', A, 'SELECT app.purge_audit_events()')).rejects.toThrow(
+      /permission denied/,
+    );
+    expect(await new AuditLog(worker.db).purgeExpired(ctxA())).toBe(0);
+    // The function takes no cut-off: callers cannot shorten the 6 years.
+    const { rows } = await asRole<{ args: string; config: string[] | null; definer: boolean }>(
+      'ob_owner',
+      A,
+      `SELECT pg_get_function_arguments(p.oid) AS args, p.proconfig AS config,
+              p.prosecdef AS definer
+         FROM pg_proc p WHERE p.oid = 'app.purge_audit_events'::regproc`,
+    );
+    expect(rows[0]).toEqual({
+      args: '',
+      config: ['search_path=pg_catalog, pg_temp'],
+      definer: true,
+    });
+  });
+
+  it('[TEN-1] ob_worker is bound by RLS like ob_app: no SET LOCAL, no rows', async () => {
+    await audit.record(ctxA(), { action: 'auth.login', actor: { kind: 'user', userId: adminA } });
+    const client = await raw('ob_worker').connect();
+    try {
+      const { rows } = await client.query<{ n: string; bypass: boolean }>(
+        `SELECT (SELECT count(*) FROM app.audit_events) AS n,
+                (SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) AS bypass`,
+      );
+      expect(rows[0]).toEqual({ n: '0', bypass: false });
+    } finally {
+      client.release();
+    }
   });
 });

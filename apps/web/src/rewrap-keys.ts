@@ -4,10 +4,10 @@ import {
   createMainDb,
   CredentialRepository,
   mainDbConfig,
-  platformDbConfig,
   rewrapAllDataKeys,
-  WorkspaceDirectory,
 } from '@omnibridge/db';
+// One of the two modules allowed to hold ob_platform (dependency-cruiser, ADR-049).
+import { platformDbConfig, WorkspaceDirectory } from '@omnibridge/db/platform';
 import { FileKeyStore } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
 import { rotateKeys } from './key-rotation.ts';

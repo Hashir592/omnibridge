@@ -11,11 +11,11 @@ import {
   rewrapAllDataKeys,
   Tenancy,
   withTenantTransaction,
-  WorkspaceDirectory,
   WorkspaceRepository,
   type MainDbHandle,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
+import { WorkspaceDirectory } from '@omnibridge/db/platform';
 import { createLogger } from '@omnibridge/logger';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

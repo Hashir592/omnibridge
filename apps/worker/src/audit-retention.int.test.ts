@@ -6,10 +6,10 @@ import {
   JobRecordRepository,
   migrateMain,
   Tenancy,
-  WorkspaceDirectory,
   WorkspaceRepository,
   type MainDbHandle,
 } from '@omnibridge/db';
+import { WorkspaceDirectory } from '@omnibridge/db/platform';
 import { createLogger } from '@omnibridge/logger';
 import { auditRetentionJob, JobQueue } from '@omnibridge/queue';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
@@ -17,7 +17,7 @@ import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { auditRetentionHandler, sweepAuditRetention } from './audit-retention.ts';
-import { registerPlatformHandlers } from './handlers.ts';
+import { registerPlatformHandlers } from './platform-jobs.ts';
 import { createWorkerBoss } from './heartbeat.ts';
 
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
@@ -51,11 +51,12 @@ describe('audit retention job (AUD-3)', () => {
   beforeAll(async () => {
     cluster = await startRoleCluster('db-main', 'omnibridge', [
       'ob_owner',
-      'ob_app',
+      'ob_worker',
       'ob_platform',
     ]);
     await migrateMain(cluster.connection('ob_owner'));
-    main = createMainDb({ ...cluster.connection('ob_app'), max: 4 });
+    // The worker's own role (ADR-049): only it may run the purge.
+    main = createMainDb({ ...cluster.connection('ob_worker'), max: 4 });
     platform = createMainDb({ ...cluster.connection('ob_platform'), max: 1 });
     owner = new pg.Pool({ ...cluster.connection('ob_owner'), max: 1 });
     const tenancy = new Tenancy(main.db);
@@ -80,7 +81,7 @@ describe('audit retention job (AUD-3)', () => {
         client.release();
       }
     }
-    boss = createWorkerBoss(cluster.connection('ob_app'), {
+    boss = createWorkerBoss(cluster.connection('ob_worker'), {
       monitorIntervalSeconds: 1,
       superviseIntervalSeconds: 1,
     });

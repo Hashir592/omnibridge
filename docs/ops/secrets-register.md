@@ -19,7 +19,8 @@ Production dates are set when each secret is first created in M22. "Next rotatio
 |---|---|---|---|---|---|---|---|
 | `db_main_superuser_password` | PostgreSQL superuser of db-main (init only) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main | 12 months | set in M22 |
 | `ob_owner_password` | db-main migration role `ob_owner` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, migrate-main | 12 months | set in M22 |
-| `ob_app_password` | db-main app role `ob_app` (no BYPASSRLS) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, web, worker, rewrap-keys (ops job) | 12 months | set in M22 |
+| `ob_app_password` | db-main app role `ob_app` (no BYPASSRLS) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, web, rewrap-keys (ops job) | 12 months | set in M22 |
+| `ob_worker_password` | db-main worker role `ob_worker`: a member of `ob_app` plus the audit purge (ADR-049), no BYPASSRLS | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, worker | 12 months | set in M22 |
 | `ob_platform_password` | db-main fan-out role `ob_platform`: reads workspace ids only | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, worker (scheduled fan-out), rewrap-keys (ops job) | 12 months | set in M22 |
 | `db_pii_superuser_password` | PostgreSQL superuser of db-pii (init only) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii | 12 months | set in M22 |
 | `vault_owner_password` | db-pii migration role `vault_owner` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, migrate-pii | 12 months | set in M22 |

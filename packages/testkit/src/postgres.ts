@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 
@@ -22,16 +23,24 @@ export interface RoleCluster {
   };
 }
 
+/** Every role whose password the cluster's roles script reads (`/run/secrets/<role>_password`). */
+function scriptRoles(cluster: 'db-main' | 'db-pii'): string[] {
+  const script = readFileSync(`${repoRoot}infra/compose/${cluster}/10-roles.sh`, 'utf8');
+  return [...script.matchAll(/\/run\/secrets\/([a-z_]+)_password/g)].map((m) => m[1] ?? '');
+}
+
 /**
  * Starts PostgreSQL 18 with the real role init script from infra/compose/<cluster>/10-roles.sh,
- * fed with random synthetic secrets mounted the same way Docker secrets are.
+ * fed with random synthetic secrets mounted the same way Docker secrets are. Every role the script
+ * creates gets a password, so a test lists only the roles it connects as.
  */
 export async function startRoleCluster(
   cluster: 'db-main' | 'db-pii',
   database: string,
   roles: readonly string[],
 ): Promise<RoleCluster> {
-  const passwords = Object.fromEntries(roles.map((r) => [r, randomBytes(18).toString('hex')]));
+  const all = [...new Set([...scriptRoles(cluster), ...roles])];
+  const passwords = Object.fromEntries(all.map((r) => [r, randomBytes(18).toString('hex')]));
   const container = await new PostgreSqlContainer(POSTGRES_IMAGE)
     .withDatabase(database)
     .withCopyFilesToContainer([
@@ -42,7 +51,7 @@ export async function startRoleCluster(
       },
     ])
     .withCopyContentToContainer(
-      roles.map((role) => ({
+      all.map((role) => ({
         content: passwords[role] ?? '',
         target: `/run/secrets/${role}_password`,
         mode: 0o444,

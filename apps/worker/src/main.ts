@@ -7,18 +7,17 @@ import {
   JobLeaseRepository,
   JobRecordRepository,
   mainDbConfig,
-  platformDbConfig,
   Tenancy,
-  WorkspaceDirectory,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
-import { auditRetentionHandler, sweepAuditRetention } from './audit-retention.ts';
+import { auditRetentionHandler } from './audit-retention.ts';
 import { workerHandlerDbConfig } from './db.ts';
-import { registerHandlers, registerPlatformHandlers } from './handlers.ts';
+import { registerHandlers } from './handlers.ts';
 import { createWorkerBoss, startHeartbeat } from './heartbeat.ts';
 import { startMetricsServer } from './metrics-server.ts';
+import { startPlatformJobs } from './platform-jobs.ts';
 import { scanFileHandler } from './scan.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
@@ -52,8 +51,6 @@ const handlerDb = createMainDb(workerHandlerDbConfig(concurrency), onDbError);
 // Job records and lease slots: short transactions of their own, on a pool the handlers never
 // fill, so progress and leases always commit while jobs run (PS-017).
 const bookkeepingDb = createMainDb(mainDbConfig('omnibridge-worker-bookkeeping', 2), onDbError);
-// The workspace list for the scheduled fan-out, as ob_platform (invariant 2): ids only.
-const platformDb = createMainDb(platformDbConfig('omnibridge-worker-fanout'), onDbError);
 const queue = new JobQueue({
   boss,
   records: new JobRecordRepository(bookkeepingDb.db),
@@ -83,17 +80,8 @@ await registerHandlers(queue, {
   }),
   'audit.retention': auditRetentionHandler(new AuditLog(handlerDb.db), log),
 });
-const directory = new WorkspaceDirectory(platformDb.db);
-await registerPlatformHandlers(
-  boss,
-  {
-    'audit.retention-sweep': async () => {
-      const workspaces = await sweepAuditRetention({ directory, queue });
-      log.info({ event: 'audit.retention_sweep', count: workspaces }, 'audit retention sent');
-    },
-  },
-  log,
-);
+// The scheduled fan-out, the worker's only use of ob_platform (invariant 2).
+const closePlatformJobs = await startPlatformJobs({ boss, queue, logger: log, onDbError });
 const metrics = await startMetricsServer(
   queueMetrics({ boss, types: JOBS.map((def) => def.type) }),
   Number(process.env.METRICS_PORT ?? '9464'),
@@ -108,7 +96,7 @@ const shutdown = async (signal: string) => {
   await boss.stop({ graceful: true, timeout: 25_000 });
   await handlerDb.destroy();
   await bookkeepingDb.destroy();
-  await platformDb.destroy();
+  await closePlatformJobs();
   process.exit(0);
 };
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
