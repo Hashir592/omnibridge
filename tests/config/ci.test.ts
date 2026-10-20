@@ -98,24 +98,25 @@ describe('CI workflow and gate', () => {
   it('[SEC-4] a file moved from code into docs/ is not docs-only in the CI diff', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ob-rename-'));
     try {
+      // Trees, not commits, so no local commit hook or signing setting affects the test.
       const git = (...args: string[]) =>
-        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', ...args], {
-          cwd: dir,
-          encoding: 'utf8',
-        });
+        execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
       git('init', '-q');
       mkdirSync(join(dir, 'packages'));
       writeFileSync(join(dir, 'packages', 'a.ts'), 'export const a = 1;\n'.repeat(20));
       git('add', '.');
-      git('commit', '-qm', 'base');
+      const before = git('write-tree');
       mkdirSync(join(dir, 'docs'));
       git('mv', 'packages/a.ts', 'docs/a.md');
-      git('commit', '-qm', 'move');
-      const command = workflow.match(/git diff ([^"]*)"\$BASE\.\.\.\$HEAD"/)?.[1]?.trim() ?? '';
-      expect(command).toBe('--no-renames --name-only');
-      const changed = git('diff', ...command.split(' '), 'HEAD~1...HEAD').split('\n');
+      const after = git('write-tree');
+
+      const flags = workflow.match(/git diff ([^"]*)"\$BASE\.\.\.\$HEAD"/)?.[1]?.trim() ?? '';
+      expect(flags).toBe('--no-renames --name-only');
+      const changed = git('diff', ...flags.split(' '), before, after).split('\n');
       expect(changed).toContain('packages/a.ts');
       expect(isDocsOnly(changed)).toBe(false);
+      // Without --no-renames, git reports only the new path, which would look docs-only.
+      expect(isDocsOnly(git('diff', '--name-only', before, after).split('\n'))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

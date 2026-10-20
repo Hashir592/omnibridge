@@ -74,17 +74,13 @@ export class FileKeyStore {
   /** KEK rotation for files: re-wraps every workspace's file keys; file bodies are untouched. */
   async rewrapAll(): Promise<number> {
     let count = 0;
-    const workspaces = await readdir(this.#root).catch(() => []);
-    for (const workspaceId of workspaces.filter((name) => UUID.test(name))) {
-      for (const version of await this.#versions(workspaceId)) {
-        const path = join(this.#keysDir(workspaceId), `v${String(version)}.json`);
-        const stored = fromFile(workspaceId, JSON.parse(await readFile(path, 'utf8')) as KeyFile);
-        const next = rewrapDataKey(this.#keyring, stored);
-        if (next === stored) continue;
-        await writeDurable(`${path}.tmp`, JSON.stringify(toFile(next)));
-        await rename(`${path}.tmp`, path);
-        count += 1;
-      }
+    for await (const { workspaceId, path, file } of this.#keyFiles()) {
+      const stored = fromFile(workspaceId, file);
+      const next = rewrapDataKey(this.#keyring, stored);
+      if (next === stored) continue;
+      await writeDurable(`${path}.tmp`, JSON.stringify(toFile(next)));
+      await rename(`${path}.tmp`, path);
+      count += 1;
     }
     return count;
   }
@@ -92,15 +88,21 @@ export class FileKeyStore {
   /** How many file keys are still wrapped under a KEK older than the active one (rotation check). */
   async countStale(): Promise<number> {
     let count = 0;
+    for await (const { file } of this.#keyFiles()) {
+      if (file.kekVersion < this.#keyring.activeVersion) count += 1;
+    }
+    return count;
+  }
+
+  /** Every workspace's key files on the volume. */
+  async *#keyFiles(): AsyncGenerator<{ workspaceId: string; path: string; file: KeyFile }> {
     const workspaces = await readdir(this.#root).catch(() => []);
     for (const workspaceId of workspaces.filter((name) => UUID.test(name))) {
       for (const version of await this.#versions(workspaceId)) {
         const path = join(this.#keysDir(workspaceId), `v${String(version)}.json`);
-        const file = JSON.parse(await readFile(path, 'utf8')) as KeyFile;
-        if (file.kekVersion < this.#keyring.activeVersion) count += 1;
+        yield { workspaceId, path, file: JSON.parse(await readFile(path, 'utf8')) as KeyFile };
       }
     }
-    return count;
   }
 
   #keysDir(workspaceId: string): string {
