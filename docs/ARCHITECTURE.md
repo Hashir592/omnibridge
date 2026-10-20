@@ -105,7 +105,7 @@ Each invariant names the check that enforces it. A change that needs to break on
 **Tenancy and permissions**
 
 1. **Every tenant table has `workspace_id`**, an RLS policy, and `FORCE ROW LEVEL SECURITY`. Foreign keys between tenant tables are composite `(workspace_id, id)`. Check: the `rls-coverage` SQL test. (TEN-1)
-2. **The app connects as `ob_app`**, which has no BYPASSRLS. Migrations run as `ob_owner`. Only the scheduler fan-out uses `ob_platform`, which has read access to the workspace list and nothing else. (TEN-1)
+2. **The app connects as `ob_app`**, which has no BYPASSRLS. Migrations run as `ob_owner`. The worker connects as `ob_worker`, a member of `ob_app` (also no BYPASSRLS) whose only extra right is the audit purge (ADR-049). Only the scheduler fan-out uses `ob_platform`, which has read access to the workspace list and nothing else. (TEN-1)
 3. **Every request and every job runs inside one transaction** that sets `app.workspace_id` and `app.company_ids` with `SET LOCAL`. Repository functions require a `TenantContext` argument. No query is written without one. Check: lint rule plus type signature. (TEN-1, PERM-3)
 4. **Every route in the contract declares** `auth` (public / session / platform / service / signed-webhook), `tab` and `adminOnly`, and whether it is company-scoped. The server refuses to register a route without them. The route walker calls every route as workspace A against workspace B's data, and as a child with no ticks. (AT-1, AT-2, SEC-3)
 5. **Combined view means the user's permitted companies only.** It never means all companies in the workspace. (TEN-5, PERM-3)
