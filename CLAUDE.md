@@ -71,6 +71,7 @@ It must pass completely before any merge; CI runs it on every PR. Locally, use `
 - **Tests:** every test title cites the IDs it proves, for example `it('[VAT-3] rounds once per rate group', …)`. Write tests **first** for money, VAT, deletion, tenancy and permissions.
 - **Task IDs:** a task's `prd_ids` lists only IDs its module owns. IDs it only helps with go in `supports` (ADR-027).
 - **Handoffs:** a message for another session is printed in chat as a fenced block headed exactly `PASTE INTO SESSION <N>`. It is also saved to `docs/handoffs/<YYYYMMDD-HHMM>-S<from>-to-S<to>.md`. Sessions never talk directly; Hashir carries the messages. When a ruling changes a session's rule file or files it uses, S1 sends that session a short note.
+- **Showing Hashir work (his rule, 20 Oct 2026):** when anything is ready on localhost, give the working links unasked, as an ordered table in click-through order: link, what to enter, what he should see. State synthetic demo values (mock emails, passwords, 6-digit codes) inline in chat; never "open a file to find them". Never show a real secret.
 - **Proposals:** to change the PRD, ARCHITECTURE, MODULES or backlog, write a proposal under "Proposed (from sessions)" in `docs/DECISIONS.md`. Keep working within your current scope. Only S1 edits those files.
 - **Units:** money is integer pence. Times are stored in UTC and shown in Europe/London. UI dates use DD/MM/YYYY.
 
