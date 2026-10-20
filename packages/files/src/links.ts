@@ -28,15 +28,20 @@ export function signFileLink(
 
 /**
  * Checks a link: the signature first (so a changed expiry is `invalid`), then the expiry.
- * The comparison is constant-time.
+ *
+ * The signature must be exactly the canonical base64url string, compared in constant time. The
+ * last of its 43 characters carries 2 unused bits, so decoding first would accept a second,
+ * different spelling of a valid signature.
  */
 export function verifyFileLink(
   input: { fileId: string; sessionId: string; exp: number; sig: string; now?: Date },
   key: Buffer,
 ): 'ok' | 'expired' | 'invalid' {
   if (!Number.isSafeInteger(input.exp)) return 'invalid';
-  const expected = mac(key, input.fileId, input.sessionId, input.exp);
-  const given = Buffer.from(input.sig, 'base64url');
+  const expected = Buffer.from(
+    mac(key, input.fileId, input.sessionId, input.exp).toString('base64url'),
+  );
+  const given = Buffer.from(input.sig);
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return 'invalid';
   const now = Math.floor((input.now ?? new Date()).getTime() / 1_000);
   return now > input.exp ? 'expired' : 'ok';

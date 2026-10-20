@@ -111,7 +111,8 @@ describe('GET /files/:id signed links (NFR-5)', () => {
     ).toBe(403);
 
     const good = signFileLink({ fileId: cleanId, sessionId: 'session-a' }, linkKey);
-    const tamperedSig = `${good.sig.slice(0, -1)}${good.sig.endsWith('A') ? 'B' : 'A'}`;
+    // A middle character: always different bytes (the last one partly holds unused bits).
+    const tamperedSig = `${good.sig.slice(0, 10)}${good.sig[10] === 'A' ? 'B' : 'A'}${good.sig.slice(11)}`;
     expect(
       (await get(`/files/${cleanId}?exp=${String(good.exp)}&sig=${tamperedSig}`)).statusCode,
     ).toBe(403);

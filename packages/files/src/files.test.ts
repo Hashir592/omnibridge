@@ -50,8 +50,29 @@ describe('chunked file encryption (NFR-5)', () => {
   });
 });
 
+const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/** Changes a middle character of a signature: always different bytes, never a padding-only edit. */
+function tamper(sig: string): string {
+  const at = 10;
+  const swapped = sig[at] === 'A' ? 'B' : 'A';
+  return `${sig.slice(0, at)}${swapped}${sig.slice(at + 1)}`;
+}
+
 describe('signed download links (NFR-5)', () => {
   const key = randomBytes(32);
+
+  it('[NFR-5] a valid signature spelled differently (non-canonical base64url) is rejected', () => {
+    const link = signFileLink({ fileId: FILE, sessionId: 'session-a' }, key);
+    // The last of 43 characters holds 2 unused bits: flipping the lowest one keeps the bytes.
+    const last = link.sig.at(-1) ?? 'A';
+    const variant = `${link.sig.slice(0, -1)}${B64URL[B64URL.indexOf(last) ^ 1] ?? 'A'}`;
+    expect(Buffer.from(variant, 'base64url').equals(Buffer.from(link.sig, 'base64url'))).toBe(true);
+    expect(variant).not.toBe(link.sig);
+    expect(
+      verifyFileLink({ fileId: FILE, sessionId: 'session-a', ...link, sig: variant }, key),
+    ).toBe('invalid');
+  });
   const now = new Date('2026-10-20T10:00:00Z');
   const link = signFileLink({ fileId: FILE, sessionId: 'session-a', now }, key);
 
@@ -64,7 +85,7 @@ describe('signed download links (NFR-5)', () => {
     expect(check({ now: at(301) })).toBe('expired');
     expect(check({ sessionId: 'session-b' })).toBe('invalid');
     expect(check({ fileId: '0e0e0e0e-0000-4000-8000-00000000000e' })).toBe('invalid');
-    expect(check({ sig: `${link.sig.slice(0, -2)}AA` })).toBe('invalid');
+    expect(check({ sig: tamper(link.sig) })).toBe('invalid');
     expect(check({ exp: link.exp + 3_600 })).toBe('invalid');
     expect(
       verifyFileLink(
