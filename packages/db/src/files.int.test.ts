@@ -45,22 +45,34 @@ describe('file scan states (SEC-2)', () => {
   };
 
   it('[SEC-2] as ob_app, a scanned file never moves back, so infected never becomes clean', async () => {
+    // Raw SQL as ob_app, as a bug or an injection would write it: the trigger refuses.
+    const rawSet = (id: string, state: string) =>
+      db.transaction().execute(async (trx) => {
+        await sql`SELECT set_config('app.workspace_id', ${A.workspaceId}, true)`.execute(trx);
+        await sql`UPDATE app.files SET state = ${state} WHERE id = ${id}`.execute(trx);
+      });
+
     const infected = await newFile();
     await files.setState(A, infected, 'infected');
-    await expect(files.setState(A, infected, 'clean')).rejects.toThrow(
-      /cannot move from infected to clean/,
-    );
-    await expect(files.setState(A, infected, 'scanning')).rejects.toThrow(/cannot move/);
+    await expect(rawSet(infected, 'clean')).rejects.toThrow(/cannot move from infected to clean/);
+    await expect(rawSet(infected, 'scanning')).rejects.toThrow(/cannot move/);
 
     const failed = await newFile();
     await files.setState(A, failed, 'scan_failed');
-    await expect(files.setState(A, failed, 'clean')).rejects.toThrow(/cannot move/);
+    await expect(rawSet(failed, 'clean')).rejects.toThrow(/cannot move/);
 
     const clean = await newFile();
     await files.setState(A, clean, 'clean');
-    await expect(files.setState(A, clean, 'infected')).rejects.toThrow(/cannot move/);
+    await expect(rawSet(clean, 'infected')).rejects.toThrow(/cannot move/);
     expect((await files.get(A, clean))?.state).toBe('clean');
     expect((await files.get(A, infected))?.state).toBe('infected');
+  });
+
+  it('[SEC-2] a repeated scan verdict is a no-op: only the first verdict counts', async () => {
+    const id = await newFile();
+    await files.setState(A, id, 'clean');
+    await files.setState(A, id, 'scan_failed'); // a second scan job: no error, no change
+    expect((await files.get(A, id))?.state).toBe('clean');
   });
 
   it('[SEC-2] as ob_app, a file cannot be inserted already clean', async () => {

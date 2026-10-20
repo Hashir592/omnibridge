@@ -51,8 +51,8 @@ export class FileKeyStore {
     // sees a half-written key. `link` fails with EEXIST for the loser of a race, who then reads
     // the winner's key (F-M01-end-07).
     const tmp = join(dir, `v1.json.${randomUUID()}.tmp`);
-    await writeDurable(tmp, JSON.stringify(toFile(wrapped)));
     try {
+      await writeDurable(tmp, JSON.stringify(toFile(wrapped)));
       await link(tmp, join(dir, 'v1.json'));
       return dataKey;
     } catch (err) {
@@ -78,8 +78,14 @@ export class FileKeyStore {
       const stored = fromFile(workspaceId, file);
       const next = rewrapDataKey(this.#keyring, stored);
       if (next === stored) continue;
-      await writeDurable(`${path}.tmp`, JSON.stringify(toFile(next)));
-      await rename(`${path}.tmp`, path);
+      // A unique temp name, so two re-wrap runs at once cannot truncate each other's file.
+      const tmp = `${path}.${randomUUID()}.tmp`;
+      try {
+        await writeDurable(tmp, JSON.stringify(toFile(next)));
+        await rename(tmp, path);
+      } finally {
+        await rm(tmp, { force: true });
+      }
       count += 1;
     }
     return count;

@@ -260,14 +260,19 @@ export class JobQueue {
       this.#log.info({ event: 'job.completed', ...fields }, 'job completed');
     } catch (err) {
       const last = job.retryCount >= job.retryLimit;
-      await this.#records.update(ctx, key, {
-        state: last ? 'failed' : 'retrying',
-        errorCode: 'handler_failed',
-      });
+      // Log first and never let a failed record update replace the handler's error.
       this.#log.warn(
         { event: last ? 'job.dead_lettered' : 'job.retrying', ...fields, err },
         last ? 'job failed; moved to the dead-letter queue' : 'job failed; will retry',
       );
+      await this.#records
+        .update(ctx, key, { state: last ? 'failed' : 'retrying', errorCode: 'handler_failed' })
+        .catch((updateErr: unknown) => {
+          this.#log.warn(
+            { event: 'job.record_update_failed', ...fields, err: updateErr },
+            'job record update failed',
+          );
+        });
       throw err; // pg-boss retries, or moves the job to <type>.dlq after the last attempt
     } finally {
       await release();

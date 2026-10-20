@@ -195,5 +195,5 @@ describe('file key rotation (SEC-6, NFR-5)', () => {
       const names = await readdir(join(workspaceDir(root, workspaceId), 'keys'));
       expect(names).toEqual(['v1.json']);
     }
-  });
+  }, 60_000); // 200 trials with an fsync each; slow on Windows under the full gate
 });
