@@ -1,5 +1,5 @@
 import { defineRoute, listQuery, pageOf, type AnyRoute } from '@omnibridge/contract';
-import { ApiError } from '@omnibridge/core';
+import { ApiError, type SessionActor, type TenantRunner } from '@omnibridge/core';
 import { createLogger } from '@omnibridge/logger';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
@@ -75,10 +75,25 @@ const handlers: Handlers<typeof routes> = {
   },
 };
 
+const SESSION: SessionActor = {
+  workspaceId: '00000000-0000-4000-8000-0000000000a1',
+  userId: '00000000-0000-4000-8000-0000000000b1',
+  sessionId: 'session-1',
+};
+/** No database here: the tenancy only hands the handler a context. */
+const tenancy: TenantRunner = {
+  runWorkspace: (actor, fn) => fn({ ...actor, companyIds: [] }),
+  run: (ctx, fn) => fn(ctx),
+};
+
 async function server(rs: readonly AnyRoute[] = routes, hs: object = handlers) {
   const app = Fastify({ loggerInstance: logger });
   installContract(app);
-  void app.register(contractRoutesPlugin(rs, hs as Handlers<typeof rs>));
+  void app.register(
+    contractRoutesPlugin(rs, hs as Handlers<typeof rs>, {
+      auth: { resolveSession: () => SESSION, tenancy },
+    }),
+  );
   await app.ready();
   return app;
 }
@@ -101,6 +116,84 @@ describe('contract registration (invariant 4)', () => {
   it('[SEC-3] server refuses duplicate route ids and missing handlers', async () => {
     await expect(server([listThings, listThings])).rejects.toThrow(/listThings/);
     await expect(server(routes, { listThings: handlers.listThings })).rejects.toThrow(/getThing/);
+  });
+});
+
+describe('authentication per route kind (SEC-3)', () => {
+  const internal = defineRoute({
+    id: 'internalPing',
+    method: 'POST',
+    path: '/internal/ping',
+    responses: { 204: z.null() },
+    auth: 'service',
+    tab: 'none',
+    adminOnly: false,
+    companyScoped: false,
+  });
+  const webhook = defineRoute({
+    id: 'providerHook',
+    method: 'POST',
+    path: '/hooks/provider',
+    responses: { 204: z.null() },
+    auth: 'signed-webhook',
+    tab: 'none',
+    adminOnly: false,
+    companyScoped: false,
+  });
+  const open = () => Promise.resolve({ status: 204 as const, body: null });
+
+  it('[SEC-3] service and signed-webhook routes fail closed until their checks exist', async () => {
+    const rs = [internal, webhook] as const;
+    const app = await server(rs, { internalPing: open, providerHook: open });
+    for (const url of ['/internal/ping', '/hooks/provider']) {
+      const res = await app.inject({ method: 'POST', url });
+      expect({ url, status: res.statusCode }).toEqual({ url, status: 401 });
+    }
+    await app.close();
+  });
+
+  it('[SEC-3] a session route answers 401 before validation when no session resolves', async () => {
+    const app = Fastify({ loggerInstance: logger });
+    installContract(app);
+    void app.register(
+      contractRoutesPlugin(routes, handlers, {
+        auth: { resolveSession: () => undefined, tenancy },
+      }),
+    );
+    await app.ready();
+    // An invalid id would be a 400; an anonymous caller learns nothing about the schema.
+    const res = await app.inject({ method: 'GET', url: '/things/nope' });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toMatchObject({ code: 'unauthorized' });
+    await app.close();
+  });
+
+  it('[SEC-3] a session handler gets the tenant context of the resolved session', async () => {
+    const whoAmI = defineRoute({
+      id: 'whoAmI',
+      method: 'GET',
+      path: '/me',
+      responses: { 200: z.object({ workspace: z.string(), user: z.string().optional() }) },
+      auth: 'session',
+      tab: 'none',
+      adminOnly: false,
+      companyScoped: false,
+    });
+    const rs = [whoAmI] as const;
+    const hs: Handlers<typeof rs> = {
+      whoAmI: ({ tenant }) =>
+        Promise.resolve({
+          status: 200,
+          body: {
+            workspace: tenant.workspaceId,
+            ...(tenant.userId ? { user: tenant.userId } : {}),
+          },
+        }),
+    };
+    const app = await server(rs, hs);
+    const res = await app.inject({ method: 'GET', url: '/me' });
+    expect(res.json()).toEqual({ workspace: SESSION.workspaceId, user: SESSION.userId });
+    await app.close();
   });
 });
 

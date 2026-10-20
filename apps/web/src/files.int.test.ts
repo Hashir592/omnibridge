@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
-import { FileRepository, migrateMain, type MainDb } from '@omnibridge/db';
+import {
+  FileRepository,
+  migrateMain,
+  Tenancy,
+  WorkspaceRepository,
+  type MainDb,
+} from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore, signFileLink } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
@@ -15,13 +21,17 @@ import { buildWebApp } from './app.ts';
 
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
 const checks = { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resolve(true) };
-const ws: TenantContext = { workspaceId: randomUUID() };
+const ws: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
 const PDF = Buffer.from('%PDF-1.7\n% synthetic test invoice\n%%EOF\n');
 
-/** Test-only stand-in for M02 sessions: workspace and session id come from headers. */
+const USER = randomUUID();
+
+/** Test-only stand-in for T-0203 sessions: the session id comes from a header. */
 const fromHeaders = (request: { headers: Record<string, unknown> }) => {
   const session = request.headers['x-test-session'];
-  return typeof session === 'string' ? { ctx: ws, sessionId: session } : undefined;
+  return typeof session === 'string'
+    ? { workspaceId: ws.workspaceId, userId: USER, sessionId: session }
+    : undefined;
 };
 
 describe('GET /files/:id signed links (NFR-5)', () => {
@@ -44,6 +54,9 @@ describe('GET /files/:id signed links (NFR-5)', () => {
         pool: new pg.Pool({ ...cluster.connection('ob_app'), max: 3 }),
       }),
     });
+    await new Tenancy(db).run(ws, (ctx) =>
+      new WorkspaceRepository(db).create(ctx, { name: 'Files test' }),
+    );
     const root = mkdtempSync(join(tmpdir(), 'ob-web-files-'));
     store = new EncryptedLocalFileStore({
       root,
@@ -75,6 +88,7 @@ describe('GET /files/:id signed links (NFR-5)', () => {
       version: '0',
       checks,
       files: { store, linkKey },
+      tenancy: new Tenancy(db),
       resolveSession: fromHeaders,
     });
 

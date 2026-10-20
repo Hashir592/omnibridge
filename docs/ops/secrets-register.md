@@ -19,12 +19,12 @@ Production dates are set when each secret is first created in M22. "Next rotatio
 |---|---|---|---|---|---|---|---|
 | `db_main_superuser_password` | PostgreSQL superuser of db-main (init only) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main | 12 months | set in M22 |
 | `ob_owner_password` | db-main migration role `ob_owner` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, migrate-main | 12 months | set in M22 |
-| `ob_app_password` | db-main app role `ob_app` (no BYPASSRLS) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, web, worker | 12 months | set in M22 |
-| `ob_platform_password` | db-main scheduler fan-out role `ob_platform` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main | 12 months | set in M22 |
+| `ob_app_password` | db-main app role `ob_app` (no BYPASSRLS) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, web, worker, rewrap-keys (ops job) | 12 months | set in M22 |
+| `ob_platform_password` | db-main fan-out role `ob_platform`: reads workspace ids only | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, rewrap-keys (ops job) | 12 months | set in M22 |
 | `db_pii_superuser_password` | PostgreSQL superuser of db-pii (init only) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii | 12 months | set in M22 |
 | `vault_owner_password` | db-pii migration role `vault_owner` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, migrate-pii | 12 months | set in M22 |
 | `vault_app_password` | db-pii app role `vault_app` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, pii-vault | 12 months | set in M22 |
-| `secrets_kek` | Secrets master key: wraps the data keys of `app.credentials` in db-main | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web, worker | 12 months | set in M22 |
+| `secrets_kek` | Secrets master key: wraps the data keys of `app.credentials` in db-main and the file keys on the files volume | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web, worker, rewrap-keys (ops job) | 12 months | set in M22 |
 | `file_link_hmac_key` | HMAC key for 5-minute signed download links (NFR-5, T-0105) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web | 12 months | set in M22 |
 | `pii_kek` | PII master key: wraps the per-workspace PII data keys (used from M04) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | pii-vault | 12 months | set in M22 |
 
@@ -65,21 +65,24 @@ These are not Docker secrets. Each value is encrypted with AES-256-GCM under a p
 **Rotate a master key (KEK).** A keyring file has one `<version>:<base64 32 bytes>` line per version; the last line is active.
 
 1. Append a new line (`generateKekLine(n + 1)` from `@omnibridge/crypto`) to the secret and redeploy. New data keys are wrapped under the new version, and old ones still open.
-2. Run `CredentialRepository.rewrapDataKeys` for every workspace. It re-wraps each data key; credential rows are not re-encrypted. (The all-workspace job arrives with the workspace list in T-0201 and the queue in T-0104.)
-3. Check that no data key is still under an old KEK version. **Every app role is filtered by row-level security** (FORCE RLS applies to `ob_owner` too), so they all see 0 rows without a workspace. Only the db-main superuser sees every workspace. Run this as `postgres` in a one-off psql session, with `<N>` as the new active version:
+2. **`secrets_kek`: run the all-workspace re-wrap job** (T-0201) with the new keyring:
 
    ```bash
-   docker compose -f infra/compose/compose.yaml exec db-main psql -U postgres -d omnibridge -c "SELECT kek_version, count(*) FROM app.data_keys WHERE kek_version < <N> GROUP BY kek_version"
+   docker compose -f infra/compose/compose.yaml --profile ops run --rm rewrap-keys
    ```
 
-   **It must return no rows** before you remove the old line. If any rows remain, re-run step 2 for their workspaces (`SELECT DISTINCT workspace_id …` with the same filter). Removing the line while any remain makes every credential in those workspaces undecryptable (`no KEK version …`), which is data loss (F-M01-halfway-03).
-4. **`secrets_kek` only: re-wrap the file keys.** Each workspace's file keys live wrapped on the files volume (`<FILES_DIR>/<workspace>/keys/v<n>.json`), not in the database, so steps 2 and 3 do not cover them. Run this in the **web** container, the only one that can write the volume (the worker mounts it read-only):
+   It lists every workspace as `ob_platform` (ids only), then re-wraps each workspace's data keys as `ob_app` inside that workspace's own tenant transaction (credential rows are not re-encrypted). Then it re-wraps every file key on the files volume (`<FILES_DIR>/<workspace>/keys/v<n>.json`; file bodies are untouched) and counts the keys left. It runs as the one-off `rewrap-keys` container (web image). That container is the only one that holds `ob_platform`, `ob_app`, `secrets_kek` and a writable files volume (the worker mounts the volume read-only). (`pii_kek`: the vault's re-wrap arrives in M04.)
+3. **It must exit 0 and log `key_rotation.done`** before you remove the old line. It exits 1 while any data key or file key is under a KEK other than the active one:
+   - `data_keys.stale` or `file_keys.stale`: run it again.
+   - `data_keys.newer_kek` or `file_keys.newer_kek`: the job ran with an older keyring than the rest of the stack (R2-02). Run it with the new keyring.
+
+   Removing the line while any key remains under it makes every credential or file in that workspace undecryptable (`no KEK version …`), which is data loss (F-M01-halfway-03, F-M01-end-03).
+
+   An independent check of the database part: every app role is filtered by row-level security, and FORCE RLS applies to `ob_owner` too. Only the db-main superuser sees every workspace. As `postgres`, with `<N>` as the new active version, this must return no rows:
 
    ```bash
-   docker compose -f infra/compose/compose.yaml exec web node dist/rewrap-file-keys.js
+   docker compose -f infra/compose/compose.yaml exec db-main psql -U postgres -d omnibridge -c "SELECT kek_version, count(*) FROM app.data_keys WHERE kek_version <> <N> GROUP BY kek_version"
    ```
-
-   It re-wraps every file key under the active KEK (file bodies are untouched) and then counts the keys still under an older one. **It must exit 0**, and its log line `file_keys.stale` must not appear. Run it again until it does. If you remove the old line while any file key is still under it, every file in that workspace becomes undecryptable, which is data loss (F-M01-end-03).
-5. Remove the old line and redeploy.
+4. Remove the old line and redeploy.
 
 **Suspected leak.** Rotate the affected secret at once, then record the incident and the new next-rotation date here.

@@ -241,6 +241,23 @@ export class CredentialRepository {
     return stale.length;
   }
 
+  /** Data keys of the workspace under an older and under a newer KEK than the active one. */
+  async countDataKeys(
+    db: Kysely<MainDb>,
+    ctx: TenantContext,
+  ): Promise<{ stale: number; newer: number }> {
+    const active = String(this.#keyring.activeVersion);
+    const row = await db
+      .selectFrom('app.data_keys')
+      .select((eb) => [
+        eb.fn.countAll<string>().filterWhere('kek_version', '<', active).as('stale'),
+        eb.fn.countAll<string>().filterWhere('kek_version', '>', active).as('newer'),
+      ])
+      .where('workspace_id', '=', ctx.workspaceId)
+      .executeTakeFirstOrThrow();
+    return { stale: Number(row.stale), newer: Number(row.newer) };
+  }
+
   async #insert(
     db: Kysely<MainDb>,
     ctx: TenantContext,

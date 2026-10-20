@@ -586,6 +586,9 @@ importers:
       '@omnibridge/contract':
         specifier: workspace:*
         version: link:../contract
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../core
       '@testcontainers/postgresql':
         specifier: 12.2.1
         version: 12.2.1(supports-color@7.2.0)

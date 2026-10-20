@@ -10,6 +10,9 @@ export interface ClamdOptions {
 
 export type ScanVerdict = 'clean' | 'infected' | 'scan_failed';
 
+/** How long one scan may take, connect to verdict, unless the caller sets `timeoutMs`. */
+export const CLAMD_TIMEOUT_MS = 120_000;
+
 /** clamd takes INSTREAM chunks up to StreamMaxLength; 64 KiB keeps memory flat. */
 const MAX_CHUNK = 64 * 1024;
 
@@ -38,7 +41,7 @@ export function scanWithClamd(options: ClamdOptions, content: Readable): Promise
       if (err !== undefined) reject(err);
       else if (verdict !== undefined) resolve(verdict);
     };
-    socket.setTimeout(options.timeoutMs ?? 120_000, () => {
+    socket.setTimeout(options.timeoutMs ?? CLAMD_TIMEOUT_MS, () => {
       finish(new Error('clamd timed out'));
     });
     socket.on('error', (err) => {

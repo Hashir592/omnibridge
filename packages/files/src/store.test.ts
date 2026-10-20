@@ -34,7 +34,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 const WS = '0a0a0a0a-0000-4000-8000-00000000000a';
-const ctx: TenantContext = { workspaceId: WS };
+const ctx: TenantContext = { workspaceId: WS, companyIds: [] };
 const PDF = Buffer.from('%PDF-1.7\n%synthetic test document\n%%EOF\n');
 
 function memoryMetadata(): FileMetadataStore {
@@ -183,6 +183,29 @@ describe('file key rotation (SEC-6, NFR-5)', () => {
     expect(await new FileKeyStore(root, parseKeyring('secrets', `${v1}\n${v2}`)).rewrapAll()).toBe(
       1,
     );
+  });
+
+  it('[SEC-6] an old keyring mid-rollout skips file keys under a newer KEK and counts them (R2-02)', async () => {
+    await putClean(storeWith(v1));
+    expect(
+      await new FileKeyStore(
+        root,
+        parseKeyring(
+          'secrets',
+          `${v1}
+${v2}`,
+        ),
+      ).rewrapAll(),
+    ).toBe(1);
+    // A process still on the one-line v1 keyring: no crash, nothing changed, the key is counted.
+    const old = new FileKeyStore(root, parseKeyring('secrets', v1));
+    expect(await old.rewrapAll()).toBe(0);
+    expect(await old.countNewer()).toBe(1);
+    expect(await old.countStale()).toBe(0);
+    const keyFile = JSON.parse(
+      await readFile(join(workspaceDir(root, WS), 'keys', 'v1.json'), 'utf8'),
+    ) as { kekVersion: number };
+    expect(keyFile.kekVersion).toBe(2);
   });
 
   it('[NFR-5] concurrent first use of a workspace key never reads a half-written file', async () => {

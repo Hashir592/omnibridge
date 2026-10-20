@@ -1,9 +1,16 @@
 export { cacheKey, companySetHash, type CacheKeyInput, type CompanySetHash } from './cache-key.ts';
 export { readSecretFile, requireEnv } from './env.ts';
+export { isUuid, UUID_PATTERN } from './ids.ts';
 export { ApiError, ERROR_CODES, type ApiErrorInit, type ErrorCode } from './errors.ts';
 export { runHttpHealthcheck } from './healthcheck.ts';
 export { pence, type Pence } from './money.ts';
-export type { TenantContext } from './tenant.ts';
+export type {
+  PlatformActor,
+  SessionActor,
+  TenantActor,
+  TenantContext,
+  TenantRunner,
+} from './tenant.ts';
 export {
   formatLondonDate,
   formatLondonDateTime,

@@ -201,7 +201,7 @@ describe('upload pipeline (SEC-2)', () => {
     await expect(
       acceptUpload(
         { store, queue },
-        { workspaceId: WS },
+        { workspaceId: WS, companyIds: [] },
         {
           bytes: PDF,
           filename: 'a.pdf',

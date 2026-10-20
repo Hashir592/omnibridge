@@ -77,6 +77,14 @@ describe('repository rules', () => {
     expect(runScript('scripts/check-names.sh', [dir]).code).toBe(0);
   });
 
+  it('[TEN-4] hard-coded-name gate: the repository, launch seed included, has no names outside seed files', () => {
+    // The launch seed holds the client's names (PRD §0.3); the gate must still pass on the repo.
+    const seed = readRepoFile('packages/db/seed/launch.ts');
+    expect(seed).toContain(['Jee', 'z Group'].join(''));
+    const res = runScript('scripts/check-names.sh');
+    expect({ code: res.code, stderr: res.stderr }).toEqual({ code: 0, stderr: '' });
+  });
+
   it('[OPS-9] the edge route file routes only OmniBridge hosts to OmniBridge aliases', () => {
     const caddy = readRepoFile('infra/edge/sites/omnibridge.caddy');
     const sites = [...caddy.matchAll(/^([a-z0-9., -]+)\s*\{/gm)].flatMap((m) =>

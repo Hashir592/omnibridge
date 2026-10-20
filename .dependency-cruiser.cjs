@@ -62,6 +62,24 @@ module.exports = {
       to: { path: '^packages/contract/', pathNot: '^packages/contract/src/client/' },
     },
     {
+      name: 'db-access-only-in-packages-db',
+      comment:
+        'Invariant 3: db-main is reached only through packages/db, whose repositories take a ' +
+        'TenantContext and run in a tenant transaction. Apps and other packages never import pg ' +
+        'or kysely themselves (createMainDb is the way in). db-pii has its own pair, pii-db and ' +
+        'pii-vault; tests may build fixtures directly.',
+      severity: 'error',
+      from: {
+        path: '^(apps|packages|mocks)/',
+        pathNot: [
+          '^packages/(db|pii-db|testkit)/',
+          '^apps/pii-vault/',
+          '\\.(test|int\\.test|contract\\.test)\\.ts$',
+        ],
+      },
+      to: { path: '(^|/)node_modules/(kysely|pg)/' },
+    },
+    {
       name: 'mocks-and-testkit-only-in-tests',
       comment: 'Provider mocks and the testkit never ship inside production code paths.',
       severity: 'error',
@@ -73,8 +91,10 @@ module.exports = {
     },
   ],
   options: {
+    // npm packages stay in the graph as leaves (not followed), so a rule can forbid one.
     doNotFollow: { path: 'node_modules' },
-    exclude: { path: '(^|/)(dist|node_modules|\\.astro)/' },
+    // Only our own build output: npm packages often live under a dist/ folder too.
+    exclude: { path: '^(apps|packages|mocks)/[^.]*(dist|\\.astro)/' },
     tsConfig: { fileName: 'tsconfig.json' },
     enhancedResolveOptions: {
       conditionNames: ['@omnibridge/source', 'import', 'default'],

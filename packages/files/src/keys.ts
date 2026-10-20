@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { link, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isUuid } from '@omnibridge/core';
 import {
   generateDataKey,
   rewrapDataKey,
@@ -10,7 +11,6 @@ import {
   type WrappedDataKey,
 } from '@omnibridge/crypto';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const KEY_FILE = /^v(\d+)\.json$/;
 
 interface KeyFile {
@@ -21,7 +21,7 @@ interface KeyFile {
 
 /** A workspace directory on the files volume. The id is checked, so it can never leave the root. */
 export function workspaceDir(root: string, workspaceId: string): string {
-  if (!UUID.test(workspaceId)) throw new Error('Workspace id must be a lower-case UUID');
+  if (!isUuid(workspaceId)) throw new Error('Workspace id must be a lower-case UUID');
   return join(root, workspaceId);
 }
 
@@ -71,10 +71,15 @@ export class FileKeyStore {
     return unwrapDataKey(this.#keyring, fromFile(workspaceId, JSON.parse(text) as KeyFile));
   }
 
-  /** KEK rotation for files: re-wraps every workspace's file keys; file bodies are untouched. */
+  /**
+   * KEK rotation for files: re-wraps every workspace's file keys; file bodies are untouched. Keys
+   * under a newer KEK than this process holds (another container already on the next keyring,
+   * mid-rollout) are left alone; `countNewer` reports them (R2-02).
+   */
   async rewrapAll(): Promise<number> {
     let count = 0;
     for await (const { workspaceId, path, file } of this.#keyFiles()) {
+      if (file.kekVersion > this.#keyring.activeVersion) continue;
       const stored = fromFile(workspaceId, file);
       const next = rewrapDataKey(this.#keyring, stored);
       if (next === stored) continue;
@@ -100,10 +105,19 @@ export class FileKeyStore {
     return count;
   }
 
+  /** How many file keys are under a newer KEK than this process holds (rotation check, R2-02). */
+  async countNewer(): Promise<number> {
+    let count = 0;
+    for await (const { file } of this.#keyFiles()) {
+      if (file.kekVersion > this.#keyring.activeVersion) count += 1;
+    }
+    return count;
+  }
+
   /** Every workspace's key files on the volume. */
   async *#keyFiles(): AsyncGenerator<{ workspaceId: string; path: string; file: KeyFile }> {
     const workspaces = await readdir(this.#root).catch(() => []);
-    for (const workspaceId of workspaces.filter((name) => UUID.test(name))) {
+    for (const workspaceId of workspaces.filter((name) => isUuid(name))) {
       for (const version of await this.#versions(workspaceId)) {
         const path = join(this.#keysDir(workspaceId), `v${String(version)}.json`);
         yield { workspaceId, path, file: JSON.parse(await readFile(path, 'utf8')) as KeyFile };

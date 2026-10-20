@@ -1,5 +1,13 @@
-import { contractRoutes, type Health, type JobProgress } from '@omnibridge/contract';
-import { ApiError, type TenantContext } from '@omnibridge/core';
+import { randomUUID } from 'node:crypto';
+import { contractRoutes, type Company, type Health, type JobProgress } from '@omnibridge/contract';
+import {
+  ApiError,
+  type PlatformActor,
+  type SessionActor,
+  type TenantContext,
+  type TenantRunner,
+} from '@omnibridge/core';
+import type { CompanyRepository, WorkspaceRepository } from '@omnibridge/db';
 import { FileNotReadable, verifyFileLink, type FileStore } from '@omnibridge/files';
 import type { Logger } from '@omnibridge/logger';
 import fastifyHelmet from '@fastify/helmet';
@@ -34,6 +42,12 @@ export interface JobProgressReader {
   >;
 }
 
+/** Workspaces and companies, for the platform routes and the company switcher (TEN-2, TEN-5). */
+export interface TenantDirectory {
+  workspaces: Pick<WorkspaceRepository, 'create' | 'get'>;
+  companies: Pick<CompanyRepository, 'create' | 'list'>;
+}
+
 export interface WebAppOptions {
   logger: Logger;
   version: string;
@@ -47,13 +61,16 @@ export interface WebAppOptions {
   jobs?: JobProgressReader;
   /** Encrypted files and the file-link HMAC key, for GET /files/:id (NFR-5). */
   files?: { store: FileStore; linkKey: Buffer };
+  /** Opens each request's one tenant transaction (TEN-1, invariant 3). */
+  tenancy?: TenantRunner;
+  directory?: TenantDirectory;
   /**
-   * The signed-in user's workspace and session for `session` routes. Sessions arrive in M02;
-   * until then production passes nothing, so every session route answers 401 and none is open.
+   * The signed-in user of `session` routes. Sessions arrive in T-0203; until then production
+   * passes nothing, so every session route answers 401 and none is open.
    */
-  resolveSession?: (
-    request: FastifyRequest,
-  ) => { ctx: TenantContext; sessionId: string } | undefined;
+  resolveSession?: (request: FastifyRequest) => SessionActor | undefined;
+  /** The operator of `platform` routes; nothing in production until T-0203, so 401. */
+  resolvePlatform?: (request: FastifyRequest) => PlatformActor | undefined;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
 }
@@ -74,7 +91,10 @@ export function buildWebApp({
   openapi,
   jobs,
   files,
+  tenancy,
+  directory,
   resolveSession,
+  resolvePlatform,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false });
@@ -104,6 +124,16 @@ export function buildWebApp({
     crossOriginEmbedderPolicy: false,
   });
 
+  function needTenancy(): TenantRunner {
+    if (tenancy === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
+    return tenancy;
+  }
+
+  function needDirectory(): TenantDirectory {
+    if (directory === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
+    return directory;
+  }
+
   const handlers: Handlers<typeof contractRoutes> = {
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
@@ -116,12 +146,9 @@ export function buildWebApp({
       };
       return healthy ? { status: 200, body } : { status: 503, body };
     },
-    getJob: async ({ params, request }) => {
-      const session = resolveSession?.(request);
-      if (session === undefined) throw new ApiError({ status: 401, code: 'unauthorized' });
-      const { ctx } = session;
+    getJob: async ({ params, tenant }) => {
       if (jobs === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
-      const job = await jobs.get(ctx, params.id);
+      const job = await jobs.get(tenant, params.id);
       // Another workspace's job looks exactly like a missing one (RLS hides it).
       if (job === undefined) throw new ApiError({ status: 404, code: 'not_found' });
       const body: JobProgress = {
@@ -137,9 +164,7 @@ export function buildWebApp({
       };
       return { status: 200, body };
     },
-    getFile: async ({ params, query, request }) => {
-      const session = resolveSession?.(request);
-      if (session === undefined) throw new ApiError({ status: 401, code: 'unauthorized' });
+    getFile: async ({ params, query, session, tenant }) => {
       if (files === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
       const verdict = verifyFileLink(
         { fileId: params.id, sessionId: session.sessionId, exp: query.exp, sig: query.sig },
@@ -153,7 +178,7 @@ export function buildWebApp({
         });
       }
       try {
-        const file = await files.store.get(session.ctx, params.id);
+        const file = await files.store.get(tenant, params.id);
         return {
           status: 200,
           body: {
@@ -168,12 +193,94 @@ export function buildWebApp({
         throw err;
       }
     },
+    listCompanies: async ({ tenant }) => {
+      // RLS returns only the companies in the context's explicit list (invariant 4).
+      const items: Company[] = (await needDirectory().companies.list(tenant)).map((c) => ({
+        id: c.id,
+        legal_name: c.legalName,
+        trading_name: c.tradingName,
+        company_number: c.companyNumber,
+        vat_number: c.vatNumber,
+        vat_period: c.vatPeriod,
+        is_fulfilment_provider: c.isFulfilmentProvider,
+        is_purchasing_company: c.isPurchasingCompany,
+        badge_colour: c.badgeColour,
+      }));
+      return { status: 200, body: { items } };
+    },
+    createWorkspace: async ({ body, platform }) => {
+      const { workspaces } = needDirectory();
+      const id = randomUUID();
+      // The new workspace's own tenant transaction: RLS lets it insert this id and no other.
+      await needTenancy().run({ workspaceId: id, companyIds: [] }, (ctx) =>
+        workspaces.create(ctx, {
+          name: body.name,
+          maxChannelAccounts: body.max_channel_accounts ?? null,
+          maxUsers: body.max_users ?? null,
+        }),
+      );
+      logger.info(
+        { event: 'workspace.created', workspaceId: id, userId: platform.userId },
+        'workspace created',
+      );
+      return { status: 201, body: { id } };
+    },
+    createCompany: async ({ params, body, platform }) => {
+      const { workspaces, companies } = needDirectory();
+      const address = body.registered_address;
+      const id = await needTenancy().runWorkspace(
+        { workspaceId: params.workspaceId },
+        async (ctx) => {
+          // An unknown workspace, and one this transaction cannot see, both look missing.
+          if ((await workspaces.get(ctx)) === undefined) return undefined;
+          return companies.create(ctx, {
+            legalName: body.legal_name,
+            tradingName: body.trading_name,
+            companyNumber: body.company_number ?? null,
+            vatNumber: body.vat_number ?? null,
+            registeredAddress: {
+              line1: address.line1,
+              city: address.city,
+              postcode: address.postcode,
+              ...(address.line2 === undefined ? {} : { line2: address.line2 }),
+              ...(address.country === undefined ? {} : { country: address.country }),
+            },
+            ...(body.vat_period === undefined ? {} : { vatPeriod: body.vat_period }),
+            ...(body.is_fulfilment_provider === undefined
+              ? {}
+              : { isFulfilmentProvider: body.is_fulfilment_provider }),
+            ...(body.is_purchasing_company === undefined
+              ? {}
+              : { isPurchasingCompany: body.is_purchasing_company }),
+            ...(body.badge_colour === undefined ? {} : { badgeColour: body.badge_colour }),
+          });
+        },
+      );
+      if (id === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      logger.info(
+        {
+          event: 'company.created',
+          workspaceId: params.workspaceId,
+          companyId: id,
+          userId: platform.userId,
+        },
+        'company created',
+      );
+      return { status: 201, body: { id } };
+    },
   };
 
   // A contract error rejects app.ready(), so the server never starts (invariant 4).
   // /healthz is polled every few seconds by Docker and the edge; only problems are logged.
   void app.register(
-    contractRoutesPlugin(contractRoutes, handlers, { logLevels: { getHealth: 'warn' } }),
+    contractRoutesPlugin(contractRoutes, handlers, {
+      logLevels: { getHealth: 'warn' },
+      auth: {
+        ...(resolveSession === undefined ? {} : { resolveSession }),
+        ...(resolvePlatform === undefined ? {} : { resolvePlatform }),
+        ...(tenancy === undefined ? {} : { tenancy }),
+      },
+    }),
   );
 
   return app;

@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@omnibridge/contract": "workspace:*",
+    "@omnibridge/core": "workspace:*",
     "@testcontainers/postgresql": "12.2.1"
   },
   "devDependencies": {

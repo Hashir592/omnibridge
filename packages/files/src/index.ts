@@ -6,7 +6,7 @@ export const PACKAGE_NAME = '@omnibridge/files';
 
 export { acceptUpload } from './accept.ts';
 export { CHUNK_BYTES, decryptStream, encryptStream } from './chunked.ts';
-export { scanWithClamd, type ClamdOptions, type ScanVerdict } from './clamd.ts';
+export { CLAMD_TIMEOUT_MS, scanWithClamd, type ClamdOptions, type ScanVerdict } from './clamd.ts';
 export { FileKeyStore, workspaceDir } from './keys.ts';
 export { LINK_TTL_SECONDS, signFileLink, verifyFileLink, type FileLink } from './links.ts';
 export {

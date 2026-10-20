@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { TenantContext } from '@omnibridge/core';
-import { JobRecordRepository, migrateMain, type MainDb } from '@omnibridge/db';
+import {
+  JobRecordRepository,
+  migrateMain,
+  Tenancy,
+  WorkspaceRepository,
+  type MainDb,
+} from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { Kysely, PostgresDialect } from 'kysely';
@@ -10,14 +16,16 @@ import { buildWebApp } from './app.ts';
 
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
 const checks = { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resolve(true) };
-const A: TenantContext = { workspaceId: randomUUID() };
-const B: TenantContext = { workspaceId: randomUUID() };
+const A: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
+const B: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
 
-/** Test-only stand-in for M02 sessions: the workspace comes from a header. */
+const USER = randomUUID();
+
+/** Test-only stand-in for T-0203 sessions: the workspace comes from a header. */
 const fromHeader = (request: { headers: Record<string, unknown> }) => {
   const ws = request.headers['x-test-workspace'];
   return typeof ws === 'string'
-    ? { ctx: { workspaceId: ws }, sessionId: 'test-session' }
+    ? { workspaceId: ws, userId: USER, sessionId: 'test-session' }
     : undefined;
 };
 
@@ -25,6 +33,7 @@ describe('GET /jobs/:id (NFR-4)', () => {
   let cluster: RoleCluster;
   let db: Kysely<MainDb>;
   let records: JobRecordRepository;
+  let tenancy: Tenancy;
   let jobId = '';
 
   beforeAll(async () => {
@@ -40,6 +49,8 @@ describe('GET /jobs/:id (NFR-4)', () => {
       }),
     });
     records = new JobRecordRepository(db);
+    tenancy = new Tenancy(db);
+    await tenancy.run(A, (ctx) => new WorkspaceRepository(db).create(ctx, { name: 'Jobs test' }));
     // A job record as the queue writes it; the pg-boss send itself is not needed here.
     jobId = (
       await records.createAndEnqueue(
@@ -61,6 +72,7 @@ describe('GET /jobs/:id (NFR-4)', () => {
       version: '0',
       checks,
       jobs: records,
+      tenancy,
       resolveSession: fromHeader,
     });
     const get = () =>
@@ -94,6 +106,7 @@ describe('GET /jobs/:id (NFR-4)', () => {
       version: '0',
       checks,
       jobs: records,
+      tenancy,
       resolveSession: fromHeader,
     });
     const other = await app.inject({

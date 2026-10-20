@@ -6,10 +6,12 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FileRepository } from './files.ts';
 import { migrateMain } from './migrate.ts';
+import { Tenancy } from './tenant.ts';
+import { WorkspaceRepository } from './workspaces.ts';
 import type { MainDb } from './schema.ts';
 
 const ROLES = ['ob_owner', 'ob_app', 'ob_platform'] as const;
-const A: TenantContext = { workspaceId: randomUUID() };
+const A: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
 
 describe('file scan states (SEC-2)', () => {
   let cluster: RoleCluster;
@@ -25,6 +27,9 @@ describe('file scan states (SEC-2)', () => {
       }),
     });
     files = new FileRepository(db);
+    await new Tenancy(db).run(A, (ctx) =>
+      new WorkspaceRepository(db).create(ctx, { name: 'File test' }),
+    );
   });
 
   afterAll(async () => {
