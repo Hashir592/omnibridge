@@ -460,7 +460,7 @@
         "test '[TEN-1] re-wrap job: rotation is reported done only when no data or file key remains under the old KEK' passes"
       ],
       "risk": "high",
-      "status": "in_progress"
+      "status": "review"
     },
     {
       "id": "T-0202",
