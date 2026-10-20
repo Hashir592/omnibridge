@@ -4,16 +4,20 @@ Owner: S2. Status: **locked by Hashir and S1 on 19/10/2026 (T-0301)**. Small twe
 
 ## Screens and reference images
 
-Locked mock-up screens (Vite dev server with MSW synthetic data, `apps/ui`):
+Screenshot tests cover **4 key screens only** (ADR-046). Every other screen (Home, the tablet orders list, the desktop shipping desk, the other auth screens) is covered by axe, keyboard and component tests, with no screenshot. Adding a screen to this list needs Hashir.
 
 | Screen | Route | Reference images (`docs/design/reference/`) |
 |---|---|---|
-| Home | `/` | `home-win32.png`, `home-linux.png` |
-| Orders list | `/orders` | `orders-*.png`, `orders-tablet-*.png` (820 px) |
-| Order detail | `/orders/ord_0039` | `order-detail-*.png` |
-| Shipping desk | `/shipping` | `shipping-*.png`, `shipping-tablet-*.png` (820 px) |
+| Orders list (desktop) | `/orders` | `orders-win32.png`, `orders-linux.png` |
+| Order detail (desktop) | `/orders/ord_0039` | `order-detail-*.png` |
+| Shipping desk (tablet, 820 px) | `/shipping` | `shipping-tablet-*.png` |
+| Sign in (desktop, T-0303) | `/sign-in` | `sign-in-*.png` |
 
-Each screen has one image per platform (`-win32` for local runs, `-linux` for CI), because fonts rasterise differently. The Playwright project `ui` (`apps/ui/e2e/mockups.spec.ts`) compares each screen with its image (at most 1% of pixels may differ), at 1440 x 900 or 820 x 1180, with the clock fixed at 19/10/2026 10:00 UTC. Changing a reference image needs Hashir's approval.
+Each screen has one image per platform (`-win32` for local runs, `-linux` for CI), because fonts rasterise differently. The Playwright project `ui` (`apps/ui/e2e/mockups.spec.ts`, `apps/ui/e2e/auth.spec.ts`) compares each screen with its image (at most 1% of pixels may differ), at 1440 x 900 or 820 x 1180, with the clock fixed at 19/10/2026 10:00 UTC. Linux images are refreshed with `scripts/ui-refs.sh`. Changing a reference image needs Hashir's approval.
+
+## Auth screens (T-0303)
+
+Sign in, TOTP code, recovery code, MFA set-up, forgot and reset password, accept invite and the workspace picker, at `/sign-in`, `/sign-in/code`, `/sign-in/recovery`, `/sign-in/set-up-mfa`, `/forgot-password`, `/reset-password?token=`, `/invite/:token` and `/workspaces`. They sit outside the app shell in `AuthFrame` (`apps/ui/src/routes/auth/layout.tsx`): at 1024 px and wider, a graphite product panel on the left and logo, form and footer on the right; below 1024 px the panel is hidden. Form messages use `Notice`: icon and coloured text only.
 
 ## Colour tokens
 
@@ -106,6 +110,8 @@ Each change Hashir asked for that departs from `docs/design/DIRECTION.md` (S1 to
 | 18/10/2026 | Order refs use the slashed-zero feature (§3) | Tabular numbers only | Hashir found refs hard to read; refs are digits only |
 | 19/10/2026 | Status as a tinted chip | Coloured icon, plain label, lifecycle ticks | Hashir: the pill chips looked generic |
 | 19/10/2026 | Lists scroll through TanStack Virtual with server pages of 50 (§5) | Numbered pages of 20, 50 or 100 rows (default 50), in the URL. Each page still renders through TanStack Virtual. | Hashir: scrolling through thousands of orders is bad |
+| 20/10/2026 | Not covered | Auth screens use a split screen: graphite panel with a one-line product statement and four plain facts (left), form with logo and footer (right). No illustration or gradient. | Hashir: a lone centred card on an empty page looked unfinished; he chose the panel on the left |
+| 20/10/2026 | Not covered | Form errors and notices are inline: icon plus coloured text, no tinted box or border | Hashir: tinted alert boxes read as AI slop |
 | 19/10/2026 | Selected rows use `brand-100` (§2) | Selected rows and active filter chips use `selected #E9EEF6`; checkboxes are graphite | Hashir: a second green for selection was confusing |
 
 The first mock company's badge hue moved from teal to indigo, so a company badge never resembles the accent (TEN-2 rule).

@@ -345,7 +345,7 @@
       "module": "M03",
       "session": "S2",
       "risk": "normal",
-      "status": "todo",
+      "status": "review",
       "id": "T-0303",
       "title": "Auth screens",
       "goal": "Login, MFA set-up and recovery screens ready for S3 to wire in M02.",
