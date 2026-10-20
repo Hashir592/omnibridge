@@ -2,7 +2,7 @@
   "version": 3,
   "updated": "2026-10-18",
   "owner": "S1",
-  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. Batch now: T-0104, T-0105, T-0106. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206. Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway after T-0302, end after T-0303.",
+  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway after T-0302, end after T-0303.",
   "tasks": [
     {
       "id": "T-0101",
@@ -405,7 +405,9 @@
         "rls-coverage SQL test: fails if any table with workspace_id lacks RLS+FORCE+policy",
         "testkit route walker: seeds workspaces A and B with marker data; for every registry route calls as A with B's IDs and as anonymous; asserts 401/403/404 and no B markers in body",
         "platform API (platform auth stub until T-0203): create workspace and companies; TEN-3 rule that a channel account's company cannot change once it has orders (schema + check, used from M07)",
-        "seed script with synthetic launch data from PRD §0.3 (names only in seed files)"
+        "seed script with synthetic launch data from PRD §0.3 (names only in seed files)",
+        "Carried from M01: workspace foreign keys on app.data_keys and app.credentials; rls-coverage includes both tables",
+        "All-workspace KEK re-wrap job (F-03, PS-015 (2), R2-02): re-wraps data keys and file keys (FileKeyStore.rewrapAll/countStale, run in web); skips keys under a newer KEK; exits 1 with the count of keys still under the old KEK, and never reports the rotation done while that count is above 0"
       ],
       "out_of_scope": [
         "Login (T-0203)",
@@ -422,7 +424,8 @@
         "test '[TEN-1] raw SQL as ob_app without SET LOCAL returns zero rows' passes",
         "test '[TEN-1] job without workspace in envelope is rejected' passes",
         "test '[TEN-4] hard-coded-name gate' passes",
-        "test '[TEN-10] limits enforced only when set' passes"
+        "test '[TEN-10] limits enforced only when set' passes",
+        "test '[TEN-1] re-wrap job: rotation is reported done only when no data or file key remains under the old KEK' passes"
       ],
       "risk": "high",
       "status": "todo"
@@ -622,6 +625,41 @@
         "every Blocker and Major finding has a recorded resolution verified by S4"
       ],
       "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0207",
+      "module": "M02",
+      "session": "S3",
+      "title": "Platform housekeeping carried from M01",
+      "goal": "Migrations can change indexes on live tables safely, job records do not grow forever, and the small M01 leftovers are closed before M07 produces data.",
+      "prd_ids": [],
+      "supports": [
+        "NFR-1",
+        "OPS-8"
+      ],
+      "scope": [
+        "Migration runner no-transaction mode (ADR-047) in both runners, with tests",
+        "F-M01-end-06: move the credential purge index onto delete_after with a no-transaction migration (CREATE then DROP INDEX CONCURRENTLY)",
+        "F-M01-end-05: JobRecordRepository.purge(ctx, olderThan) for finished records and expired leases; indexes on updated_at / expires_at (no-transaction migration); a size cap on job result; a scheduled platform job over all workspaces (uses T-0201)",
+        "R2-01: log the reason (which dependency failed) when /healthz returns 503 (apps/web/src/app.ts); no PII, no secrets",
+        "Mail base template header colour to the petrol brand-700 #0F6B66 (ADR-041)"
+      ],
+      "out_of_scope": [
+        "scan_failed rescan path (M05 platform console)",
+        "UI work"
+      ],
+      "depends_on": [
+        "T-0201"
+      ],
+      "acceptance": [
+        "CI full gate green",
+        "test: a no-transaction migration runs CONCURRENTLY index statements and a repeated run is a no-op",
+        "squawk reports 0 issues with no waiver on the new migrations",
+        "test: purge removes finished job records and expired leases older than the cut-off and nothing else",
+        "test: /healthz 503 logs the failing dependency name"
+      ],
+      "risk": "normal",
       "status": "todo"
     }
   ]
