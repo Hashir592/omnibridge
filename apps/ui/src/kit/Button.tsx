@@ -20,6 +20,15 @@ const SIZE: Record<ButtonSize, string> = {
   lg: 'h-11 px-4 text-sm gap-2',
 };
 
+/** The button look, for a link that must look like a button (e.g. "Go to sign in"). */
+export function buttonClass(variant: ButtonVariant = 'secondary', size: ButtonSize = 'md'): string {
+  return cn(
+    'inline-flex shrink-0 items-center justify-center rounded-ctl font-medium whitespace-nowrap disabled:pointer-events-none disabled:opacity-50',
+    VARIANT[variant],
+    SIZE[size],
+  );
+}
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -38,16 +47,7 @@ export function Button({
   ...rest
 }: ButtonProps) {
   return (
-    <button
-      type={type}
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-ctl font-medium whitespace-nowrap disabled:pointer-events-none disabled:opacity-50',
-        VARIANT[variant],
-        SIZE[size],
-        className,
-      )}
-      {...rest}
-    >
+    <button type={type} className={cn(buttonClass(variant, size), className)} {...rest}>
       {icon && (
         <span aria-hidden className="flex [&>svg]:size-4">
           {icon}

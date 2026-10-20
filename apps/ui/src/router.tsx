@@ -3,7 +3,10 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
+  Outlet,
+  useMatches,
 } from '@tanstack/react-router';
+import { AppStateProvider } from './app/session.tsx';
 import { NAV } from './app/nav.ts';
 import { Shell } from './components/Shell.tsx';
 import type { OrdersSearch } from './routes/orders.tsx';
@@ -12,7 +15,21 @@ import type { ShippingSearch } from './routes/shipping.tsx';
 const VIEWS = new Set(['all', 'awaiting', 'overdue', 'today', 'flagged']);
 const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined);
 
-const root = createRootRoute({ component: Shell });
+// Auth screens (T-0303) are marked `staticData: { bare: true }` and render without the app shell.
+// The signed-in app state (session, company) lives only inside the shell, so the auth screens
+// never ask for a session.
+function Root() {
+  const bare = useMatches({ select: (ms) => ms.some((m) => m.staticData.bare === true) });
+  return bare ? (
+    <Outlet />
+  ) : (
+    <AppStateProvider>
+      <Shell />
+    </AppStateProvider>
+  );
+}
+
+const root = createRootRoute({ component: Root });
 
 const placeholder = lazyRouteComponent(() => import('./routes/placeholder.tsx'), 'PlaceholderPage');
 
@@ -81,12 +98,61 @@ const gallery =
       ]
     : [];
 
-const routeTree = root.addChildren([home, orders, orderDetail, shipping, ...others, ...gallery]);
+// Auth screens (T-0303). Search params are validated so a link can carry only what it needs.
+const signIn = lazyRouteComponent(() => import('./routes/auth/sign-in.tsx'), 'SignInPage');
+const mfa = () => import('./routes/auth/mfa.tsx');
+const password = () => import('./routes/auth/password.tsx');
+const inviteFile = () => import('./routes/auth/invite.tsx');
+const authRoute = <P extends string>(path: P, component: ReturnType<typeof lazyRouteComponent>) =>
+  createRoute({ getParentRoute: () => root, path, component, staticData: { bare: true } });
+const auth = [
+  authRoute('/sign-in', signIn),
+  authRoute('/sign-in/code', lazyRouteComponent(mfa, 'CodePage')),
+  authRoute('/sign-in/recovery', lazyRouteComponent(mfa, 'RecoveryPage')),
+  authRoute(
+    '/sign-in/set-up-mfa',
+    lazyRouteComponent(() => import('./routes/auth/set-up-mfa.tsx'), 'SetUpMfaPage'),
+  ),
+  authRoute('/forgot-password', lazyRouteComponent(password, 'ForgotPasswordPage')),
+  authRoute('/workspaces', lazyRouteComponent(inviteFile, 'WorkspacesPage')),
+] as const;
+const resetPassword = createRoute({
+  getParentRoute: () => root,
+  path: '/reset-password',
+  validateSearch: (s: Record<string, unknown>): { token?: string } => {
+    const token = str(s.token);
+    return token ? { token } : {};
+  },
+  component: lazyRouteComponent(password, 'ResetPasswordPage'),
+  staticData: { bare: true },
+});
+const invite = createRoute({
+  getParentRoute: () => root,
+  path: '/invite/$token',
+  component: lazyRouteComponent(inviteFile, 'AcceptInvitePage'),
+  staticData: { bare: true },
+});
+
+const routeTree = root.addChildren([
+  home,
+  orders,
+  orderDetail,
+  shipping,
+  ...others,
+  ...gallery,
+  ...auth,
+  resetPassword,
+  invite,
+]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });
 
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
+  }
+  interface StaticDataRouteOption {
+    /** Render without the app shell (auth screens). */
+    bare?: boolean;
   }
 }

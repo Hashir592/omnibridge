@@ -1,13 +1,13 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S1.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S2.
 
 ## Now
 
 - **Phase:** B, local Docker only (ADR-029).
 - **M01 Platform foundations: CLOSED 20 Oct 2026.** S4 APPROVED in round 2 (0 Blockers, 0 Majors). Tasks T-0101 to T-0106; PRs #1, #2, #3, #5, #9, #12, #15, #17.
 - **Current module:** M02 Identity, tenancy and audit (all S3 tasks high risk: Hashir says "go" before each).
-- **Now running:** S2, T-0303 Auth screens (prompt `docs/sessions/briefs/S2-T-0303.md`). Then S3, T-0201 (prompt `docs/sessions/briefs/S3-T-0201.md`). One session at a time.
+- **Now running:** S2 T-0303 Auth screens is in review (PR open, status `review`; route shapes proposed as PS-016). Next: S3, T-0201 (prompt `docs/sessions/briefs/S3-T-0201.md`). One session at a time.
 - **M02 order:** T-0201 → T-0202 → T-0203 → halfway checkpoint → T-0204 → T-0205 → T-0207 → T-0206 (S5 audit) → M02 end. Exit also needs the S5 audit clean (ADR-026).
 - **Workflow tiers (ADR-043):** light = `--quick`, no code review; normal = `--quick` + `/code-review` medium; high = full local gate + `/code-review` high. CI always runs the full gate.
 - **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
@@ -33,7 +33,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 ## Next step
 
 1. Hashir merges the S1 docs PR (M01 close).
-2. S2 runs T-0303 (iteration mode, then merge).
+2. Hashir merges the T-0303 PR once CI is green (watch the ui-perf p95: 14-16 ms locally against 16 ms); S1 rules on PS-016.
 3. S3 posts the T-0201 plan; Hashir says "go".
 
 ## Prerequisites outstanding (Hashir)

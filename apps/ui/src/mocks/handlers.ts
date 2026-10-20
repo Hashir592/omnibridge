@@ -4,6 +4,7 @@
  */
 import type { Health } from '@omnibridge/contract/client';
 import { HttpResponse, http } from 'msw/http';
+import { authHandlers } from './auth.ts';
 import { orders } from './data.ts';
 import { orderDetail } from './detail.ts';
 import { homeSummary } from './home.ts';
@@ -45,6 +46,8 @@ function counts(rows: OrderRow[], now: number): OrderCounts {
 const list = (v: string | null) => (v ? v.split(',').filter(Boolean) : []);
 
 export const handlers = [
+  ...authHandlers,
+
   http.get('*/healthz', () =>
     HttpResponse.json<Health>({ status: 'ok', db_main: 'ok', db_pii: 'ok', version: 'mock' }),
   ),

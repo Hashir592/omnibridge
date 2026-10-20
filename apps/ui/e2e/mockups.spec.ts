@@ -23,18 +23,22 @@ async function expectNoSeriousA11yIssues(page: Page): Promise<void> {
   ).toEqual([]);
 }
 
+// Screenshots cover 4 key screens only (ADR-046): Orders (desktop), Order detail (desktop),
+// Shipping desk (tablet) and Sign in (auth.spec.ts). The rest get axe and keyboard tests only.
 const screens = [
-  { name: 'home', path: '/', ready: 'Needs action' },
-  { name: 'orders', path: '/orders', ready: 'of 500 orders' },
-  { name: 'order-detail', path: '/orders/ord_0039', ready: 'Ship to' },
-  { name: 'shipping', path: '/shipping', ready: 'Pick orders to ship' },
+  { name: 'home', path: '/', ready: 'Needs action', shot: false },
+  { name: 'orders', path: '/orders', ready: 'of 500 orders', shot: true },
+  { name: 'order-detail', path: '/orders/ord_0039', ready: 'Ship to', shot: true },
+  { name: 'shipping', path: '/shipping', ready: 'Pick orders to ship', shot: false },
 ] as const;
 
 for (const s of screens) {
-  test(`[NFR-8] ${s.name} matches the locked reference design`, async ({ page }) => {
-    await open(page, s.path, s.ready);
-    await expect(page).toHaveScreenshot(`${s.name}.png`);
-  });
+  if (s.shot) {
+    test(`[NFR-8] ${s.name} matches the locked reference design`, async ({ page }) => {
+      await open(page, s.path, s.ready);
+      await expect(page).toHaveScreenshot(`${s.name}.png`);
+    });
+  }
 
   test(`[NFR-8] ${s.name} has no serious or critical accessibility violations`, async ({
     page,
@@ -47,10 +51,15 @@ for (const s of screens) {
 test.describe('tablet width', () => {
   test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
 
-  for (const s of [screens[1], screens[3]]) {
-    test(`[NFR-8] ${s.name} works on a tablet and matches the reference`, async ({ page }) => {
+  for (const s of [
+    { ...screens[1], shot: false },
+    { ...screens[3], shot: true },
+  ]) {
+    test(`[NFR-8] ${s.name} works on a tablet${s.shot ? ' and matches the reference' : ''}`, async ({
+      page,
+    }) => {
       await open(page, s.path, s.ready);
-      await expect(page).toHaveScreenshot(`${s.name}-tablet.png`);
+      if (s.shot) await expect(page).toHaveScreenshot(`${s.name}-tablet.png`);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
         820,
       );
