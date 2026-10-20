@@ -3,7 +3,7 @@ import { useState, type SyntheticEvent } from 'react';
 import { Button } from '../../kit/Button.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
 import { authApi } from '../../mocks/api.ts';
-import type { SignInResult } from '../../mocks/auth.ts';
+import type { SignInResult } from '../../auth/shapes.ts';
 import { AuthFrame, Notice, authLink } from './layout.tsx';
 
 type Failure = { kind: 'invalid' } | { kind: 'locked'; minutes: number } | { kind: 'error' };

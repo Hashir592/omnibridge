@@ -6,7 +6,7 @@ import { Button } from '../../kit/Button.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
 import { Skeleton } from '../../kit/Skeleton.tsx';
 import { authApi, type MockProblem } from '../../mocks/api.ts';
-import type { InviteInfo, WorkspaceChoice } from '../../mocks/auth.ts';
+import type { InviteInfo, WorkspaceChoice } from '../../auth/shapes.ts';
 import { AuthFrame, Notice } from './layout.tsx';
 import { LinkUnusable } from './password.tsx';
 import { PasswordRules, passwordLocallyValid, personalParts, useEnterApp } from './parts.tsx';

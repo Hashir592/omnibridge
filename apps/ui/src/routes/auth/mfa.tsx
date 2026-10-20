@@ -3,7 +3,7 @@ import { useState, type SyntheticEvent } from 'react';
 import { Button } from '../../kit/Button.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
 import { authApi, type MockReply } from '../../mocks/api.ts';
-import type { MfaResult } from '../../mocks/auth.ts';
+import type { MfaResult } from '../../auth/shapes.ts';
 import { AuthFrame, Notice, authLink } from './layout.tsx';
 import { CodeField, useEnterApp } from './parts.tsx';
 

@@ -1,6 +1,6 @@
 /**
- * PROPOSED SHAPES (mock only, T-0303) for the auth screens. S3 builds the real routes in
- * T-0203/T-0204; the shapes are recorded in docs/DECISIONS.md (Proposed from sessions).
+ * MSW mock of the auth routes (T-0303). The shapes themselves live in `src/auth/shapes.ts`
+ * (ADR-048), so app code never imports this file and msw never reaches a production build.
  *
  * Errors use the contract's Problem body (`code` from ERROR_CODES), so no new codes are needed:
  * - 401 `unauthorized`: wrong email or password. One message for both (no account enumeration).
@@ -19,70 +19,18 @@
  * - invite link: /invite/demo-invite; expired link: /invite/expired. Same for /reset-password?token=
  */
 import { HttpResponse, http } from 'msw/http';
+import type {
+  InviteInfo,
+  MfaConfirmResult,
+  MfaEnrolment,
+  MfaResult,
+  ResetTokenInfo,
+  SignInResult,
+  WorkspaceChoice,
+} from '../auth/shapes.ts';
 
 export const DEMO_PASSWORD = 'synthetic demo only';
 export const DEMO_TOTP = '123456';
-
-/** POST /auth/sign-in → 200. The server sets a pre-MFA session cookie (httpOnly, 10 minutes). */
-export interface SignInResult {
-  next: 'mfa_code' | 'mfa_setup';
-}
-
-/** POST /auth/mfa/verify and /auth/mfa/recovery → 200. Full session cookie is set now. */
-export interface MfaResult {
-  next: 'workspace_picker' | 'app';
-  /** Recovery-code sign in only: how many unused codes are left. */
-  recoveryCodesLeft?: number;
-}
-
-/** POST /auth/mfa/enrolment → 200: a new TOTP secret, not active until confirmed. */
-export interface MfaEnrolment {
-  /** Base32 secret for typing into the app by hand, grouped in fours for reading. */
-  secret: string;
-  /** Account label the authenticator shows, e.g. "OmniBridge (n***@example.test)". */
-  label: string;
-  /**
-   * The otpauth:// URI as a QR module matrix, drawn by the UI as inline SVG: no QR library in
-   * the bundle and nothing for the CSP to allow. One string per row, '1' = dark module.
-   */
-  qr: string[];
-}
-
-/** POST /auth/mfa/enrolment/confirm {code} → 200. Codes are shown once and never again. */
-export interface MfaConfirmResult {
-  recoveryCodes: string[];
-}
-
-/** GET /auth/password/reset/:token → 200 when usable; 404 otherwise. */
-export interface ResetTokenInfo {
-  /** Masked, for "Resetting the password for s***@example.test". */
-  emailMasked: string;
-  expiresAt: string;
-}
-
-/** GET /invites/:token → 200 when usable; 404 otherwise (TEN-7: 72 hours). */
-export interface InviteInfo {
-  workspaceName: string;
-  invitedBy: string;
-  email: string;
-  expiresAt: string;
-}
-
-/** GET /auth/workspaces → 200 (only after MFA). */
-export interface WorkspaceChoice {
-  id: string;
-  name: string;
-  role: 'admin' | 'member';
-  companies: number;
-}
-
-/** USR-3 rules, checked live in the UI; the server checks them again plus breach and history. */
-export const PASSWORD_RULES = [
-  { id: 'length', label: 'At least 12 characters' },
-  { id: 'personal', label: 'Does not contain your name or the first part of your email' },
-  { id: 'breached', label: 'Not found in lists of leaked passwords' },
-  { id: 'history', label: 'Not one of your last 10 passwords' },
-] as const;
 
 const ACCOUNTS: Record<string, { name: string; mfa: boolean; workspaces: number }> = {
   'sam.admin@example.test': { name: 'Sam Admin', mfa: true, workspaces: 2 },
