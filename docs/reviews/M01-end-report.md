@@ -65,7 +65,7 @@ T-0101 to T-0103 were described in `docs/reviews/M01-halfway-report.md`; the hal
 ## Risks
 
 1. **Session-bound routes return 401 until M02.** `GET /jobs/:id` and `GET /files/:id` are `auth: session`, and production passes no session resolver, so they always answer 401. Tests inject one. No route is ever open.
-2. **Purges are not scheduled yet.** File `delete_after`, credential `delete_after` and job-record retention exist as repository methods, but scheduling them per workspace needs T-0201's workspace list.
+2. **Purges are not scheduled yet.** File `delete_after` and credential `delete_after` purges exist as repository methods, but scheduling them per workspace needs T-0201's workspace list. **Correction (F-M01-end-05):** job-record and job-lease retention does **not** exist yet; it is proposed in PS-015.
 3. **pg-boss `groupConcurrency` is best effort.** Correctness rests on the lease table, and the leases expire, so a dead worker frees its slot after 2 heartbeats.
 4. **Version step-downs (PS-014, open):** nodemailer 10.1.0 and @fastify/helmet 13.1.2 instead of the ADR pins (7-day rule). prom-client 15.1.3 is marked deprecated upstream.
 5. **Local resources:** the full stack with clamd fits the 3.8 GiB WSL VM, but tightly. The first run after a cold start takes about 12 minutes.

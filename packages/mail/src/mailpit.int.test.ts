@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Mailer } from './mailer.ts';
 import { EmailLintError, renderInvite } from './templates.ts';
 
+const APP = 'https://app.omnibridge.co.uk';
 /** Same image and digest as the mailpit service in infra/compose/compose.dev.yaml. */
 const MAILPIT_IMAGE =
   'axllent/mailpit:v1.31.6@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387';
@@ -41,6 +42,7 @@ describe('SMTP adapter against Mailpit (MAIL-2)', () => {
       inviterName: 'Synthetic Admin',
       workspaceName: 'Synthetic Workspace',
       acceptUrl: 'https://app.omnibridge.co.uk/invite/abc123',
+      appOrigin: APP,
     });
     await mailer.send('new.user@example.test', email);
 
@@ -59,6 +61,7 @@ describe('SMTP adapter against Mailpit (MAIL-2)', () => {
       inviterName: 'PIIMARK-synthetic-buyer',
       workspaceName: 'W',
       acceptUrl: 'https://app.omnibridge.co.uk/invite/x',
+      appOrigin: APP,
     });
     await expect(mailer.send('new.user@example.test', email)).rejects.toThrow(EmailLintError);
     const after = ((await (await fetch(api('/messages'))).json()) as MailpitList).messages.length;

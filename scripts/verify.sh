@@ -13,7 +13,8 @@ Modes:
   --only=a,b,...  Only the named full-gate steps, in gate order. CI splits the gate into parallel
                   jobs this way (ADR-043); together they are the full gate.
   --docs          Docs-only changes: install, format check, coverage and gitleaks (ADR-043). CI
-                  uses it when a PR touches only docs/**, *.md or docs/backlog.json.
+                  uses it when a PR touches only docs/** and *.md, except docs a test reads
+                  (READ_BY_TESTS in scripts/lib/docs-only.mjs).
   --help          Show this help.
 
 Options:

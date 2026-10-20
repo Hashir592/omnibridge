@@ -58,17 +58,40 @@ function baseTemplate(title: string, bodyHtml: string): string {
   ].join('');
 }
 
-/** Invitation to join a workspace. */
+/**
+ * The accept link must be an https URL on the app's own origin (plain http only for localhost in
+ * dev), so no other scheme or host can reach the button (F-M01-end-09).
+ */
+function checkAppUrl(value: string, appOrigin: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new EmailLintError('The link is not a valid URL');
+  }
+  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+    throw new EmailLintError('The link must use https');
+  }
+  if (url.origin !== new URL(appOrigin).origin) {
+    throw new EmailLintError('The link must point at the app origin');
+  }
+  return url.href;
+}
+
+/** Invitation to join a workspace. `appOrigin` is the app's configured origin. */
 export function renderInvite(values: {
   inviterName: string;
   workspaceName: string;
   acceptUrl: string;
+  appOrigin: string;
 }): Email {
+  const acceptUrl = checkAppUrl(values.acceptUrl, values.appOrigin);
   const subject = `${values.inviterName} invited you to ${values.workspaceName} on OmniBridge`;
   const text = [
     `${values.inviterName} invited you to join ${values.workspaceName} on OmniBridge.`,
     '',
-    `Accept the invitation: ${values.acceptUrl}`,
+    `Accept the invitation: ${acceptUrl}`,
     '',
     'The link works for 7 days. If you did not expect this email, you can ignore it.',
   ].join('\n');
@@ -76,7 +99,7 @@ export function renderInvite(values: {
     subject,
     [
       `<p>${escapeHtml(values.inviterName)} invited you to join <strong>${escapeHtml(values.workspaceName)}</strong> on OmniBridge.</p>`,
-      `<p><a href="${escapeHtml(values.acceptUrl)}" style="background:#1B2A6B;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Accept the invitation</a></p>`,
+      `<p><a href="${escapeHtml(acceptUrl)}" style="background:#1B2A6B;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Accept the invitation</a></p>`,
       '<p>The link works for 7 days. If you did not expect this email, you can ignore it.</p>',
     ].join(''),
   );

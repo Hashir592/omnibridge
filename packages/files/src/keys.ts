@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { link, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   generateDataKey,
@@ -46,16 +47,19 @@ export class FileKeyStore {
     const { dataKey, wrapped } = generateDataKey(this.#keyring, workspaceId, 1);
     const dir = this.#keysDir(workspaceId);
     await mkdir(dir, { recursive: true, mode: 0o700 });
+    // The key is complete and on disk before `link` makes it visible as v1.json, so no reader
+    // sees a half-written key. `link` fails with EEXIST for the loser of a race, who then reads
+    // the winner's key (F-M01-end-07).
+    const tmp = join(dir, `v1.json.${randomUUID()}.tmp`);
+    await writeDurable(tmp, JSON.stringify(toFile(wrapped)));
     try {
-      // `wx`: two writers racing for version 1 cannot both win; the loser reads the winner's key.
-      await writeFile(join(dir, 'v1.json'), JSON.stringify(toFile(wrapped)), {
-        flag: 'wx',
-        mode: 0o600,
-      });
+      await link(tmp, join(dir, 'v1.json'));
       return dataKey;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      return this.get(workspaceId, 1);
+      return await this.get(workspaceId, 1);
+    } finally {
+      await rm(tmp, { force: true });
     }
   }
 
@@ -77,9 +81,23 @@ export class FileKeyStore {
         const stored = fromFile(workspaceId, JSON.parse(await readFile(path, 'utf8')) as KeyFile);
         const next = rewrapDataKey(this.#keyring, stored);
         if (next === stored) continue;
-        await writeFile(`${path}.tmp`, JSON.stringify(toFile(next)), { mode: 0o600 });
+        await writeDurable(`${path}.tmp`, JSON.stringify(toFile(next)));
         await rename(`${path}.tmp`, path);
         count += 1;
+      }
+    }
+    return count;
+  }
+
+  /** How many file keys are still wrapped under a KEK older than the active one (rotation check). */
+  async countStale(): Promise<number> {
+    let count = 0;
+    const workspaces = await readdir(this.#root).catch(() => []);
+    for (const workspaceId of workspaces.filter((name) => UUID.test(name))) {
+      for (const version of await this.#versions(workspaceId)) {
+        const path = join(this.#keysDir(workspaceId), `v${String(version)}.json`);
+        const file = JSON.parse(await readFile(path, 'utf8')) as KeyFile;
+        if (file.kekVersion < this.#keyring.activeVersion) count += 1;
       }
     }
     return count;
@@ -96,6 +114,17 @@ export class FileKeyStore {
       .filter((v): v is string => v !== undefined)
       .map(Number)
       .sort((a, b) => a - b);
+  }
+}
+
+/** Writes and fsyncs a new key file, so a crash never leaves a partial key under its final name. */
+async function writeDurable(path: string, text: string): Promise<void> {
+  const handle = await open(path, 'w', 0o600);
+  try {
+    await handle.writeFile(text);
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 

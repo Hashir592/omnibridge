@@ -238,8 +238,9 @@ export class JobQueue {
     const attempt = job.retryCount + 1;
     const fields = { workspaceId: ctx.workspaceId, jobId: job.id, jobName: def.type, attempt };
     const release = await this.#takeSlot(def, envelope, ctx, job);
-    await this.#records.update(ctx, key, { state: 'active', attempt, errorCode: null });
     try {
+      // Inside the try, so a failed update still releases the slot (F-M01-end-01).
+      await this.#records.update(ctx, key, { state: 'active', attempt, errorCode: null });
       const result = await handler({
         envelope: { ...envelope, attempt },
         payload: envelope.payload,

@@ -1,6 +1,9 @@
-import { readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { isDocsOnly } from '../../scripts/lib/docs-only.mjs';
+import { isDocsOnly, READ_BY_DOCS_GATE } from '../../scripts/lib/docs-only.mjs';
 import { readRepoFile, repoRoot } from './helpers.ts';
 
 const workflow = readRepoFile('.github/workflows/ci.yml');
@@ -57,6 +60,65 @@ describe('CI workflow and gate', () => {
     expect(isDocsOnly(['.github/workflows/ci.yml'])).toBe(false);
     expect(isDocsOnly(['scripts/verify.sh'])).toBe(false);
     expect(isDocsOnly([])).toBe(false);
+  });
+
+  it('[SEC-4] docs that tests read run the full gate', () => {
+    expect(isDocsOnly(['docs/ops/secrets-register.md'])).toBe(false);
+    expect(isDocsOnly(['docs/design/reference/order-detail-linux.png'])).toBe(false);
+    expect(isDocsOnly(['docs/ops/runbook.md', 'docs/design/README.md'])).toBe(true);
+  });
+
+  it('[SEC-4] every docs path a test or script names is either full-gate or checked on the fast path', () => {
+    const files = execFileSync(
+      'git',
+      ['ls-files', 'tests', 'scripts', 'packages', 'apps', 'mocks', '*.config.ts'],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    )
+      .split('\n')
+      .filter((f) => /\.(ts|tsx|mjs|js|sh)$/.test(f))
+      .filter((f) => !['tests/config/ci.test.ts', 'scripts/lib/docs-only.mjs'].includes(f));
+    const unguarded: string[] = [];
+    for (const file of files) {
+      for (const line of readRepoFile(file).split('\n')) {
+        if (/^\s*(\/\/|\*|\/\*|#)/.test(line)) continue; // prose in comments names docs freely
+        for (const [match] of line.matchAll(/docs\/[\w./{}*-]+/g)) {
+          const path = match.replace(/[{*].*$/, '').replace(/\.$/, '');
+          // The bare tree (an exclude pathspec, help text) names no file a test could read.
+          if (path === 'docs/' || READ_BY_DOCS_GATE.includes(path)) continue;
+          if (isDocsOnly([path])) unguarded.push(`${file}: ${path}`);
+        }
+      }
+    }
+    expect(unguarded).toEqual([]);
+  });
+
+  it('[SEC-4] a file moved from code into docs/ is not docs-only in the CI diff', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ob-rename-'));
+    try {
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', ...args], {
+          cwd: dir,
+          encoding: 'utf8',
+        });
+      git('init', '-q');
+      mkdirSync(join(dir, 'packages'));
+      writeFileSync(join(dir, 'packages', 'a.ts'), 'export const a = 1;\n'.repeat(20));
+      git('add', '.');
+      git('commit', '-qm', 'base');
+      mkdirSync(join(dir, 'docs'));
+      git('mv', 'packages/a.ts', 'docs/a.md');
+      git('commit', '-qm', 'move');
+      const command = workflow.match(/git diff ([^"]*)"\$BASE\.\.\.\$HEAD"/)?.[1]?.trim() ?? '';
+      expect(command).toBe('--no-renames --name-only');
+      const changed = git('diff', ...command.split(' '), 'HEAD~1...HEAD').split('\n');
+      expect(changed).toContain('packages/a.ts');
+      expect(isDocsOnly(changed)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('[SEC-4] CI runs Semgrep CE on pull requests from a digest-pinned image', () => {
