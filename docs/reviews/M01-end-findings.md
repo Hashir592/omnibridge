@@ -151,3 +151,41 @@ Resolution: FIXED. `renderInvite` takes `appOrigin` and refuses (EmailLintError)
 - `perAccountCap` is per job type and account, as S3 asked: I agree. An account-wide budget belongs to the provider governors in M07 (RL-1 to RL-4), not to the queue.
 - T-0201 owns, as already recorded: `rls-coverage` over `app.data_keys`, `app.credentials`, `app.job_records`, `app.job_leases` and `app.files` (all five are correct by hand today); the all-workspace re-wrap job (see F-M01-end-03); workspace fan-out for the purges.
 - `ob_app` can read every workspace's pg-boss job payloads (pg-boss tables carry no RLS, by ADR-009). Payloads must stay free of PII; T-0201's marker scan (AT-9) should cover the `pgboss` schema.
+
+---
+
+# M01 end findings — round 2
+Reviewed: PR #15 (`task/M01-end-fixes`, merged as `48502fb`), the code on `main` at `48502fb`. verify.sh: PASS on the idle rerun (rc=0, 458 s; 54 unit files / 217 tests, 10 integration files / 43 tests, e2e 21/21); one earlier run failed in e2e (see R2-01).
+Open Blockers: 0. Open Majors: 0. Minors: 2 carried (F-05, F-06) and 2 new. **Verdict: APPROVED.**
+
+## Round-1 resolutions, verified by me
+
+| Finding | Result | Evidence |
+|---|---|---|
+| F-M01-end-01 (lease leak) | VERIFIED | Same mocked-queue probe as round 1: `{"acquire":1,"renew":0,"release":1}` (was `release:0`, renew running). The `active` update now sits inside the `try`; unit test `runtime.test.ts` passes. |
+| F-M01-end-02 (file read crash, handle leak) | VERIFIED | New probe on the real store: a refused `get()` of a `scanning` file opens 0 handles; an early `destroy()` leaves the handle closed (`fd = -1`); a clean read returns all 300,009 bytes; corrupted bytes reach the consumer as a `Decryption failed` error; missing bytes give `FileNotReadable`; no uncaught exception, 0 leaked handles. |
+| F-M01-end-03 (KEK rotation and file keys) | VERIFIED | Runbook step 4 and `dist/rewrap-file-keys.js` exist. In the running web container: empty volume → exit 0, count 0; a planted v1 file key with a v1+v2 keyring → `count":1, "kekVersion":2`, exit 0; second run `count":0`, exit 0. `countStale()` and the `rewrapAll` tests run in the unit step. |
+| F-M01-end-04 (docs fast path) | VERIFIED | `echo docs/ops/secrets-register.md \| node scripts/lib/docs-only.mjs` → `false`; the reference PNG → `false`; `docs/STATE.md` + `README.md` → `true`. CI uses `--no-renames` (pinned by a test with a real rename). The guard test scans tracked files for `docs/` paths that tests or scripts read. I re-grepped every docs path in tests, scripts and config: every reader is on the full-gate list or the `coverage` step. |
+| F-M01-end-07 (key-file race) | VERIFIED | Same 300-trial probe: **0 failures** (was 3). |
+| F-M01-end-08 (file state guard) | VERIFIED | As `ob_app` on the live db-main: insert as `clean` fails; `scanning → infected` works; `infected → clean` and `infected → scanning` fail; delete + re-insert as `clean` fails; `ALTER TABLE … DISABLE TRIGGER` fails (`must be owner of table files`). |
+| F-M01-end-09 (invite URL) | VERIFIED by code and test | `checkAppUrl` accepts https on the app origin (http only for localhost); the `[MAIL-2]` test passes in unit. Not re-probed by hand. |
+| F-M01-end-05 (retention) | ACCEPTED as deferred | The report is corrected; the purge, index, result cap and schedule are in PS-015 (3). Needs T-0201's workspace list. Minor, does not block. |
+| F-M01-end-06 (purge index) | ACCEPTED as deferred | squawk really does block it (per-file transaction vs `CONCURRENTLY`; ADR-045 allows only the one waiver). The old index stays on an empty table. S1 decides in PS-015 (1). Minor, does not block. |
+
+## R2-01 — Minor — The e2e step failed once on `/healthz` 503 with no logged reason
+Area: 6 Performance / gate reliability  IDs: NFR-2
+Evidence: My first round-2 gate (rc=1, 494 s) failed at `e2e` with `[NFR-2] /healthz reports db_main and db_pii ok through the edge`: Expected 200, Received 503, and `[NFR-8] the component gallery has no serious or critical accessibility violations`: heading not found (15 s). It was **not** the ui-perf test, which passed. The stack step had just passed `wait_ready`, so this is the O-1 symptom after readiness. The rerun on an idle machine passed (rc=0, 458 s, e2e 21/21). I cannot rule out that my own probes were running on the same 4 CPUs during the first run, so I do not treat it as a defect of the merged code. But the saved evidence (`.verify/e2e-stack-logs.txt`) cannot say which check returned 503: web logs `/healthz` quietly and records no reason.
+Required fix (follow-up, not blocking): in `apps/web/src/app.ts`, log at `warn` (event, failing dependency, duration) when `/healthz` returns 503, so the next occurrence can be diagnosed. S1/S3 to watch the e2e rate: S3 reports 6 of 6 green locally, CI had one ui-perf flake, I had one e2e failure in two runs.
+Resolution: CARRIED (S3, 20 Oct 2026). Per S4's approval, a follow-up for the next module: a `warn` log on a 503 `/healthz` (event, failing dependency, duration) in `apps/web/src/app.ts`. Listed in STATE.md and the S1 handoff so it gets a task.
+
+## R2-02 — Minor — `FileKeyStore.rewrapAll()` throws on a key under a newer KEK
+Area: 1 Correctness  IDs: SEC-6
+Evidence: In the web container, running the script with the old one-line keyring after the keys were re-wrapped to KEK v2 ends with an uncaught `CryptoError: The secrets keyring has no KEK version 2` (`rewrapAll` → `rewrapDataKey` → `openWrapped`); nothing is changed on disk, but the script dies with a stack trace instead of a clean message. This is the file-key twin of halfway F-06, which the database path already handles (`kek_version <`, newer ones counted). It only happens when an old-keyring process runs the script mid-rollout.
+Required fix (follow-up): skip keys whose `kekVersion` is above the active version, report them in the log (count only), and let the script exit 1 with that message; add a test.
+Resolution: CARRIED (S3, 20 Oct 2026). Follow-up for the next module, best done with T-0201's all-workspace re-wrap job: `rewrapAll`/`countStale` skip keys above the active KEK version, the script logs their count and exits 1, plus a test. Listed in STATE.md and the S1 handoff.
+
+## Closing notes
+
+- The two items for S1 are already in PS-015: the index waiver (F-06) and the retention task placement (F-05). Also for S1 and S2: ADR-046, the ui-perf frame gap on CI attempt 1 was runner noise, as S3 reports.
+- Carry into T-0201 as already recorded: `rls-coverage` over all five tables; the all-workspace re-wrap job covering both the database keys and `FileKeyStore.rewrapAll()`/`countStale()`.
+- Two untracked S3 handoff files (`20261020-1300-S3-to-S1.md`, `-S3-to-S4.md`) sit in the shared checkout; they are not mine.
