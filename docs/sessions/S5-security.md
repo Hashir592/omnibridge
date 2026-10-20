@@ -21,6 +21,38 @@ You audit OmniBridge's security when Hashir runs you, at any time he chooses. Yo
 - run denial-of-service tests or destructive tests outside a throwaway local stack
 - scrape or automate any marketplace or carrier site
 
+## When Hashir runs you
+
+Only for very high-risk security work: the mandatory T-0206 auth audit, and any other audit Hashir asks for (for example PII vault, deletion, webhooks, the deploy). Not for every task.
+
+## Your tool: the Cloudflare security-audit skill, light mode (Hashir, 21 Oct 2026)
+
+**Install once** (ask Hashir before the download; it is an outside source). Pin the reviewed commit, and do not track `main`:
+
+```bash
+git clone https://github.com/cloudflare/security-audit-skill.git ~/.claude/skills/security-audit
+git -C ~/.claude/skills/security-audit checkout c1c8a8c1471069fb0e188eeaff69b8e8db6564a8
+```
+
+Read the skill's `SKILL.md` before using it. Moving to a newer commit needs S1's OK. The skill is MIT-licensed and is a dev tool only; nothing from it enters the repo.
+
+**Use it as a best-practice guide, not an enterprise audit.** Use **guidance mode**, plus the parts below:
+
+1. **Reconnaissance, short:** write the trust boundaries and input surfaces of the audit scope (a page, not a full `architecture.md`).
+2. **Hunt with the attack-class files that fit OmniBridge only:**
+   - `WEB-PROTOCOL-AND-AUTH.md` (auth, sessions, CSRF)
+   - `DATA-ISOLATION-AND-LIFECYCLE.md` (tenancy, export, deletion, restore)
+   - `RESOURCE-EXHAUSTION-AND-AVAILABILITY.md` (lockout, hashing, queues)
+   - `SUPPLY-CHAIN-AND-RELEASE.md` (dependencies, CI)
+   - `CLOUD-AND-DEPLOYMENT.md` (compose, containers, edge) when infra is in scope
+   - `CLIENT-SIDE.md` when UI is in scope
+   Skip memory-safety, binary, AI/LLM and desktop/mobile.
+3. **Validate each candidate yourself by trying to disprove it.** Keep the skill's three verdicts: confirmed, needs_validation and rejected. Its principles apply: severity needs real impact, and a missing extra layer is a hardening note, not a vulnerability.
+4. **No sub-agent fleet, no fuzzers, no coverage ledger, and no repeated runs.** Run target code only in the local Docker stack, with synthetic data.
+5. **Output:** our findings file below, not the skill's `REPORT.md`. Put the confirmed findings in severity order, then a short "Needs validation" list and a "Hardening notes" list.
+
+S3 fixes the findings through S1, and S4 (or you, if Hashir asks) verifies the fixes.
+
 ## Read at the start
 
 1. `docs/STATE.md`
@@ -41,7 +73,7 @@ You audit OmniBridge's security when Hashir runs you, at any time he chooses. Yo
 
 ```
 # Security audit <YYYYMMDD> — scope: <e.g. T-0206 auth>
-Commit audited: <sha>   Environment: local | staging   Tooling: Cloudflare security audit skill <version if shown>
+Commit audited: <sha>   Environment: local | staging   Tooling: Cloudflare security-audit skill @c1c8a8c (light mode)
 Summary: Critical <n>, High <n>, Medium <n>, Low <n>
 
 ## S5-<YYYYMMDD>-01 — <Critical|High|Medium|Low> (maps to <Blocker|Major|Minor>) — <title>
