@@ -2,7 +2,7 @@
   "version": 3,
   "updated": "2026-10-18",
   "owner": "S1",
-  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0303) is reviewed by S4 in the same session as the M02 halfway.",
+  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0304) is reviewed by S4 in the same session as the M02 halfway.",
   "tasks": [
     {
       "id": "T-0101",
@@ -380,6 +380,38 @@
         "scripts/verify.sh exits 0 at merge time",
         "[NFR-8] ui-perf passes 3 CI runs in a row; the report shows work-per-frame p95 and the rAF gap"
       ]
+    },
+    {
+      "id": "T-0304",
+      "module": "M03",
+      "session": "S2",
+      "title": "MSW out of the production build; faster table",
+      "goal": "No mock code ships in a deployable UI build, and the 10,000-row table meets the 16 ms frame budget on CI runners without retries.",
+      "prd_ids": [
+        "NFR-8"
+      ],
+      "supports": [],
+      "scope": [
+        "Move auth response types and PASSWORD_RULES from apps/ui/src/mocks/auth.ts to a file with no msw import (e.g. apps/ui/src/auth/shapes.ts), still marked PROPOSED SHAPE / ADR-048; update imports",
+        "Check nothing in src/routes or src/components pulls in msw; production build has no msw in any JS asset",
+        "Profile and reduce DataTable work per frame (memoised cells and rows, fewer re-renders on scroll, cheaper cell formatting, measured overscan); budget stays 16 ms",
+        "ui-perf runs with retries: 0 (ADR-046)"
+      ],
+      "out_of_scope": [
+        "scripts/ (the M22 build check is S3 work)",
+        "Visual changes"
+      ],
+      "depends_on": [
+        "T-0303"
+      ],
+      "acceptance": [
+        "grep finds no msw in the production dist; initial JS gzip reported before and after (was 169.3 KB)",
+        "[NFR-8] ui-perf passes on the first try in 3 CI runs in a row, retries 0",
+        "npx vitest run apps/ui and the Playwright ui project stay green",
+        "Screenshot references unchanged"
+      ],
+      "risk": "normal",
+      "status": "todo"
     },
     {
       "id": "T-0201",
