@@ -261,7 +261,7 @@
         "test [SEC-4] migration 0003: retired credential without delete_after is rejected; squawk fails on the DROP CONSTRAINT without the waiver line and passes with it"
       ],
       "risk": "normal",
-      "status": "in_progress"
+      "status": "review"
     },
     {
       "module": "M03",
