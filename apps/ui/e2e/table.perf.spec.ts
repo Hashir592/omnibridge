@@ -70,10 +70,10 @@ test('[NFR-8] the table scrolls 10,000 rows within the 16 ms frame budget', asyn
   };
   const workP95 = pct(work, 0.95);
   const gapMedian = pct(gaps, 0.5);
-  test.info().annotations.push({
-    type: 'perf',
-    description: `table work p95 ${workP95.toFixed(2)} ms per frame (${String(work.length)} samples, ${String(RUNS)} runs); median frame gap ${gapMedian.toFixed(1)} ms`,
-  });
+  const summary = `table work p95 ${workP95.toFixed(2)} ms per frame (${String(work.length)} samples, ${String(RUNS)} runs); median frame gap ${gapMedian.toFixed(1)} ms`;
+  test.info().annotations.push({ type: 'perf', description: summary });
+  // Also on stdout, so the CI log shows the numbers on a pass, not only in the HTML report.
+  console.log(`[ui-perf] ${summary}`);
   if (gapMedian >= 17.5) {
     const msg = `median frame gap ${gapMedian.toFixed(1)} ms is above 60 fps; the runner is throttling frames (warning only, ADR-046)`;
     test.info().annotations.push({ type: 'warning', description: msg });

@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { Check, Circle, Clock } from 'lucide-react';
 import { Field, Input } from '../../kit/Field.tsx';
 import { cn } from '../../lib/cn.ts';
-import { PASSWORD_RULES } from '../../mocks/auth.ts';
+import { PASSWORD_RULES } from '../../auth/shapes.ts';
 
 /** A 6-digit authenticator code. Keeps digits only; the phone keyboard shows numbers. */
 export function CodeField({

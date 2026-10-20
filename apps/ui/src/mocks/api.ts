@@ -11,7 +11,7 @@ import type {
   ResetTokenInfo,
   SignInResult,
   WorkspaceChoice,
-} from './auth.ts';
+} from '../auth/shapes.ts';
 import type { HomeSummary } from './home.ts';
 import type { OrderDetail, OrderPage, Session } from './types.ts';
 

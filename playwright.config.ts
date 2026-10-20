@@ -52,6 +52,8 @@ export default defineConfig({
             name: 'ui-perf',
             testDir: 'apps/ui/e2e',
             testMatch: '**/*.perf.spec.ts',
+            // No retries (ADR-046): a pass on retry would hide a first try over the frame budget.
+            retries: 0,
             use: {
               ...devices['Desktop Chrome'],
               baseURL: perfUrl,

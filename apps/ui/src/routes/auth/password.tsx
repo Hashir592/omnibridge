@@ -5,7 +5,7 @@ import { Button, buttonClass } from '../../kit/Button.tsx';
 import { cn } from '../../lib/cn.ts';
 import { Field, Input } from '../../kit/Field.tsx';
 import { authApi, type MockProblem } from '../../mocks/api.ts';
-import type { ResetTokenInfo } from '../../mocks/auth.ts';
+import type { ResetTokenInfo } from '../../auth/shapes.ts';
 import { AuthFrame, Notice, authLink } from './layout.tsx';
 import { PasswordRules, passwordLocallyValid } from './parts.tsx';
 

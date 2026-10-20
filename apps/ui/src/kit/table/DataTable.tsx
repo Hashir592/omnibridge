@@ -171,7 +171,10 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     getScrollElement,
     estimateSize,
     getItemKey,
-    overscan: 12,
+    // Measured in T-0304: 12 extra rows each side cost ~1.1 ms of script per fast-scroll frame for
+    // nothing, because rows render synchronously on every scroll event. 4 keeps a margin for
+    // keyboard paging; 2 saved only another ~0.3 ms.
+    overscan: 4,
   });
 
   useEffect(() => {
