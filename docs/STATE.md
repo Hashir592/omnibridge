@@ -1,17 +1,17 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S2.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S1.
 
 ## Now
 
 - **Phase:** B, local Docker only (ADR-029).
 - **M01 Platform foundations: CLOSED 20 Oct 2026.** S4 APPROVED in round 2 (0 Blockers, 0 Majors). Tasks T-0101 to T-0106; PRs #1, #2, #3, #5, #9, #12, #15, #17.
 - **Current module:** M02 Identity, tenancy and audit (all S3 tasks high risk: Hashir says "go" before each).
-- **Now running:** S2 T-0303 Auth screens is in review (PR open, status `review`; route shapes proposed as PS-016). Next: S3, T-0201 (prompt `docs/sessions/briefs/S3-T-0201.md`). One session at a time.
+- **Now running:** S3, T-0201 (prompt `docs/sessions/briefs/S3-T-0201.md`). M03 (S2) is built: T-0301 to T-0303 done (PRs #7, #11, #19). S2 writes the M03 end report, which S4 reviews together with the M02 halfway. One session at a time.
 - **M02 order:** T-0201 → T-0202 → T-0203 → halfway checkpoint → T-0204 → T-0205 → T-0207 → T-0206 (S5 audit) → M02 end. Exit also needs the S5 audit clean (ADR-026).
 - **Workflow tiers (ADR-043):** light = `--quick`, no code review; normal = `--quick` + `/code-review` medium; high = full local gate + `/code-review` high. CI always runs the full gate.
 - **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
-- **Open questions:** none. PS-014 and PS-015 approved (ADR-047). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Open questions:** none. PS-014 and PS-015 approved (ADR-047). PS-016 approved (ADR-048). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## M01 delivered
 
@@ -25,6 +25,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 - T-0201: workspace FKs and rls-coverage for `app.data_keys` / `app.credentials`; all-workspace re-wrap job for data and file keys (F-03, R2-02).
 - T-0207: migration no-transaction mode (ADR-047), credential purge index (F-06), job-record retention (F-05), /healthz 503 reason (R2-01), mail header colour.
+- M06: the sign-in footer links (Privacy, Terms, Help) point to omnibridge.co.uk pages that M06 builds; dead until then.
 - M05: `scan_failed` rescan path in the platform console; platform app-secrets table (PLAT-4, AMZ-10).
 - M07: `channel_account_id` FK; LWA expiry reminders; new kinds in `CREDENTIAL_KINDS`.
 - Before M01b observability: S1 re-checks prom-client (deprecated on npm).
@@ -32,9 +33,10 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. Hashir merges the S1 docs PR (M01 close).
-2. Hashir merges the T-0303 PR once CI is green (watch the ui-perf p95: 14-16 ms locally against 16 ms); S1 rules on PS-016.
-3. S3 posts the T-0201 plan; Hashir says "go".
+1. Hashir merges the S1 docs PR (PS-016).
+2. S2 writes the M03 end report (short; no S4 block yet).
+3. S3 posts the T-0201 plan; Hashir says "go". Then T-0202, T-0203.
+4. S4 reviews the M02 halfway and the M03 end in one session.
 
 ## Prerequisites outstanding (Hashir)
 

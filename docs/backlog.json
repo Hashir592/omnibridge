@@ -2,7 +2,7 @@
   "version": 3,
   "updated": "2026-10-18",
   "owner": "S1",
-  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway after T-0302, end after T-0303.",
+  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0303) is reviewed by S4 in the same session as the M02 halfway.",
   "tasks": [
     {
       "id": "T-0101",
@@ -345,7 +345,7 @@
       "module": "M03",
       "session": "S2",
       "risk": "normal",
-      "status": "review",
+      "status": "done",
       "id": "T-0303",
       "title": "Auth screens",
       "goal": "Login, MFA set-up and recovery screens ready for S3 to wire in M02.",
@@ -491,7 +491,9 @@
         "sessions: 256-bit token, SHA-256 hash stored, cookie Secure/HttpOnly/SameSite=Strict, idle 30 min, absolute 12 h, sign out on all devices; CSRF Origin check + double-submit token on state-changing routes",
         "password reset by email link valid 30 minutes, single use, MFA still required",
         "workspace picker after login for multi-workspace users (USR-2); platform admin login path with MFA",
-        "minimal login, MFA enrol, recovery and reset screens (S2 restyles in M03)"
+        "minimal login, MFA enrol, recovery and reset screens (S2 restyles in M03)",
+        "Match the auth route shapes in ADR-048 / PS-016 exactly, including its S1 additions (HMAC-keyed counters for unknown emails, equal timing, pre-MFA cookie limited to MFA routes, no-store enrolment)",
+        "Wire the SPA: replace authApi in apps/ui/src/mocks/api.ts with the typed client; sign in clears the query cache before entering the app"
       ],
       "out_of_scope": [
         "Invites and roles (T-0204)",
@@ -509,7 +511,8 @@
         "test '[USR-6] idle 30 min and absolute 12 h expiry' passes (fake clock)",
         "test '[USR-7] reset link expires after 30 minutes and reset does not bypass MFA' passes",
         "test '[SEC-1] state-changing request without CSRF token is rejected' passes",
-        "Playwright e2e '[AT-3] login with TOTP' passes"
+        "Playwright e2e '[AT-3] login with TOTP' passes",
+        "test '[USR-5] an unknown email locks exactly like a real one and its plaintext is never stored' passes"
       ],
       "risk": "high",
       "status": "todo"
@@ -643,7 +646,8 @@
         "F-M01-end-06: move the credential purge index onto delete_after with a no-transaction migration (CREATE then DROP INDEX CONCURRENTLY)",
         "F-M01-end-05: JobRecordRepository.purge(ctx, olderThan) for finished records and expired leases; indexes on updated_at / expires_at (no-transaction migration); a size cap on job result; a scheduled platform job over all workspaces (uses T-0201)",
         "R2-01: log the reason (which dependency failed) when /healthz returns 503 (apps/web/src/app.ts); no PII, no secrets",
-        "Mail base template header colour to the petrol brand-700 #0F6B66 (ADR-041)"
+        "Mail base template header colour to the petrol brand-700 #0F6B66 (ADR-041)",
+        "scripts/ui-refs.sh: tar only files that exist (a tracked file deleted in the working tree must not abort the copy-back)"
       ],
       "out_of_scope": [
         "scan_failed rescan path (M05 platform console)",

@@ -77,7 +77,7 @@ Steps 5â€“10 of the S3 workflow (`docs/sessions/S3-builder.md`) apply; steps 1â€
 
 ## Checkpoints
 
-M03 has the same halfway and end checkpoints with S4 as S3's modules. Write `docs/reviews/M03-<checkpoint>-report.md` and print a `PASTE INTO SESSION 4` block. S4 reviews accessibility, permission mirroring, PII handling, contract use, bundle size and render performance on large tables. It does not review taste.
+M03 has the same halfway and end checkpoints with S4 as S3's modules. (M03 halfway was skipped; the M03 end checkpoint covers T-0301 to T-0303 and runs in the same S4 session as the M02 halfway review.) Write `docs/reviews/M03-<checkpoint>-report.md` and print a `PASTE INTO SESSION 4` block. S4 reviews accessibility, permission mirroring, PII handling, contract use, bundle size and render performance on large tables. It does not review taste.
 
 ## Handoffs
 
