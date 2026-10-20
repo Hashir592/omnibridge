@@ -349,7 +349,10 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
           body: route.body ? request.body : undefined,
           request,
         };
-        const actor = actors.get(request) ?? { kind: 'public' };
+        // No actor means the auth hook did not run: refuse anything but a public route.
+        const actor: Actor | undefined =
+          actors.get(request) ?? (route.auth === 'public' ? { kind: 'public' } : undefined);
+        if (actor === undefined) throw new ApiError({ status: 401, code: 'unauthorized' });
         const call = handler as (input: object) => Promise<RouteResult<AnyRoute>>;
         let result: RouteResult<AnyRoute>;
         if (actor.kind === 'session') {

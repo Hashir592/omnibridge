@@ -6,6 +6,7 @@ import { contractRoutes } from '@omnibridge/contract';
 import type { TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
+  ChannelAccountRepository,
   CompanyRepository,
   createMainDb,
   FileRepository,
@@ -69,6 +70,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         companies: await r.companies.list(ctx),
         job: await r.jobs.get(ctx, b.job),
         file: await new FileRepository(main.db).get(ctx, b.file),
+        accounts: await new ChannelAccountRepository(main.db).list(ctx),
         users: await r.users.list(ctx),
       });
     });
@@ -114,6 +116,13 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         legalName: `${MARKER} Ltd`,
         tradingName: MARKER,
         registeredAddress: address,
+      }),
+    );
+    await tenancy.runWorkspace({ workspaceId: B }, (ctx) =>
+      new ChannelAccountRepository(main.db).create(ctx, {
+        companyId: b.company,
+        provider: 'ebay',
+        displayName: `${MARKER} ebay`,
       }),
     );
     const job = (ws: string) =>

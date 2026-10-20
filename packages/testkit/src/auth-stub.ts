@@ -1,4 +1,4 @@
-import type { PlatformActor, SessionActor } from '@omnibridge/core';
+import { isUuid, type PlatformActor, type SessionActor } from '@omnibridge/core';
 
 /**
  * Stand-in session and platform checks for tests and local development, until T-0203 builds the
@@ -8,7 +8,6 @@ import type { PlatformActor, SessionActor } from '@omnibridge/core';
 export const TEST_SESSION_HEADER = 'x-test-session';
 export const TEST_PLATFORM_HEADER = 'x-test-platform';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -41,8 +40,8 @@ export function stubAuth(env: Env = process.env): StubAuth {
         workspaceId === undefined ||
         userId === undefined ||
         sessionId === undefined ||
-        !UUID.test(workspaceId) ||
-        !UUID.test(userId) ||
+        !isUuid(workspaceId) ||
+        !isUuid(userId) ||
         !SESSION_ID.test(sessionId)
       ) {
         return undefined;
@@ -51,7 +50,7 @@ export function stubAuth(env: Env = process.env): StubAuth {
     },
     resolvePlatform: ({ headers }) => {
       const userId = header(headers, TEST_PLATFORM_HEADER);
-      return userId !== undefined && UUID.test(userId) ? { userId } : undefined;
+      return userId !== undefined && isUuid(userId) ? { userId } : undefined;
     },
   };
 }

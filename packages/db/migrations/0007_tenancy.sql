@@ -62,8 +62,10 @@ CREATE TABLE app.companies (
   -- VAT quarter stagger (section 5.8, VQ-1); every launch company starts on stagger 1.
   vat_period text NOT NULL DEFAULT 'stagger_1'
     CHECK (vat_period IN ('stagger_1', 'stagger_2', 'stagger_3', 'monthly')),
-  is_fulfilment_provider boolean NOT NULL DEFAULT false,
-  is_purchasing_company boolean NOT NULL DEFAULT false,
+  -- No column default: the companies_first_defaults trigger fills a flag left out (TEN-2), and
+  -- keeps a value the caller gave.
+  is_fulfilment_provider boolean NOT NULL,
+  is_purchasing_company boolean NOT NULL,
   badge_colour text NOT NULL DEFAULT '#0F6B66' CHECK (badge_colour ~ '^#[0-9A-F]{6}$'),
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (id),
@@ -194,18 +196,20 @@ $$;
 REVOKE ALL ON FUNCTION app.workspace_company_ids() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.workspace_company_ids() TO ob_app;
 
--- TEN-2: while a workspace has no company yet, the first one is both the fulfilment provider and
--- the purchasing company. The workspace row lock makes two first companies at once take turns.
+-- TEN-2 defaults for a flag the caller left out: true for the workspace's first company (it is
+-- both the fulfilment provider and the purchasing company), false for later ones. A value the
+-- caller gave is kept. The workspace row lock makes two first companies at once take turns.
 CREATE FUNCTION app.companies_first_defaults() RETURNS trigger
   LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
 AS $$
+DECLARE
+  first boolean;
 BEGIN
   PERFORM 1 FROM app.workspaces w WHERE w.id = NEW.workspace_id FOR NO KEY UPDATE;
-  IF NOT EXISTS (SELECT 1 FROM app.companies c WHERE c.workspace_id = NEW.workspace_id) THEN
-    NEW.is_fulfilment_provider := true;
-    NEW.is_purchasing_company := true;
-  END IF;
+  first := NOT EXISTS (SELECT 1 FROM app.companies c WHERE c.workspace_id = NEW.workspace_id);
+  NEW.is_fulfilment_provider := coalesce(NEW.is_fulfilment_provider, first);
+  NEW.is_purchasing_company := coalesce(NEW.is_purchasing_company, first);
   RETURN NEW;
 END
 $$;

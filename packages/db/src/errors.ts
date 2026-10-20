@@ -36,3 +36,12 @@ export function tenancyError(err: unknown): unknown {
   if (code === 'OBC01') return new ChannelAccountCompanyLocked();
   return err;
 }
+
+/** Runs `fn`, turning the tenancy triggers' errors into typed ones. */
+export async function mapTenancyErrors<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    throw tenancyError(err);
+  }
+}

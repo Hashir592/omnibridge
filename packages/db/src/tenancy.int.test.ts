@@ -320,6 +320,24 @@ describe('tenancy core (TEN-1, TEN-2, TEN-3, TEN-6, TEN-10)', () => {
     expect(second).toMatchObject({ isFulfilmentProvider: false, isPurchasingCompany: false });
   });
 
+  it('[TEN-2] flags the caller sets are kept, even on the first company', async () => {
+    const W = randomUUID();
+    await tenancy.run(none(W), (ctx) => workspaces.create(ctx, { name: 'Explicit flags' }));
+    await tenancy.runWorkspace({ workspaceId: W }, (ctx) =>
+      companies.create(ctx, company('Seller', { isFulfilmentProvider: false })),
+    );
+    const [first] = await tenancy.runWorkspace({ workspaceId: W }, (ctx) => companies.list(ctx));
+    expect(first).toMatchObject({ isFulfilmentProvider: false, isPurchasingCompany: true });
+  });
+
+  it('[TEN-1] a tenant context cannot be used after its transaction has ended', async () => {
+    const escaped = await tenancy.runWorkspace({ workspaceId: A }, (ctx) => Promise.resolve(ctx));
+    await expect(companies.list(escaped)).rejects.toThrow(/already ended/);
+    await expect(tenancy.run(escaped, (ctx) => companies.list(ctx))).rejects.toThrow(
+      /already ended/,
+    );
+  });
+
   it('[TEN-2] a company holds legal and trading name, numbers, address, VAT stagger, flags and badge', async () => {
     const C = randomUUID();
     await tenancy.run(none(C), (ctx) => workspaces.create(ctx, { name: 'Workspace C' }));

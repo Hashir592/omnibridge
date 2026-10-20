@@ -107,6 +107,7 @@ export interface CompaniesTable {
   address_postcode: string;
   address_country: Generated<string>;
   vat_period: Generated<VatPeriod>;
+  /** Left out on insert: filled by the companies_first_defaults trigger (TEN-2). */
   is_fulfilment_provider: Generated<boolean>;
   is_purchasing_company: Generated<boolean>;
   badge_colour: Generated<string>;

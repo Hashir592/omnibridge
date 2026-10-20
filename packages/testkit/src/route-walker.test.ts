@@ -83,6 +83,32 @@ describe('isolation walk (TEN-1, AT-1)', () => {
     markers: ['B-MARKER'],
   };
 
+  it('[TEN-1] a session call that carries B data in its body must be refused too', async () => {
+    const claim = defineRoute({
+      ...meta,
+      auth: 'session',
+      id: 'claimThing',
+      method: 'POST',
+      path: '/things/claim',
+      body: z.object({ id: z.string() }),
+      responses: { 200: z.object({ id: z.string() }) },
+    });
+    const outcomes = await walkIsolation({
+      ...base,
+      routes: [claim],
+      againstB: { claimThing: { body: { id: 'b1' } } },
+      inject: (req) =>
+        Promise.resolve(
+          req.headers['x-test-session'] === undefined
+            ? { statusCode: 401, body: '{}' }
+            : { statusCode: 200, body: '{"id":"ok"}' },
+        ),
+    });
+    expect(outcomes.filter((o) => !o.ok)).toEqual([
+      expect.objectContaining({ route: 'claimThing', caller: 'workspace-a', status: 200 }),
+    ]);
+  });
+
   it('[TEN-1] fails a route that has no walker call', async () => {
     await expect(
       walkIsolation({

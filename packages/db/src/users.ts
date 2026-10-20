@@ -1,6 +1,6 @@
 import type { TenantContext } from '@omnibridge/core';
 import type { Kysely } from 'kysely';
-import { tenancyError } from './errors.ts';
+import { mapTenancyErrors } from './errors.ts';
 import type { MainDb, MembershipRole } from './schema.ts';
 import { withTenantTransaction } from './tenant.ts';
 
@@ -49,15 +49,13 @@ export class MembershipRepository {
 
   /** Throws WorkspaceLimitReached when max_users is set and reached (TEN-10). */
   async add(ctx: TenantContext, member: { userId: string; role: MembershipRole }): Promise<void> {
-    try {
-      await withTenantTransaction(this.#db, ctx, (trx) =>
+    await mapTenancyErrors(() =>
+      withTenantTransaction(this.#db, ctx, (trx) =>
         trx
           .insertInto('app.memberships')
           .values({ workspace_id: ctx.workspaceId, user_id: member.userId, role: member.role })
           .execute(),
-      );
-    } catch (err) {
-      throw tenancyError(err);
-    }
+      ),
+    );
   }
 }

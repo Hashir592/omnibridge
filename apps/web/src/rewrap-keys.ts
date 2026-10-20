@@ -22,8 +22,11 @@ import { rotateKeys } from './key-rotation.ts';
  */
 const logger = createLogger({ service: 'web', version: process.env.APP_VERSION ?? '0.0.0-dev' });
 const keyring = loadKeyring('secrets');
-const app = createMainDb(mainDbConfig('omnibridge-rewrap-keys', 1));
-const platform = createMainDb(platformDbConfig('omnibridge-rewrap-keys-list'));
+const onDbError = (err: Error) => {
+  logger.warn({ event: 'db.connection_error', err }, 'db-main connection error');
+};
+const app = createMainDb(mainDbConfig('omnibridge-rewrap-keys', 1), onDbError);
+const platform = createMainDb(platformDbConfig('omnibridge-rewrap-keys-list'), onDbError);
 try {
   const credentials = new CredentialRepository({ keyring, logger });
   const report = await rotateKeys({

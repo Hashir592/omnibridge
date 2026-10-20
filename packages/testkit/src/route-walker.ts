@@ -98,15 +98,19 @@ function urlOf(route: AnyRoute, call: WalkCall): string {
 
 /**
  * What a status must be. Anonymous: 401 on every route that is not public. Workspace A: 401 or
- * 403 on platform and internal routes; 403 or 404 on a session route aimed at one of B's ids; any
- * status where the route takes no id (a list), because the leak check covers it. A public route
- * may answer anything; its body is still checked for leaks.
+ * 403 on platform and internal routes; 403 or 404 on a session route given anything of B's (path,
+ * query or body); any status only where the call carries nothing (a plain list), because the leak
+ * check covers it. A public route may answer anything; its body is still checked for leaks.
  */
 function expectedFor(route: AnyRoute, caller: WalkOutcome['caller'], call: WalkCall): number[] {
   if (route.auth === 'public') return [];
   if (caller === 'anonymous') return [401];
   if (route.auth !== 'session') return [401, 403];
-  return Object.keys(call.params ?? {}).length > 0 ? [403, 404] : [];
+  const aimed =
+    Object.keys(call.params ?? {}).length > 0 ||
+    Object.keys(call.query ?? {}).length > 0 ||
+    call.body !== undefined;
+  return aimed ? [403, 404] : [];
 }
 
 /** Calls every route as anonymous and as workspace A against B; returns one outcome per call. */

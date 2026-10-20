@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { link, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isUuid } from '@omnibridge/core';
 import {
   generateDataKey,
   rewrapDataKey,
@@ -10,7 +11,6 @@ import {
   type WrappedDataKey,
 } from '@omnibridge/crypto';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const KEY_FILE = /^v(\d+)\.json$/;
 
 interface KeyFile {
@@ -21,7 +21,7 @@ interface KeyFile {
 
 /** A workspace directory on the files volume. The id is checked, so it can never leave the root. */
 export function workspaceDir(root: string, workspaceId: string): string {
-  if (!UUID.test(workspaceId)) throw new Error('Workspace id must be a lower-case UUID');
+  if (!isUuid(workspaceId)) throw new Error('Workspace id must be a lower-case UUID');
   return join(root, workspaceId);
 }
 
@@ -117,7 +117,7 @@ export class FileKeyStore {
   /** Every workspace's key files on the volume. */
   async *#keyFiles(): AsyncGenerator<{ workspaceId: string; path: string; file: KeyFile }> {
     const workspaces = await readdir(this.#root).catch(() => []);
-    for (const workspaceId of workspaces.filter((name) => UUID.test(name))) {
+    for (const workspaceId of workspaces.filter((name) => isUuid(name))) {
       for (const version of await this.#versions(workspaceId)) {
         const path = join(this.#keysDir(workspaceId), `v${String(version)}.json`);
         yield { workspaceId, path, file: JSON.parse(await readFile(path, 'utf8')) as KeyFile };

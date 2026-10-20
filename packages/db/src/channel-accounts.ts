@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { TenantContext } from '@omnibridge/core';
 import type { Kysely } from 'kysely';
-import { tenancyError } from './errors.ts';
+import { mapTenancyErrors } from './errors.ts';
 import type { ChannelProvider, MainDb } from './schema.ts';
 import { withTenantTransaction } from './tenant.ts';
 
@@ -111,10 +111,6 @@ export class ChannelAccountRepository {
   }
 
   async #write(ctx: TenantContext, fn: (db: Kysely<MainDb>) => Promise<unknown>): Promise<void> {
-    try {
-      await withTenantTransaction(this.#db, ctx, fn);
-    } catch (err) {
-      throw tenancyError(err);
-    }
+    await mapTenancyErrors(() => withTenantTransaction(this.#db, ctx, fn));
   }
 }
