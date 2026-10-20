@@ -50,7 +50,8 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          docs_only="$(git diff --name-only "$BASE...$HEAD" | node scripts/lib/docs-only.mjs)"
+          # --no-renames: a file moved from code into docs/ lists its old path too, so it is not docs-only.
+          docs_only="$(git diff --no-renames --name-only "$BASE...$HEAD" | node scripts/lib/docs-only.mjs)"
           if [[ "$docs_only" == true ]]; then code=false; else code=true; fi
           echo "docs only: $docs_only"
           echo "code=$code" >> "$GITHUB_OUTPUT"

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, rename, rm } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Readable, Transform } from 'node:stream';
+import { pipeline as pipe, Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { TenantContext } from '@omnibridge/core';
 import { decryptStream, encryptStream } from './chunked.ts';
@@ -155,20 +155,35 @@ export class EncryptedLocalFileStore implements FileStore {
   }
 
   async get(ctx: TenantContext, id: string): Promise<StoredFile> {
-    const file = await this.openForScan(ctx, id);
-    if (file.meta.state !== 'clean') {
-      file.stream.destroy();
-      throw new FileNotReadable();
-    }
-    return file;
+    const meta = await this.#meta.get(ctx, id);
+    // Checked before anything is opened, so a refused read holds no file handle (F-M01-end-02).
+    if (meta?.state !== 'clean') throw new FileNotReadable();
+    return { meta, stream: await this.#open(ctx, meta) };
   }
 
   async openForScan(ctx: TenantContext, id: string): Promise<StoredFile> {
     const meta = await this.#meta.get(ctx, id);
     if (meta === undefined) throw new FileNotReadable();
+    return { meta, stream: await this.#open(ctx, meta) };
+  }
+
+  /**
+   * The decrypted content. A missing file is FileNotReadable. `pipeline` sends a later read error
+   * to the returned stream (never an uncaught exception) and closes the file when the caller
+   * destroys the stream early.
+   */
+  async #open(ctx: TenantContext, meta: FileMeta): Promise<Readable> {
     const key = await this.#keys.get(ctx.workspaceId, meta.keyVersion);
-    const stream = createReadStream(this.#path(ctx, id)).pipe(decryptStream(key, id));
-    return { meta, stream };
+    let handle: FileHandle;
+    try {
+      handle = await open(this.#path(ctx, meta.id), 'r');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new FileNotReadable();
+      throw err;
+    }
+    const content = decryptStream(key, meta.id);
+    pipe(handle.createReadStream(), content, () => undefined);
+    return content;
   }
 
   setState(ctx: TenantContext, id: string, state: FileState): Promise<void> {

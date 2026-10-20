@@ -6,12 +6,13 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** **M01 end checkpoint with S4.** All M01 tasks are done: T-0101 to T-0106 (PRs #1, #2, #3, #5, #9, #12). Report: `docs/reviews/M01-end-report.md`, which includes the halfway carry-over outcome. S3 has stopped until S4's verdict. S2: idle; next is T-0303 Auth screens (prompt `docs/sessions/briefs/S2-T-0303.md`), after the checkpoint (one session at a time). Done also: T-0301, T-0302 (PRs #7, #11).
+- **Current task:** **M01 end checkpoint, fix round 1 done (S3).** PR from `task/M01-end-fixes` fixes the 4 Majors and Minors F-07, F-08 and F-09; F-05 and F-06 go to S1 as PS-015. Next: Hashir merges, then S4 round 2. All M01 tasks are done: T-0101 to T-0106 (PRs #1, #2, #3, #5, #9, #12). S2: idle; next is T-0303 Auth screens (prompt `docs/sessions/briefs/S2-T-0303.md`), after the checkpoint (one session at a time). Done also: T-0301, T-0302 (PRs #7, #11).
 - **Sessions:** Hashir runs **one session at a time** (ADR-043).
 - **Workflow tiers (ADR-043):** light = `verify.sh --quick`, no code review, CI full gate; normal = `--quick` + `/code-review` medium, CI full gate; high = full local gate + `/code-review` high, then CI. S3 does not wait for CI.
 - **Last checkpoint:** M01 end, handed to S4 on 20 Oct 2026 (one review of the whole module plus the halfway carry-over; up to 2 fix rounds, then S1, ADR-044). O-1 fixed (gate waits for a ready stack; 5 green full runs), F-04 landed as migration 0005.
+- **Review (S4, 20 Oct 2026):** M01 end round 1 is **BLOCKED**: 0 Blockers, 4 Majors (lease leak on a failed record update, file-read errors crash the process, KEK rotation misses the file keys, docs fast path skips tests that read docs/), 5 Minors. Full gate, `--docs` and ui-refs pass; acceptance 39/39. See `docs/reviews/M01-end-findings.md`; S3's resolutions are filled in there.
 - **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
-- **Open questions:** PS-014 (S3, T-0105): nodemailer 10.1.0 and @fastify/helmet 13.1.2 instead of the ADR pins (7-day rule), @types/nodemailer 8.0.2, prom-client flagged deprecated. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Open questions:** PS-015 (S3, M01 end fixes): how to move the credential purge index (F-06, squawk vs the transactional runner), file-key re-wrap in T-0201's job, job-record retention (F-05). PS-014 (S3, T-0105): nodemailer 10.1.0 and @fastify/helmet 13.1.2 instead of the ADR pins (7-day rule), @types/nodemailer 8.0.2, prom-client flagged deprecated. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 
@@ -42,9 +43,9 @@ Local-first (ADR-029): everything is built and tested on local Docker with mocks
 
 ## Next step
 
-1. Hashir merges the S1 docs PR for PS-013.
-2. S3 runs the batch T-0104, T-0105, T-0106 (draft PR after T-0104; no waiting on CI).
-3. M01 end checkpoint: S3 report plus the halfway carry-over → S4 (up to 2 fix rounds).
+1. Hashir merges the M01 end fixes PR once CI is green.
+2. S4 runs round 2 of the M01 end review (the last of 2, ADR-044), then S1 closes M01 and rules on PS-014 and PS-015.
+3. Then S2 T-0303, then T-0201.
 
 ## Prerequisites outstanding (Hashir)
 

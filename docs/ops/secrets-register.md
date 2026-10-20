@@ -73,6 +73,13 @@ These are not Docker secrets. Each value is encrypted with AES-256-GCM under a p
    ```
 
    **It must return no rows** before you remove the old line. If any rows remain, re-run step 2 for their workspaces (`SELECT DISTINCT workspace_id …` with the same filter). Removing the line while any remain makes every credential in those workspaces undecryptable (`no KEK version …`), which is data loss (F-M01-halfway-03).
-4. Remove the old line and redeploy.
+4. **`secrets_kek` only: re-wrap the file keys.** Each workspace's file keys live wrapped on the files volume (`<FILES_DIR>/<workspace>/keys/v<n>.json`), not in the database, so steps 2 and 3 do not cover them. Run this in the **web** container, the only one that can write the volume (the worker mounts it read-only):
+
+   ```bash
+   docker compose -f infra/compose/compose.yaml exec web node dist/rewrap-file-keys.js
+   ```
+
+   It re-wraps every file key under the active KEK (file bodies are untouched) and then counts the keys still under an older one. **It must exit 0**, and its log line `file_keys.stale` must not appear. Run it again until it does. If you remove the old line while any file key is still under it, every file in that workspace becomes undecryptable, which is data loss (F-M01-end-03).
+5. Remove the old line and redeploy.
 
 **Suspected leak.** Rotate the affected secret at once, then record the incident and the new next-rotation date here.

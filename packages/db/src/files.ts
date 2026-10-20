@@ -52,9 +52,12 @@ export class FileRepository implements FileMetadataStore {
     await withTenantTransaction(this.#db, ctx, (trx) =>
       trx
         .updateTable('app.files')
-        .set({ state, scanned_at: state === 'scanning' ? null : new Date() })
+        .set({ state, scanned_at: new Date() })
         .where('workspace_id', '=', ctx.workspaceId)
         .where('id', '=', id)
+        // Only the first verdict counts: a repeated scan job is a no-op, never a trigger error
+        // from migration 0006.
+        .where('state', '=', 'scanning')
         .execute(),
     );
   }
