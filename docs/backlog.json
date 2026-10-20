@@ -364,7 +364,8 @@
         "Built on the T-0302 kit against MSW mocks with proposed route shapes; propose the shapes in DECISIONS.md so S3 matches them in T-0203/T-0204",
         "Error and lockout states (USR-5 message, no account enumeration)",
         "Iteration mode until Hashir says merge (ADR-037)",
-        "Screenshot scope (ADR-046): add the Sign in reference (Linux + Windows); remove the Home, Orders-tablet and Shipping-desktop references and their tests"
+        "Screenshot scope (ADR-046): add the Sign in reference (Linux + Windows); remove the Home, Orders-tablet and Shipping-desktop references and their tests",
+        "ui-perf fix (ADR-046, CI run 39421307043): the hard check is main-thread table work per frame, p95 across 3 runs, under 16 ms; the rAF frame gap is logged as a warning only, because shared headless runners throttle it to 30 fps. The 16 ms budget is unchanged"
       ],
       "out_of_scope": [
         "Real auth logic (S3, M02)"
@@ -376,7 +377,8 @@
         "[NFR-8] axe zero serious or critical violations on every auth screen",
         "Proposed route shapes recorded in DECISIONS.md Proposed (from sessions)",
         "Screenshot tests match docs/design/reference/ for the 4 key screens only (ADR-046)",
-        "scripts/verify.sh exits 0 at merge time"
+        "scripts/verify.sh exits 0 at merge time",
+        "[NFR-8] ui-perf passes 3 CI runs in a row; the report shows work-per-frame p95 and the rAF gap"
       ]
     },
     {
