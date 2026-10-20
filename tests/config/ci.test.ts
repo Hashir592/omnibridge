@@ -1,20 +1,62 @@
+import { readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { readRepoFile } from './helpers.ts';
+import { isDocsOnly } from '../../scripts/lib/docs-only.mjs';
+import { readRepoFile, repoRoot } from './helpers.ts';
 
 const workflow = readRepoFile('.github/workflows/ci.yml');
 const verify = readRepoFile('scripts/verify.sh');
+const localActions = readdirSync(`${repoRoot}.github/actions`).map((dir) =>
+  readRepoFile(`.github/actions/${dir}/action.yml`),
+);
+
+const PINNED = /^[\w.-]+\/[\w.-]+(\/[\w./-]+)?@[0-9a-f]{40}$/;
+const LOCAL = /^\.\/\.github\/actions\/[\w-]+$/;
 
 describe('CI workflow and gate', () => {
   it('[SEC-16] every action in the CI workflow is pinned to a 40-character commit SHA', () => {
-    const uses = [...workflow.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map((m) => m[1] ?? '');
-    expect(uses.length).toBeGreaterThan(0);
-    for (const ref of uses) expect(ref).toMatch(/^[\w.-]+\/[\w.-]+(\/[\w./-]+)?@[0-9a-f]{40}$/);
+    // Local composite actions live in this repo; every action they use is pinned as well.
+    for (const file of [workflow, ...localActions]) {
+      const uses = [...file.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map((m) => m[1] ?? '');
+      expect(uses.length).toBeGreaterThan(0);
+      for (const ref of uses)
+        expect({ ref, ok: PINNED.test(ref) || LOCAL.test(ref) }).toEqual({ ref, ok: true });
+    }
   });
 
   it('[SEC-16] CI runs the full gate on pull requests to main', () => {
     expect(workflow).toMatch(/pull_request:\s*\n\s*branches: \[main\]/);
     expect(workflow).toContain('run: bash scripts/verify.sh');
     expect(workflow).not.toMatch(/verify\.sh --quick/);
+  });
+
+  it('[SEC-4] the parallel CI jobs together run exactly the full gate (ADR-043)', () => {
+    const fullSteps = (/FULL_STEPS=\(([^)]*)\)/.exec(verify)?.[1] ?? '')
+      .split(/\s+/)
+      .filter(Boolean);
+    expect(fullSteps).toHaveLength(19);
+    const jobs = [...workflow.matchAll(/verify\.sh --only=([\w,-]+)/g)].map((m) =>
+      (m[1] ?? '').split(','),
+    );
+    expect(jobs).toHaveLength(3);
+    // Each job installs first; every other step runs in exactly one job, and nothing unknown.
+    for (const job of jobs) expect(job[0]).toBe('install');
+    const covered = jobs.flat().filter((step) => step !== 'install');
+    expect([...covered].sort()).toEqual(fullSteps.filter((step) => step !== 'install').sort());
+  });
+
+  it('[SEC-4] the required check keeps its name and needs every gate job', () => {
+    expect(workflow).toContain('name: verify (full gate)');
+    expect(workflow).toMatch(/needs: \[changes, docs, static, tests, stack\]\n\s+if: always\(\)/);
+    expect(workflow).toContain('run: bash scripts/verify.sh --docs');
+    expect(workflow).toContain("if: needs.changes.outputs.code == 'false'");
+  });
+
+  it('[SEC-4] only docs/**, *.md and docs/backlog.json take the docs fast path', () => {
+    expect(isDocsOnly(['docs/STATE.md', 'README.md', 'docs/backlog.json'])).toBe(true);
+    expect(isDocsOnly(['docs/STATE.md', 'packages/db/src/x.ts'])).toBe(false);
+    expect(isDocsOnly(['.github/workflows/ci.yml'])).toBe(false);
+    expect(isDocsOnly(['scripts/verify.sh'])).toBe(false);
+    expect(isDocsOnly([])).toBe(false);
   });
 
   it('[SEC-4] CI runs Semgrep CE on pull requests from a digest-pinned image', () => {
@@ -32,12 +74,12 @@ describe('CI workflow and gate', () => {
   it('[SEC-4] gate tool images are pinned by digest', () => {
     const images = readRepoFile('scripts/lib/images.sh');
     const pinned = [...images.matchAll(/_IMAGE='([^']+)'/g)].map((m) => m[1]);
-    expect(pinned).toHaveLength(5); // gitleaks, osv-scanner, actionlint, caddy, sops (PS-007)
+    // gitleaks, osv-scanner, actionlint, caddy, sops (PS-007), playwright (ADR-039, ui-refs.sh)
+    expect(pinned).toHaveLength(6);
     for (const image of pinned) expect(image).toMatch(/@sha256:[0-9a-f]{64}$/);
   });
 
   it('[SEC-16] the gate e2e step starts its own UI server and never reuses another one', () => {
-    const verify = readRepoFile('scripts/verify.sh');
     expect(verify).toMatch(/OB_UI_PORT=\d+ OB_E2E_OWN_SERVER=1 .*playwright test/);
   });
 

@@ -1,0 +1,25 @@
+name: setup
+description: Node from .nvmrc, pnpm from package.json (corepack) and the pnpm store cache.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+
+    - name: Enable pnpm (corepack, version from package.json)
+      shell: bash
+      run: corepack enable && corepack install
+
+    - name: Locate the pnpm store
+      id: paths
+      shell: bash
+      run: echo "pnpm-store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache pnpm store
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.pnpm-store }}
+        key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-${{ runner.os }}-
