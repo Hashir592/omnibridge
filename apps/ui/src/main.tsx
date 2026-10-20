@@ -5,6 +5,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppStateProvider } from './app/session.tsx';
+import { ToastProvider } from './kit/Toast.tsx';
 import { router } from './router.tsx';
 
 const queryClient = new QueryClient({
@@ -20,7 +21,9 @@ async function start() {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <AppStateProvider>
-          <RouterProvider router={router} />
+          <ToastProvider>
+            <RouterProvider router={router} />
+          </ToastProvider>
         </AppStateProvider>
       </QueryClientProvider>
     </StrictMode>,

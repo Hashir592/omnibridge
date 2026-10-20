@@ -1,16 +1,17 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S3.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Oct 2026 by S3.
 
 ## Now
 
 - **Phase:** B. Building M01 on local Docker (ADR-029).
 - **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** S3 batch T-0104 + T-0105 + T-0106 on `task/T-0104-T-0106-m01-rest`, draft PR #12 (ADR-043). **T-0104 and T-0105 done on the branch** (status review). T-0104: job registry and envelope, DLQ and redrive, per-account FIFO, a PostgreSQL lease semaphore for caps, global worker cap, London cron, job records and GET /jobs/:id, worker /metrics. T-0105: encrypted file store with per-workspace file keys, 5-minute session-bound signed links (GET /files/:id), magic-byte and size checks, clamd scan job (EICAR proven), SMTP adapter with template lint, helmet strict CSP. Session routes answer 401 until M02. Next: T-0106. PS-013 open (version step-downs for the 7-day rule). S2: T-0302 component kit. Done: T-0101 to T-0103, T-0301 (PRs #1 to #10).
+- **Current task:** S3: batch T-0104 + T-0105 + T-0106 on `task/T-0104-T-0106-m01-rest`, draft PR #12 (ADR-043). T-0104 (queue) and T-0105 (files, scan, mail, CSP) are done on the branch (status review). T-0106 in progress: F-04 landed as migration **0005** (0003 and 0004 are the batch's job_records and files) and the numbered-page helper is in; next gitleaks worktree scan, `ui-refs.sh`, CI parallel jobs and docs fast path, then O-1. S2: idle; next is T-0303 Auth screens (prompt `docs/sessions/briefs/S2-T-0303.md`), started after S3 (one session at a time). Done: T-0101, T-0102, T-0103, T-0301, T-0302 (PRs #1 to #11).
 - **Sessions:** Hashir runs **one session at a time** (ADR-043).
 - **Workflow tiers (ADR-043):** light = `verify.sh --quick`, no code review, CI full gate; normal = `--quick` + `/code-review` medium, CI full gate; high = full local gate + `/code-review` high, then CI. S3 does not wait for CI.
 - **Last checkpoint:** M01 halfway: S4 found FIX REQUIRED (1 Blocker, 1 Major, 6 Minors). S3 fixed 7; F-04 moves into T-0106 as migration 0003 (PS-012 approved, ADR-045). Carry-over for the M01 end review: `docs/reviews/M01-halfway-carryover.md` (O-1 e2e flake, now in T-0106 scope).
-- **Open questions:** none. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
+- **Open questions:** PS-014 (S3, T-0105): nodemailer 10.1.0 and @fastify/helmet 13.1.2 instead of the ADR pins (7-day rule), @types/nodemailer 8.0.2, prom-client flagged deprecated. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
 ## Delivery model
 
@@ -41,7 +42,7 @@ Local-first (ADR-029): everything is built and tested on local Docker with mocks
 
 ## Next step
 
-1. Hashir merges PR #9, then the S1 docs PR (workflow tiers, checkpoint flow, PS-012).
+1. Hashir merges the S1 docs PR for PS-013.
 2. S3 runs the batch T-0104, T-0105, T-0106 (draft PR after T-0104; no waiting on CI).
 3. M01 end checkpoint: S3 report plus the halfway carry-over → S4 (up to 2 fix rounds).
 

@@ -67,7 +67,21 @@ const others = NAV.filter((n) => !['/', '/orders', '/shipping'].includes(n.path)
   createRoute({ getParentRoute: () => root, path: n.path, component: placeholder }),
 );
 
-const routeTree = root.addChildren([home, orders, orderDetail, shipping, ...others]);
+// Component gallery (T-0302): dev server only. Production builds drop the route and its chunk,
+// unless built with VITE_UI_GALLERY=1, which only the Playwright ui-perf test build sets; never set
+// it for a deployable build.
+const gallery =
+  import.meta.env.DEV || import.meta.env.VITE_UI_GALLERY === '1'
+    ? [
+        createRoute({
+          getParentRoute: () => root,
+          path: '/__ui',
+          component: lazyRouteComponent(() => import('./routes/gallery.tsx'), 'GalleryPage'),
+        }),
+      ]
+    : [];
+
+const routeTree = root.addChildren([home, orders, orderDetail, shipping, ...others, ...gallery]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });
 

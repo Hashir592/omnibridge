@@ -14,7 +14,8 @@ export default defineConfig({
         resolve,
         test: {
           name: 'unit',
-          include: ['{apps,packages,mocks,scripts,tests}/**/*.test.ts'],
+          // .tsx files are UI component tests; each opts into jsdom (ADR-039) with a file comment.
+          include: ['{apps,packages,mocks,scripts,tests}/**/*.test.{ts,tsx}'],
           exclude: [...exclude, '**/*.int.test.ts', '**/*.contract.test.ts'],
         },
       },

@@ -65,10 +65,10 @@ If a session is about to end with uncommitted work, remind Hashir that the work 
 
 Steps 5–10 of the S3 workflow (`docs/sessions/S3-builder.md`) apply; steps 1–4 already happened during iteration. Differences:
 
-- **Plan in chat:** list the screens and components, the states you will cover (loading, empty, error, permission-denied, long text) and the reference screenshots you will produce.
+- **Plan in chat:** list the screens and components, the states you will cover (loading, empty, error, permission-denied, long text) and which of the 4 key screens (ADR-046) the task touches.
 - **Tests:**
   - component tests (Vitest + Testing Library) for behaviour
-  - Playwright screenshot tests against `docs/design/reference/<screen>.png` for every screen in the task
+  - Playwright screenshot tests against `docs/design/reference/<screen>.png` **only for the 4 key screens** (ADR-046): Orders, Order detail, Shipping desk (tablet), Sign in. Other screens get component, keyboard and axe tests only
   - an axe accessibility check on each screen with zero serious or critical violations
   - test titles cite IDs, for example `[NFR-8]`
 - **Acceptance for UI:** the screenshot comparison passes within the agreed threshold. Changing a reference image needs Hashir's approval, so mention it in your report.
