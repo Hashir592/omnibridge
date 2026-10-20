@@ -176,7 +176,7 @@
         "test '[NFR-4] progress route reports percent and result' passes"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0105",
@@ -216,7 +216,7 @@
         "test '[SEC-2] CSP header present and blocks inline script' passes"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0106",
@@ -261,7 +261,7 @@
         "test [SEC-4] migration 0003: retired credential without delete_after is rejected; squawk fails on the DROP CONSTRAINT without the waiver line and passes with it"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
     },
     {
       "module": "M03",
