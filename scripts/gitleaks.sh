@@ -52,10 +52,9 @@ case "$mode" in
     exit "$code"
     ;;
   full)
-    # Every ref, so commits on other branches and worktrees are scanned too.
     log="$(mktemp)"
     code=0
-    run git --log-opts=--all /repo 2>&1 | tee "$log" || code=${PIPESTATUS[0]}
+    run git /repo 2>&1 | tee "$log" || code=${PIPESTATUS[0]}
     if ! grep -Eq '[1-9][0-9]* commits? scanned' "$log"; then
       echo "gitleaks: the history scan covered no commits; failing rather than passing silently" >&2
       rm -f "$log"

@@ -123,13 +123,14 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.paths.outputs.playwright }}
 
-      # Docker image layers: a BuildKit builder that can export its cache to a directory, which
-      # this cache keeps between runs (the newest layers replace the older ones).
+      # Docker image layers: a BuildKit builder exports its cache to a directory that this cache
+      # keeps. Keyed on what changes the expensive layers (dependencies and Dockerfiles), so a
+      # normal push reuses the entry instead of storing a new one and evicting other caches.
       - name: Cache Docker image layers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ob-buildx-cache
-          key: buildx-${{ runner.os }}-${{ github.sha }}
+          key: buildx-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'infra/docker/**') }}
           restore-keys: buildx-${{ runner.os }}-
 
       - name: BuildKit builder

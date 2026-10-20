@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { pagedOf, pageQuery, pageResult, PAGE_LIMITS, TOTAL_COUNT_CAP } from './pages.ts';
+import { pagedOf, PAGE_MAX, pageQuery, pageResult, PAGE_LIMITS, TOTAL_COUNT_CAP } from './pages.ts';
 
 describe('numbered-page lists (CAP-7, ADR-040)', () => {
   it('[CAP-7] page-based list: limit 20/50/100 accepted, 201 rejected, default 50', () => {
@@ -12,7 +12,10 @@ describe('numbered-page lists (CAP-7, ADR-040)', () => {
     for (const limit of ['201', '200', '25', '0', '-1', 'x']) {
       expect(pageQuery.safeParse({ limit }).success, limit).toBe(false);
     }
-    for (const page of ['0', '-2', '1.5', 'x']) {
+    // Past the counted rows there is nothing to show, so no huge OFFSET is ever queried.
+    expect(PAGE_MAX).toBe(500);
+    expect(pageQuery.parse({ page: '500', limit: '20' }).page).toBe(500);
+    for (const page of ['0', '-2', '1.5', 'x', '501', '5000000']) {
       expect(pageQuery.safeParse({ page }).success, page).toBe(false);
     }
     // Filters are added the same way as on the cursor query.

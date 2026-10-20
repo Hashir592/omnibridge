@@ -21,6 +21,14 @@ out="$root/.verify/ui-refs"
 rm -rf "$out"
 mkdir -p "$out"
 
+# New files that are not committed yet are included, so S2 can refresh before committing; they
+# are listed, because CI will only have them once they are committed.
+untracked="$(cd "$root" && git ls-files --others --exclude-standard)"
+if [[ -n "$untracked" ]]; then
+  echo "ui-refs: including files not yet committed:"
+  echo "$untracked" | sed 's/^/  /'
+fi
+
 (cd "$root" && git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf -) |
   docker_run -i --rm -v "$(docker_src "$out"):/out" -e CI=1 -e GREP="$grep_arg" \
     -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "$PLAYWRIGHT_IMAGE" bash -euo pipefail -c '

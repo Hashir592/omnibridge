@@ -20,6 +20,7 @@ export {
   pageQuery,
   pageResult,
   PAGE_LIMITS,
+  PAGE_MAX,
   TOTAL_COUNT_CAP,
   type PageQuery,
 } from './pages.ts';

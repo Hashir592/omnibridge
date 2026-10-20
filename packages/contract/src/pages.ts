@@ -11,11 +11,24 @@ export const PAGE_LIMITS = [20, 50, 100] as const;
 export const TOTAL_COUNT_CAP = 10_000;
 
 /**
+ * Highest page a client may ask for: the counted rows end at TOTAL_COUNT_CAP, so even at the
+ * smallest page size no page lies beyond it. Larger pages are a 400, so no request can make the
+ * database walk a huge OFFSET.
+ */
+export const PAGE_MAX = TOTAL_COUNT_CAP / Math.min(...PAGE_LIMITS);
+
+/**
  * Query for numbered-page list routes: `page` from 1 and `limit` 20, 50 or 100 (default 50).
  * Cursor pagination (`listQuery`) stays for exports and jobs. Add filters with `.extend({...})`.
  */
 export const pageQuery = z.object({
-  page: z.coerce.number().int().min(1).default(1).describe('Page number, from 1'),
+  page: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(PAGE_MAX)
+    .default(1)
+    .describe(`Page number, from 1 to ${String(PAGE_MAX)}`),
   limit: z.coerce
     .number()
     .refine((n) => (PAGE_LIMITS as readonly number[]).includes(n), {
