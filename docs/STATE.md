@@ -1,51 +1,40 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S3.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Oct 2026 by S1.
 
 ## Now
 
-- **Phase:** B. Building M01 on local Docker (ADR-029).
-- **Current module:** M01 Platform foundations (local Docker only)
-- **Current task:** **M01 end checkpoint: APPROVED by S4 (round 2, 20 Oct 2026); waiting for S1 to close M01.** All M01 tasks are done: T-0101 to T-0106 (PRs #1, #2, #3, #5, #9, #12), fixes in PR #15. S2: next is T-0303 Auth screens (prompt `docs/sessions/briefs/S2-T-0303.md`, now also carrying the ui-perf measurement ruling from PR #16). Done also: T-0301, T-0302 (PRs #7, #11).
-- **Sessions:** Hashir runs **one session at a time** (ADR-043).
-- **Workflow tiers (ADR-043):** light = `verify.sh --quick`, no code review, CI full gate; normal = `--quick` + `/code-review` medium, CI full gate; high = full local gate + `/code-review` high, then CI. S3 does not wait for CI.
-- **Last checkpoint:** M01 end, handed to S4 on 20 Oct 2026 (one review of the whole module plus the halfway carry-over; up to 2 fix rounds, then S1, ADR-044). O-1 fixed (gate waits for a ready stack; 5 green full runs), F-04 landed as migration 0005.
-- **Review (S4, 20 Oct 2026):** M01 end round 2 is **APPROVED**: 0 Blockers, 0 Majors; all 4 Majors and 3 Minors of round 1 verified fixed; F-05 and F-06 deferred to S1 (PS-015); new Minors R2-01 (log why /healthz is 503) and R2-02 (rewrapAll on a newer KEK). Full gate rc=0 on 48502fb. See `docs/reviews/M01-end-findings.md`.
+- **Phase:** B, local Docker only (ADR-029).
+- **M01 Platform foundations: CLOSED 20 Oct 2026.** S4 APPROVED in round 2 (0 Blockers, 0 Majors). Tasks T-0101 to T-0106; PRs #1, #2, #3, #5, #9, #12, #15, #17.
+- **Current module:** M02 Identity, tenancy and audit (all S3 tasks high risk: Hashir says "go" before each).
+- **Now running:** S2, T-0303 Auth screens (prompt `docs/sessions/briefs/S2-T-0303.md`). Then S3, T-0201 (prompt `docs/sessions/briefs/S3-T-0201.md`). One session at a time.
+- **M02 order:** T-0201 → T-0202 → T-0203 → halfway checkpoint → T-0204 → T-0205 → T-0207 → T-0206 (S5 audit) → M02 end. Exit also needs the S5 audit clean (ADR-026).
+- **Workflow tiers (ADR-043):** light = `--quick`, no code review; normal = `--quick` + `/code-review` medium; high = full local gate + `/code-review` high. CI always runs the full gate.
 - **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
-- **Open questions:** PS-015 (S3, M01 end fixes): how to move the credential purge index (F-06, squawk vs the transactional runner), file-key re-wrap in T-0201's job, job-record retention (F-05). PS-014 (S3, T-0105): nodemailer 10.1.0 and @fastify/helmet 13.1.2 instead of the ADR pins (7-day rule), @types/nodemailer 8.0.2, prom-client flagged deprecated. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Open questions:** none. PS-014 and PS-015 approved (ADR-047). Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
 
-## Delivery model
+## M01 delivered
 
-Local-first (ADR-029): everything is built and tested on local Docker with mocks; servers arrive only in M22 Deploy, near the end. Local containers keep the production limits.
+- Monorepo, limited compose stack, `verify.sh` gate, CI with parallel jobs and a docs fast path, lefthook.
+- Contract registry with permission metadata, OpenAPI and typed client, numbered pages (ADR-040).
+- Envelope crypto (AES-256-GCM, DEK/KEK), credential store, SOPS dev secrets (DEV ONLY age key).
+- pg-boss queue and scheduler, file store with clamd scan and state guard, SMTP mail with Mailpit.
+- **Local dev note:** after old volumes, run `docker compose … down -v`, then `bash scripts/dev-secrets.sh --reset`.
 
-## Done so far
+## Follow-ups placed
 
-- **T-0101 (done):** pnpm monorepo, the limited compose stack, `scripts/verify.sh` full gate, CI, lefthook.
-- **T-0103 (done):** see below.
-- **T-0102 (done):** contract registry with permission metadata, OpenAPI plus typed client, time, cache-key and error helpers.
-
-## What T-0103 delivered
-
-- `packages/crypto`: AES-256-GCM with a random 96-bit nonce, a key-version prefix, and AAD binding workspace, table, column and row. DEK/KEK envelope with versioned keyrings; KEK rotation re-wraps DEKs only. `Secret` never prints its value.
-- Two master keys as Docker secrets: `secrets_kek` (web, worker) and `pii_kek` (pii-vault only), both loaded at boot.
-- Migration 0002: `app.data_keys` and `app.credentials` (current/next slots, forced RLS). `CredentialRepository` in `packages/db`. `TenantContext` type in core (T-0201 extends it).
-- Dev secrets: SOPS 3.13.3 image plus the DEV ONLY age key in `infra/secrets/`. Run `bash scripts/dev-secrets.sh` (or `--reset` after `down -v`). Register: `docs/ops/secrets-register.md`. PS-007 (approved).
-- **Local dev note:** dev DB passwords are now the SOPS values. Any machine with older volumes needs one `docker compose … down -v`, then `bash scripts/dev-secrets.sh --reset`.
-
-## Follow-ups noted (not in T-0103 scope)
-
-- M05: platform app-secrets table (PLAT-4, AMZ-10 LWA current/next) on the same crypto.
-- T-0201: workspace foreign keys on `app.data_keys` and `app.credentials`; tenant transaction wrapper.
-- T-0201 + T-0104: an all-workspace KEK re-wrap job, which reports the count of data keys left under the old KEK across all workspaces and refuses to call the rotation done unless it is 0 (F-03).
-- T-0201: the `rls-coverage` test must include `app.data_keys` and `app.credentials` (S4).
-- M07: `channel_account_id` foreign key; LWA expiry reminders; new provider credential kinds go into `CREDENTIAL_KINDS`.
-- Housekeeping: an orphaned `docker stats` loop from S4's session (PID 1135, read-only) still runs on this host; ending it is up to Hashir.
+- T-0201: workspace FKs and rls-coverage for `app.data_keys` / `app.credentials`; all-workspace re-wrap job for data and file keys (F-03, R2-02).
+- T-0207: migration no-transaction mode (ADR-047), credential purge index (F-06), job-record retention (F-05), /healthz 503 reason (R2-01), mail header colour.
+- M05: `scan_failed` rescan path in the platform console; platform app-secrets table (PLAT-4, AMZ-10).
+- M07: `channel_account_id` FK; LWA expiry reminders; new kinds in `CREDENTIAL_KINDS`.
+- Before M01b observability: S1 re-checks prom-client (deprecated on npm).
+- Housekeeping: an orphaned `docker stats` loop (PID 1135) may still run on this host.
 
 ## Next step
 
-1. S1 closes M01, rules on PS-015 (F-06 index, file-key re-wrap in T-0201, job-record retention F-05) and PS-014, and places the carried Minors R2-01 (log why `/healthz` is 503) and R2-02 (`rewrapAll` skips keys under a newer KEK, exits 1 with a count).
-2. S2 runs T-0303 (one session at a time).
-3. S3 starts T-0201 when S1 says so.
+1. Hashir merges the S1 docs PR (M01 close).
+2. S2 runs T-0303 (iteration mode, then merge).
+3. S3 posts the T-0201 plan; Hashir says "go".
 
 ## Prerequisites outstanding (Hashir)
 
