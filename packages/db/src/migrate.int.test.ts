@@ -53,6 +53,7 @@ describe('db-main roles and migrations', () => {
       '0002_credentials',
       '0003_job_records',
       '0004_files',
+      '0005_credentials_delete_after',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

@@ -175,7 +175,10 @@ describe('credential store (SEC-6, INT-3)', () => {
     const r = repo();
     const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
     const [first, second] = [marker(), marker()];
-    await asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret(first)));
+    const providerExpiry = new Date(Date.now() + 200 * DAY_MS);
+    await asTenant(A, (trx) =>
+      r.store(trx, A, ref, 'current', new Secret(first), { expiresAt: providerExpiry }),
+    );
     await asTenant(A, (trx) =>
       r.replaceCurrent(trx, A, ref, new Secret(second), { retainOldForMs: 7 * DAY_MS }),
     );
@@ -184,12 +187,14 @@ describe('credential store (SEC-6, INT-3)', () => {
     const retired = await asTenant(A, (trx) =>
       trx
         .selectFrom('app.credentials')
-        .select(['expires_at', 'is_active'])
+        .select(['expires_at', 'delete_after', 'is_active'])
         .where('channel_account_id', '=', ref.channelAccountId ?? null)
         .where('is_active', '=', false)
         .executeTakeFirstOrThrow(),
     );
-    const keepMs = (retired.expires_at?.getTime() ?? 0) - Date.now();
+    // F-M01-halfway-04: retiring keeps the provider's expiry and sets its own deletion time.
+    expect(retired.expires_at?.getTime()).toBe(providerExpiry.getTime());
+    const keepMs = (retired.delete_after?.getTime() ?? 0) - Date.now();
     expect(keepMs).toBeGreaterThan(7 * DAY_MS - 60_000);
     expect(keepMs).toBeLessThanOrEqual(7 * DAY_MS);
 
@@ -342,5 +347,29 @@ describe('credential store (SEC-6, INT-3)', () => {
     expect(rows.filter((r) => !r.is_active)).toHaveLength(2);
     const current = (await asTenant(H, (trx) => repo().get(trx, H, ref)))?.reveal();
     expect([first, second]).toContain(current);
+  });
+
+  it('[SEC-4] migration 0005: retired credential without delete_after is rejected', async () => {
+    const r = repo();
+    const ref: CredentialRef = { kind: 'evri.api_key', channelAccountId: randomUUID() };
+    await asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret('x')));
+    // Retiring by hand without a deletion time breaks the new rule ...
+    await expect(
+      asTenant(A, (trx) =>
+        trx
+          .updateTable('app.credentials')
+          .set({ is_active: false })
+          .where('channel_account_id', '=', ref.channelAccountId ?? null)
+          .execute(),
+      ),
+    ).rejects.toThrow(/credentials_inactive_delete_after/);
+    // ... while a retired row with no provider expiry is fine: the old expires_at rule is gone.
+    await asTenant(A, (trx) =>
+      trx
+        .updateTable('app.credentials')
+        .set({ is_active: false, delete_after: new Date() })
+        .where('channel_account_id', '=', ref.channelAccountId ?? null)
+        .execute(),
+    );
   });
 });

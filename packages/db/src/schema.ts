@@ -26,6 +26,8 @@ export interface CredentialsTable {
   is_active: Generated<boolean>;
   expires_at: Date | null;
   rotated_at: Date | null;
+  /** When the purge hard-deletes a retired row (migration 0005). */
+  delete_after: Date | null;
   created_at: Generated<Date>;
 }
 

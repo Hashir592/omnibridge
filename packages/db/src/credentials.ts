@@ -166,13 +166,13 @@ export class CredentialRepository {
     return this.#insert(db, ctx, ref, 'current', value, options.expiresAt ?? null);
   }
 
-  /** Hard-deletes inactive credentials whose retention has ended. Returns how many. */
+  /** Hard-deletes inactive credentials whose `delete_after` has passed. Returns how many. */
   async purgeExpired(db: Kysely<MainDb>, ctx: TenantContext, now = new Date()): Promise<number> {
     const result = await db
       .deleteFrom(TABLE)
       .where('workspace_id', '=', ctx.workspaceId)
       .where('is_active', '=', false)
-      .where('expires_at', '<=', now)
+      .where('delete_after', '<=', now)
       .executeTakeFirst();
     const count = Number(result.numDeletedRows);
     this.#log.info(
@@ -291,9 +291,12 @@ export class CredentialRepository {
     await db
       .updateTable(TABLE)
       .where(this.#slot(ctx, ref, 'current'))
-      // On a retired row expires_at is when the purge deletes it. Splitting this into its own
-      // delete_after column is F-M01-halfway-04, deferred to M07 (PS-012).
-      .set({ is_active: false, rotated_at: now, expires_at: new Date(now.getTime() + retainForMs) })
+      // expires_at keeps the provider's expiry; delete_after is when the purge removes the row.
+      .set({
+        is_active: false,
+        rotated_at: now,
+        delete_after: new Date(now.getTime() + retainForMs),
+      })
       .execute();
   }
 
