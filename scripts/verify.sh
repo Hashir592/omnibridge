@@ -155,6 +155,8 @@ wait_ready() {
 # OB_BUILD_CACHE_DIR (set by CI): build the compose images with buildx bake and a local layer
 # cache that the workflow saves between runs. The new cache replaces the old, so it never grows.
 # The migrate jobs reuse the web and pii-vault images, so only the five distinct images are built.
+# Bake resolves compose's `context: ../..` from the current directory, so it runs from
+# infra/compose, and it is granted exactly the repo (the build context) and the cache directory.
 build_images() {
   local cache="${OB_BUILD_CACHE_DIR:-}"
   if [[ -z "$cache" ]]; then
@@ -162,9 +164,11 @@ build_images() {
     return
   fi
   mkdir -p "$cache" &&
-    docker buildx bake -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml \
+    (cd infra/compose && docker buildx bake -f compose.yaml -f compose.dev.yaml \
+      --allow "fs.read=$root" --allow "fs=$(dirname "$cache")" \
       --set "*.cache-from=type=local,src=$cache" \
-      --set "*.cache-to=type=local,dest=$cache-new,mode=max" --load \n      web worker pii-vault site provider-mocks &&
+      --set "*.cache-to=type=local,dest=$cache-new,mode=max" --load \
+      web worker pii-vault site provider-mocks) &&
     rm -rf "$cache" && mv "$cache-new" "$cache"
 }
 
