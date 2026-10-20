@@ -157,18 +157,25 @@ wait_ready() {
 # The migrate jobs reuse the web and pii-vault images, so only the five distinct images are built.
 # Bake resolves compose's `context: ../..` from the current directory, so it runs from
 # infra/compose, and it is granted exactly the repo (the build context) and the cache directory.
+# The targets build in parallel, so each exports its cache to its own directory: one shared
+# directory makes their writes of the same layer blobs collide.
+BAKE_TARGETS=(web worker pii-vault site provider-mocks)
+
 build_images() {
   local cache="${OB_BUILD_CACHE_DIR:-}"
   if [[ -z "$cache" ]]; then
     "${compose[@]}" build
     return
   fi
-  mkdir -p "$cache" &&
-    (cd infra/compose && docker buildx bake -f compose.yaml -f compose.dev.yaml \
-      --allow "fs.read=$root" --allow "fs=$(dirname "$cache")" \
-      --set "*.cache-from=type=local,src=$cache" \
-      --set "*.cache-to=type=local,dest=$cache-new,mode=max" --load \
-      web worker pii-vault site provider-mocks) &&
+  local sets=() target
+  for target in "${BAKE_TARGETS[@]}"; do
+    mkdir -p "$cache/$target" || return 1
+    sets+=(--set "$target.cache-from=type=local,src=$cache/$target")
+    sets+=(--set "$target.cache-to=type=local,dest=$cache-new/$target,mode=max")
+  done
+  (cd infra/compose && docker buildx bake -f compose.yaml -f compose.dev.yaml \
+    --allow "fs.read=$root" --allow "fs=$(dirname "$cache")" \
+    "${sets[@]}" --load "${BAKE_TARGETS[@]}") &&
     rm -rf "$cache" && mv "$cache-new" "$cache"
 }
 

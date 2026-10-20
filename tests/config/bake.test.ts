@@ -31,7 +31,9 @@ describe('CI image build with buildx bake (ADR-043)', () => {
     expect(verify).toContain(
       '(cd infra/compose && docker buildx bake -f compose.yaml -f compose.dev.yaml',
     );
-    expect(verify).toContain('web worker pii-vault site provider-mocks)');
+    expect(verify).toContain('BAKE_TARGETS=(web worker pii-vault site provider-mocks)');
+    // Parallel targets must not share a cache directory: their blob writes collide.
+    expect(verify).toContain('$target.cache-to=type=local,dest=$cache-new/$target,mode=max');
     expect(Object.keys(targets).sort()).toEqual([...TARGETS].sort());
   });
 
