@@ -20,8 +20,9 @@ if ! git -C "$target" rev-parse --git-dir >/dev/null 2>&1; then
   exit 2
 fi
 
-git_dir="$(cd "$(git -C "$target" rev-parse --absolute-git-dir)" && pwd)"
-common_dir="$(cd "$(git -C "$target" rev-parse --git-common-dir)" && pwd)"
+# Both from git in the same absolute form (shells differ on /d/... versus D:/...).
+git_dir="$(git -C "$target" rev-parse --path-format=absolute --absolute-git-dir)"
+common_dir="$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)"
 mounts=(-v "$(docker_src "$target"):/repo" -v "$(docker_src "$root")/.gitleaks.toml:/config/gitleaks.toml:ro")
 git_env=(-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*')
 if [[ "$git_dir" != "$common_dir" ]]; then
@@ -37,7 +38,19 @@ run() {
 }
 
 case "$mode" in
-  staged) run git --pre-commit --staged /repo ;;
+  staged)
+    # gitleaks exits 0 even when its git call fails, so an error in its log fails the hook.
+    log="$(mktemp)"
+    code=0
+    run git --pre-commit --staged /repo 2>&1 | tee "$log" || code=${PIPESTATUS[0]}
+    if sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -q ' ERR '; then
+      echo "gitleaks: the staged scan reported an error; failing rather than passing silently" >&2
+      rm -f "$log"
+      exit 1
+    fi
+    rm -f "$log"
+    exit "$code"
+    ;;
   full)
     # Every ref, so commits on other branches and worktrees are scanned too.
     log="$(mktemp)"
