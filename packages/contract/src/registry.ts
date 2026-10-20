@@ -1,3 +1,4 @@
+import { exportAuditEvents, listAuditEvents } from './routes/audit.ts';
 import { getHealth } from './routes/health.ts';
 import { getFile } from './routes/files.ts';
 import { getJob } from './routes/jobs.ts';
@@ -14,6 +15,8 @@ export const contractRoutes = [
   listCompanies,
   createWorkspace,
   createCompany,
+  listAuditEvents,
+  exportAuditEvents,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;

@@ -167,10 +167,11 @@ describe('compose stack: secrets (SEC-5)', () => {
   it('[SEC-5] each secret is mounted only into the containers that need it', () => {
     const secretsOf = (name: string) => (service(name).secrets ?? []).map((s) => s.source).sort();
     expect(secretsOf('web')).toEqual(['file_link_hmac_key', 'ob_app_password', 'secrets_kek']);
-    expect(secretsOf('worker')).toEqual(['ob_app_password', 'secrets_kek']);
+    // The worker lists workspace ids as ob_platform for the scheduled fan-out (T-0202).
+    expect(secretsOf('worker')).toEqual(['ob_app_password', 'ob_platform_password', 'secrets_kek']);
     expect(secretsOf('pii-vault')).toEqual(['pii_kek', 'vault_app_password']);
     expect(secretsOf('migrate-main')).toEqual(['ob_owner_password']);
-    // Only the one-off KEK re-wrap job holds ob_platform, which lists workspace ids (T-0201).
+    // Besides the worker, only the one-off KEK re-wrap job holds ob_platform (T-0201).
     expect(secretsOf('rewrap-keys')).toEqual([
       'ob_app_password',
       'ob_platform_password',

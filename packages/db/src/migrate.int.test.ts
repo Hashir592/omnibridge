@@ -58,6 +58,7 @@ describe('db-main roles and migrations', () => {
       '0007_tenancy',
       '0008_workspace_fks',
       '0009_validate_workspace_fks',
+      '0010_audit_events',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

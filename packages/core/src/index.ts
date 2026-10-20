@@ -20,3 +20,16 @@ export {
   toUtcIso,
   type LondonDate,
 } from './time.ts';
+export {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  AUDIT_EVENTS,
+  auditDiff,
+  AuditValueRejected,
+  isAuditAction,
+  PII_MARKER,
+  type AuditAction,
+  type AuditEventSpec,
+  type AuditValue,
+  type AuditValues,
+} from './audit-events.ts';

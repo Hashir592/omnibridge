@@ -2,6 +2,7 @@ import {
   deadLetterOptions,
   HEARTBEAT_QUEUE,
   JOBS,
+  PLATFORM_JOBS,
   QUEUE_SCHEMA,
   queueOptions,
   type JobDefinition,
@@ -10,9 +11,10 @@ import type { PoolConfig } from 'pg';
 import { PgBoss, type ConstructorOptions } from 'pg-boss';
 
 /**
- * Installs or upgrades the pg-boss schema and creates the platform queues and every registered
- * job queue (JOBS). Runs as ob_owner in the migrate job: pg-boss does DDL here (schema, tables,
- * one partition per queue), which ob_app is not allowed to do (ADR-032).
+ * Installs or upgrades the pg-boss schema and creates the platform queues (the heartbeat and
+ * PLATFORM_JOBS) and every registered job queue (JOBS). Runs as ob_owner in the migrate job:
+ * pg-boss does DDL here (schema, tables, one partition per queue), which ob_app is not allowed
+ * to do (ADR-032).
  */
 export async function installQueueSchema(owner: PoolConfig): Promise<void> {
   await withOwnerBoss(owner, async (boss) => {
@@ -21,6 +23,17 @@ export async function installQueueSchema(owner: PoolConfig): Promise<void> {
         retentionSeconds: 3_600,
         deleteAfterSeconds: 3_600,
       });
+    }
+    // Platform jobs carry no workspace and no job record; a missed run is caught by the next.
+    for (const def of PLATFORM_JOBS) {
+      if ((await boss.getQueue(def.type)) === null) {
+        await boss.createQueue(def.type, {
+          retryLimit: 3,
+          retryDelay: 300,
+          retentionSeconds: 86_400,
+          deleteAfterSeconds: 7 * 86_400,
+        });
+      }
     }
     await ensureQueues(boss, JOBS);
   });

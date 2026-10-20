@@ -20,7 +20,7 @@ Production dates are set when each secret is first created in M22. "Next rotatio
 | `db_main_superuser_password` | PostgreSQL superuser of db-main (init only) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main | 12 months | set in M22 |
 | `ob_owner_password` | db-main migration role `ob_owner` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, migrate-main | 12 months | set in M22 |
 | `ob_app_password` | db-main app role `ob_app` (no BYPASSRLS) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, web, worker, rewrap-keys (ops job) | 12 months | set in M22 |
-| `ob_platform_password` | db-main fan-out role `ob_platform`: reads workspace ids only | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, rewrap-keys (ops job) | 12 months | set in M22 |
+| `ob_platform_password` | db-main fan-out role `ob_platform`: reads workspace ids only | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, worker (scheduled fan-out), rewrap-keys (ops job) | 12 months | set in M22 |
 | `db_pii_superuser_password` | PostgreSQL superuser of db-pii (init only) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii | 12 months | set in M22 |
 | `vault_owner_password` | db-pii migration role `vault_owner` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, migrate-pii | 12 months | set in M22 |
 | `vault_app_password` | db-pii app role `vault_app` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, pii-vault | 12 months | set in M22 |
@@ -71,7 +71,7 @@ These are not Docker secrets. Each value is encrypted with AES-256-GCM under a p
    docker compose -f infra/compose/compose.yaml --profile ops run --rm rewrap-keys
    ```
 
-   It lists every workspace as `ob_platform` (ids only), then re-wraps each workspace's data keys as `ob_app` inside that workspace's own tenant transaction (credential rows are not re-encrypted). Then it re-wraps every file key on the files volume (`<FILES_DIR>/<workspace>/keys/v<n>.json`; file bodies are untouched) and counts the keys left. It runs as the one-off `rewrap-keys` container (web image). That container is the only one that holds `ob_platform`, `ob_app`, `secrets_kek` and a writable files volume (the worker mounts the volume read-only). (`pii_kek`: the vault's re-wrap arrives in M04.)
+   It lists every workspace as `ob_platform` (ids only), then re-wraps each workspace's data keys as `ob_app` inside that workspace's own tenant transaction (credential rows are not re-encrypted). Then it re-wraps every file key on the files volume (`<FILES_DIR>/<workspace>/keys/v<n>.json`; file bodies are untouched) and counts the keys left. It runs as the one-off `rewrap-keys` container (web image). That container is the only one that holds `ob_platform`, `ob_app`, `secrets_kek` and a writable files volume (the worker also holds `ob_platform`, for the scheduled fan-out, but mounts the volume read-only). (`pii_kek`: the vault's re-wrap arrives in M04.)
 3. **It must exit 0 and log `key_rotation.done`** before you remove the old line. It exits 1 while any data key or file key is under a KEK other than the active one:
    - `data_keys.stale` or `file_keys.stale`: run it again.
    - `data_keys.newer_kek` or `file_keys.newer_kek`: the job ran with an older keyring than the rest of the stack (R2-02). Run it with the new keyring.

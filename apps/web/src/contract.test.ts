@@ -195,6 +195,49 @@ describe('authentication per route kind (SEC-3)', () => {
     expect(res.json()).toEqual({ workspace: SESSION.workspaceId, user: SESSION.userId });
     await app.close();
   });
+
+  it('[AUD-4][SEC-3] an adminOnly route answers 403 to anyone but a workspace admin', async () => {
+    const adminThing = defineRoute({
+      id: 'adminThing',
+      method: 'GET',
+      path: '/admin-thing',
+      responses: { 200: Thing },
+      auth: 'session',
+      tab: 'audit-log',
+      adminOnly: true,
+      companyScoped: false,
+    });
+    const rs = [adminThing] as const;
+    let calls = 0;
+    const hs: Handlers<typeof rs> = {
+      adminThing: () => {
+        calls += 1;
+        return Promise.resolve({ status: 200, body: { id: 'secret' } });
+      },
+    };
+    const statusWith = async (auth: Parameters<typeof contractRoutesPlugin>[2]) => {
+      const app = Fastify({ loggerInstance: logger });
+      installContract(app);
+      void app.register(contractRoutesPlugin(rs, hs, auth));
+      await app.ready();
+      const res = await app.inject({ method: 'GET', url: '/admin-thing' });
+      await app.close();
+      return res.statusCode;
+    };
+    const base = { resolveSession: () => SESSION, tenancy };
+    expect(
+      await statusWith({ auth: { ...base, roleOf: () => Promise.resolve('admin' as const) } }),
+    ).toBe(200);
+    expect(
+      await statusWith({ auth: { ...base, roleOf: () => Promise.resolve('member' as const) } }),
+    ).toBe(403);
+    expect(await statusWith({ auth: { ...base, roleOf: () => Promise.resolve(undefined) } })).toBe(
+      403,
+    );
+    // No way to look the role up: closed, never open.
+    expect(await statusWith({ auth: base })).toBe(403);
+    expect(calls).toBe(1);
+  });
 });
 
 describe('list pagination over HTTP (CAP-7)', () => {

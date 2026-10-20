@@ -47,6 +47,88 @@
         },
         "required": ["type", "title", "status", "code"]
       },
+      "AuditEventInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "actor_kind": { "type": "string", "enum": ["user", "system", "platform"] },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "user_name": { "type": ["string", "null"] },
+          "action": { "type": "string" },
+          "entity_type": { "type": "string" },
+          "entity_id": { "type": ["string", "null"] },
+          "before": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": { "type": "string" },
+                "additionalProperties": {
+                  "anyOf": [
+                    { "type": "string" },
+                    { "type": "number" },
+                    { "type": "boolean" },
+                    { "type": "null" },
+                    { "type": "array", "items": { "type": ["string", "number"] } }
+                  ]
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "after": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": { "type": "string" },
+                "additionalProperties": {
+                  "anyOf": [
+                    { "type": "string" },
+                    { "type": "number" },
+                    { "type": "boolean" },
+                    { "type": "null" },
+                    { "type": "array", "items": { "type": ["string", "number"] } }
+                  ]
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "reason": { "type": ["string", "null"] },
+          "ip": { "type": ["string", "null"] }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "actor_kind",
+          "user_id",
+          "user_name",
+          "action",
+          "entity_type",
+          "entity_id",
+          "before",
+          "after",
+          "reason",
+          "ip"
+        ]
+      },
       "HealthInput": {
         "type": "object",
         "properties": {
@@ -225,6 +307,89 @@
           }
         },
         "required": ["type", "title", "status", "code"],
+        "additionalProperties": false
+      },
+      "AuditEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "actor_kind": { "type": "string", "enum": ["user", "system", "platform"] },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "user_name": { "type": ["string", "null"] },
+          "action": { "type": "string" },
+          "entity_type": { "type": "string" },
+          "entity_id": { "type": ["string", "null"] },
+          "before": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": { "type": "string" },
+                "additionalProperties": {
+                  "anyOf": [
+                    { "type": "string" },
+                    { "type": "number" },
+                    { "type": "boolean" },
+                    { "type": "null" },
+                    { "type": "array", "items": { "type": ["string", "number"] } }
+                  ]
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "after": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": { "type": "string" },
+                "additionalProperties": {
+                  "anyOf": [
+                    { "type": "string" },
+                    { "type": "number" },
+                    { "type": "boolean" },
+                    { "type": "null" },
+                    { "type": "array", "items": { "type": ["string", "number"] } }
+                  ]
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "reason": { "type": ["string", "null"] },
+          "ip": { "type": ["string", "null"] }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "actor_kind",
+          "user_id",
+          "user_name",
+          "action",
+          "entity_type",
+          "entity_id",
+          "before",
+          "after",
+          "reason",
+          "ip"
+        ],
         "additionalProperties": false
       },
       "Health": {
@@ -650,6 +815,305 @@
             "description": "Default Response",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Created" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/audit-events": {
+      "get": {
+        "operationId": "listAuditEvents",
+        "summary": "List audit events",
+        "parameters": [
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "description": "next_cursor from the previous page"
+          },
+          {
+            "schema": { "default": 50, "type": "integer", "minimum": 1, "maximum": 200 },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Rows per page (default 50, max 200)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "user_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "auth.login",
+                "auth.login_failed",
+                "auth.locked",
+                "auth.signed_out_everywhere",
+                "mfa.enrolled",
+                "mfa.reset",
+                "mfa.recovery_codes_regenerated",
+                "user.invited",
+                "user.joined",
+                "user.removed",
+                "user.role_changed",
+                "user.permissions_changed",
+                "user.access_review_completed",
+                "connection.added",
+                "connection.removed",
+                "connection.reauthorised",
+                "kill_switch.changed",
+                "stock.adjusted",
+                "catalogue.changed",
+                "cogs.changed",
+                "finance.created",
+                "finance.edited",
+                "finance.deleted",
+                "finance.company_moved",
+                "intercompany.edited",
+                "intercompany.deleted",
+                "vat_quarter.locked",
+                "vat_quarter.unlocked",
+                "export.created",
+                "audit_log.exported",
+                "deletion.run",
+                "ads.changed"
+              ]
+            },
+            "in": "query",
+            "name": "action",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "invite",
+                "membership",
+                "channel_account",
+                "workspace",
+                "master_sku",
+                "finance_record",
+                "intercompany_transfer",
+                "vat_quarter",
+                "export",
+                "audit_log",
+                "deletion_request",
+                "ad_entity"
+              ]
+            },
+            "in": "query",
+            "name": "entity_type",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "in": "query",
+            "name": "entity_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "audit-log",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/AuditEvent" }
+                    },
+                    "next_cursor": { "type": ["string", "null"] }
+                  },
+                  "required": ["items", "next_cursor"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/audit-events/export": {
+      "get": {
+        "operationId": "exportAuditEvents",
+        "summary": "Export audit events as CSV",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "user_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "auth.login",
+                "auth.login_failed",
+                "auth.locked",
+                "auth.signed_out_everywhere",
+                "mfa.enrolled",
+                "mfa.reset",
+                "mfa.recovery_codes_regenerated",
+                "user.invited",
+                "user.joined",
+                "user.removed",
+                "user.role_changed",
+                "user.permissions_changed",
+                "user.access_review_completed",
+                "connection.added",
+                "connection.removed",
+                "connection.reauthorised",
+                "kill_switch.changed",
+                "stock.adjusted",
+                "catalogue.changed",
+                "cogs.changed",
+                "finance.created",
+                "finance.edited",
+                "finance.deleted",
+                "finance.company_moved",
+                "intercompany.edited",
+                "intercompany.deleted",
+                "vat_quarter.locked",
+                "vat_quarter.unlocked",
+                "export.created",
+                "audit_log.exported",
+                "deletion.run",
+                "ads.changed"
+              ]
+            },
+            "in": "query",
+            "name": "action",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "invite",
+                "membership",
+                "channel_account",
+                "workspace",
+                "master_sku",
+                "finance_record",
+                "intercompany_transfer",
+                "vat_quarter",
+                "export",
+                "audit_log",
+                "deletion_request",
+                "ad_entity"
+              ]
+            },
+            "in": "query",
+            "name": "entity_type",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "in": "query",
+            "name": "entity_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "audit-log",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary", "description": "File bytes" }
+              }
             }
           },
           "4XX": {
