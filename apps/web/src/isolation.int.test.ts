@@ -6,6 +6,7 @@ import { contractRoutes } from '@omnibridge/contract';
 import type { TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
+  AuditLog,
   ChannelAccountRepository,
   CompanyRepository,
   createMainDb,
@@ -72,6 +73,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         file: await new FileRepository(main.db).get(ctx, b.file),
         accounts: await new ChannelAccountRepository(main.db).list(ctx),
         users: await r.users.list(ctx),
+        audit: await new AuditLog(main.db).list(ctx, {}, { limit: 200 }),
       });
     });
 
@@ -143,6 +145,16 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       );
     a.job = await job(A);
     b.job = await job(B);
+    // An audit event in B that names B's own rows (AUD-4 routes are walked too).
+    await tenancy.runWorkspace({ workspaceId: B, userId: userB }, (ctx) =>
+      new AuditLog(main.db).record(ctx, {
+        action: 'connection.added',
+        actor: { kind: 'user', userId: userB },
+        entityId: b.company,
+        after: { provider: 'ebay', display_name: `${MARKER} ebay`, company_id: b.company },
+        reason: `${MARKER} reason`,
+      }),
+    );
     b.file = await tenancy.runWorkspace({ workspaceId: B }, async (ctx) => {
       const id = await store.put(ctx, {
         body: PDF,
@@ -168,6 +180,8 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       checks,
       tenancy,
       directory: { workspaces: r.workspaces, companies: r.companies },
+      members: r.memberships,
+      audit: new AuditLog(main.db),
       jobs: r.jobs,
       files: { store, linkKey },
       ...stubAuth(),
@@ -205,6 +219,9 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           params: { workspaceId: B },
           body: { legal_name: `${MARKER} 2 Ltd`, trading_name: 'x', registered_address: address },
         },
+        // Plain lists as A's admin: only A's events may come back, never B's.
+        listAuditEvents: {},
+        exportAuditEvents: {},
       },
       markers: [MARKER, B, b.company, b.job, b.file, userB],
     });

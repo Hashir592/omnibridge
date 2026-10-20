@@ -73,6 +73,11 @@ export interface AuthOptions {
   resolvePlatform?: (request: FastifyRequest) => PlatformActor | undefined;
   /** Opens the request's one tenant transaction (required with resolveSession). */
   tenancy?: TenantRunner;
+  /**
+   * The signed-in user's role in the workspace, read inside the request's transaction. Without
+   * it every `adminOnly` route answers 403 (PERM-5); tab and company ticks arrive with T-0204.
+   */
+  roleOf?: (tenant: TenantContext) => Promise<'admin' | 'member' | undefined>;
 }
 
 /** One handler per route id. A missing handler is a type error and a startup failure. */
@@ -298,7 +303,7 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
   { logLevels, auth = {} }: RegisterOptions<R> = {},
 ): void {
   const levels: Readonly<Record<string, 'warn' | 'error' | undefined>> = logLevels ?? {};
-  const { tenancy } = auth;
+  const { tenancy, roleOf } = auth;
   if (auth.resolveSession !== undefined && tenancy === undefined) {
     throw new ContractError('Session routes need a tenancy to open their tenant transaction');
   }
@@ -362,7 +367,13 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
           const { session } = actor;
           result = await tenancy.runWorkspace(
             { workspaceId: session.workspaceId, userId: session.userId },
-            (tenant) => call({ ...input, session, tenant }),
+            async (tenant) => {
+              // Admin-only routes check the role in the same transaction (PERM-5, AUD-4).
+              if (route.adminOnly && (await roleOf?.(tenant)) !== 'admin') {
+                throw new ApiError({ status: 403, code: 'forbidden' });
+              }
+              return call({ ...input, session, tenant });
+            },
           );
         } else if (actor.kind === 'platform') {
           result = await call({ ...input, platform: actor.platform });

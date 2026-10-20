@@ -51,3 +51,11 @@ export {
   type RouteResult,
 } from './route.ts';
 export { getHealth, HealthSchema, type Health } from './routes/health.ts';
+export {
+  AuditEventSchema,
+  auditFilters,
+  exportAuditEvents,
+  listAuditEvents,
+  type AuditEvent,
+  type AuditFilters,
+} from './routes/audit.ts';

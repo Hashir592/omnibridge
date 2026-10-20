@@ -1,11 +1,13 @@
 import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
+  AuditLog,
   CompanyRepository,
   createMainDb,
   FileRepository,
   JobRecordRepository,
   mainDbConfig,
+  MembershipRepository,
   ping,
   Tenancy,
   WorkspaceRepository,
@@ -54,6 +56,8 @@ const app = buildWebApp({
     workspaces: new WorkspaceRepository(main.db),
     companies: new CompanyRepository(main.db),
   },
+  members: new MembershipRepository(main.db),
+  audit: new AuditLog(main.db),
   // No session or platform resolver until T-0203: those routes answer 401 (closed, never open).
   jobs: new JobRecordRepository(main.db),
   files: { store: fileStore, linkKey },

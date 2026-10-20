@@ -79,7 +79,10 @@ describe('secrets handling (SEC-5)', () => {
     // rewrap-keys is the one-off KEK rotation job (T-0201), run by hand in the ops profile.
     expect(holders('secrets_kek')).toEqual(['rewrap-keys', 'web', 'worker']);
     expect(holders('pii_kek')).toEqual(['pii-vault']);
-    expect(holders('ob_platform_password')).toEqual(['db-main', 'rewrap-keys']);
+    // ob_platform reads workspace ids only: the scheduled fan-out (worker) and the re-wrap job.
+    expect(holders('ob_platform_password')).toEqual(['db-main', 'rewrap-keys', 'worker']);
+    expect(service('worker').environment?.DB_PLATFORM_USER).toBe('ob_platform');
+    expect(service('web').environment?.DB_PLATFORM_USER).toBeUndefined();
     expect(service('web').environment?.SECRETS_KEK_FILE).toBe('/run/secrets/secrets_kek');
     expect(service('worker').environment?.SECRETS_KEK_FILE).toBe('/run/secrets/secrets_kek');
     expect(service('rewrap-keys').environment?.SECRETS_KEK_FILE).toBe('/run/secrets/secrets_kek');

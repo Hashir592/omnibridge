@@ -58,4 +58,19 @@ export class MembershipRepository {
       ),
     );
   }
+
+  /** The role of `ctx.userId` in the context's workspace, or undefined when not a member. */
+  async roleOf(ctx: TenantContext): Promise<MembershipRole | undefined> {
+    const userId = ctx.userId;
+    if (userId === undefined) return undefined;
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const row = await trx
+        .selectFrom('app.memberships')
+        .select('role')
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
+      return row?.role;
+    });
+  }
 }

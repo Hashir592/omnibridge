@@ -1,3 +1,4 @@
+import type { AuditValues } from '@omnibridge/core';
 import type { ColumnType, Generated } from 'kysely';
 
 /**
@@ -145,6 +146,25 @@ export interface MembershipsTable {
   created_at: Generated<Date>;
 }
 
+export type AuditActorKind = 'user' | 'system' | 'platform';
+
+/** Append-only (migration 0010): ob_app inserts and reads, and never sets the id or time. */
+export interface AuditEventsTable {
+  id: Generated<string>;
+  workspace_id: string;
+  occurred_at: ColumnType<Date, never, never>;
+  actor_kind: AuditActorKind;
+  user_id: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  /** jsonb: written as JSON text, read as an object. */
+  before: ColumnType<AuditValues | null, string | null, never>;
+  after: ColumnType<AuditValues | null, string | null, never>;
+  reason: string | null;
+  ip: ColumnType<string | null, string | null, never>;
+}
+
 export interface MainDb {
   'app.workspaces': WorkspacesTable;
   'app.companies': CompaniesTable;
@@ -156,4 +176,5 @@ export interface MainDb {
   'app.job_records': JobRecordsTable;
   'app.job_leases': JobLeasesTable;
   'app.files': FilesTable;
+  'app.audit_events': AuditEventsTable;
 }

@@ -1,5 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { contractRoutes, type Company, type Health, type JobProgress } from '@omnibridge/contract';
+import { Readable } from 'node:stream';
+import {
+  contractRoutes,
+  type AuditEvent as AuditEventBody,
+  type AuditFilters,
+  type Company,
+  type Health,
+  type JobProgress,
+} from '@omnibridge/contract';
 import {
   ApiError,
   type PlatformActor,
@@ -7,11 +15,20 @@ import {
   type TenantContext,
   type TenantRunner,
 } from '@omnibridge/core';
-import type { CompanyRepository, WorkspaceRepository } from '@omnibridge/db';
+import {
+  isAuditCursor,
+  type AuditCursor,
+  type AuditFilter,
+  type AuditLog,
+  type CompanyRepository,
+  type MembershipRepository,
+  type WorkspaceRepository,
+} from '@omnibridge/db';
 import { FileNotReadable, verifyFileLink, type FileStore } from '@omnibridge/files';
 import type { Logger } from '@omnibridge/logger';
 import fastifyHelmet from '@fastify/helmet';
 import Fastify, { type FastifyRequest } from 'fastify';
+import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
 import { contractRoutesPlugin, installContract, type Handlers } from './contract.ts';
 
 export interface HealthChecks {
@@ -48,6 +65,13 @@ export interface TenantDirectory {
   companies: Pick<CompanyRepository, 'create' | 'list'>;
 }
 
+/**
+ * The most one audit export may hold (AUD-4); more is a 400 asking for a narrower range. It is
+ * read and written page by page, so the bytes cap is what bounds memory (web heap 288 MB).
+ */
+export const AUDIT_EXPORT_LIMITS = { rows: 100_000, bytes: 16 * 1024 * 1024 } as const;
+const AUDIT_EXPORT_PAGE = 1_000;
+
 export interface WebAppOptions {
   logger: Logger;
   version: string;
@@ -64,6 +88,12 @@ export interface WebAppOptions {
   /** Opens each request's one tenant transaction (TEN-1, invariant 3). */
   tenancy?: TenantRunner;
   directory?: TenantDirectory;
+  /** Workspace roles, for adminOnly routes (PERM-5). Without it those routes answer 403. */
+  members?: Pick<MembershipRepository, 'roleOf'>;
+  /** The audit log (AUD-1, AUD-4). */
+  audit?: Pick<AuditLog, 'record' | 'list'>;
+  /** Overrides AUDIT_EXPORT_LIMITS; tests only. */
+  auditExportLimits?: { rows: number; bytes: number };
   /**
    * The signed-in user of `session` routes. Sessions arrive in T-0203; until then production
    * passes nothing, so every session route answers 401 and none is open.
@@ -93,6 +123,9 @@ export function buildWebApp({
   files,
   tenancy,
   directory,
+  members,
+  audit,
+  auditExportLimits,
   resolveSession,
   resolvePlatform,
 }: WebAppOptions) {
@@ -132,6 +165,11 @@ export function buildWebApp({
   function needDirectory(): TenantDirectory {
     if (directory === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
     return directory;
+  }
+
+  function needAudit(): NonNullable<WebAppOptions['audit']> {
+    if (audit === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
+    return audit;
   }
 
   const handlers: Handlers<typeof contractRoutes> = {
@@ -268,6 +306,60 @@ export function buildWebApp({
       );
       return { status: 201, body: { id } };
     },
+    listAuditEvents: async ({ query, tenant }) => {
+      const page = await needAudit().list(tenant, auditFilter(query), {
+        limit: query.limit,
+        after: query.cursor === undefined ? undefined : decodeCursor(query.cursor),
+      });
+      return {
+        status: 200,
+        body: {
+          items: page.items.map(auditBody),
+          next_cursor: page.next === null ? null : encodeCursor(page.next),
+        },
+      };
+    },
+    exportAuditEvents: async ({ query, session, tenant, request }) => {
+      const log = needAudit();
+      const limits = auditExportLimits ?? AUDIT_EXPORT_LIMITS;
+      const filter = auditFilter(query);
+      // Page by page inside the request's transaction, so only one page of rows is held at once.
+      const header = Buffer.from(AUDIT_CSV_HEADER, 'utf8');
+      const chunks = [header];
+      let bytes = header.length;
+      let rows = 0;
+      let after: AuditCursor | undefined;
+      do {
+        const page = await log.list(tenant, filter, { limit: AUDIT_EXPORT_PAGE, after });
+        const chunk = Buffer.from(auditCsvRows(page.items), 'utf8');
+        rows += page.items.length;
+        bytes += chunk.length;
+        if (rows > limits.rows || bytes > limits.bytes) {
+          throw new ApiError({
+            status: 400,
+            code: 'bad_request',
+            detail: 'Too many audit events match for one export. Narrow the date range.',
+          });
+        }
+        chunks.push(chunk);
+        after = page.next ?? undefined;
+      } while (after !== undefined);
+      // The export is itself audited (AUD-4), in the same transaction as the read.
+      await log.record(tenant, {
+        action: 'audit_log.exported',
+        actor: { kind: 'user', userId: session.userId },
+        after: { ...query, row_count: rows },
+        ip: request.ip,
+      });
+      return {
+        status: 200,
+        body: {
+          stream: Readable.from(chunks),
+          contentType: 'text/csv; charset=utf-8',
+          sizeBytes: bytes,
+        },
+      };
+    },
   };
 
   // A contract error rejects app.ready(), so the server never starts (invariant 4).
@@ -279,9 +371,53 @@ export function buildWebApp({
         ...(resolveSession === undefined ? {} : { resolveSession }),
         ...(resolvePlatform === undefined ? {} : { resolvePlatform }),
         ...(tenancy === undefined ? {} : { tenancy }),
+        ...(members === undefined ? {} : { roleOf: (ctx: TenantContext) => members.roleOf(ctx) }),
       },
     }),
   );
 
   return app;
+}
+
+/** Contract filters → repository filters; times are parsed to instants. */
+function auditFilter(query: AuditFilters): AuditFilter {
+  return {
+    ...(query.user_id === undefined ? {} : { userId: query.user_id }),
+    ...(query.action === undefined ? {} : { action: query.action }),
+    ...(query.entity_type === undefined ? {} : { entityType: query.entity_type }),
+    ...(query.entity_id === undefined ? {} : { entityId: query.entity_id }),
+    ...(query.from === undefined ? {} : { from: new Date(query.from) }),
+    ...(query.to === undefined ? {} : { to: new Date(query.to) }),
+  };
+}
+
+function auditBody(e: Awaited<ReturnType<AuditLog['list']>>['items'][number]): AuditEventBody {
+  return {
+    id: e.id,
+    occurred_at: e.occurredAt.toISOString(),
+    actor_kind: e.actorKind,
+    user_id: e.userId,
+    user_name: e.userName,
+    action: e.action,
+    entity_type: e.entityType,
+    entity_id: e.entityId,
+    before: e.before,
+    after: e.after,
+    reason: e.reason,
+    ip: e.ip,
+  };
+}
+
+/** The list cursor is opaque to clients: the last event's time and id, base64url-encoded. */
+function encodeCursor(cursor: AuditCursor): string {
+  return Buffer.from(`${cursor.at}|${cursor.id}`, 'utf8').toString('base64url');
+}
+
+function decodeCursor(text: string): AuditCursor {
+  const [at = '', id = '', ...rest] = Buffer.from(text, 'base64url').toString('utf8').split('|');
+  const cursor = { at, id };
+  if (rest.length > 0 || !isAuditCursor(cursor)) {
+    throw new ApiError({ status: 400, code: 'bad_request', detail: 'The cursor is not valid' });
+  }
+  return cursor;
 }

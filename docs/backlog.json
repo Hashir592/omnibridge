@@ -460,7 +460,7 @@
         "test '[TEN-1] re-wrap job: rotation is reported done only when no data or file key remains under the old KEK' passes"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0202",
@@ -497,7 +497,7 @@
         "test '[AUD-4] export is itself audited' passes"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0203",

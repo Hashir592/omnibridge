@@ -220,6 +220,9 @@ services:
       <<: *db-main-env
       DB_MAIN_USER: ob_app
       DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
+      # The scheduled fan-out lists workspace ids as ob_platform, nothing else (T-0202).
+      DB_PLATFORM_USER: ob_platform
+      DB_PLATFORM_PASSWORD_FILE: /run/secrets/ob_platform_password
       SECRETS_KEK_FILE: /run/secrets/secrets_kek
       WORKER_HEALTH_FILE: /tmp/worker-heartbeat
       # Most jobs at once across all queues; /metrics on an unpublished port (T-0104).
@@ -230,7 +233,7 @@ services:
       METRICS_PORT: '9464'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=384
-    secrets: [ob_app_password, secrets_kek]
+    secrets: [ob_app_password, ob_platform_password, secrets_kek]
     # The worker only reads files (to scan them); it never writes the volume.
     volumes:
       - files_data:/data/files:ro
@@ -251,7 +254,8 @@ services:
   # KEK rotation for every workspace (SEC-6, runbook "Rotate a master key"). One-off and opt-in:
   #   docker compose -f infra/compose/compose.yaml --profile ops run --rm rewrap-keys
   # The only container with ob_platform (to list the workspaces), ob_app, the secrets KEK and a
-  # writable files volume, so web itself never holds ob_platform (T-0201).
+  # writable files volume, so web itself never holds ob_platform (T-0201). The worker holds
+  # ob_platform too, for the scheduled fan-out, but mounts the files volume read-only (T-0202).
   rewrap-keys:
     <<: *job-hardening
     image: omnibridge/web:dev

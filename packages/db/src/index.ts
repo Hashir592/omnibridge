@@ -16,7 +16,13 @@ export {
   type CredentialRepositoryOptions,
   type CredentialSlot,
 } from './credentials.ts';
-export type { ChannelProvider, MainDb, MembershipRole, VatPeriod } from './schema.ts';
+export type {
+  AuditActorKind,
+  ChannelProvider,
+  MainDb,
+  MembershipRole,
+  VatPeriod,
+} from './schema.ts';
 export { JobRecordRepository, type JobProgress } from './job-records.ts';
 export { createQueues } from './queue-schema.ts';
 export { Tenancy, withTenantTransaction } from './tenant.ts';
@@ -38,3 +44,13 @@ export {
 export { MembershipRepository, UserRepository, type User } from './users.ts';
 export { WorkspaceDirectory } from './platform.ts';
 export { rewrapAllDataKeys, type DataKeyTotals } from './rewrap.ts';
+export {
+  AuditLog,
+  AuditReasonRequired,
+  isAuditCursor,
+  type AuditActor,
+  type AuditCursor,
+  type AuditEvent,
+  type AuditFilter,
+  type NewAuditEvent,
+} from './audit.ts';
