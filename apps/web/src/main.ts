@@ -110,7 +110,7 @@ const app = buildWebApp({
   auth,
   jobs: new JobRecordRepository(main.db),
   files: { store: fileStore, linkKey },
-  // Unset until the edge's address range is fixed (M22); then the edge's CIDR only.
+  // compose sets uniquelocal: only the private-network edge may name the client address.
   ...(process.env.TRUSTED_PROXIES ? { trustedProxies: process.env.TRUSTED_PROXIES } : {}),
 });
 

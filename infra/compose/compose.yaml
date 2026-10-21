@@ -188,6 +188,10 @@ services:
       # The only origins allowed on state-changing requests (SEC-1). Dev default: the dev edge;
       # production sets the app's own origin (M22).
       APP_ORIGINS: ${APP_ORIGINS:-https://localhost:8443}
+      # Believe X-Forwarded-For only from private-network peers: web sits on Docker's private
+      # networks behind the edge, and Caddy replaces any client-sent X-Forwarded-For. So the
+      # sign-in delay and the audit see the client's address, not the edge's (ADR-008).
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-uniquelocal}
       FILES_DIR: /data/files
       PII_VAULT_URL: http://pii-vault:8080
       PORT: '8080'

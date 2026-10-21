@@ -33,10 +33,11 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Follow-ups noted (not in T-0203 scope)
 
-- T-0204: invites (accept sets the first password through `AuthStore.setPassword`), roles and ticks; USR-8 revocation can use `session_revoke_user`; user and permission audit events; the invite screens move off the mock.
+- T-0204: invites (accept sets the first password through `AuthStore.setPassword`), roles and ticks; user and permission audit events; the invite screens move off the mock. USR-8: today a workspace session does not re-check its membership, so a removed member keeps reading until the session ends; revoke with `session_revoke_user` on removal and check the membership in `resolveSession`.
+- T-0206 (S5 audit): a failed sign-in for a real account also writes audit rows, a few milliseconds that an unknown email skips. argon2 equalises the main cost (ADR-048); check whether the residual gap matters.
 - S2 (later task): the password-change screen for `next: password_change`.
 - M05: platform admins are made by platform tooling (no path yet); in-app lock alerts; a reset email for an operator with no workspace (skipped and logged today, since every job needs a workspace).
-- M22: production `APP_ORIGINS`, `APP_ORIGIN` and SMTP (Scaleway TEM with TLS, `SMTP_ALLOW_PLAIN` unset). The compose defaults are dev values.
+- M22: production `APP_ORIGINS`, `APP_ORIGIN` and SMTP (Scaleway TEM with TLS). The compose defaults are dev values: `SMTP_ALLOW_PLAIN` defaults to 1 for Mailpit, so production must set it to 0. `TRUSTED_PROXIES` defaults to uniquelocal (only the private-network edge may name the client address).
 - T-0207: job retention can reuse `PLATFORM_JOBS`; plus the purge index, the /healthz 503 reason and the mail header colour.
 - Capacity: role connection caps (ob_app 30, ob_worker 20, ob_platform 4) exceed `max_connections` 40; real peak is about 31 (web 10 + 2 queue, worker 18, fan-out 1). Revisit pool sizes in T-0207 or M22.
 - Later: very large audit exports as a background job. M07: provider jobs must not hold a tenant transaction across network calls. M04: the AT-9 marker scan should cover `pgboss`. M12: carrier accounts of the launch seed.

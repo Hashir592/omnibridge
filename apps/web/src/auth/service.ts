@@ -266,6 +266,17 @@ export class AuthService {
     }
   }
 
+  /**
+   * After a correct answer: attempts that ran at the same time may have locked the email
+   * meanwhile, and a lock wins over a right guess (USR-5: at most 10 tries per lock window).
+   */
+  async #refuseIfLockedMeanwhile(key: Buffer, ip: string, now: Date): Promise<void> {
+    const { lockedUntil } = await this.#o.store.lockState(key, ip, now);
+    if (lockedUntil !== null) {
+      throw rateLimited(lockedUntil, now, 'Too many failed attempts. Sign in is paused.');
+    }
+  }
+
   /** Counts a failure and answers it: 429 once locked, 401 otherwise. Never returns. */
   async #failed(
     key: Buffer,
@@ -331,6 +342,7 @@ export class AuthService {
     if (!ok || account === undefined) {
       return this.#failed(key, ip, now, account, 'password');
     }
+    await this.#refuseIfLockedMeanwhile(key, ip, now);
     await this.#o.store.clearFailures(key);
     const sessionToken = token();
     const csrf = token();
@@ -374,6 +386,7 @@ export class AuthService {
     if (step === undefined || !(await this.#o.store.useTotpStep(user.userId, step))) {
       return this.#failed(key, request.ip, now, user, 'code');
     }
+    await this.#refuseIfLockedMeanwhile(key, request.ip, now);
     await this.#o.store.clearFailures(key);
     return this.#finishSignIn(request, user, now);
   }
@@ -393,6 +406,7 @@ export class AuthService {
       now,
     );
     if (left === undefined) return this.#failed(key, request.ip, now, user, 'recovery_code');
+    await this.#refuseIfLockedMeanwhile(key, request.ip, now);
     await this.#o.store.clearFailures(key);
     const done = await this.#finishSignIn(request, user, now);
     return { body: { ...done.body, recoveryCodesLeft: left }, cookies: done.cookies };

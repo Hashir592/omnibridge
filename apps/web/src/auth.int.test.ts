@@ -49,7 +49,7 @@ class Browser {
     method: 'GET' | 'POST',
     url: string,
     payload?: object,
-    opts: { csrf?: string | null; origin?: string | null } = {},
+    opts: { csrf?: string | null; origin?: string | null; headers?: Record<string, string> } = {},
   ) {
     const csrf = opts.csrf === undefined ? this.cookies.get('ob_csrf') : opts.csrf;
     const origin = opts.origin === undefined ? ORIGIN : opts.origin;
@@ -64,6 +64,7 @@ class Browser {
         ...(origin === null ? {} : { origin }),
         ...(csrf == null ? {} : { 'x-csrf-token': csrf }),
         ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+        ...opts.headers,
       },
       ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
     });
@@ -135,8 +136,9 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       now: () => clock,
     });
 
-  const app = (auth = service()) =>
+  const app = (auth = service(), trustedProxies?: string) =>
     buildWebApp({
+      ...(trustedProxies === undefined ? {} : { trustedProxies }),
       logger,
       version: '0',
       checks,
@@ -368,6 +370,66 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       [`%${unknown}%`],
     );
     expect(jobs[0]?.n).toBe('0');
+    await server.close();
+  });
+
+  it('[USR-5] a lock set by attempts running at the same time beats a right password', async () => {
+    const user = await makeUser();
+    const key = service().emailKey(user.email);
+    // While this sign-in hashes, ten other attempts fail and lock the email.
+    class RacingPasswords extends Passwords {
+      override async check(stored: string | undefined, password: string): Promise<boolean> {
+        for (let i = 0; i < 10; i += 1) await store.recordFailure(key, '198.51.100.250', clock);
+        return super.check(stored, password);
+      }
+    }
+    const racing = new AuthService({
+      store,
+      passwords: new RacingPasswords(),
+      platformKeys,
+      tenancy,
+      audit: new AuditLog(main.db),
+      notifier: { locked: () => Promise.resolve(), passwordReset: () => Promise.resolve() },
+      logger,
+      hmacKey,
+      origins: [ORIGIN],
+      now: () => clock,
+    });
+    const server = app(racing);
+    const b = await new Browser(server, '192.0.2.60').start();
+    const res = await b.signIn(user.email, PASSWORD);
+    expect(res.statusCode).toBe(429);
+    expect(b.cookies.has('ob_session')).toBe(false);
+    await server.close();
+  });
+
+  it('[USR-5] the client address comes through the private-network edge, never from a public peer', async () => {
+    const server = app(service(), 'uniquelocal');
+    const user = await makeUser();
+    const viaEdge = await new Browser(server, '172.18.0.4').start();
+    later(31_000);
+    await viaEdge.send(
+      'POST',
+      '/auth/sign-in',
+      { email: user.email, password: 'wrong one' },
+      { headers: { 'x-forwarded-for': '203.0.113.99' } },
+    );
+    const direct = await new Browser(server, '198.51.100.77').start();
+    later(31_000);
+    await direct.send(
+      'POST',
+      '/auth/sign-in',
+      { email: user.email, password: 'wrong two' },
+      { headers: { 'x-forwarded-for': '203.0.113.98' } },
+    );
+    const events = await tenancy.run({ workspaceId: A, companyIds: [] }, (ctx) =>
+      new AuditLog(main.db).list(
+        ctx,
+        { userId: user.id, action: 'auth.login_failed' },
+        { limit: 10 },
+      ),
+    );
+    expect(events.items.map((e) => e.ip).sort()).toEqual(['198.51.100.77', '203.0.113.99']);
     await server.close();
   });
 
