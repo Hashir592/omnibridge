@@ -414,6 +414,41 @@
       "status": "review"
     },
     {
+      "id": "T-0305",
+      "module": "M03",
+      "session": "S2",
+      "title": "Client preview: mock-up screens for the remaining tabs",
+      "goal": "The client can see and approve the look of every main area of OmniBridge before those modules are built.",
+      "prd_ids": [
+        "NFR-8"
+      ],
+      "supports": [],
+      "scope": [
+        "Clickable mock-ups on MSW synthetic data, built from the T-0302 kit only, in the existing shell. No business logic; later modules wire real data.",
+        "Wave 1 (client priority): Stock & Catalogue (Master SKU list + SKU detail with stock per channel and location, PRD 4.1, 4.2); Sales & Profit dashboard (4.8); Finance overview: VAT quarter summary, expenses list, P&L (5.2, 5.4, 5.8, 5.9); Account Health (4.6); Users & permissions admin with tab and company ticks (PERM-3, PERM-4); Connections admin (3.0, cards per channel account with status)",
+        "Wave 2 (if time): Customer Service inbox (4.5); Advertising overview (4.7, module flag); Forecasting (4.9); Reminders and Notes with the PII banner (4.10); notification panel from the bell (6); Audit Log viewer (AUD-4); Settings; password-change screen for next: password_change (USR-3)",
+        "Charts with Recharts (ADR-003); check the 7-day rule first and propose a step-down if needed",
+        "Client preview set: PNG screenshots of every new screen at 1440x900 (and tablet for Stock) saved to docs/design/client-preview/20261021/, numbered in click-through order, plus an index.md listing each screen with one line on what it shows. These are not test references (ADR-046 unchanged)"
+      ],
+      "out_of_scope": [
+        "Real routes or contract changes (propose shapes only)",
+        "New colours or tokens without Hashir",
+        "Dark theme"
+      ],
+      "depends_on": [
+        "T-0302"
+      ],
+      "acceptance": [
+        "[NFR-8] axe zero serious or critical on every new screen",
+        "Keyboard walkthrough of each new screen passes",
+        "Client preview PNGs and index.md present",
+        "Proposed API shapes for new screens recorded in DECISIONS.md Proposed (from sessions)",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
       "id": "T-0201",
       "module": "M02",
       "session": "S3",
