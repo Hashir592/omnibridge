@@ -123,8 +123,16 @@ const breached = () =>
 const usable = (token: string | null | undefined) => !!token && token !== 'expired';
 
 export const authHandlers = [
-  // The CSRF cookie (SEC-1): the mock checks no token, so it only answers.
-  http.get('*/auth/csrf', () => new HttpResponse(null, { status: 204 })),
+  // The CSRF cookie (SEC-1), set as the server sets it, so the SPA asks only once. The mock
+  // checks no token.
+  http.get(
+    '*/auth/csrf',
+    () =>
+      new HttpResponse(null, {
+        status: 204,
+        headers: { 'set-cookie': 'ob_csrf=mock-csrf-token; Path=/; SameSite=Strict' },
+      }),
+  ),
 
   http.post('*/auth/sign-in', async ({ request }) => {
     const body = (await request.json()) as { email?: string; password?: string };
