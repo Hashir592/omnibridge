@@ -161,25 +161,14 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   }, []);
 
   const modelRows = table.getRowModel().rows;
-  const scroller = useRef<HTMLDivElement>(null);
-  // Stable callbacks: a new getItemKey on every render makes the virtualiser re-measure every row
-  // on every scroll frame, which is the difference between smooth and janky at 10,000 rows.
-  const getItemKey = useCallback((i: number) => modelRows[i]?.id ?? i, [modelRows]);
-  const getScrollElement = useCallback(() => scroller.current, []);
-  const virtual = useVirtualizer({
-    count: modelRows.length,
-    getScrollElement,
-    estimateSize,
-    getItemKey,
-    // Measured in T-0304: 12 extra rows each side cost ~1.1 ms of script per fast-scroll frame for
-    // nothing, because rows render synchronously on every scroll event. 4 keeps a margin for
-    // keyboard paging; 2 saved only another ~0.3 ms.
-    overscan: 4,
-  });
+  // State, not a ref: the body's virtualiser reads the scroller in its own layout effect, which
+  // runs before this component's refs are attached.
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  const getScrollElement = useCallback(() => scroller, [scroller]);
 
   useEffect(() => {
-    scroller.current?.scrollTo({ top: 0 });
-  }, [scrollKey]);
+    scroller?.scrollTo({ top: 0 });
+  }, [scroller, scrollKey]);
 
   // Header checkbox state, recomputed only when selection or rows change, not on every scroll frame.
   const { allSelected, someSelected } = useMemo(() => {
@@ -193,7 +182,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   return (
     <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-card border border-border bg-card shadow-card">
       <div
-        ref={scroller}
+        ref={setScroller}
         // Focusable, so the table can be scrolled with the arrow keys even with no links in it (WCAG 2.1.1).
         tabIndex={0}
         className="h-full overflow-auto focus-visible:outline-offset-[-2px]"
@@ -245,25 +234,14 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
             ))}
           </div>
 
-          <div role="rowgroup" style={{ height: virtual.getTotalSize(), position: 'relative' }}>
-            {virtual.getVirtualItems().map((vi) => {
-              const row = modelRows[vi.index];
-              if (!row) return null;
-              return (
-                <TableRow
-                  key={row.id}
-                  id={row.id}
-                  original={row.original}
-                  ariaIndex={rowOffset + vi.index + 2}
-                  start={vi.start}
-                  selected={row.getIsSelected()}
-                  checkboxLabel={rowLabel ? rowLabel(row.original) : `Select row ${row.id}`}
-                  layout={layout}
-                  onToggle={toggle}
-                />
-              );
-            })}
-          </div>
+          <TableBody
+            rows={modelRows}
+            getScrollElement={getScrollElement}
+            rowOffset={rowOffset}
+            rowLabel={rowLabel}
+            layout={layout}
+            onToggle={toggle}
+          />
         </div>
       </div>
       {/* Messages sit over the visible area under the header, so they stay centred however wide the columns are. */}
@@ -279,6 +257,65 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     </div>
   );
 }
+
+interface TableBodyProps<T extends RowData> {
+  rows: ReadonlyArray<{ id: string; original: T; getIsSelected: () => boolean }>;
+  getScrollElement: () => HTMLDivElement | null;
+  rowOffset: number;
+  rowLabel: ((row: T) => string) | undefined;
+  layout: Layout<T>;
+  onToggle: (id: string) => void;
+}
+
+/**
+ * The virtualised rows. The virtualiser lives here, not in DataTable, so a scroll frame re-renders
+ * only this body: the table model, the header and the layout are left alone (NFR-8).
+ */
+function TableBodyImpl<T extends RowData>({
+  rows,
+  getScrollElement,
+  rowOffset,
+  rowLabel,
+  layout,
+  onToggle,
+}: TableBodyProps<T>) {
+  // Stable callbacks: a new getItemKey on every render makes the virtualiser re-measure every row
+  // on every scroll frame, which is the difference between smooth and janky at 10,000 rows.
+  const getItemKey = useCallback((i: number) => rows[i]?.id ?? i, [rows]);
+  const virtual = useVirtualizer({
+    count: rows.length,
+    getScrollElement,
+    estimateSize,
+    getItemKey,
+    // Measured in T-0304: 12 extra rows each side cost ~1.1 ms of script per fast-scroll frame for
+    // nothing, because rows render synchronously on every scroll event. 4 keeps a margin for
+    // keyboard paging; 2 saved only another ~0.3 ms.
+    overscan: 4,
+  });
+  return (
+    <div role="rowgroup" style={{ height: virtual.getTotalSize(), position: 'relative' }}>
+      {virtual.getVirtualItems().map((vi) => {
+        const row = rows[vi.index];
+        if (!row) return null;
+        return (
+          <TableRow
+            key={row.id}
+            id={row.id}
+            original={row.original}
+            ariaIndex={rowOffset + vi.index + 2}
+            start={vi.start}
+            selected={row.getIsSelected()}
+            checkboxLabel={rowLabel ? rowLabel(row.original) : `Select row ${row.id}`}
+            layout={layout}
+            onToggle={onToggle}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+const TableBody = memo(TableBodyImpl) as typeof TableBodyImpl;
 
 interface Layout<T> {
   visible: Array<DataColumn<T>>;
@@ -331,6 +368,9 @@ function TableRowImpl<T>({
         gridTemplateColumns: layout.grid,
         height: ROW_HEIGHT,
         transform: `translateY(${String(start)}px)`,
+        // Each row is placed absolutely at a fixed height, so the browser can lay it out and style
+        // it on its own: a row entering the window no longer dirties its neighbours (NFR-8).
+        contain: 'size layout style',
       }}
     >
       {layout.selectable && (
