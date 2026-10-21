@@ -23,8 +23,7 @@ import {
   schedulePlatformJob,
 } from '@omnibridge/queue';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
-import { Kysely, PostgresDialect, sql } from 'kysely';
-import pg from 'pg';
+import { type Kysely, sql } from 'kysely';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -64,6 +63,7 @@ const stuckJob = defineJob({
 
 describe('durable job queue (NFR-3, OPS-10)', () => {
   let cluster: RoleCluster;
+  let bookkeeping: MainDbHandle;
   let db: Kysely<MainDb>;
   const bosses: PgBoss[] = [];
   const errors: unknown[] = [];
@@ -117,11 +117,10 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
       idleJob,
       stuckJob,
     ]);
-    db = new Kysely<MainDb>({
-      dialect: new PostgresDialect({
-        pool: new pg.Pool({ ...cluster.connection('ob_app'), max: 6 }),
-      }),
-    });
+    // createMainDb's pool handles a dropped connection, so stopping the container cannot raise
+    // an unhandled 57P01 from an idle client.
+    bookkeeping = createMainDb({ ...cluster.connection('ob_app'), max: 6 });
+    db = bookkeeping.db;
     handlers = createMainDb({ ...cluster.connection('ob_app'), max: 6 });
     await new Tenancy(handlers.db).run(ws, (ctx) =>
       new WorkspaceRepository(handlers.db).create(ctx, { name: 'Worker test' }),
@@ -137,7 +136,7 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
 
   afterAll(async () => {
     await handlers.destroy();
-    await db.destroy();
+    await bookkeeping.destroy();
     await cluster.container.stop();
   });
 
