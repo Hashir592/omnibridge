@@ -4,7 +4,7 @@ import { useState, type ReactNode, type SyntheticEvent } from 'react';
 import { Button, buttonClass } from '../../kit/Button.tsx';
 import { cn } from '../../lib/cn.ts';
 import { Field, Input } from '../../kit/Field.tsx';
-import { authApi, type MockProblem } from '../../mocks/api.ts';
+import { authApi, type ApiProblem } from '../../auth/api.ts';
 import type { ResetTokenInfo } from '../../auth/shapes.ts';
 import { AuthFrame, Notice, authLink } from './layout.tsx';
 import { PasswordRules, passwordLocallyValid } from './parts.tsx';
@@ -175,7 +175,7 @@ export function ResetPasswordPage() {
       if (r.ok) setResult('done');
       else if (r.status === 404) setResult('gone');
       else if (r.status === 422) {
-        const rule = (r.body as MockProblem).errors?.[0]?.message;
+        const rule = (r.body as ApiProblem).errors?.[0]?.message;
         setResult(rule === 'breached' ? 'breached' : 'error');
       } else setResult('error');
     } catch {

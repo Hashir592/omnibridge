@@ -5,7 +5,8 @@ import { useState, type SyntheticEvent } from 'react';
 import { Button } from '../../kit/Button.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
 import { Skeleton } from '../../kit/Skeleton.tsx';
-import { authApi, type MockProblem } from '../../mocks/api.ts';
+import { authApi, type ApiProblem } from '../../auth/api.ts';
+import { inviteApi } from '../../mocks/api.ts';
 import type { InviteInfo, WorkspaceChoice } from '../../auth/shapes.ts';
 import { AuthFrame, Notice } from './layout.tsx';
 import { LinkUnusable } from './password.tsx';
@@ -21,7 +22,7 @@ export function AcceptInvitePage() {
   const invite = useQuery({
     queryKey: ['invite', token],
     queryFn: async () => {
-      const r = await authApi.invite(token);
+      const r = await inviteApi.invite(token);
       if (r.status === 404) return null;
       if (!r.ok) throw new Error(String(r.status));
       return r.body as InviteInfo;
@@ -60,13 +61,13 @@ export function AcceptInvitePage() {
     setBusy(true);
     setResult(undefined);
     try {
-      const r = await authApi.acceptInvite(token, name.trim(), password);
+      const r = await inviteApi.acceptInvite(token, name.trim(), password);
       if (r.ok) {
         await navigate({ to: '/sign-in/set-up-mfa' });
         return;
       }
       if (r.status === 404) setResult('gone');
-      else if (r.status === 422 && (r.body as MockProblem).errors?.[0]?.message === 'breached')
+      else if (r.status === 422 && (r.body as ApiProblem).errors?.[0]?.message === 'breached')
         setResult('breached');
       else setResult('error');
     } catch {

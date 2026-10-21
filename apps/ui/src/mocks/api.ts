@@ -3,15 +3,7 @@
  * contract does not have yet, so the typed client cannot reach them. Each function is replaced by
  * an `api.GET(...)` call from @omnibridge/contract/client once S3 builds the real route.
  */
-import type {
-  InviteInfo,
-  MfaConfirmResult,
-  MfaEnrolment,
-  MfaResult,
-  ResetTokenInfo,
-  SignInResult,
-  WorkspaceChoice,
-} from '../auth/shapes.ts';
+import type { InviteInfo, SignInResult } from '../auth/shapes.ts';
 import type { HomeSummary } from './home.ts';
 import type { OrderDetail, OrderPage, Session } from './types.ts';
 
@@ -68,20 +60,11 @@ async function send<T>(
   };
 }
 
-/** Auth routes (T-0303), PROPOSED SHAPES; see mocks/auth.ts. */
-export const authApi = {
-  signIn: (email: string, password: string) =>
-    send<SignInResult>('POST', '/api/mock/auth/sign-in', { email, password }),
-  verifyCode: (code: string) => send<MfaResult>('POST', '/api/mock/auth/mfa/verify', { code }),
-  recovery: (code: string) => send<MfaResult>('POST', '/api/mock/auth/mfa/recovery', { code }),
-  startEnrolment: () => send<MfaEnrolment>('POST', '/api/mock/auth/mfa/enrolment'),
-  confirmEnrolment: (code: string) =>
-    send<MfaConfirmResult>('POST', '/api/mock/auth/mfa/enrolment/confirm', { code }),
-  forgot: (email: string) => send<never>('POST', '/api/mock/auth/password/forgot', { email }),
-  resetInfo: (token: string) =>
-    send<ResetTokenInfo>('GET', `/api/mock/auth/password/reset/${encodeURIComponent(token)}`),
-  reset: (token: string, password: string) =>
-    send<never>('POST', '/api/mock/auth/password/reset', { token, password }),
+/**
+ * Invite routes (T-0303), PROPOSED SHAPES until T-0204 builds them; see mocks/auth.ts. The other
+ * auth routes are real since T-0203: src/auth/api.ts.
+ */
+export const inviteApi = {
   invite: (token: string) =>
     send<InviteInfo>('GET', `/api/mock/invites/${encodeURIComponent(token)}`),
   acceptInvite: (token: string, name: string, password: string) =>
@@ -89,7 +72,4 @@ export const authApi = {
       name,
       password,
     }),
-  workspaces: () => send<WorkspaceChoice[]>('GET', '/api/mock/auth/workspaces'),
-  chooseWorkspace: (workspaceId: string) =>
-    send<never>('POST', '/api/mock/auth/workspace', { workspaceId }),
 };

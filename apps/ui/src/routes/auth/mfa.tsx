@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useState, type SyntheticEvent } from 'react';
 import { Button } from '../../kit/Button.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
-import { authApi, type MockReply } from '../../mocks/api.ts';
+import { authApi, type ApiReply } from '../../auth/api.ts';
 import type { MfaResult } from '../../auth/shapes.ts';
 import { AuthFrame, Notice, authLink } from './layout.tsx';
 import { CodeField, useEnterApp } from './parts.tsx';
@@ -12,7 +12,7 @@ type Failure = 'invalid' | 'locked' | 'error';
 /** After MFA, go to the workspace picker or straight into the app. */
 function useAfterMfa() {
   const enter = useEnterApp();
-  return (r: MockReply<MfaResult>) =>
+  return (r: ApiReply<MfaResult>) =>
     enter((r.body as MfaResult).next === 'workspace_picker' ? '/workspaces' : '/');
 }
 

@@ -123,7 +123,10 @@ const breached = () =>
 const usable = (token: string | null | undefined) => !!token && token !== 'expired';
 
 export const authHandlers = [
-  http.post('*/api/mock/auth/sign-in', async ({ request }) => {
+  // The CSRF cookie (SEC-1): the mock checks no token, so it only answers.
+  http.get('*/auth/csrf', () => new HttpResponse(null, { status: 204 })),
+
+  http.post('*/auth/sign-in', async ({ request }) => {
     const body = (await request.json()) as { email?: string; password?: string };
     const email = (body.email ?? '').trim().toLowerCase();
     const now = Date.now();
@@ -145,14 +148,14 @@ export const authHandlers = [
     return HttpResponse.json<SignInResult>({ next: account.mfa ? 'mfa_code' : 'mfa_setup' });
   }),
 
-  http.post('*/api/mock/auth/mfa/verify', async ({ request }) => {
+  http.post('*/auth/mfa/verify', async ({ request }) => {
     const { code } = (await request.json()) as { code?: string };
     if (code !== DEMO_TOTP) return problem(401, 'unauthorized', 'invalid_code');
     const ws = current ? (ACCOUNTS[current]?.workspaces ?? 1) : 1;
     return HttpResponse.json<MfaResult>({ next: ws > 1 ? 'workspace_picker' : 'app' });
   }),
 
-  http.post('*/api/mock/auth/mfa/recovery', async ({ request }) => {
+  http.post('*/auth/mfa/recovery', async ({ request }) => {
     const { code } = (await request.json()) as { code?: string };
     if (!/^[a-z0-9]{5}-[a-z0-9]{5}$/i.test((code ?? '').trim())) {
       return problem(401, 'unauthorized', 'invalid_code');
@@ -164,7 +167,7 @@ export const authHandlers = [
     });
   }),
 
-  http.post('*/api/mock/auth/mfa/enrolment', () =>
+  http.post('*/auth/mfa/enrolment', () =>
     HttpResponse.json<MfaEnrolment>({
       secret: 'MOCK SECR ETNO TREA LXXX XXXX XXXX',
       label: 'OmniBridge (n***@example.test)',
@@ -172,7 +175,7 @@ export const authHandlers = [
     }),
   ),
 
-  http.post('*/api/mock/auth/mfa/enrolment/confirm', async ({ request }) => {
+  http.post('*/auth/mfa/enrolment/confirm', async ({ request }) => {
     const { code } = (await request.json()) as { code?: string };
     if (code !== DEMO_TOTP) return problem(401, 'unauthorized', 'invalid_code');
     const account = current ? ACCOUNTS[current] : undefined;
@@ -185,9 +188,9 @@ export const authHandlers = [
   }),
 
   // Always 202, whether or not the email has an account (no account enumeration).
-  http.post('*/api/mock/auth/password/forgot', () => new HttpResponse(null, { status: 202 })),
+  http.post('*/auth/password/forgot', () => new HttpResponse(null, { status: 202 })),
 
-  http.get('*/api/mock/auth/password/reset/:token', ({ params }) =>
+  http.get('*/auth/password/reset/:token', ({ params }) =>
     usable(params.token as string)
       ? HttpResponse.json<ResetTokenInfo>({
           emailMasked: 's***@example.test',
@@ -196,7 +199,7 @@ export const authHandlers = [
       : problem(404, 'not_found', 'link_unusable'),
   ),
 
-  http.post('*/api/mock/auth/password/reset', async ({ request }) => {
+  http.post('*/auth/password/reset', async ({ request }) => {
     const { token, password } = (await request.json()) as { token?: string; password?: string };
     if (!usable(token)) return problem(404, 'not_found', 'link_unusable');
     if ((password ?? '').toLowerCase().includes('password')) return breached();
@@ -222,12 +225,12 @@ export const authHandlers = [
     return HttpResponse.json<SignInResult>({ next: 'mfa_setup' });
   }),
 
-  http.get('*/api/mock/auth/workspaces', () =>
+  http.get('*/auth/workspaces', () =>
     HttpResponse.json<WorkspaceChoice[]>([
       { id: 'ws_1', name: 'Demo workspace', role: 'admin', companies: 3 },
       { id: 'ws_2', name: 'Second demo workspace', role: 'member', companies: 1 },
     ]),
   ),
 
-  http.post('*/api/mock/auth/workspace', () => new HttpResponse(null, { status: 204 })),
+  http.post('*/auth/workspace', () => new HttpResponse(null, { status: 204 })),
 ];

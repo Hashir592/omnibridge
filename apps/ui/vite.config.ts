@@ -11,7 +11,7 @@ export default defineConfig(({ command }) => ({
   server: { port: 5173, strictPort: true },
   // Scan the lazy routes up front, so the dev server never reloads the page mid-test to
   // optimise a dependency it found late.
-  optimizeDeps: { entries: ['index.html', 'src/routes/*.tsx'] },
+  optimizeDeps: { entries: ['index.html', 'src/routes/**/*.tsx'] },
   build: {
     rolldownOptions: {
       // React libraries mark modules "use client" for server-component bundlers; meaningless in an SPA.
