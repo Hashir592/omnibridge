@@ -7,9 +7,9 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Phase:** B, local Docker only (ADR-029).
 - **M01 Platform foundations: CLOSED 20 Oct 2026.** S4 APPROVED in round 2.
 - **Current module:** M02 Identity, tenancy and audit (all S3 tasks high risk: Hashir says "go" before each).
-- **T-0201 Tenancy core: DONE** (PR #24). **T-0202 Audit log: DONE** (PR #25). Its ADR-049 additions (the `ob_worker` role, the ob_platform module rule, `validation_failed` on the export cap) are in **PR #30**, waiting for CI and Hashir's approval.
-- **Current task:** **T-0203 Passwords, MFA, lockout and sessions: in review.** Go from S1 with the ADR-050 changes. Branch `task/T-0203-auth` is built on PR #30's branch, so merge #30 first.
-- **M02 order:** T-0201 ✓ → T-0202 ✓ → T-0203 → **halfway checkpoint** (S4) → T-0204 → T-0205 → T-0207 → T-0206 (S5 audit) → M02 end. Exit also needs the S5 audit clean (ADR-026).
+- **Done in M02:** T-0201 (PR #24), T-0202 (PR #25, #30), T-0203 (PR #31). PR #32 (table perf fix) waits for CI.
+- **Now running:** S2, T-0305 Client preview (mock-ups for the remaining tabs + a PNG set in `docs/design/client-preview/20261021/`). **S3 and S4 on hold** (Hashir, 21 Oct 2026); the M02 halfway report waits for Hashir's go.
+- **M02 order:** T-0201 ✓ → T-0202 ✓ → T-0203 ✓ → **halfway checkpoint** (S4) → T-0204 → T-0205 → T-0207 → T-0206 (S5 audit) → M02 end. Exit also needs the S5 audit clean (ADR-026).
 - **Workflow tiers (ADR-043):** light = `--quick`, no code review; normal = `--quick` + `/code-review` medium; high = full local gate + `/code-review` high. CI always runs the full gate.
 - **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
 - **Open questions:** none. ADR-049 (PS-018) and ADR-050 (PS-019) are ruled. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
