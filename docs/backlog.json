@@ -547,7 +547,7 @@
         "test '[USR-5] an unknown email locks exactly like a real one and its plaintext is never stored' passes"
       ],
       "risk": "high",
-      "status": "in_progress"
+      "status": "review"
     },
     {
       "id": "T-0204",
