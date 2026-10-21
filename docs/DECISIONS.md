@@ -107,6 +107,7 @@ Owner: S1. Other sessions add entries only to the **Proposed (from sessions)** s
 
 ## Review log
 
+- **Hashir, 21 Oct 2026:** S5 runs only for very high-risk security work. It uses the Cloudflare security-audit skill (MIT, pinned at commit c1c8a8c, dev tool only) in light mode: best-practice checks for OmniBridge, no sub-agent fleet. Rules in `docs/sessions/S5-security.md`.
 - **S1, 21 Oct 2026:** T-0203 go with changes (ADR-050). ob_worker role recorded in ARCHITECTURE invariant 2.
 - **Hashir, 21 Oct 2026:** no HIBP download. The breached-password check uses a small committed list of a few hundred entries (ADR-008 amended).
 - **S1, 21 Oct 2026:** PS-018 approved (ADR-049), with four additions: a fixed cut-off inside the function, worker-only EXECUTE, the ob_platform import rule, and an audit event per export.
