@@ -5,4 +5,12 @@
 export const PACKAGE_NAME = '@omnibridge/mail';
 
 export { Mailer, SYSTEM_FROM, type SmtpConfig } from './mailer.ts';
-export { EmailLintError, escapeHtml, lintEmail, renderInvite, type Email } from './templates.ts';
+export {
+  EmailLintError,
+  escapeHtml,
+  lintEmail,
+  renderInvite,
+  renderLockNotice,
+  renderPasswordReset,
+  type Email,
+} from './templates.ts';

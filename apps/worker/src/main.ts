@@ -2,17 +2,22 @@ import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AuditLog,
+  AuthStore,
   createMainDb,
   FileRepository,
   JobLeaseRepository,
   JobRecordRepository,
   mainDbConfig,
+  MembershipRepository,
   Tenancy,
+  UserRepository,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
+import { Mailer } from '@omnibridge/mail';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
 import { auditRetentionHandler } from './audit-retention.ts';
+import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
 import { workerHandlerDbConfig } from './db.ts';
 import { registerHandlers } from './handlers.ts';
 import { createWorkerBoss, startHeartbeat } from './heartbeat.ts';
@@ -72,6 +77,17 @@ const files = new EncryptedLocalFileStore({
   keys: new FileKeyStore(filesDir, secretsKeyring),
   metadata: new FileRepository(handlerDb.db),
 });
+// Auth mail (T-0203): web enqueues, the worker sends (ADR-050). Plain SMTP is allowed only when
+// SMTP_ALLOW_PLAIN is set, for Mailpit on the dev network.
+const mailer = new Mailer({
+  host: requireEnv('SMTP_HOST'),
+  port: Number(process.env.SMTP_PORT ?? '587'),
+  secure: process.env.SMTP_SECURE === '1',
+  ...(process.env.SMTP_USER ? { user: process.env.SMTP_USER } : {}),
+  ...(process.env.SMTP_PASSWORD_FILE ? { password: readSecretFile('SMTP_PASSWORD') } : {}),
+  allowPlain: process.env.SMTP_ALLOW_PLAIN === '1',
+});
+const users = new UserRepository(handlerDb.db);
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -79,6 +95,19 @@ await registerHandlers(queue, {
     logger: log,
   }),
   'audit.retention': auditRetentionHandler(new AuditLog(handlerDb.db), log),
+  'auth.lock_notice': lockNoticeHandler({
+    users,
+    members: new MembershipRepository(handlerDb.db),
+    mailer,
+    logger: log,
+  }),
+  'auth.password_reset': passwordResetHandler({
+    store: new AuthStore(handlerDb.db),
+    users,
+    mailer,
+    appOrigin: requireEnv('APP_ORIGIN'),
+    logger: log,
+  }),
 });
 // The scheduled fan-out, the worker's only use of ob_platform (invariant 2).
 const closePlatformJobs = await startPlatformJobs({ boss, queue, logger: log, onDbError });
@@ -97,6 +126,7 @@ const shutdown = async (signal: string) => {
   await handlerDb.destroy();
   await bookkeepingDb.destroy();
   await closePlatformJobs();
+  mailer.close();
   process.exit(0);
 };
 process.once('SIGTERM', () => void shutdown('SIGTERM'));

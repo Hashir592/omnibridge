@@ -409,6 +409,9 @@ importers:
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@omnibridge/mail':
+        specifier: workspace:*
+        version: link:../../packages/mail
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
