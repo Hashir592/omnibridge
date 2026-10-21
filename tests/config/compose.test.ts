@@ -168,7 +168,12 @@ describe('compose stack: secrets (SEC-5)', () => {
     const secretsOf = (name: string) => (service(name).secrets ?? []).map((s) => s.source).sort();
     expect(secretsOf('web')).toEqual(['file_link_hmac_key', 'ob_app_password', 'secrets_kek']);
     // The worker lists workspace ids as ob_platform for the scheduled fan-out (T-0202).
-    expect(secretsOf('worker')).toEqual(['ob_app_password', 'ob_platform_password', 'secrets_kek']);
+    // The worker logs in as ob_worker (ADR-049), never as ob_app.
+    expect(secretsOf('worker')).toEqual([
+      'ob_platform_password',
+      'ob_worker_password',
+      'secrets_kek',
+    ]);
     expect(secretsOf('pii-vault')).toEqual(['pii_kek', 'vault_app_password']);
     expect(secretsOf('migrate-main')).toEqual(['ob_owner_password']);
     // Besides the worker, only the one-off KEK re-wrap job holds ob_platform (T-0201).

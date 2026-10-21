@@ -85,6 +85,31 @@ describe('repository rules', () => {
     expect({ code: res.code, stderr: res.stderr }).toEqual({ code: 0, stderr: '' });
   });
 
+  it('[TEN-1] only the PLATFORM_JOBS module and the re-wrap job import the ob_platform pool', () => {
+    // Mirrors the dependency-cruiser rule ob-platform-only-in-fanout (ADR-049).
+    const config = readRepoFile('.dependency-cruiser.cjs');
+    expect(config).toContain("name: 'ob-platform-only-in-fanout'");
+    const importers: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(join(repoRoot, dir), { withFileTypes: true })) {
+        const path = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) {
+          if (!['node_modules', 'dist'].includes(entry.name)) walk(path);
+        } else if (/\.tsx?$/.test(entry.name) && !/\.(test|int\.test)\.tsx?$/.test(entry.name)) {
+          if (readRepoFile(path).includes("'@omnibridge/db/platform'")) importers.push(path);
+        }
+      }
+    };
+    for (const top of ['apps', 'mocks']) walk(top);
+    for (const pkg of readdirSync(join(repoRoot, 'packages'), { withFileTypes: true })) {
+      if (pkg.isDirectory() && pkg.name !== 'db') walk(`packages/${pkg.name}`);
+    }
+    expect(importers.sort()).toEqual([
+      'apps/web/src/rewrap-keys.ts',
+      'apps/worker/src/platform-jobs.ts',
+    ]);
+  });
+
   it('[OPS-9] the edge route file routes only OmniBridge hosts to OmniBridge aliases', () => {
     const caddy = readRepoFile('infra/edge/sites/omnibridge.caddy');
     const sites = [...caddy.matchAll(/^([a-z0-9., -]+)\s*\{/gm)].flatMap((m) =>

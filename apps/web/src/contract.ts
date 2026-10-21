@@ -226,12 +226,10 @@ function handleError(error: FastifyError, request: FastifyRequest, reply: Fastif
     return sendProblem(reply, 400, 'validation_failed', { errors });
   }
   if (error instanceof ApiError) {
-    return sendProblem(
-      reply,
-      error.status,
-      error.code,
-      error.detail ? { detail: error.detail } : {},
-    );
+    return sendProblem(reply, error.status, error.code, {
+      ...(error.detail ? { detail: error.detail } : {}),
+      ...(error.errors ? { errors: [...error.errors] } : {}),
+    });
   }
   const status = error.statusCode ?? 500;
   if (status >= 400 && status < 500) {

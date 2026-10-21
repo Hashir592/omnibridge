@@ -335,10 +335,12 @@ export function buildWebApp({
         rows += page.items.length;
         bytes += chunk.length;
         if (rows > limits.rows || bytes > limits.bytes) {
+          // The filters ask for too much: a validation problem the caller fixes (ADR-049).
           throw new ApiError({
             status: 400,
-            code: 'bad_request',
+            code: 'validation_failed',
             detail: 'Too many audit events match for one export. Narrow the date range.',
+            errors: [{ location: 'query', path: 'from', message: 'Narrow the date range' }],
           });
         }
         chunks.push(chunk);

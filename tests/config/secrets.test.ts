@@ -81,6 +81,10 @@ describe('secrets handling (SEC-5)', () => {
     expect(holders('pii_kek')).toEqual(['pii-vault']);
     // ob_platform reads workspace ids only: the scheduled fan-out (worker) and the re-wrap job.
     expect(holders('ob_platform_password')).toEqual(['db-main', 'rewrap-keys', 'worker']);
+    // Only the worker may run the audit purge (ADR-049): its own role, held by nobody else.
+    expect(holders('ob_worker_password')).toEqual(['db-main', 'worker']);
+    expect(holders('ob_app_password')).toEqual(['db-main', 'rewrap-keys', 'web']);
+    expect(service('worker').environment?.DB_MAIN_USER).toBe('ob_worker');
     expect(service('worker').environment?.DB_PLATFORM_USER).toBe('ob_platform');
     expect(service('web').environment?.DB_PLATFORM_USER).toBeUndefined();
     expect(service('web').environment?.SECRETS_KEK_FILE).toBe('/run/secrets/secrets_kek');

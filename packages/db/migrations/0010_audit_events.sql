@@ -5,7 +5,8 @@
 -- every role, ob_owner included. The one exception is the retention purge: a SECURITY DEFINER
 -- function owned by ob_owner that deletes events older than 6 years in the current workspace
 -- (AUD-3, PRD default: everything kept 6 years). So retention runs as ob_owner without any
--- container holding ob_owner's password.
+-- container holding ob_owner's password. Only ob_worker may call it (ADR-049): web, as ob_app,
+-- cannot.
 
 SET LOCAL lock_timeout = '1s';
 SET LOCAL statement_timeout = '30s';
@@ -70,7 +71,8 @@ CREATE TRIGGER audit_events_no_truncate
   FOR EACH STATEMENT EXECUTE FUNCTION app.audit_events_append_only();
 
 -- Retention (AUD-3): the only deletion path. Deletes the current workspace's events older than
--- 6 years and returns how many. Run by the audit.retention job in its tenant transaction.
+-- 6 years and returns how many. Run by the audit.retention job in its tenant transaction. The
+-- cut-off is fixed here, never a parameter.
 CREATE FUNCTION app.purge_audit_events() RETURNS bigint
   LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
@@ -91,4 +93,13 @@ BEGIN
 END
 $$;
 REVOKE ALL ON FUNCTION app.purge_audit_events() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app.purge_audit_events() TO ob_app;
+-- ob_worker comes from the roles script, which runs only on an empty volume (ADR-049).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ob_worker') THEN
+    RAISE EXCEPTION 'role ob_worker is missing: in dev, recreate the db-main volume '
+      'so infra/compose/db-main/10-roles.sh runs again; elsewhere, create it as that script does';
+  END IF;
+END
+$$;
+GRANT EXECUTE ON FUNCTION app.purge_audit_events() TO ob_worker;

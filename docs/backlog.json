@@ -497,7 +497,7 @@
         "test '[AUD-4] export is itself audited' passes"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0203",
@@ -547,7 +547,7 @@
         "test '[USR-5] an unknown email locks exactly like a real one and its plaintext is never stored' passes"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "in_progress"
     },
     {
       "id": "T-0204",

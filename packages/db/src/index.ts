@@ -1,4 +1,4 @@
-export { mainDbConfig, platformDbConfig, txTimeouts, type TxTimeouts } from './config.ts';
+export { mainDbConfig, txTimeouts, type TxTimeouts } from './config.ts';
 export { MAIN_MIGRATIONS_DIR, migrateMain } from './migrate.ts';
 export {
   createMainDb,
@@ -42,7 +42,6 @@ export {
   type NewChannelAccount,
 } from './channel-accounts.ts';
 export { MembershipRepository, UserRepository, type User } from './users.ts';
-export { WorkspaceDirectory } from './platform.ts';
 export { rewrapAllDataKeys, type DataKeyTotals } from './rewrap.ts';
 export {
   AuditLog,

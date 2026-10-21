@@ -80,6 +80,24 @@ module.exports = {
       to: { path: '(^|/)node_modules/(kysely|pg)/' },
     },
     {
+      name: 'ob-platform-only-in-fanout',
+      comment:
+        'Invariant 2 / ADR-049: ob_platform (the workspace id list) is opened only by the ' +
+        "worker's PLATFORM_JOBS module and the one-off KEK re-wrap job, through " +
+        '@omnibridge/db/platform. Tests may build fixtures.',
+      severity: 'error',
+      from: {
+        path: '^(apps|packages|mocks)/',
+        pathNot: [
+          '^packages/db/',
+          '^apps/worker/src/platform-jobs\\.ts$',
+          '^apps/web/src/rewrap-keys\\.ts$',
+          '\\.(test|int\\.test|contract\\.test)\\.ts$',
+        ],
+      },
+      to: { path: '^packages/db/src/platform\\.ts$' },
+    },
+    {
       name: 'mocks-and-testkit-only-in-tests',
       comment: 'Provider mocks and the testkit never ship inside production code paths.',
       severity: 'error',

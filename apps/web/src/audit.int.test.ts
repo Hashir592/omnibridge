@@ -144,11 +144,15 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
     );
     expect(none.json<Page>().items).toEqual([]);
     expect((await get('action=not.an_action')).statusCode).toBe(400);
+    // A page larger than the list cap is refused, never silently cut (CAP-7).
+    const tooMany = await get('limit=201');
+    expect(tooMany.statusCode).toBe(400);
+    expect(tooMany.json()).toMatchObject({ code: 'validation_failed' });
     expect((await get('cursor=bm9wZQ')).statusCode).toBe(400);
     await server.close();
   });
 
-  it('[AUD-4] export is itself audited', async () => {
+  it('[AUD-2][AUD-4] export is itself audited', async () => {
     const entityId = randomUUID();
     await audit.record(ctx(admin), {
       action: 'vat_quarter.unlocked',
@@ -184,7 +188,7 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
     await server.close();
   });
 
-  it('[AUD-4] an export larger than the cap is refused, and not audited', async () => {
+  it('[AUD-4] an export larger than the cap is a 400 validation_failed, and not audited', async () => {
     const entityId = randomUUID();
     for (let i = 0; i < 3; i += 1) {
       await audit.record(ctx(admin), {
@@ -202,7 +206,10 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
       headers: headers(A, admin),
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ code: 'bad_request' });
+    expect(res.json()).toMatchObject({
+      code: 'validation_failed',
+      errors: [{ location: 'query', path: 'from' }],
+    });
     await server.close();
     // The bytes cap bounds memory whatever the row count.
     const small = app({ rows: 1_000, bytes: 400 });
@@ -212,6 +219,7 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
       headers: headers(A, admin),
     });
     expect(big.statusCode).toBe(400);
+    expect(big.json()).toMatchObject({ code: 'validation_failed' });
     expect(await exportEvents()).toHaveLength(before);
     await small.close();
   });

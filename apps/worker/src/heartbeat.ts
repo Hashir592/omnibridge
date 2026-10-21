@@ -4,9 +4,9 @@ import { HEARTBEAT_CRON, HEARTBEAT_QUEUE, QUEUE_SCHEMA } from '@omnibridge/queue
 import { PgBoss, type ConstructorOptions } from 'pg-boss';
 
 /**
- * pg-boss as ob_app. ob_app may not run DDL, so everything that needs it is off here and done by
- * the migrate job instead: schema install and upgrades (migrate, createSchema), queue creation,
- * and index rebuilds (reindex needs table ownership).
+ * pg-boss as ob_worker (a member of ob_app, ADR-049). It may not run DDL, so everything that
+ * needs it is off here and done by the migrate job instead: schema install and upgrades
+ * (migrate, createSchema), queue creation, and index rebuilds (reindex needs table ownership).
  */
 export function createWorkerBoss(
   connection: ConstructorOptions,
