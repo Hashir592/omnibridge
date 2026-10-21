@@ -358,7 +358,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     // The unknown email is in no auth table and no queued job, in any form.
     for (const table of ['login_counters', 'ip_counters', 'sessions', 'password_resets']) {
       const { rows } = await owner.query<{ n: string }>(
-        `SELECT count(*) AS n FROM app.${table} t WHERE t::text ILIKE $1 OR encode(t::text::bytea, 'hex') ILIKE $2`,
+        `SELECT count(*) AS n FROM app.${table} t WHERE t::text ILIKE $1 OR t::text ILIKE $2`,
         [`%${unknown}%`, `%${Buffer.from(unknown).toString('hex')}%`],
       );
       expect({ table, n: rows[0]?.n }).toEqual({ table, n: '0' });
