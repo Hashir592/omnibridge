@@ -8,7 +8,7 @@ import {
   Tenancy,
   WorkspaceRepository,
   type MainDbHandle,
-} from '../src/index.ts';
+} from '../index.ts';
 import { LAUNCH_WORKSPACE_ID, seedLaunch } from './launch.ts';
 
 describe('launch seed (PRD §0.3)', () => {

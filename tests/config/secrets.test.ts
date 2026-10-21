@@ -77,15 +77,17 @@ describe('secrets handling (SEC-5)', () => {
         .map(([name]) => name)
         .sort();
     // rewrap-keys is the one-off KEK rotation job (T-0201), run by hand in the ops profile.
-    expect(holders('secrets_kek')).toEqual(['rewrap-keys', 'web', 'worker']);
+    // seed is the DEV ONLY one-off of compose.dev.yaml (T-0203): it seals the demo TOTP secret.
+    expect(holders('secrets_kek')).toEqual(['rewrap-keys', 'seed', 'web', 'worker']);
+    expect(service('seed').environment?.OB_ENV).toBe('dev');
     expect(holders('pii_kek')).toEqual(['pii-vault']);
     // ob_platform reads workspace ids only: the scheduled fan-out (worker) and the re-wrap job.
     expect(holders('ob_platform_password')).toEqual(['db-main', 'rewrap-keys', 'worker']);
     // Only the worker may run the audit purge (ADR-049): its own role, held by nobody else.
     expect(holders('ob_worker_password')).toEqual(['db-main', 'worker']);
     // The sign-in HMAC key stays in web (T-0203): the worker sends mail but never checks codes.
-    expect(holders('auth_hmac_key')).toEqual(['web']);
-    expect(holders('ob_app_password')).toEqual(['db-main', 'rewrap-keys', 'web']);
+    expect(holders('auth_hmac_key')).toEqual(['seed', 'web']);
+    expect(holders('ob_app_password')).toEqual(['db-main', 'rewrap-keys', 'seed', 'web']);
     expect(service('worker').environment?.DB_MAIN_USER).toBe('ob_worker');
     expect(service('worker').environment?.DB_PLATFORM_USER).toBe('ob_platform');
     expect(service('web').environment?.DB_PLATFORM_USER).toBeUndefined();

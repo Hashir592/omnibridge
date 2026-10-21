@@ -7,7 +7,6 @@
   "include": [
     "apps/*/src",
     "packages/*/src",
-    "packages/*/seed",
     "packages/governors/*/src",
     "packages/providers/*/src",
     "mocks/*/src",

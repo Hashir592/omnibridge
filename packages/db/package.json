@@ -17,6 +17,11 @@
       "@omnibridge/source": "./src/platform.ts",
       "types": "./dist/platform.d.ts",
       "default": "./dist/platform.js"
+    },
+    "./seed": {
+      "@omnibridge/source": "./src/seed/launch.ts",
+      "types": "./dist/seed/launch.d.ts",
+      "default": "./dist/seed/launch.js"
     }
   },
   "scripts": {

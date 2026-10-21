@@ -48,6 +48,44 @@ services:
       retries: 6
       start_period: 5s
 
+  # DEV ONLY seed (T-0203, ADR-050): the launch workspace and the DEV ONLY demo sign-in, once,
+  # after migrations. It refuses to run unless OB_ENV is dev or test. Web waits for it, so the
+  # demo sign-in works as soon as the stack is up.
+  seed:
+    image: omnibridge/web:dev
+    build:
+      context: ../..
+      dockerfile: infra/docker/node-app.Dockerfile
+      args: { APP: web }
+    command: [node, dist/seed-dev.js]
+    restart: 'no'
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    labels:
+      com.omnibridge.kind: job # one-off: exits when done, so it has no healthcheck
+    environment:
+      OB_ENV: dev
+      DB_MAIN_HOST: db-main
+      DB_MAIN_PORT: '5432'
+      DB_MAIN_NAME: omnibridge
+      DB_MAIN_USER: ob_app
+      DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
+      SECRETS_KEK_FILE: /run/secrets/secrets_kek
+      AUTH_HMAC_KEY_FILE: /run/secrets/auth_hmac_key
+    secrets: [ob_app_password, secrets_kek, auth_hmac_key]
+    networks: [ob_db]
+    depends_on:
+      migrate-main: { condition: service_completed_successfully }
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 64
+
+  web:
+    depends_on:
+      seed: { condition: service_completed_successfully }
+
   # The only provider endpoints dev and CI may call (ADR-011, invariant 17).
   provider-mocks:
     image: omnibridge/provider-mocks:dev
