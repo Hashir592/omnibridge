@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "files": [
+    "data",
     "dist"
   ],
   "exports": {
@@ -26,6 +27,7 @@
     "@omnibridge/db": "workspace:*",
     "@omnibridge/files": "workspace:*",
     "@omnibridge/logger": "workspace:*",
+    "@omnibridge/queue": "workspace:*",
     "@oslojs/otp": "1.1.0",
     "fastify": "5.12.7",
     "fastify-type-provider-zod": "7.0.0",

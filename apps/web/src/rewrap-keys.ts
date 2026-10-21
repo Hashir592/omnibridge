@@ -1,6 +1,7 @@
 import { requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
+  AuthStore,
   createMainDb,
   CredentialRepository,
   mainDbConfig,
@@ -10,7 +11,8 @@ import {
 import { platformDbConfig, WorkspaceDirectory } from '@omnibridge/db/platform';
 import { FileKeyStore } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
-import { rotateKeys } from './key-rotation.ts';
+import { rewrapPlatformKeys } from './auth/platform-keys.ts';
+import { rotateKeys, withPlatformKeys } from './key-rotation.ts';
 
 /**
  * KEK rotation for every workspace (SEC-6, runbook "Rotate a master key"): re-wraps each
@@ -31,12 +33,16 @@ try {
   const credentials = new CredentialRepository({ keyring, logger });
   const report = await rotateKeys({
     kekVersion: keyring.activeVersion,
-    dataKeys: () =>
-      rewrapAllDataKeys({
-        db: app.db,
-        directory: new WorkspaceDirectory(platform.db),
-        credentials,
-      }),
+    dataKeys: async () =>
+      withPlatformKeys(
+        await rewrapAllDataKeys({
+          db: app.db,
+          directory: new WorkspaceDirectory(platform.db),
+          credentials,
+        }),
+        // The platform key that seals the TOTP secrets (T-0203).
+        await rewrapPlatformKeys(new AuthStore(app.db), keyring),
+      ),
     fileKeys: new FileKeyStore(requireEnv('FILES_DIR'), keyring),
     logger,
   });

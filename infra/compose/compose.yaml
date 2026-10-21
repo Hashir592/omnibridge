@@ -183,12 +183,17 @@ services:
       DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
       SECRETS_KEK_FILE: /run/secrets/secrets_kek
       FILE_LINK_HMAC_KEY_FILE: /run/secrets/file_link_hmac_key
+      # Keys the sign-in lockout counters and the recovery codes (T-0203, ADR-048, ADR-050).
+      AUTH_HMAC_KEY_FILE: /run/secrets/auth_hmac_key
+      # The only origins allowed on state-changing requests (SEC-1). Dev default: the dev edge;
+      # production sets the app's own origin (M22).
+      APP_ORIGINS: ${APP_ORIGINS:-https://localhost:8443}
       FILES_DIR: /data/files
       PII_VAULT_URL: http://pii-vault:8080
       PORT: '8080'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=288
-    secrets: [ob_app_password, secrets_kek, file_link_hmac_key]
+    secrets: [ob_app_password, secrets_kek, file_link_hmac_key, auth_hmac_key]
     # Encrypted files (T-0105, ADR-012): the only writable path in the read-only container.
     volumes:
       - files_data:/data/files
@@ -231,6 +236,12 @@ services:
       FILES_DIR: /data/files
       CLAMD_HOST: clamd
       CLAMD_PORT: '3310'
+      # Auth mail (T-0203): links point at the app's origin. Dev defaults send to Mailpit in plain
+      # SMTP on the internal network; production sets Scaleway TEM with TLS (M22, ADR-020).
+      APP_ORIGIN: ${APP_ORIGIN:-https://localhost:8443}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_ALLOW_PLAIN: ${SMTP_ALLOW_PLAIN:-1}
       WORKER_CONCURRENCY: '8'
       METRICS_PORT: '9464'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
@@ -369,6 +380,8 @@ secrets:
     file: ./.secrets/ob_app_password
   ob_worker_password:
     file: ./.secrets/ob_worker_password
+  auth_hmac_key:
+    file: ./.secrets/auth_hmac_key
   ob_platform_password:
     file: ./.secrets/ob_platform_password
   db_pii_superuser_password:

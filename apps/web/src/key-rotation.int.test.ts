@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKekLine, parseKeyring, Secret } from '@omnibridge/crypto';
 import {
+  AuthStore,
   createMainDb,
   CredentialRepository,
   FileRepository,
@@ -19,7 +20,8 @@ import { WorkspaceDirectory } from '@omnibridge/db/platform';
 import { createLogger } from '@omnibridge/logger';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { rotateKeys } from './key-rotation.ts';
+import { PlatformKeys, rewrapPlatformKeys } from './auth/platform-keys.ts';
+import { rotateKeys, withPlatformKeys } from './key-rotation.ts';
 
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
 const v1 = generateKekLine(1);
@@ -139,6 +141,43 @@ describe('all-workspace KEK re-wrap job (F-03, PS-015 (2), R2-02, SEC-6)', () =>
 
     // A repeat run under the new keyring changes nothing and stays done.
     expect(await job([v1, v2])).toMatchObject({ done: true, fileKeys: { rewrapped: 0 } });
+  });
+
+  it('[USR-4] the platform key that seals TOTP secrets is re-wrapped with the workspace keys', async () => {
+    const store = new AuthStore(main.db);
+    const key = await new PlatformKeys(store, ring(v1)).current();
+    const sealed = key.encrypt('totp secret', {
+      workspaceId: 'platform',
+      table: 'user_auth',
+      column: 'totp_secret',
+      rowId: 'u1',
+    });
+    // A process that still has only v1 sees nothing newer yet; after the move it would.
+    expect(await rewrapPlatformKeys(store, ring(v1, v2))).toEqual({
+      rewrapped: 1,
+      stale: 0,
+      newer: 0,
+    });
+    expect(await rewrapPlatformKeys(store, ring(v1))).toMatchObject({ rewrapped: 0, newer: 1 });
+    // The old KEK line can go: the key opens with v2 alone and still opens the old secret.
+    const moved = await new PlatformKeys(store, ring(v2)).version(key.version);
+    expect(
+      moved
+        .decrypt(sealed, {
+          workspaceId: 'platform',
+          table: 'user_auth',
+          column: 'totp_secret',
+          rowId: 'u1',
+        })
+        .toString(),
+    ).toBe('totp secret');
+    // Counted with the workspace keys: a platform key left behind keeps the rotation open.
+    expect(
+      withPlatformKeys(
+        { workspaces: 2, rewrapped: 2, stale: 0, newer: 0 },
+        { rewrapped: 0, stale: 1, newer: 0 },
+      ),
+    ).toEqual({ workspaces: 2, rewrapped: 2, stale: 1, newer: 0 });
   });
 
   it('[TEN-1] the workspace list is read only as ob_platform', async () => {
