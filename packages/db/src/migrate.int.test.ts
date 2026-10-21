@@ -59,6 +59,7 @@ describe('db-main roles and migrations', () => {
       '0008_workspace_fks',
       '0009_validate_workspace_fks',
       '0010_audit_events',
+      '0011_auth',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

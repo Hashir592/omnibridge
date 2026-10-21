@@ -43,7 +43,6 @@ import {
 export const PRE_MFA_MS = 10 * 60_000;
 export const IDLE_MS = 30 * 60_000;
 export const ABSOLUTE_MS = 12 * 3_600_000;
-export const RESET_LINK_MS = 30 * 60_000;
 /** A session's last-seen time is written at most this often. */
 const TOUCH_MS = 60_000;
 

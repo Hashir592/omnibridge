@@ -203,8 +203,19 @@ describe('tenancy core (TEN-1, TEN-2, TEN-3, TEN-6, TEN-10)', () => {
     const seen = await tenancy.runWorkspace({ workspaceId: A }, (ctx) => companies.list(ctx));
     expect(seen.length).toBe(2);
     for (const { name } of rows) {
-      const res = await app.query<{ n: string }>(`SELECT count(*) AS n FROM ${name}`);
-      expect({ table: name, n: res.rows[0]?.n }).toEqual({ table: name, n: '0' });
+      const { rows: grant } = await app.query<{ readable: boolean }>(
+        `SELECT has_table_privilege(current_user, $1, 'SELECT') AS readable`,
+        [name],
+      );
+      if (grant[0]?.readable === true) {
+        const res = await app.query<{ n: string }>(`SELECT count(*) AS n FROM ${name}`);
+        expect({ table: name, n: res.rows[0]?.n }).toEqual({ table: name, n: '0' });
+      } else {
+        // The auth tables (migration 0011): no grant at all, reached through definer functions.
+        await expect(app.query(`SELECT count(*) FROM ${name}`), name).rejects.toThrow(
+          /permission denied/,
+        );
+      }
     }
     await expect(
       app.query(

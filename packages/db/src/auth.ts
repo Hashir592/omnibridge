@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import type { MainDb } from './schema.ts';
 
@@ -365,4 +366,22 @@ export class AuthStore {
       this.#db,
     );
   }
+}
+
+/** A password reset link is valid this long (USR-7). */
+export const RESET_LINK_MS = 30 * 60_000;
+
+/**
+ * Makes a reset link for a user: a 256-bit token whose SHA-256 alone is stored. The worker calls
+ * it just before it sends the email, so the token itself never sits in the database or a queue.
+ */
+export async function issuePasswordReset(
+  store: Pick<AuthStore, 'createReset'>,
+  userId: string,
+  now: Date,
+): Promise<{ token: string; expiresAt: Date }> {
+  const token = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(now.getTime() + RESET_LINK_MS);
+  await store.createReset(createHash('sha256').update(token).digest(), userId, now, expiresAt);
+  return { token, expiresAt };
 }

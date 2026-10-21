@@ -55,6 +55,8 @@ export {
 } from './audit.ts';
 export {
   AuthStore,
+  issuePasswordReset,
+  RESET_LINK_MS,
   type AuthUser,
   type FailureResult,
   type LoginAccount,
