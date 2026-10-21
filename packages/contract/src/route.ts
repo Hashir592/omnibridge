@@ -53,9 +53,12 @@ export function routeMetadataProblems(route: AnyRoute): string[] {
   if (adminOnlyTabs.has(tab) && !adminOnly) {
     problems.push(`adminOnly: tab "${tab}" is admin-only (PERM-4), so adminOnly must be true`);
   }
-  if (auth === 'public' && (tab !== 'none' || companyScoped || adminOnly)) {
+  if (
+    (auth === 'public' || auth === 'pre-mfa' || auth === 'signed-in') &&
+    (tab !== 'none' || companyScoped || adminOnly)
+  ) {
     problems.push(
-      'auth: a public route must have tab "none", adminOnly false, companyScoped false',
+      `auth: a ${auth} route must have tab "none", adminOnly false, companyScoped false`,
     );
   }
   const declared = Object.keys(route.params?.shape ?? {});
@@ -103,5 +106,10 @@ export interface RouteInput<T extends AnyRoute> {
 
 /** What a handler returns: one of the route's declared statuses with its body. */
 export type RouteResult<T extends AnyRoute> = {
-  [S in keyof T['responses'] & number]: { status: S; body: z.output<T['responses'][S]> };
+  [S in keyof T['responses'] & number]: {
+    status: S;
+    body: z.output<T['responses'][S]>;
+    /** Extra response headers, e.g. Set-Cookie or Cache-Control (T-0203). */
+    headers?: Readonly<Record<string, string | readonly string[]>>;
+  };
 }[keyof T['responses'] & number];

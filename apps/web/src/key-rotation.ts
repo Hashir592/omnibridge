@@ -74,3 +74,19 @@ export async function rotateKeys(deps: {
   if (done) log.info({ event: 'key_rotation.done', kekVersion }, 'no key is left under an old KEK');
   return { done, kekVersion, dataKeys, fileKeys };
 }
+
+/**
+ * The database's data keys in one count: every workspace's, plus the platform key that seals
+ * the TOTP secrets (T-0203). The rotation is done only when neither is left under an old KEK.
+ */
+export function withPlatformKeys(
+  workspaces: DataKeyTotals,
+  platform: Omit<DataKeyTotals, 'workspaces'>,
+): DataKeyTotals {
+  return {
+    workspaces: workspaces.workspaces,
+    rewrapped: workspaces.rewrapped + platform.rewrapped,
+    stale: workspaces.stale + platform.stale,
+    newer: workspaces.newer + platform.newer,
+  };
+}

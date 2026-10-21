@@ -222,6 +222,23 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         // Plain lists as A's admin: only A's events may come back, never B's.
         listAuditEvents: {},
         exportAuditEvents: {},
+        // Sign-in routes (T-0203): public ones may answer anything but must leak nothing of B;
+        // the pre-MFA and signed-in ones refuse a workspace session.
+        getCsrf: {},
+        signIn: { body: { email: `${userB}@example.test`, password: MARKER } },
+        verifyMfa: { body: { code: '123456' } },
+        useRecoveryCode: { body: { code: MARKER } },
+        startMfaEnrolment: {},
+        confirmMfaEnrolment: { body: { code: '123456' } },
+        forgotPassword: { body: { email: `${userB}@example.test` } },
+        getPasswordReset: { params: { token: MARKER } },
+        resetPassword: { body: { token: MARKER, password: 'a long enough password 1' } },
+        listMyWorkspaces: {},
+        chooseWorkspace: { body: { workspaceId: B } },
+        enterPlatform: {},
+        changePassword: { body: { currentPassword: MARKER, password: 'a long enough password 1' } },
+        signOut: {},
+        signOutEverywhere: {},
       },
       markers: [MARKER, B, b.company, b.job, b.file, userB],
     });

@@ -2,7 +2,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { useState, type SyntheticEvent } from 'react';
 import { Button } from '../../kit/Button.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
-import { authApi } from '../../mocks/api.ts';
+import { authApi } from '../../auth/api.ts';
 import type { SignInResult } from '../../auth/shapes.ts';
 import { AuthFrame, Notice, authLink } from './layout.tsx';
 

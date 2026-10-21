@@ -29,6 +29,8 @@ import type { Logger } from '@omnibridge/logger';
 import fastifyHelmet from '@fastify/helmet';
 import Fastify, { type FastifyRequest } from 'fastify';
 import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
+import { authHandlers } from './auth/routes.ts';
+import type { AuthService } from './auth/service.ts';
 import { contractRoutesPlugin, installContract, type Handlers } from './contract.ts';
 
 export interface HealthChecks {
@@ -95,11 +97,13 @@ export interface WebAppOptions {
   /** Overrides AUDIT_EXPORT_LIMITS; tests only. */
   auditExportLimits?: { rows: number; bytes: number };
   /**
-   * The signed-in user of `session` routes. Sessions arrive in T-0203; until then production
-   * passes nothing, so every session route answers 401 and none is open.
+   * Sign-in, MFA and sessions (T-0203). It resolves every auth kind and runs the Origin and CSRF
+   * check (SEC-1); it replaces resolveSession and resolvePlatform when given.
    */
+  auth?: AuthService;
+  /** Tests only: a stand-in session resolver (packages/testkit stubAuth). */
   resolveSession?: (request: FastifyRequest) => SessionActor | undefined;
-  /** The operator of `platform` routes; nothing in production until T-0203, so 401. */
+  /** Tests only: a stand-in platform resolver. */
   resolvePlatform?: (request: FastifyRequest) => PlatformActor | undefined;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
@@ -126,6 +130,7 @@ export function buildWebApp({
   members,
   audit,
   auditExportLimits,
+  auth,
   resolveSession,
   resolvePlatform,
 }: WebAppOptions) {
@@ -173,6 +178,7 @@ export function buildWebApp({
   }
 
   const handlers: Handlers<typeof contractRoutes> = {
+    ...authHandlers(auth),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';
@@ -370,8 +376,18 @@ export function buildWebApp({
     contractRoutesPlugin(contractRoutes, handlers, {
       logLevels: { getHealth: 'warn' },
       auth: {
-        ...(resolveSession === undefined ? {} : { resolveSession }),
-        ...(resolvePlatform === undefined ? {} : { resolvePlatform }),
+        ...(auth === undefined
+          ? {
+              ...(resolveSession === undefined ? {} : { resolveSession }),
+              ...(resolvePlatform === undefined ? {} : { resolvePlatform }),
+            }
+          : {
+              resolveSession: auth.resolveSession,
+              resolvePlatform: auth.resolvePlatform,
+              resolvePreMfa: auth.resolvePreMfa,
+              resolveSignedIn: auth.resolveSignedIn,
+              checkRequest: auth.checkRequest,
+            }),
         ...(tenancy === undefined ? {} : { tenancy }),
         ...(members === undefined ? {} : { roleOf: (ctx: TenantContext) => members.roleOf(ctx) }),
       },

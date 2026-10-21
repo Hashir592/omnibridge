@@ -53,3 +53,16 @@ export {
   type AuditFilter,
   type NewAuditEvent,
 } from './audit.ts';
+export {
+  AuthStore,
+  issuePasswordReset,
+  RESET_LINK_MS,
+  type AuthUser,
+  type FailureResult,
+  type LoginAccount,
+  type MfaState,
+  type PlatformKeyRow,
+  type SessionStage,
+  type StoredSession,
+  type WorkspaceChoiceRow,
+} from './auth.ts';

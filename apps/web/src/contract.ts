@@ -15,6 +15,7 @@ import {
 } from '@omnibridge/contract';
 import {
   ApiError,
+  type AccountActor,
   type ErrorCode,
   type PlatformActor,
   type SessionActor,
@@ -56,21 +57,35 @@ export type AuthInput<T extends AnyRoute> = T['auth'] extends 'session'
   ? { session: SessionActor; tenant: TenantContext }
   : T['auth'] extends 'platform'
     ? { platform: PlatformActor }
-    : unknown;
+    : T['auth'] extends 'pre-mfa' | 'signed-in'
+      ? { account: AccountActor }
+      : unknown;
 
 export type RouteHandler<T extends AnyRoute> = (
   input: RouteInput<T> & { request: FastifyRequest } & AuthInput<T>,
 ) => Promise<RouteResult<T>>;
 
+/** Resolves the caller of one auth kind, or undefined (then 401). May throw an ApiError. */
+export type Resolver<A> = (
+  request: FastifyRequest,
+  route: AnyRoute,
+) => A | undefined | Promise<A | undefined>;
+
 /** Who is calling, resolved before validation, so an anonymous caller learns nothing more. */
 export interface AuthOptions {
+  /** The signed-in user of a `session` route (T-0203). Without it, those routes answer 401. */
+  resolveSession?: Resolver<SessionActor>;
+  /** The operator of a `platform` route; without it, 401. */
+  resolvePlatform?: Resolver<PlatformActor>;
+  /** A `pre-mfa` caller: password checked, MFA not yet (ADR-048). */
+  resolvePreMfa?: Resolver<AccountActor>;
+  /** A `signed-in` caller: MFA done, no workspace needed (USR-2). */
+  resolveSignedIn?: Resolver<AccountActor>;
   /**
-   * The signed-in user of a `session` route. Until T-0203 production passes none, so every
-   * session route answers 401: closed, never open.
+   * Runs first on every request to a state-changing route (SEC-1): the Origin check and the CSRF
+   * token. Throws an ApiError to refuse.
    */
-  resolveSession?: (request: FastifyRequest) => SessionActor | undefined;
-  /** The operator of a `platform` route; none in production until T-0203, so 401. */
-  resolvePlatform?: (request: FastifyRequest) => PlatformActor | undefined;
+  checkRequest?: (request: FastifyRequest, route: AnyRoute) => void | Promise<void>;
   /** Opens the request's one tenant transaction (required with resolveSession). */
   tenancy?: TenantRunner;
   /**
@@ -94,7 +109,10 @@ export interface RegisterOptions<R extends readonly AnyRoute[]> {
 type Actor =
   | { kind: 'public' }
   | { kind: 'session'; session: SessionActor }
-  | { kind: 'platform'; platform: PlatformActor };
+  | { kind: 'platform'; platform: PlatformActor }
+  | { kind: 'account'; account: AccountActor };
+
+const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /** The caller of each request, set by the route's onRequest hook. */
 const actors = new WeakMap<FastifyRequest, Actor>();
@@ -104,20 +122,32 @@ const actors = new WeakMap<FastifyRequest, Actor>();
  * `signed-webhook` have no check yet, so they fail closed until the module that needs them
  * builds one.
  */
-function authenticate(route: AnyRoute, request: FastifyRequest, auth: AuthOptions): Actor {
+async function authenticate(
+  route: AnyRoute,
+  request: FastifyRequest,
+  auth: AuthOptions,
+): Promise<Actor> {
   const unauthorized = () => new ApiError({ status: 401, code: 'unauthorized' });
+  if (!SAFE_METHODS.has(route.method)) await auth.checkRequest?.(request, route);
   switch (route.auth) {
     case 'public':
       return { kind: 'public' };
     case 'session': {
-      const session = auth.resolveSession?.(request);
+      const session = await auth.resolveSession?.(request, route);
       if (session === undefined) throw unauthorized();
       return { kind: 'session', session };
     }
     case 'platform': {
-      const platform = auth.resolvePlatform?.(request);
+      const platform = await auth.resolvePlatform?.(request, route);
       if (platform === undefined) throw unauthorized();
       return { kind: 'platform', platform };
+    }
+    case 'pre-mfa':
+    case 'signed-in': {
+      const resolve = route.auth === 'pre-mfa' ? auth.resolvePreMfa : auth.resolveSignedIn;
+      const account = await resolve?.(request, route);
+      if (account === undefined) throw unauthorized();
+      return { kind: 'account', account };
     }
     default:
       throw unauthorized();
@@ -226,6 +256,9 @@ function handleError(error: FastifyError, request: FastifyRequest, reply: Fastif
     return sendProblem(reply, 400, 'validation_failed', { errors });
   }
   if (error instanceof ApiError) {
+    if (error.retryAfterSeconds !== undefined) {
+      void reply.header('retry-after', String(error.retryAfterSeconds));
+    }
     return sendProblem(reply, error.status, error.code, {
       ...(error.detail ? { detail: error.detail } : {}),
       ...(error.errors ? { errors: [...error.errors] } : {}),
@@ -337,13 +370,8 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
         response: responseSchemas(route.responses),
       },
       // Before validation: an anonymous caller gets 401, never a field-by-field 400.
-      onRequest: (request, _reply, done) => {
-        try {
-          actors.set(request, authenticate(route, request, auth));
-          done();
-        } catch (err) {
-          done(err as Error);
-        }
+      onRequest: async (request) => {
+        actors.set(request, await authenticate(route, request, auth));
       },
       handler: async (request, reply) => {
         const input = {
@@ -375,8 +403,13 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
           );
         } else if (actor.kind === 'platform') {
           result = await call({ ...input, platform: actor.platform });
+        } else if (actor.kind === 'account') {
+          result = await call({ ...input, account: actor.account });
         } else {
           result = await call(input);
+        }
+        for (const [name, value] of Object.entries(result.headers ?? {})) {
+          void reply.header(name, typeof value === 'string' ? value : [...value]);
         }
         if (route.responses[result.status] === FileDownloadSchema) {
           // A file stream (NFR-5): sent as is, never cached, never sniffed by the browser.

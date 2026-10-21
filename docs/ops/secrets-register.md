@@ -22,6 +22,7 @@ Production dates are set when each secret is first created in M22. "Next rotatio
 | `ob_app_password` | db-main app role `ob_app` (no BYPASSRLS) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, web, rewrap-keys (ops job) | 12 months | set in M22 |
 | `ob_worker_password` | db-main worker role `ob_worker`: a member of `ob_app` plus the audit purge (ADR-049), no BYPASSRLS | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, worker | 12 months | set in M22 |
 | `ob_platform_password` | db-main fan-out role `ob_platform`: reads workspace ids only | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-main, worker (scheduled fan-out), rewrap-keys (ops job) | 12 months | set in M22 |
+| `auth_hmac_key` | Sign-in HMAC key: keys the lockout counters (no plaintext email of an unknown address is stored) and the recovery-code hashes (T-0203, ADR-048, ADR-050). Rotating it unlocks every counter and voids every recovery code: users re-enrol their codes | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web | 12 months | set in M22 |
 | `db_pii_superuser_password` | PostgreSQL superuser of db-pii (init only) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii | 12 months | set in M22 |
 | `vault_owner_password` | db-pii migration role `vault_owner` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, migrate-pii | 12 months | set in M22 |
 | `vault_app_password` | db-pii app role `vault_app` | Hashir | `dev.sops.yaml` | ops repo → tmpfs | db-pii, pii-vault | 12 months | set in M22 |

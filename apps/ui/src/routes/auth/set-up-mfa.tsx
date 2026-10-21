@@ -3,7 +3,7 @@ import { Copy, Download } from 'lucide-react';
 import { useState, type SyntheticEvent } from 'react';
 import { Button } from '../../kit/Button.tsx';
 import { Skeleton } from '../../kit/Skeleton.tsx';
-import { authApi } from '../../mocks/api.ts';
+import { authApi } from '../../auth/api.ts';
 import type { MfaConfirmResult, MfaEnrolment } from '../../auth/shapes.ts';
 import { AuthFrame, Notice } from './layout.tsx';
 import { CodeField, useEnterApp } from './parts.tsx';

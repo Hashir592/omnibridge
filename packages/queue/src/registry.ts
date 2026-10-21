@@ -29,11 +29,39 @@ export const auditRetentionJob = defineJob({
 });
 
 /**
+ * Lock notice (USR-5): the worker emails the locked user and the admins of this workspace. Web
+ * only enqueues it, so a lock costs the same time for a real email and an unknown one (ADR-050).
+ */
+export const authLockNoticeJob = defineJob({
+  type: 'auth.lock_notice',
+  payload: z.object({ user_id: z.uuid(), locked_until: z.iso.datetime() }),
+  retry: { limit: 5, delaySeconds: 30, backoff: true, maxDelaySeconds: 900 },
+  expireInSeconds: 120,
+});
+
+/**
+ * Password reset email (USR-7): the worker makes the 30-minute token and sends the link, so the
+ * token never sits in the queue or the database.
+ */
+export const authPasswordResetJob = defineJob({
+  type: 'auth.password_reset',
+  payload: z.object({ user_id: z.uuid() }),
+  // Few retries: a link sent late is little use, and the user can ask again.
+  retry: { limit: 2, delaySeconds: 30 },
+  expireInSeconds: 120,
+});
+
+/**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
  */
-export const JOBS: readonly JobDefinition[] = [filesScanJob, auditRetentionJob];
+export const JOBS: readonly JobDefinition[] = [
+  filesScanJob,
+  auditRetentionJob,
+  authLockNoticeJob,
+  authPasswordResetJob,
+];
 
 /**
  * The daily audit retention sweep (AUD-3): lists every workspace as ob_platform and sends one

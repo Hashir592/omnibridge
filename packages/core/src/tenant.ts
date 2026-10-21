@@ -43,6 +43,15 @@ export interface SessionActor {
   readonly sessionId: string;
 }
 
+/**
+ * A person part-way through sign-in (T-0203, ADR-048): `pre-mfa` after the password, before MFA;
+ * `signed-in` after MFA, before a workspace is chosen (or while choosing another).
+ */
+export interface AccountActor {
+  readonly userId: string;
+  readonly sessionId: string;
+}
+
 /** A platform operator (PLAT-1). They see no tenant business data (PLAT-3). */
 export interface PlatformActor {
   readonly userId: string;

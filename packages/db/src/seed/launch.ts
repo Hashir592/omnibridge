@@ -7,7 +7,7 @@ import {
   type ChannelProvider,
   type MainDb,
   type NewCompany,
-} from '../src/index.ts';
+} from '../index.ts';
 
 /**
  * The launch configuration (PRD §0.3) as synthetic seed data for local development and tests.

@@ -99,6 +99,8 @@ test('[USR-4] sign in, code and workspace picker work with the keyboard alone', 
   // The code field has focus and submits itself at the sixth digit.
   await page.keyboard.type(DEMO_TOTP);
   await expect(page.getByRole('heading', { name: 'Choose a workspace' })).toBeVisible();
+  // The list loads after the heading: wait for it, or Tab can land past it.
+  await expect(page.getByRole('button', { name: /Demo workspace/ }).first()).toBeVisible();
   await page.keyboard.press('Tab');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/$/);

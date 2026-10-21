@@ -26,6 +26,8 @@ export interface ApiErrorInit {
   detail?: string;
   /** With `validation_failed`: one entry per field the caller must change. */
   errors?: readonly ApiFieldError[];
+  /** With `rate_limited`: seconds until a retry can work, sent as `Retry-After`. */
+  retryAfterSeconds?: number;
 }
 
 export interface ApiFieldError {
@@ -40,8 +42,9 @@ export class ApiError extends Error {
   readonly code: ErrorCode;
   readonly detail: string | undefined;
   readonly errors: readonly ApiFieldError[] | undefined;
+  readonly retryAfterSeconds: number | undefined;
 
-  constructor({ status, code, detail, errors }: ApiErrorInit) {
+  constructor({ status, code, detail, errors, retryAfterSeconds }: ApiErrorInit) {
     if (!Number.isInteger(status) || status < 400 || status > 599) {
       throw new RangeError(`ApiError status must be 400-599, got ${String(status)}`);
     }
@@ -51,5 +54,7 @@ export class ApiError extends Error {
     this.code = code;
     this.detail = detail;
     this.errors = errors;
+    this.retryAfterSeconds =
+      retryAfterSeconds === undefined ? undefined : Math.max(1, Math.ceil(retryAfterSeconds));
   }
 }

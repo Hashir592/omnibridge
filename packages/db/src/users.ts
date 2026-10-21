@@ -31,6 +31,17 @@ export class UserRepository {
     );
   }
 
+  /** One user this context may see (itself or a member of its workspace), or undefined. */
+  async get(ctx: TenantContext, id: string): Promise<User | undefined> {
+    return withTenantTransaction(this.#db, ctx, (trx) =>
+      trx
+        .selectFrom('app.users')
+        .select(['id', 'email', 'name'])
+        .where('id', '=', id)
+        .executeTakeFirst(),
+    );
+  }
+
   /** Every user this context may see: itself and the workspace's members. */
   async list(ctx: TenantContext): Promise<User[]> {
     return withTenantTransaction(this.#db, ctx, (trx) =>
@@ -56,6 +67,20 @@ export class MembershipRepository {
           .values({ workspace_id: ctx.workspaceId, user_id: member.userId, role: member.role })
           .execute(),
       ),
+    );
+  }
+
+  /** The admins of the context's workspace, with what an email to them needs (USR-5 notices). */
+  async admins(ctx: TenantContext): Promise<User[]> {
+    return withTenantTransaction(this.#db, ctx, (trx) =>
+      trx
+        .selectFrom('app.memberships as m')
+        .innerJoin('app.users as u', 'u.id', 'm.user_id')
+        .select(['u.id', 'u.email', 'u.name'])
+        .where('m.workspace_id', '=', ctx.workspaceId)
+        .where('m.role', '=', 'admin')
+        .orderBy('u.id')
+        .execute(),
     );
   }
 

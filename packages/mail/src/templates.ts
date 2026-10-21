@@ -105,3 +105,67 @@ export function renderInvite(values: {
   );
   return { subject, text, html };
 }
+
+/**
+ * Sign-in locked (USR-5): to the person whose email was locked, and to each admin of their
+ * workspace. `lockedUntil` is already London time for reading (NFR-9). Names only, no address.
+ */
+export function renderLockNotice(values: {
+  recipientName: string;
+  /** The locked person, when the email goes to an admin. */
+  lockedName?: string;
+  lockedUntil: string;
+}): Email {
+  const forAdmin = values.lockedName !== undefined;
+  const who = forAdmin ? (values.lockedName ?? '') : 'your account';
+  const subject = forAdmin
+    ? `Sign in locked for ${who} on OmniBridge`
+    : 'Sign in to your OmniBridge account is locked';
+  const lines = [
+    `Hello ${values.recipientName},`,
+    '',
+    `There were 10 failed sign-in attempts for ${who} in 15 minutes, so sign in is paused until ${values.lockedUntil} (UK time).`,
+    '',
+    forAdmin
+      ? 'If this was not them, ask them to change their password once the lock ends.'
+      : 'If this was not you, change your password once the lock ends.',
+  ];
+  const html = baseTemplate(
+    subject,
+    [
+      `<p>Hello ${escapeHtml(values.recipientName)},</p>`,
+      `<p>There were 10 failed sign-in attempts for ${escapeHtml(who)} in 15 minutes, so sign in is paused until <strong>${escapeHtml(values.lockedUntil)}</strong> (UK time).</p>`,
+      `<p>${escapeHtml(lines[4] ?? '')}</p>`,
+    ].join(''),
+  );
+  return { subject, text: lines.join('\n'), html };
+}
+
+/** Password reset link (USR-7): valid 30 minutes, once; signing in still needs MFA. */
+export function renderPasswordReset(values: {
+  recipientName: string;
+  resetUrl: string;
+  appOrigin: string;
+  expiresAt: string;
+}): Email {
+  const resetUrl = checkAppUrl(values.resetUrl, values.appOrigin);
+  const subject = 'Reset your OmniBridge password';
+  const text = [
+    `Hello ${values.recipientName},`,
+    '',
+    `Reset your password: ${resetUrl}`,
+    '',
+    `The link works once, until ${values.expiresAt} (UK time). You will still need your authenticator app to sign in.`,
+    'If you did not ask for this, you can ignore this email: your password stays as it is.',
+  ].join('\n');
+  const html = baseTemplate(
+    subject,
+    [
+      `<p>Hello ${escapeHtml(values.recipientName)},</p>`,
+      `<p><a href="${escapeHtml(resetUrl)}" style="background:#1B2A6B;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Reset your password</a></p>`,
+      `<p>The link works once, until ${escapeHtml(values.expiresAt)} (UK time). You will still need your authenticator app to sign in.</p>`,
+      '<p>If you did not ask for this, you can ignore this email: your password stays as it is.</p>',
+    ].join(''),
+  );
+  return { subject, text, html };
+}

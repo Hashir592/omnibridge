@@ -59,3 +59,12 @@ export {
   type AuditEvent,
   type AuditFilters,
 } from './routes/audit.ts';
+export {
+  authRoutes,
+  MfaConfirmResultSchema,
+  MfaEnrolmentSchema,
+  MfaResultSchema,
+  ResetTokenInfoSchema,
+  SignInResultSchema,
+  WorkspaceChoiceSchema,
+} from './routes/auth.ts';
