@@ -6,8 +6,12 @@
 export const AUTH_KINDS = [
   /** No session: health checks, the public site's forms. */
   'public',
-  /** A signed-in workspace user. */
+  /** A signed-in workspace user: password, MFA and a chosen workspace. */
   'session',
+  /** Password checked, MFA not yet: the MFA routes only (USR-4, ADR-048). */
+  'pre-mfa',
+  /** MFA done, no workspace chosen yet: the picker, sign-out, password change (USR-2). */
+  'signed-in',
   /** A platform operator (console, M05). */
   'platform',
   /** Another OmniBridge service on an internal network. */

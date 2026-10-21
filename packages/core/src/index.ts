@@ -11,6 +11,7 @@ export {
 export { runHttpHealthcheck } from './healthcheck.ts';
 export { pence, type Pence } from './money.ts';
 export type {
+  AccountActor,
   PlatformActor,
   SessionActor,
   TenantActor,

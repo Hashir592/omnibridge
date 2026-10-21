@@ -19,19 +19,23 @@
   "dependencies": {
     "@fastify/helmet": "13.1.2",
     "@fastify/swagger": "9.9.2",
+    "@node-rs/argon2": "2.2.2",
     "@omnibridge/contract": "workspace:*",
     "@omnibridge/core": "workspace:*",
     "@omnibridge/crypto": "workspace:*",
     "@omnibridge/db": "workspace:*",
     "@omnibridge/files": "workspace:*",
     "@omnibridge/logger": "workspace:*",
+    "@oslojs/otp": "1.1.0",
     "fastify": "5.12.7",
     "fastify-type-provider-zod": "7.0.0",
     "kysely": "0.29.7",
     "pg": "8.23.1",
+    "qrcode": "1.5.4",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.6",
     "openapi-types": "12.1.3",
     "openapi-typescript": "7.13.0",
     "prettier": "3.9.10"
