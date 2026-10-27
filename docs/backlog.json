@@ -613,7 +613,9 @@
         "company switcher API (list permitted companies + Combined)",
         "permission change or removal revokes active sessions immediately; last admin cannot be removed or demoted",
         "quarterly access review: task record every 90 days per workspace admin, completion audited (notification wiring in M05)",
-        "users management screens (minimal; S2 restyles)"
+        "users management screens (minimal; S2 restyles)",
+        "Auth events placement (ADR-052): user-level auth_events table for failed sign-ins and lockouts; successful sign-in and MFA events only in the chosen workspace",
+        "Invariant 4 before any member user exists: ticks enforced in the tenant context, and a walker test for a child with no ticks; USR-8 revoke on removal and re-check in resolveSession"
       ],
       "out_of_scope": [
         "Notification centre (M05)",
@@ -714,7 +716,9 @@
         "F-M01-end-05: JobRecordRepository.purge(ctx, olderThan) for finished records and expired leases; indexes on updated_at / expires_at (no-transaction migration); a size cap on job result; a scheduled platform job over all workspaces (uses T-0201)",
         "R2-01: log the reason (which dependency failed) when /healthz returns 503 (apps/web/src/app.ts); no PII, no secrets",
         "Mail base template header colour to the petrol brand-700 #0F6B66 (ADR-041)",
-        "scripts/ui-refs.sh: tar only files that exist (a tracked file deleted in the working tree must not abort the copy-back)"
+        "scripts/ui-refs.sh: tar only files that exist (a tracked file deleted in the working tree must not abort the copy-back)",
+        "F-M02h-06: retention for sessions (revoked or expired > 30 days) and password resets (used or expired > 7 days), with an index and a test",
+        "Pool sizes: role connection caps must add up to less than max_connections"
       ],
       "out_of_scope": [
         "scan_failed rescan path (M05 platform console)",
