@@ -1,14 +1,15 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Oct 2026 by S1.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 27 Oct 2026 by S1.
 
 ## Now
 
 - **Phase:** B, local Docker only (ADR-029).
 - **M01 Platform foundations: CLOSED 20 Oct 2026.** S4 APPROVED in round 2.
 - **Current module:** M02 Identity, tenancy and audit (all S3 tasks high risk: Hashir says "go" before each).
-- **Done in M02:** T-0201 (PR #24), T-0202 (PR #25, #30), T-0203 (PR #31). PR #32 (table perf fix) waits for CI.
-- **Now running:** S2, T-0305 Client preview (mock-ups for the remaining tabs + a PNG set in `docs/design/client-preview/20261021/`). **S3 and S4 on hold** (Hashir, 21 Oct 2026); the M02 halfway report waits for Hashir's go.
+- **Done in M02:** T-0201 (PR #24), T-0202 (PR #25, #30), T-0203 (PR #31). PR #32 merged.
+- **Now running:** S2, T-0305 Client preview (client screens). Then S2 fixes M03 end (F-M03-end-01 to -04) in a separate worktree, then S3 fixes the M02 halfway (F-M02h-01 to -05, -07, -08, -10). One session at a time.
+- **Review (S4, 27 Oct 2026):** M02 halfway **FIX REQUIRED** (3 Majors, 7 Minors; no round 2, ADR-044). M03 end **BLOCKED** (1 Blocker, the ui-perf margin; round 2 allowed). S1 rulings: ADR-051 role split, ADR-052 auth events, ADR-046 ratio measurement, ADR-020 nodemailer 10.1.4 or later.
 - **M02 order:** T-0201 ✓ → T-0202 ✓ → T-0203 ✓ → **halfway checkpoint** (S4) → T-0204 → T-0205 → T-0207 → T-0206 (S5 audit) → M02 end. Exit also needs the S5 audit clean (ADR-026).
 - **Workflow tiers (ADR-043):** light = `--quick`, no code review; normal = `--quick` + `/code-review` medium; high = full local gate + `/code-review` high. CI always runs the full gate.
 - **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
