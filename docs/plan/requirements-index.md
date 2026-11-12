@@ -1,11 +1,11 @@
 # Requirements index (coverage checklist)
 
-Source: `docs/PRD.md` v1.2. One line per requirement ID, grouped by PRD section. This file is the checklist that `scripts/verify.sh` uses. Every ID must map to one owning module (`docs/plan/MODULES.md`) and to at least one task. Once the ID is built, it must also map to at least one test that names it, for example `it('[TEN-1] blocks cross-workspace reads')`.
+Source: `docs/PRD.md` v1.4. One line per requirement ID, grouped by PRD section. This file is the checklist that `scripts/verify.sh` uses. Every ID must map to one owning module (`docs/plan/MODULES.md`) and to at least one task. Once the ID is built, it must also map to at least one test that names it, for example `it('[TEN-1] blocks cross-workspace reads')`.
 
 Totals:
 
-- 289 PRD requirement IDs
-- 25 acceptance tests (AT-1…AT-25, PRD §12.2)
+- 297 PRD requirement IDs (8 added in v1.4)
+- 28 acceptance tests (AT-1…AT-28, PRD §12.2)
 - 10 capacity targets (CAP-1…CAP-10, PRD §9.1, added in v1.2)
 
 Summaries are shortened. The PRD text always wins.
@@ -147,6 +147,7 @@ Summaries are shortened. The PRD text always wins.
 ## §4.0 Home
 - HOME-1 — The Home tab shows: orders today by channel; orders awaiting dispatch, with how many are past their ship-by date; sales and units for today, 7…
 - HOME-2 — Each tile links to the filtered list behind it. A child only sees tiles for tabs they have.
+- HOME-3 — Quick view of today's orders per channel on the Home card; no buyer details.
 
 ## §4.1 Catalogue (Master SKUs)
 - CAT-1 — Master SKU fields: SKU code (unique per workspace), title; short description (used as the carrier item description); barcode (optional),…
@@ -166,6 +167,7 @@ Summaries are shortened. The PRD text always wins.
 - INV-7 — A nightly reconciliation compares each listing's quantity on the channel with the expected quantity.
 - INV-8 — A failed stock push retries (3.0 rules). After the last retry the listing gets a "Sync failed" badge and an alert.
 - INV-9 — FBA stock is not managed by OmniBridge. FBA listings show "Fulfilled by Amazon" and are excluded from pushes.
+- INV-10 — Manual allocation per Master SKU or listing; target = min(manual qty − sold since set, available − buffer); back to Auto re-syncs all.
 
 ## §4.3 Orders
 - ORD-1 — One list for all channels and companies. Columns: channel icon, company badge, order ref, placed date/time; status, item count, total gross,…
@@ -176,6 +178,7 @@ Summaries are shortened. The PRD text always wins.
 - ORD-6 — The order detail page shows lines, money breakdown, status history, labels and tracking, the tracking push state, and internal notes.
 - ORD-7 — Returns view: Amazon returns from the returns report (reason, status, A-to-z flag, inferred claim deadline labelled Estimate), plus refunds from…
 - ORD-8 — Order export to CSV contains no PII.
+- ORD-9 — Same-buyer groups: same channel account, exact normalised buyer and address match in pii-vault, same London day or 3 h across midnight.
 
 ## §4.4 Shipping desk
 - SHP-1 — A queue of orders awaiting dispatch, filtered by company, channel and ship-by, sorted by ship-by date.
@@ -186,6 +189,7 @@ Summaries are shortened. The PRD text always wins.
 - SHP-6 — Optional packing slip PDF (setting): order ref, items, quantities, and the delivery name and address rendered on demand.
 - SHP-7 — Label cost: a per-service cost table per carrier account, entered by the admin, is used for profit.
 - SHP-8 — Partial dispatch (some lines now, the rest later) SHOULD be supported where the channel allows it.
+- SHP-9 — Ship together: one label for a same-buyer group, same tracking pushed to each order, label cost split to the penny.
 
 ## §4.5 Customer service
 - CS-1 — eBay messages: a two-way inbox per eBay account, with: conversation list with unread counts; thread view and plain-text reply; mark read, unread…
@@ -193,6 +197,7 @@ Summaries are shortened. The PRD text always wins.
 - CS-3 — eBay seller feedback: lists new feedback by rating; alerts on neutral and negative; lets users reply from the dashboard (RespondToFeedback); shows…
 - CS-4 — Amazon seller feedback: new feedback from the daily report, with an alert on ratings of 3 or below.
 - CS-5 — Amazon review requests: A daily job per Amazon account, switched on and off per account.; Candidate orders are those where today is between…
+- CS-6 — Amazon buyer messages through the email relay: inbox per account, reply to the relay only, content in the PII store, 30-day deletion.
 
 ## §4.6 Account health
 - HLT-1 — Amazon screen, one card per Amazon account: account status; Order Defect Rate, Late Shipment Rate, Pre-fulfilment Cancel Rate, Valid Tracking…
@@ -200,6 +205,8 @@ Summaries are shortened. The PRD text always wins.
 - HLT-3 — Amazon and eBay are on separate screens. No chart or table may put eBay and Amazon performance metrics side by side.
 - HLT-4 — Alerts fire when a metric changes band, when account status changes, and when a report fails to parse.
 - HLT-5 — Data age is shown on every card ("updated 3 h ago").
+- HLT-6 — Amazon seller feedback on each Amazon account card: stars, counts for 30 d / 90 d / 12 m, newest comments.
+- HLT-7 — (SHOULD) Estimate of when an amber or red Amazon metric recovers, from own merchant-fulfilled orders.
 
 ## §4.7 Advertising (Amazon Ads; module flag)
 - AD-1 — Campaign list per company and Ads profile: type (SP / SB / SD), state, budget; spend, sales, ACOS, ROAS, impressions, clicks, CTR, CPC, orders;…
@@ -215,6 +222,7 @@ Summaries are shortened. The PRD text always wins.
 - PRF-3 — Breakdown by company, channel account, Master SKU and custom clusters (saved groups of channel accounts).
 - PRF-4 — Cross-channel views compare money only: revenue, cost, profit, margin.
 - PRF-5 — Figures that depend on provisional or estimated data carry a marker.
+- PRF-6 — Order profit card with Ex VAT, VAT and Inc VAT columns.
 
 ## §4.9 Forecasting
 - FC-1 — Per Master SKU (bundle sales converted to component units): velocity over 7, 30 and 90 days; blended velocity = 0.5 × v7 + 0.3 × v30 + 0.2 × v90;…
@@ -445,3 +453,6 @@ Summaries are shortened. The PRD text always wins.
 - AT-23 — The public site has no login wall, a valid certificate, privacy, terms and contact pages, and the Operator footer.
 - AT-24 — A restore from backup works within 8 hours and deleted PII does not reappear; first drill on production before go-live, later drills on staging.
 - AT-25 — A load test at design capacity (§9.1) meets the page and stock-push targets; runs on production before go-live with synthetic data.
+- AT-26 — Same-buyer groups: midnight case, account and name rules, one label under concurrency, penny split.
+- AT-27 — Manual allocation: limit, cap by stock, back to Auto re-syncs within 2 minutes.
+- AT-28 — Amazon buyer messages: routing, rejection of bad mail, replies to the relay only, 30-day deletion.

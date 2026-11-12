@@ -1,4 +1,4 @@
-# OmniBridge PRD v1.3 (Locked Source of Truth)
+# OmniBridge PRD v1.4 (Locked Source of Truth)
 
 Oct 17, 2026 · @Raja
 
@@ -6,7 +6,7 @@ Oct 17, 2026 · @Raja
 
 This PRD is the single locked source of truth for OmniBridge v1. It replaces every earlier SRS (v1.0–v1.4), the Source of Truth v1.0, Research Summaries v1.0/v2.0, the Project Context file and the teammate PRD. Where any older document disagrees, this one wins.
 
-**Status:** Locked v1.3, 18 Oct 2026 (first locked as v1.0 on 17 Oct 2026). Changes only through a numbered change log entry (section 13.6).
+**Status:** Locked v1.4, 12 Nov 2026 (first locked as v1.0 on 17 Oct 2026). Changes only through a numbered change log entry (section 13.6).
 
 ### 0.1 How to use this document (for humans and coding agents)
 
@@ -75,7 +75,7 @@ OmniBridge is a multi-tenant SaaS back office for UK sellers who sell on Amazon,
 | Inventory | Master stock, manual stock-in and adjustments, safety buffer per channel, auto-push, change log |
 | Orders | Unified order list, two-tier storage (non-PII record + PII store), returns view |
 | Shipping | Evri and DPD labels, batch printing, tracking push with confirmation loop |
-| Customer service | eBay two-way messages, eBay seller-feedback alerts and replies, Amazon seller-feedback alerts, Amazon review requests |
+| Customer service | eBay two-way messages, eBay seller-feedback alerts and replies, Amazon seller-feedback alerts, Amazon review requests, Amazon buyer messages through the email relay (CS-6) |
 | Account health | Amazon and eBay health screens, returns and A-to-z mirror |
 | Advertising | Amazon Ads campaign manager, rules, negative keyword finder, performance warehouse (conditional on Amazon approving the Ads app) |
 | Analytics | Sales and profit dashboard, ad spend per SKU, forecasting and reorder alerts |
@@ -88,8 +88,8 @@ OmniBridge is a multi-tenant SaaS back office for UK sellers who sell on Amazon,
 
 | Item | Reason |
 | --- | --- |
-| Amazon buyer message counter (email parsing) | Parked by the client; not needed for launch |
-| Two-way Amazon buyer messaging | Impossible: Amazon's Messaging API is send-only |
+| Two-way Amazon buyer messaging through the Messaging API | The API is send-only; CS-6 uses Amazon's email relay instead (v1.4) |
+| Starting a new conversation with an Amazon buyer | The relay only allows replies to the buyer's messages |
 | Amazon and eBay product review alerts | No API exists; scraping is forbidden. Seller feedback replaces it |
 | Website product reviews | Client does not want them |
 | Responding to A-to-z claims | No API; stays in Seller Central |
@@ -390,6 +390,7 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
   - reminders due today
   - pending tasks (access review, address-shortened orders, voided labels to reconcile)
 - **HOME-2** Each tile links to the filtered list behind it. A child only sees tiles for tabs they have.
+- **HOME-3** On "orders today by channel", each channel row opens a quick view of that channel's latest 10 orders today (ref, time, company, total, status; no buyer details). An order opens its detail page; "View all" opens the filtered list. Users without the Orders tab get no quick view. Design: `docs/plan/client-changes-20261112.md` C1.
 
 ### 4.1 Catalogue (Master SKUs)
 
@@ -408,7 +409,7 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
   - has COGS = component COGS × pack size
 
   Mixed-product bundles cannot be created.
-- **CAT-4** COGS is entered by hand per Master SKU, one value per SKU, with an effective-from date. Each order line stores a snapshot of the COGS in effect when the order was placed. Changing COGS never changes past profit. COGS can be bulk-imported by CSV.
+- **CAT-4** COGS is entered by hand per Master SKU, **excluding VAT**, one value per SKU, with an effective-from date. Its purchase VAT rate (used only for inc-VAT views, PRF-6) follows the SKU's VAT type unless a different purchase VAT rate is set on the SKU. Each order line stores a snapshot of the COGS in effect when the order was placed. Changing COGS never changes past profit. COGS can be bulk-imported by CSV.
 - **CAT-5** Channel listing mapping:
   - On connect and daily, each channel's listings are discovered (channel account, external SKU, listing ID/ASIN/item ID, title, MFN or FBA, Inventory-API-managed flag for eBay).
   - A listing is matched automatically to a Master SKU when its external SKU equals the Master SKU code exactly. Everything else goes to an **Unmapped listings** queue for manual mapping.
@@ -420,7 +421,7 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
 ### 4.2 Inventory
 
 - **INV-1** Each non-bundle Master SKU has one **on hand** number. Reserved = units in orders that are not yet dispatched or cancelled. Available = on hand − reserved.
-- **INV-2** Quantity pushed to a merchant-fulfilled listing = max(0, available − safety buffer). Bundles use floor((available − buffer) ÷ pack size). The safety buffer is set per channel account (default) and can be overridden per listing. The default buffer is 0.
+- **INV-2** Quantity pushed to a merchant-fulfilled listing in Auto mode = max(0, available − safety buffer); in Manual mode see INV-10. Bundles use floor((available − buffer) ÷ pack size). The safety buffer is set per channel account (default) and can be overridden per listing. The default buffer is 0.
 - **INV-3** Stock movements:
   - order placed: reserve
   - order cancelled: release
@@ -432,14 +433,16 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
 - **INV-4** After any movement, stock is recalculated and the new quantities are queued for every affected listing on every other channel. Target: 95% of pushes sent within 2 minutes, not counting eBay revision holds and provider throttling.
 - **INV-5** Change log: every movement records timestamp, Master SKU, change, new on hand, reason, source (order ref or user), and the channel listings pushed with their result. It can be filtered and exported. It is kept 3 years **\[Claude default\]**.
 - **INV-6** If an order makes available fall below 0, the order is flagged **Oversold** and an alert is raised.
-- **INV-7** A nightly reconciliation compares each listing's quantity on the channel with the expected quantity. Drift is corrected automatically, logged and reported. Repeated drift on the same listing raises an alert.
+- **INV-7** A nightly reconciliation compares each listing's quantity on the channel with its target quantity (INV-2 or INV-10). Drift is corrected automatically, logged and reported. Repeated drift on the same listing raises an alert.
 - **INV-8** A failed stock push retries (3.0 rules). After the last retry the listing gets a "Sync failed" badge and an alert.
 - **INV-9** FBA stock is not managed by OmniBridge. FBA listings show "Fulfilled by Amazon" and are excluded from pushes.
+- **INV-10** **Manual allocation.** Stock sync can be switched from Auto to Manual per Master SKU or per listing. In Manual mode the user types the quantity each listing (each Amazon account, eBay account, website) shows, and the listing receives max(0, min(manual quantity − units sold on it since set, available − buffer)), so a manual number can limit a channel but never show more than real stock. Master stock is still moved by every order. Writes happen only when the target changes. Switching back to Auto pushes available − buffer to every listing at once. Every change is audited and in the change log. Full rules and edge cases: `docs/plan/client-changes-20261112.md` C7.
 
 ### 4.3 Orders
 
 - **ORD-1** One list for all channels and companies. Columns:
   - channel icon, company badge, order ref, placed date/time
+  - SKU (first line's Master SKU, "+N" with a tooltip for more lines)
   - status, item count, total gross, ship-by date
   - shipping status, tracking state
   - flags: Oversold, Unmapped item, Address shortened, Tracking not confirmed, FBA
@@ -466,6 +469,7 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
 - **ORD-6** The order detail page shows lines, money breakdown, status history, labels and tracking, the tracking push state, and internal notes. The notes field warns: no customer details. When PII has been deleted, the page says "Customer details deleted on {date} under the 30-day rule".
 - **ORD-7** Returns view: Amazon returns from the returns report (reason, status, A-to-z flag, inferred claim deadline labelled **Estimate**), plus refunds from every channel. It is read-only.
 - **ORD-8** Order export to CSV contains no PII.
+- **ORD-9** **Same-buyer groups.** Awaiting-dispatch orders on the **same channel account** with the same buyer and delivery address (exact match after normalising; no fuzzy matching) are shown together as one group, when placed on the same Europe/London day or within 3 hours across midnight (setting `group_midnight_grace_hours`). Matching happens inside pii-vault (capability `match`); db-main stores only the group link. Each order can still be shipped on its own, and a group can be dismissed as "Not the same buyer". Full rules: `docs/plan/client-changes-20261112.md` C3.
 
 ### 4.4 Shipping desk
 
@@ -479,7 +483,8 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
 - **SHP-4** On label creation: the order goes to Label created, then Dispatched (setting `auto_dispatch_on_label`, default on **\[Claude default\]**). Stock moves and the tracking job is queued.
 - **SHP-5** Reprint fetches the existing label. "Void" marks it void in OmniBridge, returns the order to Awaiting dispatch and adds it to the reconcile list. It never calls a carrier void that does not exist.
 - **SHP-6** Optional packing slip PDF (setting): order ref, items, quantities, and the delivery name and address rendered on demand. It is never stored.
-- **SHP-7** Label cost: a per-service cost table per carrier account, entered by the admin, is used for profit **\[Claude default\]**. Carrier APIs do not return the price.
+- **SHP-7** Label cost: a per-service cost table per carrier account, entered by the admin **excluding VAT, with a VAT rate per service (default 20%)**, is used for profit **\[Claude default\]**. Carrier APIs do not return the price.
+- **SHP-9** **Ship together.** The members of a same-buyer group (ORD-9) can be sent on one label: summed weight, earliest ship-by, the highest service needed. The same tracking number is pushed to every member order on its channel, each confirmed separately. Label cost is split equally with remainder pence to the earliest orders. Void returns every member to Awaiting dispatch. Members are locked and re-checked before the label is created. Full rules: `docs/plan/client-changes-20261112.md` C3.4.
 - **SHP-8** Partial dispatch (some lines now, the rest later) SHOULD be supported where the channel allows it. Otherwise one label set per order.
 
 ### 4.5 Customer service
@@ -508,6 +513,7 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
   - Maximum one per order, ever. Record the result: Sent / Not eligible / Error.
   - Optional per-SKU exclusion list.
   - The job uses order IDs only, never PII.
+- **CS-6** **Amazon buyer messages** through Amazon's buyer–seller email relay (not the send-only API): each Amazon account gets its own inbound address on `omnibridge.co.uk`, added by the seller under Buyer Messages in Seller Central, and replies are sent from an approved-sender address to the buyer's relay address only. An inbox per Amazon account with thread view, plain-text reply, read/unread/done, order link and a 24-hour reply timer. Content lives only in the PII store and is deleted 30 days after the last activity (as CS-2). Inbound mail is verified (DKIM, relay domain, token, order belongs to the account) and removed from the mailbox after ingest. OmniBridge never starts a conversation. Full design: `docs/plan/client-changes-20261112.md` C6.
 
 ### 4.6 Account health
 
@@ -527,6 +533,8 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
 - **HLT-3** Amazon and eBay are on **separate screens**. No chart or table may put eBay and Amazon performance metrics side by side.
 - **HLT-4** Alerts fire when a metric changes band, when account status changes, and when a report fails to parse.
 - **HLT-5** Data age is shown on every card ("updated 3 h ago").
+- **HLT-6** Each Amazon account card shows seller feedback: star rating over 12 months with the number of ratings, positive / neutral / negative counts and % for 30 days, 90 days and 12 months, and the 5 newest comments with stars, date and order link (data from CS-4; the rater email is discarded at parse time). Display only.
+- **HLT-7** (SHOULD) On an amber or red Amazon metric, an **Estimate** of when it recovers, from OmniBridge's own merchant-fulfilled orders: how many defects leave the 30-day window and on which date the rate returns inside the target if no new defects occur.
 
 ### 4.7 Advertising (Amazon Ads; module flag)
 
@@ -565,6 +573,7 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
 - **PRF-3** Breakdown by company, channel account, Master SKU and custom clusters (saved groups of channel accounts). Comparison against the previous period and the same period last year. Presets: today, yesterday, 7 days, 30 days, this month, last month, this quarter, custom.
 - **PRF-4** Cross-channel views compare money only: revenue, cost, profit, margin. No conversion, defect or other performance ratios across channels.
 - **PRF-5** Figures that depend on provisional or estimated data carry a marker.
+- **PRF-6** The order detail page has a profit card with three columns, Ex VAT, VAT and Inc VAT, for sales less refunds, channel fees, label cost, COGS and profit. Profit ex VAT is the contribution profit (PRF-2, without ad spend); profit inc VAT = profit ex VAT + net VAT, exactly. Layout and rules: `docs/plan/client-changes-20261112.md` C4.
 
 ### 4.9 Forecasting
 
@@ -1216,6 +1225,9 @@ In phases 2 to 6, the "Gate" lines above apply to live verification only. Buildi
 23. The public site passes these checks: no login wall, a valid certificate, privacy, terms and contact pages, and a footer naming the Operator.
 24. Restoring from backup works within 8 hours, and deleted PII does not reappear. The first drill runs on the production server before go-live; later drills run on staging.
 25. A load test at design capacity (9.1) meets the page and stock-push targets. It runs on the production server before go-live, while it holds only synthetic data.
+26. Same-buyer groups: orders placed at 23:59 and 00:01 London time by the same buyer on the same channel account form one group; the same buyer on two different channel accounts, or a different name at the same address, does not. Two users pressing Ship together at once create exactly one label, and the label cost splits to the penny.
+27. Manual allocation: with available 186, listing A set to 120, B to 10 and C on Auto, selling 5 on B leaves B at 5, A at 120 and C at 181; lowering available to 50 caps A at 50; switching back to Auto sets every listing to available − buffer within 2 minutes (staging, without throttling).
+28. Amazon buyer messages: a relay email for account X lands only in X's inbox; an email with a bad DKIM signature, an unknown token or an order of another account is rejected; a reply goes only to the relay address; the message content is gone 30 days after the last activity.
 
 ## 13. Decisions, Claude defaults, open items and go-live
 
@@ -1358,3 +1370,5 @@ Nothing below blocks coding. Open items are built as settings, or behind adapter
 - OPS-11 allows one free external uptime checker (P-011)
 
 **v1.3, 18 Oct 2026:** local-first delivery plan (P-012, Hashir). Section 12.1 now builds and tests every phase on local Docker with mocks. The servers, the public site going live and the provider applications move to a new phase 8 (Deploy), before hardening. An optional early mini-deploy of the public site and eBay endpoint stays available.
+
+**v1.4, 12 Nov 2026:** client review of the preview (P-014, Hashir). Added HOME-3, INV-10, ORD-9, SHP-9, CS-6, HLT-6, HLT-7 (SHOULD), PRF-6, AT-26 to AT-28. Amended ORD-1 (SKU column), INV-2 and INV-7 (target per mode), CAT-4 (COGS ex VAT), SHP-7 (label cost ex VAT plus rate), §1.3 and §1.4 (Amazon buyer messages through the email relay). Designs: `docs/plan/client-changes-20261112.md`.
