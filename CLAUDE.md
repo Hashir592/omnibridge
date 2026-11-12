@@ -61,7 +61,7 @@ It runs:
 - hard-coded-name check
 - requirement-ID coverage check
 
-It must pass completely before any merge; CI runs it on every PR. Locally, use `scripts/verify.sh --quick` while you work. Run the full gate locally only for **high**-risk tasks and at checkpoints (ADR-043). A task is done only when the full run passes in CI.
+It must pass completely before any merge, and **CI is where the full gate runs** (ADR-054). Locally, use `scripts/verify.sh --quick`, plus the integration tests your task touches for high-risk tasks. A task is done only when the full run passes in CI.
 
 ## Conventions
 
@@ -75,23 +75,24 @@ It must pass completely before any merge; CI runs it on every PR. Locally, use `
 - **Proposals:** to change the PRD, ARCHITECTURE, MODULES or backlog, write a proposal under "Proposed (from sessions)" in `docs/DECISIONS.md`. Keep working within your current scope. Only S1 edits those files.
 - **Units:** money is integer pence. Times are stored in UTC and shown in Europe/London. UI dates use DD/MM/YYYY.
 
-## Invariants (full list with checks: `docs/ARCHITECTURE.md` §5)
+## Invariants (summary; the numbered list with checks is `docs/ARCHITECTURE.md` §5, and code and reviews cite those numbers)
 
-1. Every tenant table has `workspace_id`, forced row-level security and composite `(workspace_id, id)` foreign keys.
-2. The app connects as `ob_app`, which has no BYPASSRLS. Every request or job runs in one transaction with `SET LOCAL app.workspace_id` / `app.company_ids`. Every repository call takes a `TenantContext`.
-3. Every contract route declares `auth`, `tab`, `adminOnly` and company scoping. The route walker proves isolation on every route.
-4. "Combined" means the user's **permitted** companies only.
-5. Buyer PII exists only in `db-pii`, behind `pii-vault`. It never appears in db-main, logs, metrics, error events, exports, emails, notifications or main backups.
-6. pii-vault access is capability-scoped: ingest, read-full (logged), mask, search, delete. Masked strings are never stored.
-7. PII fields are encrypted with AES-256-GCM, using per-workspace data keys under a master key that never sits in a database, an image or a backup.
-8. Deletion is a hard DELETE plus VACUUM. Tombstones are re-applied after every restore. Label files are PII and are never backed up.
-9. Money is `bigint` pence with no floats. Rounding is half-up only where the PRD says. Order-line snapshots (VAT, COGS) are immutable.
-10. Provider APIs are called only from `packages/providers`, through the queue and governors. Web handlers make no provider calls except OAuth code exchanges.
-11. The Amazon and eBay governors are separate code paths with no shared retry helper. The eBay budget is counted **before** each send.
-12. Every job carries the workspace, channel account, idempotency key and attempt count. Handlers are idempotent.
-13. The kill switch and maintenance switch are checked in the outbound pipeline, just before each write.
-14. Every OmniBridge container has memory, CPU and PID limits, and joins only OmniBridge networks.
-15. Migrations are forward-only and expand/contract, and must be safe with the previous app version still running.
+- Every tenant table has `workspace_id`, forced row-level security and composite `(workspace_id, id)` foreign keys.
+- The app connects as `ob_app`, which has no BYPASSRLS. Every request runs in one transaction, and every job in short ones (never across a provider call), with `SET LOCAL app.workspace_id` / `app.company_ids`. Every repository call takes a `TenantContext`.
+- Every contract route declares `auth`, `tab`, `adminOnly` and company scoping. The route walker proves isolation on every route.
+- "Combined" means the user's **permitted** companies only.
+- No PII in job payloads, job results, idempotency records or webhook inboxes: IDs and `pii_ref` only (ARCHITECTURE 7a).
+- Buyer PII exists only in `db-pii`, behind `pii-vault`. It never appears in db-main, logs, metrics, error events, exports, emails, notifications or main backups.
+- pii-vault access is capability-scoped: ingest, read-full (logged), mask, search, delete. Masked strings are never stored.
+- PII fields are encrypted with AES-256-GCM, using per-workspace data keys under a master key that never sits in a database, an image or a backup.
+- Deletion is a hard DELETE plus VACUUM. Tombstones are re-applied after every restore. Label files are PII and are never backed up.
+- Money is `bigint` pence with no floats. Rounding is half-up only where the PRD says. Order-line snapshots (VAT, COGS) are immutable.
+- Provider APIs are called only from `packages/providers`, through the queue and governors. Web handlers make no provider calls except OAuth code exchanges.
+- The Amazon and eBay governors are separate code paths with no shared retry helper. The eBay budget is counted **before** each send.
+- Every job carries the workspace, channel account, idempotency key and attempt count. Handlers are idempotent.
+- The kill switch and maintenance switch are checked in the outbound pipeline, just before each write.
+- Every OmniBridge container has memory, CPU and PID limits, and joins only OmniBridge networks.
+- Migrations are forward-only and expand/contract, and must be safe with the previous app version still running.
 
 ## Never
 

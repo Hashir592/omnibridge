@@ -1,19 +1,16 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 27 Oct 2026 by S1.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 12 Nov 2026 by S1.
 
 ## Now
 
-- **Phase:** B, local Docker only (ADR-029).
-- **M01 Platform foundations: CLOSED 20 Oct 2026.** S4 APPROVED in round 2.
-- **Current module:** M02 Identity, tenancy and audit (all S3 tasks high risk: Hashir says "go" before each).
-- **Done in M02:** T-0201 (PR #24), T-0202 (PR #25, #30), T-0203 (PR #31). PR #32 merged.
-- **Now running:** S2, T-0305 Client preview (client screens). Then S2 fixes M03 end (F-M03-end-01 to -04) in a separate worktree, then S3 fixes the M02 halfway (F-M02h-01 to -05, -07, -08, -10). One session at a time.
-- **Review (S4, 27 Oct 2026):** M02 halfway **FIX REQUIRED** (3 Majors, 7 Minors; no round 2, ADR-044). M03 end **BLOCKED** (1 Blocker, the ui-perf margin; round 2 allowed). S1 rulings: ADR-051 role split, ADR-052 auth events, ADR-046 ratio measurement, ADR-020 nodemailer 10.1.4 or later.
-- **M02 order:** T-0201 ✓ → T-0202 ✓ → T-0203 ✓ → **halfway checkpoint** (S4) → T-0204 → T-0205 → T-0207 → T-0206 (S5 audit) → M02 end. Exit also needs the S5 audit clean (ADR-026).
-- **Workflow tiers (ADR-043):** light = `--quick`, no code review; normal = `--quick` + `/code-review` medium; high = full local gate + `/code-review` high. CI always runs the full gate.
-- **UI tests (ADR-046):** screenshots for 4 key screens only: Orders, Order detail, Shipping desk (tablet), Sign in.
-- **Open questions:** none. ADR-049 (PS-018) and ADR-050 (PS-019) are ruled. Delete the `minimumReleaseAgeExclude` list after 25 Oct 2026.
+- **Phase:** B, local Docker only. **Plan replaced on 12 Nov 2026** after the architecture audit (ADR-054): three releases, the order in `docs/plan/MODULES.md`. Release 1 = website + first approved marketplace + Evri: orders, stock, labels, tracking. The public site goes live early, deployed by Hashir's devops person.
+- **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway FIX REQUIRED (3 Majors, 7 Minors, no round 2). Then T-0204 → T-0207 → T-0206 (S5 audit) → M02 end. T-0205 deferred to Release 3.
+- **M03:** T-0305 client preview built by S2, **uncommitted** in `../omnibridge-ui` (branch `task/T-0305-client-preview`); 34 PNGs in `docs/design/client-preview/20261021/`. M03 end BLOCKED only on ui-perf, which ADR-054 removes from the blocking gate; Minors F-M03-end-02 to -04 remain.
+- **Order now (one session at a time):** S2 merges T-0305 → client UI changes (S1 writes them up) → S2 fixes M03 end Minors → S3 fixes M02 halfway → T-0204.
+- **Process (ADR-053, ADR-054):** sessions merge their own green PRs. CI is the only full gate; locally `--quick` (plus a task's integration tests for high risk). Halfway checkpoints only for M02, M04, M10, M12, M17, M18. Reviews do not block the next module.
+- **Hashir:** GitHub CLI must stay on the Hashir592 account (`gh auth switch -u Hashir592`). Dev machine to 16 GB in 1 to 2 weeks.
+- **Open questions:** none.
 
 ## What T-0203 delivered
 

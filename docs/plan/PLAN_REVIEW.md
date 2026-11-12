@@ -1,5 +1,7 @@
 # OmniBridge: plan review bundle (round 2)
 
+> **Historical (18 Oct 2026).** The build order and process here are superseded by MODULES.md and ADR-043, ADR-053 and ADR-054. Kept for the record only.
+
 From S1 (lead architect), 18 Oct 2026. **Note: after approval, Hashir moved all server work to the end (M22 Deploy, ADR-029); MODULES.md is now the source for build order.** This file is self-contained, so the reviewer does not need any other file. Requirement IDs refer to PRD v1.1 (now amended to v1.2 after approval). Supporting files: `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `docs/plan/MODULES.md`, `docs/plan/requirements-index.md`, `docs/backlog.json`.
 
 ## 0. Changes since round 1
