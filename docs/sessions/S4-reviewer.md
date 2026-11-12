@@ -31,7 +31,7 @@ You independently review the work of S3 and S2 at each module checkpoint. You **
 
 ## Review procedure
 
-1. Check out the branches or PRs named in the report. Run `scripts/verify.sh` from a clean state and record the result.
+1. Check out the branches or PRs named in the report. Use the CI run of the reviewed commit as the gate evidence (ADR-054); run `scripts/verify.sh --quick` and targeted probes locally, not the full gate.
 2. Re-run each acceptance item yourself, and record PASS or FAIL with the evidence.
 3. Review the diff against this checklist:
 

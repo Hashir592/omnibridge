@@ -6,43 +6,30 @@ Detailed tasks exist only for the next two modules (`docs/backlog.json`). Tasks 
 
 ## Build order and why
 
-| # | Module | Session | Starts after |
-|---|---|---|---|
-| 1 | M01 Platform foundations (local) | S3 | none |
-| 2 | M02 Identity, tenancy and audit | S3 | M01 APPROVED |
-| 3 | M01b Ops stack (local) | S3 | M02 APPROVED |
-| 4 | M06 Public site, legal and eBay deletion endpoint (built locally) | S3 (+S2 for page design) | M01b |
-| 5 | M04 PII vault and deletion service | S3 | M06 |
-| 6 | M05 Notifications, platform console and security alerts | S3 | M04 |
-| 7 | M07 Integration framework and provider mocks | S3 | M05 |
-| 8 | M08 Catalogue | S3 | M07 |
-| 9 | M09 Inventory and stock engine | S3 | M08 |
-| 10 | M10 Orders and sales VAT | S3 | M09 |
-| 11 | M11 Website connector (JeezMart) | S3 | M10 |
-| 12 | M12 Shipping desk, Evri and tracking loop | S3 | M11 |
-| 13 | M13 DPD | S3 | M12 |
-| 14 | M14 Reminders and Notes | S3 | M13 |
-| 15 | M15 eBay (on mocks) | S3 | M14 |
-| 16 | M16 Finance I | S3 | M15 |
-| 17 | M17 Finance II | S3 | M16 |
-| 18 | M18 Amazon SP-API (on mocks) | S3 | M17 |
-| 19 | M19 Amazon Ads (on mocks) | S3 | M18 |
-| 20 | M20 Profit, forecasting and Home | S3 | M19 |
-| 21 | **M22 Deploy: staging and production (first VPS work)** | S3 | M20 APPROVED + Hashir's server prerequisites |
-| 22 | M21 Hardening and go-live | S3 + S5 | M22 |
-| ∥ | M03 Design system and app shell | S2 | T-0102 (contract) done |
+Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement ownership below is unchanged; only the order and the release cuts changed.
 
-**Why this order (local-first, ADR-029):**
+| # | Module | Release | Session | Starts after |
+|---|---|---|---|---|
+| 1 | M01 Platform foundations | 1 | S3 | done |
+| 2 | M02 Identity, tenancy and audit (T-0205 moved to Release 3) | 1 | S3 | M01 |
+| 3 | M06 Public site, legal pages and eBay deletion endpoint | 1 | S3 (+S2 design) | M02 |
+| 4 | **Early public deploy** (devops person): the public site and endpoint on the shared VPS over HTTPS, then send the Amazon, Ads and eBay applications | 1 | devops | M06 |
+| 5 | M04 PII vault and deletion (core), plus the backup and restore scripts from M01b | 1 | S3 | M06 |
+| 6 | M05 core: notification centre and critical email alerts (console views come with the modules that feed them) | 1 | S3 | M04 |
+| 7 | M07 Integration framework and provider mocks | 1 | S3 | M05 core |
+| 8 | M08 Catalogue → M09 Inventory → M10 Orders and sales VAT → M11 Website connector → M12 Shipping desk, Evri and tracking | 1 | S3 | in order |
+| 9 | First approved marketplace, core only (M15 eBay or M18 Amazon, whichever is approved first): connect, listings, orders, stock, tracking | 1 | S3 | M12 |
+| 10 | **Release 1 hardening + production deploy** (M22, devops with S3): restore drill, S5 check of the Release 1 surface, observability | 1 | S3 + devops + S5 | step 9 |
+| 11 | Second marketplace, M13 DPD, M16 Finance I, M17 Finance II | 2 | S3 | Release 1 live |
+| 12 | M19 Ads, M20 Profit/forecasting/Home, customer service and health screens, M14 Reminders and Notes, the deferred items (P-013), then M21 full hardening | 3 | S3 | Release 2 |
+| ∥ | M03 Design system and screens | 1 | S2 | parallel |
 
-1. **Design → develop → deploy.** Everything is built and tested on local Docker (localhost), with every provider replaced by mocks. No VPS is bought or used until M22. The VPS budget (ARCHITECTURE §7) still applies from day one: local containers run with the same memory and CPU limits, so we find out early if something does not fit.
-2. **Foundations first.** M01 and M02 give the skeleton, the quality gate and the security core that everything else uses.
-3. **Ops stack early, but locally.** M01b runs the observability, backup and restore tooling and the edge config in local Docker. M04 needs the restore and tombstone path for AT-8, and the budget alarms help during development.
-4. **Features on mocks.** M04–M20 cover every feature, including eBay, Amazon and Ads, built against mocks written from the official specs.
-5. **Deploy late.** M22 buys and hardens the servers, deploys staging and production, puts the public site live, subscribes the eBay deletion endpoint and sends the Amazon, Ads and eBay applications. It then runs every verify-live task as each approval arrives.
-6. **Known cost of this order (accepted by Hashir):** the Amazon, Ads and eBay approvals can take weeks and only start in M22, so go-live waits on them. **Option:** at any point Hashir can ask for an early mini-deploy of only the public site and the eBay deletion endpoint (from M06) so the approvals run while the rest is still being built. It is small, about 0.3 GB of the production budget.
-7. **Design runs in parallel.** M03 (S2) uses the shared contract and mock data, so it can run alongside S3 from T-0102 onwards.
+**Why this order:**
 
-**A module starts only when the previous one is APPROVED by S4**, with at most 2 fix rounds per checkpoint. M02 also needs an S5 audit of the auth task T-0203 with no open Blocker or Major findings.
+1. **Value early.** Release 1 is what the business runs on every day: one stock number, one order list, labels and tracking (PRD §1.1 goals 1 and 2). It goes to production before finance and growth features.
+2. **Public face early.** Amazon and eBay review an application only against a live site, and approvals take weeks. The public site, legal pages and the eBay endpoint ship right after M02, so the approvals run while the rest is built.
+3. **Everything else stays local-first.** Features are built and tested on local Docker with mocks (ADR-029). A provider `sandbox` mode is allowed on a staging server only, once one exists.
+4. **Checkpoints:** halfway reviews only for high-risk modules (M02, M04, M10, M12, M17, M18). A module-end review may run while the next module starts; APPROVED is needed before that next module's own end review and before any production deploy (ADR-054).
 
 ## Modules
 

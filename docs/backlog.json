@@ -2,7 +2,7 @@
   "version": 3,
   "updated": "2026-10-18",
   "owner": "S1",
-  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0304) is reviewed by S4 in the same session as the M02 halfway.",
+  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0304) is reviewed by S4 in the same session as the M02 halfway. From 12 Nov 2026 (ADR-054): build order and releases are in MODULES.md; T-0205 deferred to Release 3; halfway checkpoints only for M02, M04, M10, M12, M17, M18; CI is the only full gate.",
   "tasks": [
     {
       "id": "T-0101",
@@ -378,7 +378,7 @@
         "Proposed route shapes recorded in DECISIONS.md Proposed (from sessions)",
         "Screenshot tests match docs/design/reference/ for the 4 key screens only (ADR-046)",
         "scripts/verify.sh exits 0 at merge time",
-        "[NFR-8] ui-perf passes 3 CI runs in a row; the report shows work-per-frame p95 and the rAF gap"
+        "[NFR-8] ui-perf is a local benchmark only (ADR-054, FA-18); a unit test checks that a 100-row page renders within a fixed render count"
       ]
     },
     {
@@ -406,7 +406,7 @@
       ],
       "acceptance": [
         "grep finds no msw in the production dist; initial JS gzip reported before and after (was 169.3 KB)",
-        "[NFR-8] ui-perf passes on the first try in 3 CI runs in a row, retries 0",
+        "[NFR-8] ui-perf is a local benchmark only (ADR-054, FA-18); a unit test checks that a 100-row page renders within a fixed render count",
         "npx vitest run apps/ui and the Playwright ui project stay green",
         "Screenshot references unchanged"
       ],
@@ -665,7 +665,7 @@
         "test '[TEN-9] wizard step can be skipped and resumed' passes"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "deferred"
     },
     {
       "id": "T-0206",

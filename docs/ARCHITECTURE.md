@@ -106,7 +106,7 @@ Each invariant names the check that enforces it. A change that needs to break on
 
 1. **Every tenant table has `workspace_id`**, an RLS policy, and `FORCE ROW LEVEL SECURITY`. Foreign keys between tenant tables are composite `(workspace_id, id)`. Check: the `rls-coverage` SQL test. (TEN-1)
 2. **The app connects as `ob_app`**, which has no BYPASSRLS. Migrations run as `ob_owner`. The worker connects as `ob_worker`, a member of `ob_app` (also no BYPASSRLS) whose only extra right is the audit purge (ADR-049). Only the scheduler fan-out uses `ob_platform`, which has read access to the workspace list and nothing else. (TEN-1)
-3. **Every request and every job runs inside one transaction** that sets `app.workspace_id` and `app.company_ids` with `SET LOCAL`. Repository functions require a `TenantContext` argument. No query is written without one. Check: lint rule plus type signature. (TEN-1, PERM-3)
+3. **Every request runs inside one transaction, and every job uses only short transactions,** each of which sets `app.workspace_id` and `app.company_ids` with `SET LOCAL`. Repository functions require a `TenantContext` argument. No query is written without one. A provider job never holds a transaction across a network call: it reads and writes an intent row, calls the provider with no transaction open, then stores the result (ADR-054, FA-03). Check: lint rule plus type signature. (TEN-1, PERM-3)
 4. **Every route in the contract declares** `auth` (public / session / platform / service / signed-webhook), `tab` and `adminOnly`, and whether it is company-scoped. The server refuses to register a route without them. The route walker calls every route as workspace A against workspace B's data, and as a child with no ticks. (AT-1, AT-2, SEC-3)
 5. **Combined view means the user's permitted companies only.** It never means all companies in the workspace. (TEN-5, PERM-3)
 6. **No workspace, company or account name appears in code**, schema or UI strings. Jeez, Sidson, Kyyz and JeezMart exist only in seed files. Check: a grep gate in verify.sh. (TEN-4)
@@ -114,6 +114,7 @@ Each invariant names the check that enforces it. A change that needs to break on
 **PII and deletion**
 
 7. **Buyer PII never enters db-main**, logs, metrics, error events, exports, emails, notifications or main backups. The only door is `pii-vault`. Check: a CI marker scan. Synthetic PII carries `PIIMARK-` markers, and the scan searches DB dumps, logs, captured emails and export files for them. (DP-8, AT-9)
+7a. **No PII in queues or inboxes.** Job payloads, job results, idempotency records and webhook inboxes hold IDs and `pii_ref` values only. Inbound PII goes to the vault inside the request, before anything is queued. Check: the AT-9 marker scan includes the `pgboss` schema and `app.job_records`. (ADR-054, FA-04)
 8. **pii-vault access is capability-scoped.** The capabilities are `ingest` (write), `read-full` (label, order detail, eBay inbox; each read logged), `mask`, `search` (blind index), and `delete`. Masked strings are computed on request and never stored. (DP-7, ORD-5)
 9. **PII is encrypted per field with AES-256-GCM**, using a per-workspace data key wrapped by the PII master key. That key lives only in pii-vault's Docker secret, never in a DB, an image or a backup. (DP-6)
 10. **Deletion is a hard DELETE followed by VACUUM.** Each deletion writes tombstones in three places: db-pii, db-main (IDs only) and an off-site journal file. After any restore, the restore runbook applies every tombstone before the app starts. db-pii has no WAL archiving. (DEL-2, AT-8)
@@ -139,7 +140,7 @@ Each invariant names the check that enforces it. A change that needs to break on
 21. **Every OmniBridge container has `mem_limit`, `cpus` and `pids_limit`.** OmniBridge joins only its own networks. Check: `scripts/check-limits.sh` in verify.sh. (OPS-8, OPS-10)
 22. **No secret appears in the repo**, an image, a log or chat. Check: gitleaks in pre-commit and CI. Secrets reach containers only as Docker secrets. (SEC-5)
 23. **Migrations are forward-only and expand/contract.** Each one must work with the previous app version still running. Check: squawk lint, plus a test that applies the migration to a seeded database from the previous release. (OPS-3)
-24. **The ID coverage check passes.** Every test title cites the PRD IDs it proves, for example `[VAT-3]`, and `scripts/req-coverage.mjs` checks the mapping. Merging to `main` requires a PR, green CI and Hashir's approval. (SEC-16, Q-001)
+24. **The ID coverage check passes.** Every test title cites the PRD IDs it proves, for example `[VAT-3]`, and `scripts/req-coverage.mjs` checks the mapping. Merging to `main` requires a PR and green CI; the session that opened it merges it (ADR-053). The human gate is Hashir's "go" on high-risk work and his approval of each production deploy. (SEC-16, Q-001)
 
 ## 6. Key designs
 
