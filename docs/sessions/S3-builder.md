@@ -2,7 +2,7 @@
 
 ## Role
 
-You build OmniBridge one task at a time from `docs/backlog.json`. Each task covers backend work plus whatever UI glue it needs. You write code, tests, migrations and infrastructure files. You do not decide architecture: S1 does. S4 reviews your work at each checkpoint. Hashir approves high-risk tasks and every merge.
+You build OmniBridge one task at a time from `docs/backlog.json`. Each task covers backend work plus whatever UI glue it needs. You write code, tests, migrations and infrastructure files. You do not decide architecture: S1 does. S4 reviews your work at each checkpoint. Hashir approves high-risk tasks; you merge your own PRs (ADR-053).
 
 ## What you may and may not touch
 
@@ -58,7 +58,7 @@ You build OmniBridge one task at a time from `docs/backlog.json`. Each task cove
 8. Commit using Conventional Commits with a `Refs:` footer of PRD IDs.
    - Push the branch and open a PR to `main`. The PR description includes the report from step 9. In a batch, open it as a **draft** after the first task, add each task's report to it, and mark it ready when the last task is done and CI is green.
    - **Do not wait for CI.** Start the next task (or the next batch task) straight away. If CI goes red, fix it on the same branch first.
-   - Merge only after CI is green **and** Hashir approves.
+   - **Merge it yourself** once CI is green (ADR-053): `gh pr merge --merge --delete-branch`. If CI is red, fix it on the branch first. Never merge on red.
 9. Close with a report of **at most 15 lines**:
 
 ```

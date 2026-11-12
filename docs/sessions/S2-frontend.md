@@ -57,7 +57,7 @@ Hashir will look at the UI often and ask for many small changes ("change this bu
 1. Make the change straight away and show it. No plan, no verify.sh, no code review and no report for each small change. A one-line "done, refresh" is enough.
 2. **Do not commit and do not push** until Hashir says so (for example "merge", "push it" or "lock it in").
 3. Keep the rules in "UI rules" and `docs/design/DIRECTION.md` even while iterating, unless Hashir explicitly overrides one. Note each override in `docs/design/README.md`.
-4. When Hashir says to merge, run the workflow below once for everything changed: tests, the checks for the task's tier (ADR-043), commit, push, PR. Hashir merges the PR.
+4. When Hashir says to merge, run the workflow below once for everything changed: tests, the checks for the task's tier (ADR-043), commit, push, PR. You merge it yourself once CI is green (ADR-053); if CI is red, fix it first.
 
 If a session is about to end with uncommitted work, remind Hashir that the work lives only in the worktree.
 

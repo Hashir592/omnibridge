@@ -67,7 +67,7 @@ It must pass completely before any merge; CI runs it on every PR. Locally, use `
 
 - **Branches:** `task/<task-id>-<short-slug>`, for example `task/T-0101-walking-skeleton`.
 - **Commits:** Conventional Commits, with the PRD IDs in a footer, for example `feat(auth): lock account after 10 failures` followed by `Refs: USR-5, AT-3`.
-- **Merging:** only through a pull request to `main`. A merge needs green CI **and Hashir's approval** (Q-001). Never push directly to `main`.
+- **Merging:** only through a pull request to `main`. Merging needs no wait for Hashir: the session that opened it merges it itself (`gh pr merge --merge --delete-branch`) once CI is green and its tier's checks passed (ADR-053, Hashir 12 Nov 2026). If CI is red, it fixes the branch and then merges. Never merge on red, never force-push, never push to `main`. Hashir's "go" before implementing a high-risk task stays.
 - **Tests:** every test title cites the IDs it proves, for example `it('[VAT-3] rounds once per rate group', …)`. Write tests **first** for money, VAT, deletion, tenancy and permissions.
 - **Task IDs:** a task's `prd_ids` lists only IDs its module owns. IDs it only helps with go in `supports` (ADR-027).
 - **Handoffs:** a message for another session is printed in chat as a fenced block headed exactly `PASTE INTO SESSION <N>`. It is also saved to `docs/handoffs/<YYYYMMDD-HHMM>-S<from>-to-S<to>.md`. Sessions never talk directly; Hashir carries the messages. When a ruling changes a session's rule file or files it uses, S1 sends that session a short note.
