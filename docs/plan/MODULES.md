@@ -24,6 +24,8 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
 | 12 | M19 Ads, M20 Profit/forecasting/Home, customer service and health screens, M14 Reminders and Notes, the deferred items (P-013), then M21 full hardening | 3 | S3 | Release 2 |
 | ∥ | M03 Design system and screens | 1 | S2 | parallel |
 
+**Client changes (12 Nov 2026, ADR-055):** designs in `docs/plan/client-changes-20261112.md`. Release 1 gains the SKU column and same-buyer groups (M10), Ship together (M12) and manual allocation (M09); Release 3 gains the Home quick view and order profit card (M20), and Amazon feedback on health, the recovery estimate and Amazon buyer messages (M18 customer service part). Hashir can move CS-6 earlier once Amazon is approved.
+
 **Why this order:**
 
 1. **Value early.** Release 1 is what the business runs on every day: one stock number, one order list, labels and tracking (PRD §1.1 goals 1 and 2). It goes to production before finance and growth features.
@@ -159,7 +161,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - oversold flags
   - nightly reconciliation
   - sync-failed state
-- **Owns:** INV-1, INV-2, INV-3, INV-4, INV-5, INV-6, INV-7, INV-8, INV-9, AT-4
+- **Owns:** INV-1, INV-2, INV-3, INV-4, INV-5, INV-6, INV-7, INV-8, INV-9, INV-10, AT-4, AT-27
 - **Depends on:** M08.
 - **External gate:** none.
 - **Before the gate:** pushes go to mocks.
@@ -174,7 +176,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - returns and refunds view
   - no-PII CSV export
   - VAT engine (test-first)
-- **Owns:** ORD-1, ORD-2, ORD-3, ORD-4, ORD-5, ORD-6, ORD-7, ORD-8, VAT-1, VAT-2, VAT-3, VAT-4, VAT-5, VAT-6, VAT-7, AT-6, AT-15, AT-16
+- **Owns:** ORD-1, ORD-2, ORD-3, ORD-4, ORD-5, ORD-6, ORD-7, ORD-8, ORD-9, VAT-1, VAT-2, VAT-3, VAT-4, VAT-5, VAT-6, VAT-7, AT-6, AT-15, AT-16, AT-26
 - **Depends on:** M09, M04.
 - **External gate:** none.
 - **Before the gate:** orders come from mock channels and the website mock.
@@ -204,7 +206,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - label cost table
   - partial dispatch
   - tracking push loop with the 4-hour alert
-- **Owns:** SHIP-1, SHIP-2, SHIP-3, SHIP-4, EVRI-1, EVRI-2, EVRI-3, EVRI-4, EVRI-5, EVRI-6, EVRI-7, SHP-1, SHP-2, SHP-3, SHP-4, SHP-5, SHP-6, SHP-7, SHP-8, TRK-1, TRK-2, TRK-3, AT-12, AT-13
+- **Owns:** SHIP-1, SHIP-2, SHIP-3, SHIP-4, EVRI-1, EVRI-2, EVRI-3, EVRI-4, EVRI-5, EVRI-6, EVRI-7, SHP-1, SHP-2, SHP-3, SHP-4, SHP-5, SHP-6, SHP-7, SHP-8, SHP-9, TRK-1, TRK-2, TRK-3, AT-12, AT-13
 - **Depends on:** M11.
 - **External gate:** Evri credit account live and the failover IP allowlisted (a verify-live task).
 - **Before the gate:** an Evri mock built from myHermes spec v1.4.
@@ -295,7 +297,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - keepalive
   - revocation handling and deletion at day 21 (P-006)
   - reactive governor
-- **Owns:** AMZ-1, AMZ-2, AMZ-3, AMZ-4, AMZ-5, AMZ-6, AMZ-7, AMZ-8, AMZ-9, AMZ-10, AMZ-11, AMZ-12, AMZ-13, AMZ-14, RL-1, HLT-1, CS-4, CS-5, AT-11, AT-22
+- **Owns:** AMZ-1, AMZ-2, AMZ-3, AMZ-4, AMZ-5, AMZ-6, AMZ-7, AMZ-8, AMZ-9, AMZ-10, AMZ-11, AMZ-12, AMZ-13, AMZ-14, RL-1, HLT-1, HLT-6, HLT-7, CS-4, CS-5, CS-6, AT-11, AT-22, AT-28
 - **Depends on:** M17, M15.
 - **External gate:** none for building (mocks). Live checks wait for M22: developer profile and roles approved (architecture review).
 - **Before the gate:** an Amazon mock built from the official selling-partner-api-models. Each [Verify in testing] item becomes a verify-live task.
@@ -321,7 +323,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - Sales & Profit dashboard
   - forecasting and low-stock list
   - Home tiles
-- **Owns:** PRF-1, PRF-2, PRF-3, PRF-4, PRF-5, FC-1, FC-2, FC-3, HOME-1, HOME-2
+- **Owns:** PRF-1, PRF-2, PRF-3, PRF-4, PRF-5, PRF-6, FC-1, FC-2, FC-3, HOME-1, HOME-2, HOME-3
 - **Depends on:** M19 (or M18 if Ads is refused), M17.
 - **External gate:** none.
 - **Before the gate:** n/a.

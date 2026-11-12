@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "updated": "2026-10-18",
+  "updated": "2026-11-12",
   "owner": "S1",
   "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0304) is reviewed by S4 in the same session as the M02 halfway. From 12 Nov 2026 (ADR-054): build order and releases are in MODULES.md; T-0205 deferred to Release 3; halfway checkpoints only for M02, M04, M10, M12, M17, M18; CI is the only full gate.",
   "tasks": [
@@ -733,6 +733,51 @@
         "squawk reports 0 issues with no waiver on the new migrations",
         "test: purge removes finished job records and expired leases older than the cut-off and nothing else",
         "test: /healthz 503 logs the failing dependency name"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0306",
+      "module": "M03",
+      "session": "S2",
+      "title": "Client preview round 2: the client's seven changes as mock-ups",
+      "goal": "The client sees every change he asked for on 12 Nov 2026, working on mock data, before the modules that build the real logic.",
+      "prd_ids": [
+        "NFR-8"
+      ],
+      "supports": [
+        "HOME-3",
+        "ORD-1",
+        "ORD-9",
+        "SHP-9",
+        "PRF-6",
+        "HLT-6",
+        "HLT-7",
+        "CS-6",
+        "INV-10"
+      ],
+      "scope": [
+        "Mock-ups on MSW synthetic data, built from the T-0302 kit, following docs/plan/client-changes-20261112.md exactly (C1 to C7). No business logic beyond what the mocks need to look real.",
+        "C1 Home quick view; C2 SKU column; C3 same-buyer groups on Orders and the Shipping desk, Ship together dialog, Same buyer panel on order detail; C4 profit card with Ex VAT / VAT / Inc VAT; C5 Amazon feedback section and HLT-7 estimate line on Account Health; C6 Customer Service > Amazon messages inbox plus the setup panel on Connections; C7 Stock sync Auto/Manual on the SKU detail with per-listing allocation, summary, capped badge and back-to-Auto results",
+        "Mock data must include the edge cases: a 23:59/00:01 pair, a group with different ship-by dates, a same-address different-name pair that is NOT grouped, a manual listing capped by stock, an allocation used up",
+        "Client preview PNGs at 1440x900 for every changed screen in docs/design/client-preview/20261112/, numbered in click-through order, with index.md",
+        "PROPOSED SHAPE entries in DECISIONS.md for every new or changed endpoint"
+      ],
+      "out_of_scope": [
+        "Real routes, migrations or provider code",
+        "New colours or tokens without Hashir",
+        "Tinted banners (plain inline icon + text only)"
+      ],
+      "depends_on": [
+        "T-0305"
+      ],
+      "acceptance": [
+        "[NFR-8] axe zero serious or critical on every new or changed screen",
+        "Keyboard walkthrough passes, including the quick-view chevron and the group rows",
+        "Client preview PNGs and index.md present",
+        "Proposed shapes recorded",
+        "CI full gate green at merge"
       ],
       "risk": "normal",
       "status": "todo"
