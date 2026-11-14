@@ -112,7 +112,7 @@ BEGIN
                   WHERE m.workspace_id = OLD.workspace_id AND m.role = 'admin'
                     AND m.user_id <> OLD.user_id) THEN
     RAISE EXCEPTION 'the last admin of a workspace cannot be removed or demoted'
-      USING ERRCODE = 'P0001', HINT = 'last_admin';
+      USING ERRCODE = 'OBA01';
   END IF;
   RETURN COALESCE(NEW, OLD);
 END

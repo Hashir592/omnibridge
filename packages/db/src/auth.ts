@@ -156,6 +156,74 @@ export class AuthStore {
    * Counts one password reset request and says whether a mail may go out for it: 3 per email
    * and 10 per address an hour, 100 a day in all (F-M02h-05).
    */
+  /** An open invite by its token hash, for the accept page (USR-1, TEN-7). */
+  async findInvite(
+    tokenHash: Buffer,
+    now: Date,
+  ): Promise<
+    | {
+        id: string;
+        workspaceId: string;
+        workspaceName: string;
+        email: string;
+        role: 'admin' | 'member';
+        userExists: boolean;
+      }
+    | undefined
+  > {
+    const { rows } = await sql<{
+      id: string;
+      workspace_id: string;
+      workspace_name: string;
+      email: string;
+      role: 'admin' | 'member';
+      user_exists: boolean;
+    }>`SELECT * FROM app.invite_find(${tokenHash}, ${now})`.execute(this.#db);
+    const r = rows[0];
+    return r === undefined
+      ? undefined
+      : {
+          id: r.id,
+          workspaceId: r.workspace_id,
+          workspaceName: r.workspace_name,
+          email: r.email,
+          role: r.role,
+          userExists: r.user_exists,
+        };
+  }
+
+  /**
+   * Accepts an invite once: the person joins with its role and ticks; a new user is created
+   * under `newUserId`. Undefined when the link is not usable or they are already a member.
+   */
+  async acceptInvite(
+    tokenHash: Buffer,
+    newUserId: string,
+    name: string,
+    now: Date,
+  ): Promise<{ userId: string; workspaceId: string; created: boolean } | undefined> {
+    const { rows } = await sql<{ user_id: string; workspace_id: string; created: boolean }>`
+      SELECT * FROM app.invite_accept(${tokenHash}, ${newUserId}::uuid, ${name}, ${now})`.execute(
+      this.#db,
+    );
+    const r = rows[0];
+    return r === undefined
+      ? undefined
+      : { userId: r.user_id, workspaceId: r.workspace_id, created: r.created };
+  }
+
+  /** A failed sign-in or lockout, per person, outside any workspace (ADR-052). */
+  async recordAuthEvent(event: {
+    userId: string | null;
+    action: 'auth.login_failed' | 'auth.locked';
+    ip: string;
+    detail: Readonly<Record<string, unknown>>;
+    now: Date;
+  }): Promise<void> {
+    await sql`SELECT app.auth_event_record(${event.userId}::uuid, ${event.action},
+      ${event.ip}::inet, ${JSON.stringify(event.detail)}::jsonb, ${event.now})`.execute(this.#db);
+  }
+
   /** Whether the user has accepted this version of the terms and privacy policy (WWW-7). */
   async termsAccepted(userId: string, version: string): Promise<boolean> {
     const { rows } = await sql<{ ok: boolean }>`SELECT app.terms_accepted(${userId}::uuid,

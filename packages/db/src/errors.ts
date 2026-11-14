@@ -17,6 +17,14 @@ export class ChannelAccountCompanyLocked extends Error {
   }
 }
 
+/** The last admin of a workspace cannot be removed or demoted (PERM-7). */
+export class LastAdmin extends Error {
+  constructor() {
+    super('The last admin of a workspace cannot be removed or demoted');
+    this.name = 'LastAdmin';
+  }
+}
+
 /** The SQLSTATE of a PostgreSQL error, as raised through pg. */
 export function pgCode(err: unknown): string | undefined {
   return typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string'
@@ -34,6 +42,7 @@ export function tenancyError(err: unknown): unknown {
     );
   }
   if (code === 'OBC01') return new ChannelAccountCompanyLocked();
+  if (code === 'OBA01') return new LastAdmin();
   return err;
 }
 
