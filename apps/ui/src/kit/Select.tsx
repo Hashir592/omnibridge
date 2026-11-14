@@ -21,6 +21,7 @@ export function Select({
   placeholder = 'Choose',
   disabled,
   className,
+  label,
 }: {
   options: Option[];
   value: string | null;
@@ -28,6 +29,8 @@ export function Select({
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Accessible name when the select has no visible <Field> label. */
+  label?: string;
 }) {
   return (
     <BaseSelect.Root
@@ -39,6 +42,7 @@ export function Select({
       disabled={disabled ?? false}
     >
       <BaseSelect.Trigger
+        aria-label={label}
         className={cn(controlClass, 'flex items-center justify-between gap-2 text-left', className)}
       >
         <BaseSelect.Value

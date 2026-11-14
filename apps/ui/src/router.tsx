@@ -7,10 +7,20 @@ import {
   useMatches,
 } from '@tanstack/react-router';
 import { AppStateProvider } from './app/session.tsx';
-import { NAV } from './app/nav.ts';
+import { BUILT, NAV } from './app/nav.ts';
 import { Shell } from './components/Shell.tsx';
 import type { OrdersSearch } from './routes/orders.tsx';
 import type { ShippingSearch } from './routes/shipping.tsx';
+import type { HealthSearch } from './routes/account-health.tsx';
+import type { AdsSearch } from './routes/advertising.tsx';
+import type { AuditSearch } from './routes/audit-log.tsx';
+import type { CsSearch } from './routes/customer-service.tsx';
+import type { FinanceSearch } from './routes/finance.tsx';
+import type { ForecastSearch } from './routes/forecasting.tsx';
+import type { NotesSearch } from './routes/notes.tsx';
+import type { SettingsSearch } from './routes/settings.tsx';
+import type { SalesProfitSearch } from './routes/sales-profit.tsx';
+import type { StockSearch } from './routes/stock.tsx';
 
 const VIEWS = new Set(['all', 'awaiting', 'overdue', 'today', 'flagged']);
 const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined);
@@ -80,7 +90,204 @@ const shipping = createRoute({
   component: lazyRouteComponent(() => import('./routes/shipping.tsx'), 'ShippingPage'),
 });
 
-const others = NAV.filter((n) => !['/', '/orders', '/shipping'].includes(n.path)).map((n) =>
+const pageParams = (s: Record<string, unknown>) => {
+  const out: { page?: number; size?: 20 | 100 } = {};
+  const page = Number(s.page);
+  if (Number.isInteger(page) && page > 1) out.page = page;
+  const size = Number(s.size);
+  if (size === 20 || size === 100) out.size = size;
+  return out;
+};
+const oneOf = <T extends string>(v: unknown, xs: readonly T[]): T | undefined =>
+  typeof v === 'string' && (xs as readonly string[]).includes(v) ? (v as T) : undefined;
+
+// T-0305 client preview screens (mock-ups on MSW data).
+const STOCK_VIEWS = ['all', 'low', 'oversold', 'sync', 'bundles', 'unmapped'] as const;
+const stock = createRoute({
+  getParentRoute: () => root,
+  path: '/stock',
+  validateSearch: (s: Record<string, unknown>): StockSearch => {
+    const out: StockSearch = { ...pageParams(s) };
+    const view = oneOf(s.view, STOCK_VIEWS);
+    if (view && view !== 'all') out.view = view;
+    for (const k of ['q', 'vat', 'channel'] as const) {
+      const v = str(s[k]);
+      if (v) out[k] = v;
+    }
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/stock.tsx'), 'StockPage'),
+});
+const stockDetail = createRoute({
+  getParentRoute: () => root,
+  path: '/stock/$skuId',
+  component: lazyRouteComponent(() => import('./routes/stock-detail.tsx'), 'StockDetailPage'),
+});
+
+const salesProfit = createRoute({
+  getParentRoute: () => root,
+  path: '/sales-profit',
+  validateSearch: (s: Record<string, unknown>): SalesProfitSearch => {
+    const out: SalesProfitSearch = {};
+    const period = oneOf(s.period, [
+      'today',
+      'yesterday',
+      '7d',
+      'month',
+      'last_month',
+      'quarter',
+    ] as const);
+    if (period) out.period = period;
+    if (s.compare === 'last_year') out.compare = 'last_year';
+    const by = oneOf(s.by, ['account', 'sku', 'cluster'] as const);
+    if (by) out.by = by;
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/sales-profit.tsx'), 'SalesProfitPage'),
+});
+const finance = createRoute({
+  getParentRoute: () => root,
+  path: '/finance',
+  validateSearch: (s: Record<string, unknown>): FinanceSearch => {
+    const out: FinanceSearch = { ...pageParams(s) };
+    const section = oneOf(s.section, ['expenses', 'pnl'] as const);
+    if (section) out.section = section;
+    const range = oneOf(s.range, ['quarter', 'year'] as const);
+    if (range) out.range = range;
+    for (const k of ['vatCompany', 'quarter', 'q', 'status', 'category'] as const) {
+      const v = str(s[k]);
+      if (v) out[k] = v;
+    }
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/finance.tsx'), 'FinancePage'),
+});
+const accountHealth = createRoute({
+  getParentRoute: () => root,
+  path: '/account-health',
+  validateSearch: (s: Record<string, unknown>): HealthSearch =>
+    s.market === 'ebay' ? { market: 'ebay' } : {},
+  component: lazyRouteComponent(() => import('./routes/account-health.tsx'), 'AccountHealthPage'),
+});
+const usersFile = () => import('./routes/users.tsx');
+const users = createRoute({
+  getParentRoute: () => root,
+  path: '/users',
+  component: lazyRouteComponent(usersFile, 'UsersPage'),
+});
+const userDetail = createRoute({
+  getParentRoute: () => root,
+  path: '/users/$userId',
+  component: lazyRouteComponent(usersFile, 'UserDetailPage'),
+});
+const connections = createRoute({
+  getParentRoute: () => root,
+  path: '/connections',
+  component: lazyRouteComponent(() => import('./routes/connections.tsx'), 'ConnectionsPage'),
+});
+
+const customerService = createRoute({
+  getParentRoute: () => root,
+  path: '/customer-service',
+  validateSearch: (s: Record<string, unknown>): CsSearch => {
+    const out: CsSearch = {};
+    const section = oneOf(s.section, ['feedback', 'reviews'] as const);
+    if (section) out.section = section;
+    const view = oneOf(s.view, ['unread', 'archived'] as const);
+    if (view) out.view = view;
+    for (const k of ['account', 'c'] as const) {
+      const v = str(s[k]);
+      if (v) out[k] = v;
+    }
+    return out;
+  },
+  component: lazyRouteComponent(
+    () => import('./routes/customer-service.tsx'),
+    'CustomerServicePage',
+  ),
+});
+const advertising = createRoute({
+  getParentRoute: () => root,
+  path: '/advertising',
+  validateSearch: (s: Record<string, unknown>): AdsSearch => {
+    const out: AdsSearch = {};
+    const section = oneOf(s.section, ['rules', 'negatives'] as const);
+    if (section) out.section = section;
+    const days = Number(s.days);
+    if (days === 7 || days === 14) out.days = days;
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/advertising.tsx'), 'AdvertisingPage'),
+});
+const forecasting = createRoute({
+  getParentRoute: () => root,
+  path: '/forecasting',
+  validateSearch: (s: Record<string, unknown>): ForecastSearch => {
+    const out: ForecastSearch = { ...pageParams(s) };
+    const view = oneOf(s.view, ['now', 'all'] as const);
+    if (view) out.view = view;
+    const q = str(s.q);
+    if (q) out.q = q;
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/forecasting.tsx'), 'ForecastingPage'),
+});
+const reminders = createRoute({
+  getParentRoute: () => root,
+  path: '/reminders',
+  component: lazyRouteComponent(() => import('./routes/reminders.tsx'), 'RemindersPage'),
+});
+const notes = createRoute({
+  getParentRoute: () => root,
+  path: '/notes',
+  validateSearch: (s: Record<string, unknown>): NotesSearch => {
+    const n = str(s.n);
+    return n ? { n } : {};
+  },
+  component: lazyRouteComponent(() => import('./routes/notes.tsx'), 'NotesPage'),
+});
+const auditLog = createRoute({
+  getParentRoute: () => root,
+  path: '/audit-log',
+  validateSearch: (s: Record<string, unknown>): AuditSearch => {
+    const out: AuditSearch = { ...pageParams(s) };
+    for (const k of ['q', 'area', 'user'] as const) {
+      const v = str(s[k]);
+      if (v) out[k] = v;
+    }
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/audit-log.tsx'), 'AuditLogPage'),
+});
+const settings = createRoute({
+  getParentRoute: () => root,
+  path: '/settings',
+  validateSearch: (s: Record<string, unknown>): SettingsSearch => {
+    const section = oneOf(s.section, ['companies', 'notifications', 'stock', 'security'] as const);
+    return section ? { section } : {};
+  },
+  component: lazyRouteComponent(() => import('./routes/settings.tsx'), 'SettingsPage'),
+});
+
+const preview = [
+  stock,
+  stockDetail,
+  salesProfit,
+  finance,
+  accountHealth,
+  users,
+  userDetail,
+  connections,
+  customerService,
+  advertising,
+  forecasting,
+  reminders,
+  notes,
+  auditLog,
+  settings,
+];
+
+const others = NAV.filter((n) => !BUILT.has(n.path)).map((n) =>
   createRoute({ getParentRoute: () => root, path: n.path, component: placeholder }),
 );
 
@@ -114,6 +321,10 @@ const auth = [
     lazyRouteComponent(() => import('./routes/auth/set-up-mfa.tsx'), 'SetUpMfaPage'),
   ),
   authRoute('/forgot-password', lazyRouteComponent(password, 'ForgotPasswordPage')),
+  authRoute(
+    '/sign-in/password-change',
+    lazyRouteComponent(() => import('./routes/auth/password-change.tsx'), 'PasswordChangePage'),
+  ),
   authRoute('/workspaces', lazyRouteComponent(inviteFile, 'WorkspacesPage')),
 ] as const;
 const resetPassword = createRoute({
@@ -138,6 +349,7 @@ const routeTree = root.addChildren([
   orders,
   orderDetail,
   shipping,
+  ...preview,
   ...others,
   ...gallery,
   ...auth,

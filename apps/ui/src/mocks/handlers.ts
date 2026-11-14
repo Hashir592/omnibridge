@@ -7,6 +7,7 @@ import { HttpResponse, http } from 'msw/http';
 import { authHandlers } from './auth.ts';
 import { orders } from './data.ts';
 import { orderDetail } from './detail.ts';
+import { previewHandlers } from './preview-handlers.ts';
 import { homeSummary } from './home.ts';
 import { currentSession } from './session.ts';
 import type { OrderCounts, OrderPage, OrderRow } from './types.ts';
@@ -47,6 +48,7 @@ const list = (v: string | null) => (v ? v.split(',').filter(Boolean) : []);
 
 export const handlers = [
   ...authHandlers,
+  ...previewHandlers,
 
   http.get('*/healthz', () =>
     HttpResponse.json<Health>({ status: 'ok', db_main: 'ok', db_pii: 'ok', version: 'mock' }),

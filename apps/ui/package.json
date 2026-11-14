@@ -18,7 +18,9 @@
     "@tanstack/react-virtual": "3.14.15",
     "lucide-react": "1.55.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "react-is": "19.3.0",
+    "recharts": "3.10.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",
