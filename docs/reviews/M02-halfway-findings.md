@@ -57,13 +57,13 @@ Required fix:
 1. Do not put the token in a path or query. Make the "who is this link for" lookup a `POST` with the token in the body (or a header), and change the SPA's reset screen to call it.
 2. Add a logger rule that redacts any path segment after `/auth/password/reset/` (and, for later, invite tokens), so a future route cannot repeat this.
 3. Test: call the reset-info route with a marker token while capturing the log stream; the marker must not appear.
-Resolution: (S3 fills in)
+Resolution: fixed in `a7a9047`. `scrubString` (packages/logger) redacts the path segment after `/auth/password/reset/` wherever a path appears in a log line; ADR-048's GET shape is kept (S1 allowed either). Tests: `[SEC-5][USR-7] a reset token in a request path is never logged` (logger) and `[SEC-5][USR-7] the reset token in the link lookup path never reaches the request log` (web, captured log stream).
 
 ## F-M02h-02 — Major — Changing a password checks the current password with no failure counter
 Area: 4 Security  IDs: USR-5, USR-3
 Evidence: `AuthService.changePassword` (`apps/web/src/auth/service.ts`) verifies `currentPassword` with `passwords.check` and answers 422 on a miss, but it never calls `recordFailure` or `lockState`. Live probe, signed in (workspace stage), 12 wrong current passwords in a row: `422,422,422,422,422,422,422,422,422,422,422,422`, `login_counters` rows after: 0. So anyone holding a live session (a stolen cookie, an unlocked laptop) can guess the current password online without limit, at the speed of the 4-slot hash gate, and then reuse it elsewhere or keep access after the session ends. USR-5 limits failed attempts at the sign-in verifier; this is a second verifier of the same secret.
 Required fix: Count a wrong current password against the same email key and the same per-IP delay (and refuse with 429 and `Retry-After` while locked or delayed), exactly like `signIn` and the MFA routes. Add tests: 10 wrong current passwords lock; a lock started by sign-in failures also blocks the change; a right password after the lock is refused.
-Resolution: (S3 fills in)
+Resolution: fixed in `a8fd4f3` (audit label in `4384c22`). Change-password checks the email lock and per-address delay first, counts each wrong current password (audited as `current_password`), and refuses a right one if a lock started meanwhile. Test: `[USR-5][USR-3] a wrong current password counts toward the same lock as sign-in` (10 wrong lock; right one refused; a sign-in lock blocks the change).
 
 ## F-M02h-03 — Major — The auth definers are open to every `ob_app`/`ob_worker` connection: raw SQL can mint a platform session or read password hashes
 Area: 4 Security / 9 Invariants  IDs: SEC-3, USR-6, ADR-048, ADR-049
@@ -81,49 +81,49 @@ Required fix:
 2. Stop the worker and `rewrap-keys`/`seed` from executing what they do not need: give `ob_worker` EXECUTE only on the few functions the mail jobs call (`auth_reset_create`, and whatever `issuePasswordReset`/`userWorkspaces` use), and everything else only to the web role. Because `ob_worker` inherits `ob_app`, this needs a role split: for example a NOLOGIN group that holds the table DML grants, with `ob_app` and `ob_worker` as members, and a second group for the auth definers that only `ob_app` joins. S1 to confirm the role design (ADR-049 touches it).
 3. Test as `ob_worker`: `session_create(…, 'platform', …)`, `auth_login_lookup` and `session_find` are denied; `auth_reset_create` still works.
 4. Correct the claim in the migration header and in `docs/ops` so it says what is true.
-Resolution: (S3 fills in)
+Resolution: fixed in `eb51d7d` (ADR-051; migration 0013, `10-roles.sh`). Groups `ob_tenant_rw` (tenant grants and policies) and `ob_auth` (auth definers, web only); `ob_worker` gets only `auth_reset_create` and the purge; new `ob_ops` for rewrap-keys and the seed (Hashir's choice). `session_create` makes pre_mfa only; `session_advance` allows only the moves the app makes, platform only with `platform_admin`. Tests: `[USR-6][SEC-3] ob_worker reaches only the reset-link definer…`, `[USR-6][SEC-3] a session starts at pre_mfa, and platform needs the platform_admin flag`; seed and key-rotation tests now run as ob_ops. Dev stack on a fresh volume: seed, rewrap-keys (`key_rotation.done`) and `[AT-3]` passed.
 
 ## F-M02h-04 — Minor — `POST /auth/password/forgot` shows whether an email has an account, by timing
 Area: 4 Security  IDs: USR-7
 Evidence: USR-7 says nothing may tell whether an email has an account. Live probe, 15 requests each, same session: medians **25.2 ms for the real email vs 11.8 ms for unknown ones** (min/max 14.0–68.5 vs 6.0–32.2). The real path does the workspace lookup and queues a mail job; the unknown path returns after one lookup. Sign-in is equalised (65 vs 57 ms) because ADR-048 runs a dummy hash; forgot has no equivalent.
 Required fix: Make both paths do the same work before the 202: for example always run the lookup, then queue the work after the response is sent (or for an unknown email send a no-op job through the same code path). Re-run the timing probe; the medians should be within normal noise.
-Resolution: (S3 fills in)
+Resolution: fixed in `2e35ffa`. The route answers 202 at once and does the cap check, lookup and enqueue afterwards (bounded to 64 at once, `4384c22`), so both paths answer in the same time by construction. Test: `[USR-7] forgot-password answers before any lookup…` (a store that never answers still gets 202).
 
 ## F-M02h-05 — Minor — Nothing limits `POST /auth/password/forgot` per address, and mail is a paid, capped resource
 Area: 5 Rate limits  IDs: USR-7, SEC-1
 Evidence: `notifier.passwordReset` uses the idempotency key `reset:<user>:<minute>` (`apps/web/src/auth/notifier.ts:28`), so a known email gets at most one mail per minute, forever, and each one inserts a `password_resets` row. There is no per-IP or global cap (the web app registers no `@fastify/rate-limit`, which ADR-002 lists), and ADR-020's free tier is 300 emails a month. One script could spend the month's allowance in five hours, and use the product to mail-bomb a known address.
 Required fix: A per-address cap (for example 3 per hour), a per-IP cap and a daily global ceiling on reset mails; over the limit the route still answers 202 and sends nothing. Test it.
-Resolution: (S3 fills in)
+Resolution: fixed in `2e35ffa` (migration 0012). Every request is counted by email HMAC and address; mail goes out within 3 per email and 10 per address an hour and 100 a day overall; over a cap the route still answers 202. Tests: `[USR-7][SEC-1] reset mail caps…` (db, all three caps) and `[USR-7][SEC-1] reset mail is capped at 3 an hour per address…` (web).
 
 ## F-M02h-06 — Minor — Sessions and used or expired reset links are never deleted
 Area: 6 Performance and memory  IDs: USR-6, USR-7
 Evidence: `app.sessions` gets a row per sign-in (revoked or expired rows stay), and `app.password_resets` keeps used and expired links; `grep -rn "DELETE FROM app.sessions\|DELETE FROM app.password_resets"` finds nothing outside tests. Only `login_counters` and `ip_counters` clean themselves (inside `auth_record_failure`). Hash-only data, so nothing leaks, but the tables grow for ever.
 Required fix: Put both into T-0207's retention job (delete sessions revoked or expired more than, say, 30 days ago; resets used or expired more than 7 days ago), with an index to delete by, and a test.
-Resolution: (S3 fills in)
+Resolution: deferred to T-0207 (S1).
 
 ## F-M02h-07 — Minor — The documented demo TOTP secret is wrong
 Area: 1 Correctness  IDs: USR-4 (AT-3)
 Evidence: `docs/reviews/M02-halfway-report.md:141` gives the DEV ONLY TOTP secret as `IRCVMLKPJZGFSWJNKRHVIUBNKNCUGUSFKQ` (34 characters). The seed secret is the 20 bytes `DEV-ONLY-TOTP-SECRET`, and the module's own `base32()` gives **`IRCVMLKPJZGFSLKUJ5KFALKTIVBVERKU`** (32 characters). With the first string my probe's TOTP code was refused (401 `invalid_code`); with the seed bytes it was accepted (200 `next: app`). Anyone typing the documented secret into an authenticator app gets codes that never work. CLAUDE.md asks that demo values shown to Hashir be right and inline.
 Required fix: Correct the value wherever it is stated (the report, the S3 handoff, `STATE.md` or README if it appears), and add a unit test that `base32(DEV_ONLY_DEMO_USER.totpSecret)` equals a literal that is also what the docs show.
-Resolution: (S3 fills in)
+Resolution: fixed in `c6c1198`. The report now gives `IRCVMLKPJZGFSLKUJ5KFALKTIVBVERKU`. Test: `[USR-4][AT-3] the documented demo TOTP secret is the seed secret in base32`.
 
 ## F-M02h-08 — Minor — The gate fails in the main checkout when `.claude/launch.json` exists
 Area: 8 Requirement coverage / gate integrity  IDs: SEC-16
 Evidence: First gate attempt in the main checkout: `--- lint FAILED`, `[warn] .claude/launch.json … Code style issues found`. The file is the Claude app's local preview config (it points at `D:/Work Projects/omnibridge-ui`); it is untracked and not ignored, and `.prettierignore` lists only `.claude/settings.local.json`. Any developer who starts a preview from the app gets a red gate on a clean tree. The same clean tree in a worktree passed lint.
 Required fix: Add `.claude/` (or `.claude/launch.json`) to `.prettierignore` and `.gitignore`, and the ESLint ignores if it matters.
-Resolution: (S3 fills in)
+Resolution: fixed in `c6c1198`. `.claude/launch.json` is in `.gitignore` and `.prettierignore` (ESLint does not read JSON).
 
 ## F-M02h-09 — Minor — The kit focus-trap test checks once, right after a keypress
 Area: 8 Requirement coverage  IDs: NFR-8
 Evidence: `apps/ui/e2e/kit.spec.ts:39-50` presses Tab and immediately runs a one-shot `expect(await dialog.evaluate(d => d.contains(document.activeElement))).toBe(true)`. Under load the focus moves a frame later. It failed once in my full gate (`Expected: true  Received: false`) and passed 24/24 alone. This is the cause of the flake and not a focus-trap bug.
 Required fix (S2's file; route through S3 only if S2 is idle): use `await expect.poll(() => dialog.evaluate(…)).toBe(true)`, or `await expect(dialog.locator(':focus')).toHaveCount(1)`, for each Tab. Do not loosen what is asserted.
-Resolution: (S3 or S2 fills in)
+Resolution: S2's file (S1); S2 fixed it in PR #42 (see the M03 end round 2).
 
 ## F-M02h-10 — Minor — The dependency housekeeping due on 25 Oct has not been done, and nodemailer has known advisories
 Area: 4 Security (dependency risk)  IDs: SEC-4
 Evidence: (a) `pnpm-workspace.yaml` still has the 75-entry `minimumReleaseAgeExclude` list that PS-005 and `STATE.md` say to delete after 25 Oct 2026 (today is 27 Oct). (b) `osv-scanner` in the audit step reports 11 moderate or low findings with 0 high or critical (so the gate stays green), among them three on **nodemailer 10.1.0** (CVSS 6.5 each): GHSA-85x2-q946-cp5h, GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, all address-parser flaws that can deliver mail to a recipient the header does not name. They are fixed in 10.1.4. The reset and lock mails address users by the stored email.
 Required fix: Delete the exclude list; move nodemailer to the newest release that is at least 7 days old and has provenance (10.1.4 or later; S1 to amend ADR-020/PS-014), and in `Mailer.send` refuse any recipient that is not a plain `local@domain` address before it reaches the parser.
-Resolution: (S3 fills in)
+Resolution: fixed in `c6c1198` (recipient handling refined in `4384c22`). The exclude list is deleted; nodemailer 10.1.7 (provenance, published 18 Oct); `Mailer.send` refuses any recipient that is not a plain address, and the worker skips such a recipient (logged without the address) before sending anything. Tests: `[SEC-4] only a plain local@domain address is accepted`, `[SEC-4] send refuses any other recipient…`.
 
 ## Carried to T-0204 and later (not findings)
 
