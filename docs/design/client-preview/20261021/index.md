@@ -2,7 +2,7 @@
 
 Design mock-ups of every main area, in click-through order. All data is synthetic: the companies, accounts, people, orders and figures are invented for the preview. Screens are 1440 x 900 (desktop) unless marked tablet (820 x 1180). These images are for review only; they are not test references (ADR-046).
 
-Regenerate with the dev server running: `node apps/ui/scripts/client-preview.mjs`.
+Regenerate with the dev server running: `node apps/ui/scripts/client-preview.mjs docs/design/client-preview/20261021`.
 
 | File | What it shows |
 |---|---|

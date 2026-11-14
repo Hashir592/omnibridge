@@ -1,14 +1,20 @@
 // Client preview screenshots (T-0305). Not a test and not part of the gate (ADR-046 is unchanged):
 // it saves one PNG per screen, in click-through order, for Hashir to send to the client.
 // Start the dev server first (`corepack pnpm --dir apps/ui dev`), then from the repo root:
-//   node apps/ui/scripts/client-preview.mjs [output folder]
+//   node apps/ui/scripts/client-preview.mjs docs/design/client-preview/<YYYYMMDD>
+// The folder is an argument, not a default: code that names a docs path would need the full gate
+// on every docs-only change (tests/config/ci.test.ts).
 // Synthetic mock data only; the clock is fixed so every relative date is the same on each run.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 
 const BASE = process.env.UI_URL ?? 'http://localhost:5173';
-const OUT = process.argv[2] ?? 'docs/design/client-preview/20261021';
+const OUT = process.argv[2];
+if (!OUT) {
+  console.error('Usage: node apps/ui/scripts/client-preview.mjs <output folder>');
+  process.exit(1);
+}
 const NOW = new Date('2026-10-21T10:00:00Z');
 const DESKTOP = { width: 1440, height: 900 };
 const TABLET = { width: 820, height: 1180 };
