@@ -26,6 +26,7 @@ import { newTotpSecret, recoveryCodeHmac, totpCode, totpStep } from './auth/totp
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
 const checks = { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resolve(true) };
 const ORIGIN = 'https://app.omnibridge.test';
+const TERMS = '2026-11-15';
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -132,6 +133,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     logger,
     hmacKey,
     origins: [ORIGIN],
+    termsVersion: TERMS,
     now: () => clock,
   });
   const service = (gate?: HashGate) => new AuthService(serviceOptions(gate));
@@ -159,6 +161,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       mfa?: boolean;
       name?: string;
       passwordAgeMs?: number;
+      /** False: the current terms are not accepted yet (WWW-7). */
+      terms?: boolean;
     } = {},
   ) {
     const id = randomUUID();
@@ -187,6 +191,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       );
       await store.confirmTotp(id, totpStep(clock) - 10, hmacs, clock);
     }
+    if (opts.terms !== false) await store.acceptTerms(id, TERMS, clock, '192.0.2.1');
     return { id, email, name, secret, recovery: recovery[0] ?? '' };
   }
 
@@ -393,6 +398,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       logger,
       hmacKey,
       origins: [ORIGIN],
+      termsVersion: TERMS,
       now: () => clock,
     });
     const server = app(racing);
@@ -708,6 +714,47 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await auth.idle();
     expect(notified.reset.slice(before)).toHaveLength(4);
     await server.close();
+  });
+
+  it('[WWW-7] a new version forces re-acceptance; acceptance is audited', async () => {
+    const one = await makeUser({ terms: false });
+    // Not accepted yet: MFA passes, but nothing opens until the terms are accepted.
+    const server = app();
+    const first = await signedIn(server, one);
+    expect(first.next).toBe('terms');
+    expect((await first.b.send('GET', '/companies')).statusCode).toBe(401);
+    expect((await first.b.send('POST', '/auth/workspace', { workspaceId: A })).statusCode).toBe(
+      403,
+    );
+    const terms = await first.b.send('GET', '/auth/terms');
+    expect(terms.json()).toMatchObject({ version: TERMS });
+    expect((await first.b.send('POST', '/auth/terms', { version: '2025-01-01' })).statusCode).toBe(
+      422,
+    );
+    const accepted = await first.b.send('POST', '/auth/terms', { version: TERMS });
+    expect(accepted.json()).toEqual({ next: 'app' });
+    expect((await first.b.send('GET', '/companies')).statusCode).toBe(200);
+    // Next sign-in: accepted, straight in.
+    expect((await signedIn(server, one)).next).toBe('app');
+
+    // A new version: asked again at the next sign-in.
+    const NEW = '2027-01-01';
+    const v2 = app(new AuthService({ ...serviceOptions(), termsVersion: NEW }));
+    const again = await signedIn(v2, one);
+    expect(again.next).toBe('terms');
+    expect((await again.b.send('POST', '/auth/terms', { version: NEW })).statusCode).toBe(200);
+
+    // The log: each version with its time and address, and it cannot be changed.
+    const rows = await owner.query<{ version: string; ip: string }>(
+      'SELECT version, host(ip) AS ip FROM app.terms_acceptances WHERE user_id = $1 ORDER BY id',
+      [one.id],
+    );
+    expect(rows.rows.map((r) => r.version)).toEqual([TERMS, NEW]);
+    await server.close();
+    await v2.close();
+    await expect(
+      owner.query('DELETE FROM app.terms_acceptances WHERE user_id = $1', [one.id]),
+    ).rejects.toThrow(/append-only/);
   });
 
   it('[SEC-1] state-changing request without CSRF token is rejected', async () => {

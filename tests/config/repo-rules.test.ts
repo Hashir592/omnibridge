@@ -125,3 +125,14 @@ describe('repository rules', () => {
     expect(caddy.match(/import waf/g)).toHaveLength(2);
   });
 });
+
+describe('mailboxes (MAIL-1)', () => {
+  it('[MAIL-1] the mailbox runbook lists the 2 paid users, every alias and the email DNS records', () => {
+    const doc = readRepoFile('docs/ops/mailboxes.md');
+    for (const alias of ['support@', 'privacy@', 'developer@', 'security@', 'notifications@']) {
+      expect(doc).toContain(alias);
+    }
+    for (const record of ['MX', 'v=spf1', '_domainkey', '_dmarc']) expect(doc).toContain(record);
+    expect(doc).toContain('2 paid users');
+  });
+});

@@ -1,17 +1,66 @@
 ---
-// Placeholder public page (T-0101). The real site, legal pages and Operator details arrive in M06.
+import Base from '../layouts/Base.astro';
+import { CONTACT } from '../settings.ts';
+
+const requestAccess = `mailto:${CONTACT.support}?subject=${encodeURIComponent('Request access to OmniBridge')}`;
+const modules = [
+  ['Stock', 'One stock figure per product across Amazon, eBay and your own website, with low-stock alerts.'],
+  ['Orders', 'Every channel’s orders in one list, with clear dispatch deadlines.'],
+  ['Shipping', 'Buy Evri and DPD labels in bulk and send tracking back to each channel.'],
+  ['Account health', 'Amazon and eBay account health and seller feedback in one place.'],
+  ['Advertising', 'Amazon Ads spend, sales and ACoS by campaign.'],
+  ['Profit and VAT', 'Profit per order after fees, shipping and cost of goods, and the VAT figures for your returns.'],
+];
 ---
-<!doctype html>
-<html lang="en-GB">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OmniBridge</title>
-  </head>
-  <body>
-    <main>
-      <h1>OmniBridge</h1>
-      <p>Back office for UK marketplace sellers. Coming soon.</p>
-    </main>
-  </body>
-</html>
+
+<Base
+  title="OmniBridge"
+  description="OmniBridge is the back office for UK sellers on Amazon, eBay and their own website: stock, orders, shipping labels, account health, ads, profit and VAT figures."
+>
+  <h1>One back office for UK marketplace sellers</h1>
+  <p class="lead">
+    OmniBridge brings your Amazon, eBay and website selling together: multichannel stock, orders,
+    shipping labels, account health, Amazon Ads, profit and the VAT figures for your returns.
+  </p>
+  <p><a class="button" href={requestAccess}>Request access</a></p>
+
+  <div class="grid">
+    {
+      modules.map(([name, text]) => (
+        <section class="card">
+          <h2>{name}</h2>
+          <p>{text}</p>
+        </section>
+      ))
+    }
+  </div>
+
+  <figure>
+    <img
+      src="/screens/orders.webp"
+      width="1200"
+      height="750"
+      alt="The OmniBridge orders list, showing orders from the website, Amazon and eBay with their dispatch deadlines"
+      loading="lazy"
+    />
+    <figcaption class="updated">The orders list, with demonstration data.</figcaption>
+  </figure>
+
+  <h2>Built for how you sell</h2>
+  <p>
+    Hosted in the EU (Germany), with two-step sign-in for every user, and your customers’ details
+    deleted within 30 days of delivery. Read more about <a href="/security">security and data</a>.
+  </p>
+</Base>
+
+<style>
+  figure {
+    margin: 2rem 0;
+  }
+  figure img {
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+  }
+</style>

@@ -1,0 +1,18 @@
+# static-web-server for the public site (T-0601, WWW-3). Security headers on every response:
+# nothing but our own files may load, the site cannot be framed, and no referrer leaves it.
+# HSTS is set by the HTTPS edge (Caddy), which owns TLS.
+
+[general]
+
+[advanced]
+
+[[advanced.headers]]
+source = "**"
+[advanced.headers.headers]
+Content-Security-Policy = "default-src 'none'; img-src 'self'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+X-Content-Type-Options = "nosniff"
+X-Frame-Options = "DENY"
+Referrer-Policy = "no-referrer"
+Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+Cross-Origin-Opener-Policy = "same-origin"
+Cross-Origin-Resource-Policy = "same-origin"

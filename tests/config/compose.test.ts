@@ -5,6 +5,7 @@ import {
   DOCKER_SETUP_TIMEOUT_MS,
   loadComposeModel,
   networksOf,
+  readRepoFile,
   runScript,
   service,
 } from './helpers.ts';
@@ -190,5 +191,15 @@ describe('compose stack: secrets (SEC-5)', () => {
     ]);
     expect(secretsOf('migrate-pii')).toEqual(['vault_owner_password']);
     expect(secretsOf('site')).toEqual([]);
+  });
+});
+
+describe('terms version (WWW-7)', () => {
+  it('[WWW-7] the version users accept is the date on the public legal pages', () => {
+    const site = readRepoFile('apps/site/src/settings.ts');
+    const legal = /LEGAL_VERSION = '([\d-]+)'/.exec(site)?.[1];
+    const compose = readRepoFile('infra/compose/compose.yaml');
+    expect(legal).toBeDefined();
+    expect(compose).toContain(`TERMS_VERSION: \${TERMS_VERSION:-${legal ?? ''}}`);
   });
 });

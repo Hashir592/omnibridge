@@ -1,0 +1,55 @@
+---
+import Base from '../layouts/Base.astro';
+import { CONTACT } from '../settings.ts';
+---
+
+<Base
+  title="Security & data"
+  description="How OmniBridge protects your data: EU hosting in Germany, encryption, deletion of customer details within 30 days, two-step sign-in."
+>
+  <div class="prose">
+    <h1>Security and data</h1>
+    <p class="lead">A plain-English summary of how we look after your data and your customers’ data.</p>
+
+    <h2>Hosted in the EU</h2>
+    <p>OmniBridge runs on servers in Germany. Your data does not leave the EU for hosting.</p>
+
+    <h2>Encryption</h2>
+    <p>
+      All traffic uses HTTPS. Your customers’ personal details (names, addresses, phone numbers and
+      messages) are kept in a separate encrypted database, with a key for each workspace. Marketplace
+      access tokens are encrypted too.
+    </p>
+
+    <h2>Customer details deleted within 30 days</h2>
+    <p>
+      Buyers’ personal details are deleted within 30 days of delivery, including from backups. The
+      order itself (products, prices, VAT) is kept without personal details for your accounts.
+    </p>
+
+    <h2>Two-step sign-in for everyone</h2>
+    <p>
+      Every user signs in with a password and a code from an authenticator app. Accounts are locked
+      after repeated wrong attempts, and shared logins are not allowed.
+    </p>
+
+    <h2>We never ask for your marketplace passwords</h2>
+    <p>
+      You connect Amazon and eBay through their own sign-in pages. OmniBridge never asks for, sees or
+      stores your Amazon or eBay password.
+    </p>
+
+    <h2>You control who sees what</h2>
+    <p>
+      Each person gets only the tabs and companies you give them. Every sign-in, permission change and
+      export is recorded in an audit log that cannot be edited.
+    </p>
+
+    <h2>Report a problem</h2>
+    <p>
+      If you think you have found a security issue, email <a href={`mailto:${CONTACT.security}`}
+        >{CONTACT.security}</a
+      >. Privacy questions go to <a href={`mailto:${CONTACT.privacy}`}>{CONTACT.privacy}</a>.
+    </p>
+  </div>
+</Base>

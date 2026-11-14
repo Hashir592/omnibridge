@@ -74,6 +74,8 @@ export interface AuthServiceOptions {
   hmacKey: Buffer;
   /** Origins allowed on state-changing requests (SEC-1), e.g. https://app.omnibridge.co.uk. */
   origins: readonly string[];
+  /** The current version of the terms and privacy policy, a platform setting (WWW-7). */
+  termsVersion: string;
   /** The clock; tests move it. */
   now?: () => Date;
   /** Secure cookies; off only for plain-HTTP tests. */
@@ -85,7 +87,7 @@ export interface WithCookies<T> {
   cookies: string[];
 }
 
-export type MfaNext = 'workspace_picker' | 'app' | 'password_change';
+export type MfaNext = 'workspace_picker' | 'app' | 'password_change' | 'terms';
 
 const sha256 = (value: string): Buffer => createHash('sha256').update(value).digest();
 const token = (): string => randomBytes(32).toString('base64url');
@@ -447,6 +449,9 @@ export class AuthService {
     if (expired) {
       stage = 'password_change';
       next = 'password_change';
+    } else if (!(await this.#o.store.termsAccepted(user.userId, this.#o.termsVersion))) {
+      // A new version is accepted before anything else opens (WWW-7): no workspace yet.
+      next = 'terms';
     } else if (workspaces.length === 1 && workspaces[0] !== undefined) {
       stage = 'workspace';
       workspaceId = workspaces[0].id;
@@ -644,13 +649,65 @@ export class AuthService {
 
   async chooseWorkspace(request: FastifyRequest, workspaceId: string): Promise<string[]> {
     const session = this.#sessionOf(request);
+    await this.#requireTerms(session);
     return this.#advance(session, 'workspace', workspaceId, this.#now(), false);
   }
 
   async enterPlatform(request: FastifyRequest, account: AccountActor): Promise<string[]> {
+    await this.#requireTerms(this.#sessionOf(request));
     const user = await this.#user(account.userId);
     if (!user.platformAdmin) throw forbidden('Only platform operators can open the console');
     return this.#advance(this.#sessionOf(request), 'platform', null, this.#now(), false);
+  }
+
+  // ---- terms and privacy policy (WWW-7) ----
+
+  terms(): { version: string; termsUrl: string; privacyUrl: string } {
+    return {
+      version: this.#o.termsVersion,
+      termsUrl: 'https://omnibridge.co.uk/terms',
+      privacyUrl: 'https://omnibridge.co.uk/privacy',
+    };
+  }
+
+  /**
+   * Accepts the current version, logged with its version, time and address, then moves on as
+   * the sign-in would have: into the only workspace, or to the picker.
+   */
+  async acceptTerms(
+    request: FastifyRequest,
+    account: AccountActor,
+    version: string,
+  ): Promise<WithCookies<{ next: 'workspace_picker' | 'app' }>> {
+    if (version !== this.#o.termsVersion) {
+      throw new ApiError({
+        status: 422,
+        code: 'validation_failed',
+        detail: 'These terms have been replaced; read the current version',
+        errors: [{ location: 'body', path: 'version', message: 'stale' }],
+      });
+    }
+    const now = this.#now();
+    await this.#o.store.acceptTerms(account.userId, version, now, request.ip);
+    const session = this.#sessionOf(request);
+    const workspaces = await this.#o.store.userWorkspaces(account.userId);
+    if (session.stage === 'signed_in' && workspaces.length === 1 && workspaces[0] !== undefined) {
+      const cookies = await this.#advance(session, 'workspace', workspaces[0].id, now, false);
+      return { body: { next: 'app' }, cookies };
+    }
+    return { body: { next: 'workspace_picker' }, cookies: [] };
+  }
+
+  /**
+   * A session fresh from sign-in (signed_in) opens nothing until the current version is accepted.
+   * A session already in a workspace or the console passed this at its sign-in; a new version
+   * is asked for at the next sign-in (WWW-7), not in the middle of one.
+   */
+  async #requireTerms(session: StoredSession): Promise<void> {
+    if (session.stage !== 'signed_in') return;
+    if (!(await this.#o.store.termsAccepted(session.userId, this.#o.termsVersion))) {
+      throw forbidden('Accept the terms and privacy policy to continue');
+    }
   }
 
   // ---- sign out ----

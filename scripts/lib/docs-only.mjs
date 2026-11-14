@@ -9,7 +9,11 @@ import { readFileSync } from 'node:fs';
  * in `/` covers its whole directory. tests/config/ci.test.ts fails if a test or script reads a
  * docs path that is neither listed here nor checked by the `coverage` step of `verify.sh --docs`.
  */
-export const READ_BY_TESTS = ['docs/ops/secrets-register.md', 'docs/design/reference/'];
+export const READ_BY_TESTS = [
+  'docs/ops/secrets-register.md',
+  'docs/ops/mailboxes.md',
+  'docs/design/reference/',
+];
 
 /** Docs the `coverage` step reads; it runs on the fast path too, so they may stay docs-only. */
 export const READ_BY_DOCS_GATE = [

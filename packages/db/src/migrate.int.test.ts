@@ -62,6 +62,7 @@ describe('db-main roles and migrations', () => {
       '0011_auth',
       '0012_reset_requests',
       '0013_role_split',
+      '0014_terms_acceptances',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

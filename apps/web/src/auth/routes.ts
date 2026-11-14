@@ -34,6 +34,8 @@ export function authHandlers(auth: AuthService | undefined): Handlers<typeof aut
       chooseWorkspace: unavailable,
       enterPlatform: unavailable,
       changePassword: unavailable,
+      getTerms: unavailable,
+      acceptTerms: unavailable,
       signOut: unavailable,
       signOutEverywhere: unavailable,
     };
@@ -90,6 +92,11 @@ export function authHandlers(auth: AuthService | undefined): Handlers<typeof aut
       body: null,
       headers: headers(await auth.enterPlatform(request, account)),
     }),
+    getTerms: () => Promise.resolve({ status: 200, body: auth.terms(), headers: headers() }),
+    acceptTerms: async ({ request, body, account }) => {
+      const { body: result, cookies } = await auth.acceptTerms(request, account, body.version);
+      return { status: 200, body: result, headers: headers(cookies) };
+    },
     changePassword: async ({ request, body, account }) => ({
       status: 204,
       body: null,

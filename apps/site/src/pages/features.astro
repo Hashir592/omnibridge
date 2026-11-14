@@ -1,0 +1,64 @@
+---
+import Base from '../layouts/Base.astro';
+
+const blocks = [
+  {
+    name: 'Stock and catalogue',
+    text: 'One stock figure per product, shared by Amazon, eBay and your website. Sales on one channel lower the stock everywhere, with low-stock alerts, bundles and a full change history.',
+  },
+  {
+    name: 'Orders',
+    text: 'Orders from every channel in one list, with dispatch deadlines, filters, bulk actions and a status history for each order.',
+  },
+  {
+    name: 'Shipping',
+    text: 'Buy Evri and DPD labels in bulk, print them on a shipping desk built for tablets, and send tracking back to Amazon, eBay and your website automatically.',
+  },
+  {
+    name: 'Customer service',
+    text: 'eBay messages and feedback, Amazon buyer messages and seller feedback, and Amazon review requests sent at the right time.',
+  },
+  {
+    name: 'Account health',
+    text: 'The health of each Amazon and eBay account on one screen, with alerts before a metric goes out of range.',
+  },
+  {
+    name: 'Advertising',
+    text: 'Amazon Ads spend, sales and ACoS by campaign and by product, next to the profit those sales made.',
+  },
+  {
+    name: 'Sales and profit',
+    text: 'Profit per order and per product after marketplace fees, shipping, advertising and cost of goods.',
+  },
+  {
+    name: 'Finance and VAT figures',
+    text: 'A VAT ledger built from your orders and expenses, with the figures for your VAT return. Money is held to the penny.',
+  },
+  {
+    name: 'Forecasting, reminders and notes',
+    text: 'Stock forecasts from your sales history, reminders for the team, and notes kept with the right order or product.',
+  },
+  {
+    name: 'Users and companies',
+    text: 'Named users only, each with two-step sign-in. Choose which tabs and which of your companies each person can see. Every change is in the audit log.',
+  },
+];
+---
+
+<Base
+  title="Features"
+  description="What OmniBridge does: stock, orders, shipping labels, customer service, account health, Amazon Ads, profit and VAT figures."
+>
+  <h1>Features</h1>
+  <p class="lead">Everything a UK seller on Amazon, eBay and their own website needs, in one place.</p>
+  <div class="grid">
+    {
+      blocks.map((block) => (
+        <section class="card">
+          <h2>{block.name}</h2>
+          <p>{block.text}</p>
+        </section>
+      ))
+    }
+  </div>
+</Base>

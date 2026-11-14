@@ -1,0 +1,64 @@
+---
+// Every public page (WWW-1 to WWW-4): logo, navigation, the Operator footer from settings and no
+// script of any kind (WWW-3). Styles are a file of our own, so the CSP needs no inline styles.
+import { APP_URL, readSettings } from '../settings.ts';
+import '../styles/site.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const settings = readSettings(process.env);
+const nav = [
+  { href: '/features', label: 'Features' },
+  { href: '/security', label: 'Security & data' },
+  { href: '/contact', label: 'Contact' },
+];
+const pageTitle = title === 'OmniBridge' ? title : `${title} | OmniBridge`;
+---
+
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/brand/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content="https://omnibridge.co.uk/brand/og.png" />
+    <meta property="og:type" content="website" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="/" class="brand" aria-label="OmniBridge home">
+        <img src="/brand/logo.webp" alt="OmniBridge" width="163" height="48" />
+      </a>
+      <nav aria-label="Main">
+        {nav.map((item) => <a href={item.href}>{item.label}</a>)}
+        <a class="button secondary" href={`${APP_URL}/login`}>Sign in</a>
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p>
+        OmniBridge is operated by {settings.operatorLegalName}, company number {
+          settings.operatorCompanyNumber
+        }, registered office {settings.operatorRegisteredAddress}.
+      </p>
+      <p class="footer-links">
+        <a href="/privacy">Privacy policy</a>
+        <a href="/terms">Terms of service</a>
+        <a href="/cookies">Cookies</a>
+        <a href="/contact">Contact</a>
+      </p>
+    </footer>
+  </body>
+</html>
