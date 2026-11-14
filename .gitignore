@@ -13,3 +13,6 @@ blob-report/
 infra/compose/.secrets/
 infra/compose/.local/
 .verify/
+
+# verify.sh step logs (ADR-056).
+.verify-logs/
