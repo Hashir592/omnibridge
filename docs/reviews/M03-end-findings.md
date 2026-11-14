@@ -59,25 +59,25 @@ Required fix: (S1 to rule if the route is the measurement.) Either of these, the
 1. Make the table do less per frame, so CI's p95 sits at 10 ms or less. The table is the only thing the test measures.
 2. Change the measurement, not the budget (ADR-046): run a fixed reference workload in the same page just before the scroll (for example a known script-and-layout loop that takes about 4 ms on the dev machine), and fail when `workP95 / reference` is above the ratio the dev machine passes with, so a slow runner scales both sides. Report both numbers.
 In both cases print the p95 on pass and fail (already done) and keep `retries` at CI's value only if the first attempt is also reported.
-Resolution: (S2 fills in)
+Resolution: Ruled by ADR-054 (FA-18): ui-perf is no longer a blocking gate. It stays a local benchmark and runs only on request (`OB_UI_PERF=1 npx playwright test --project ui-perf`), so CI and the default local run leave it out (`playwright.config.ts`). The gate now checks render work by counting: `kit/table/DataTable.test.tsx` `[NFR-8] a 100-row page renders only the visible rows, and a parent re-render renders none` (at most 20 rows drawn for a 100-row page, 0 cells redrawn on two parent re-renders). Writing that test found a real cost: the column layout depended on the table object, which is new on every render, so every parent re-render redrew all visible rows; `DataTable.tsx` now reads the table through a ref in the layout memo. (S2, 14 Nov 2026, branch task/M03-end-fixes)
 
 ## F-M03-end-02 — Minor — The perf build, which includes the component gallery, is written inside `apps/ui/dist`
 Area: 9 Invariants (ADR-046)  IDs: NFR-8
 Evidence: `playwright.config.ts:80` builds the `ui-perf` server with `vite build --outDir dist/perf --emptyOutDir`. After any test run `apps/ui/dist/perf/` exists (index.html plus assets, 31-chunk build with `VITE_UI_GALLERY=1`) inside the folder that M22 will deploy. ADR-046 says the gallery must never reach a deployable build; the M22 check is still to be written, and today's layout makes it easy to deploy `dist` with the gallery in it after a local test run.
 Required fix: Write the perf build to a path outside `dist`, for example `apps/ui/.perf-build` (git-ignored) or `.verify/ui-perf`, and update `playwright.config.ts` and `.gitignore`; keep the M22 "no gallery in dist" check on the list.
-Resolution: (S2 fills in)
+Resolution: The perf build is written to `apps/ui/.perf-build` (git-ignored), never inside `dist`, and only when ui-perf is asked for (`playwright.config.ts`, `.gitignore`). The M22 "no gallery in dist" check stays on the list. (S2, 14 Nov 2026)
 
 ## F-M03-end-03 — Minor — The "Mock persona" switcher and the mock session ship in the production bundle
 Area: 2 Tenancy / 4 Security (permission mirroring)  IDs: PERM-3, PERM-4
 Evidence: `components/Shell.tsx:182-208` renders "Mock persona (mock-ups only)" with an admin/packer selector, and the string is in `index-BIVxfs3E.js`, the entry chunk. `app/session.tsx` builds the signed-in state from `mockApi.session`. Server checks remain the real gate, so it grants nothing, but a deployed build would show every user a switcher and fake data.
 Required fix: Until the real session route exists, render the switcher only when `import.meta.env.DEV`, and add to the M22 build check that `Mock persona` and `mocks/` are absent from `dist`. S2 swaps `mockApi.session` for the typed client when T-0204 exposes it.
-Resolution: (S2 fills in)
+Resolution: The persona switcher renders only when `import.meta.env.DEV`; production builds show the signed-in user without it (`Shell.tsx`, `SignedInUser`). Checked: a production build contains no "Mock persona" string. The M22 build check for "Mock persona" and `mocks/` in `dist` stays on the list; the swap from `mockApi.session` to the typed client waits for T-0204. (S2, 14 Nov 2026)
 
 ## F-M03-end-04 — Minor — The keyboard focus test is a race (same as F-M02h-09)
 Area: 8 Requirement coverage  IDs: NFR-8
 Evidence: `apps/ui/e2e/kit.spec.ts:39-50`: failed once in my full gate, passed 24/24 alone; details in `docs/reviews/M02-halfway-findings.md`, F-M02h-09.
 Required fix: Poll instead of a one-shot check (see that finding). One fix covers both.
-Resolution: (S2 fills in)
+Resolution: `kit.spec.ts` now polls after each Tab with `expect.poll(() => dialog.evaluate(...)).toBe(true)`; the assertion is unchanged. This also closes F-M02h-09. (S2, 14 Nov 2026)
 
 ## Follow-ups (not findings)
 

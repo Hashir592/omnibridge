@@ -48,7 +48,7 @@ test('[NFR-8] dialog, sheet and confirm work with the keyboard and return focus'
   // Focus is trapped: tabbing many times never leaves the dialog.
   for (let i = 0; i < 8; i++) {
     await page.keyboard.press('Tab');
-    expect(await dialog.evaluate((d) => d.contains(document.activeElement))).toBe(true);
+    await expect.poll(() => dialog.evaluate((d) => d.contains(document.activeElement))).toBe(true);
   }
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();

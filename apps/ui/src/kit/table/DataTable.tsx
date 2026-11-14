@@ -117,9 +117,14 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     },
   });
 
+  // The table object can be new on every render; the layout and the row toggle read it through a
+  // ref, so a parent re-render does not redraw rows whose data and columns did not change.
+  const tableRef = useRef(table);
+  tableRef.current = table;
+
   // Column layout, memoised so unchanged rows can skip rendering while the table scrolls.
   const layout = useMemo<Layout<T>>(() => {
-    const visible = table
+    const visible = tableRef.current
       .getVisibleLeafColumns()
       .map((c) => byId.get(c.id))
       .filter(isDefined);
@@ -149,13 +154,11 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
         ...visible.map((c) => track(c.width)),
       ].join(' '),
     };
-    // columnVisibility drives getVisibleLeafColumns.
-  }, [table, byId, columnVisibility, pinned, selectable]);
+    // columnVisibility drives getVisibleLeafColumns, so it stands in for the table here.
+  }, [byId, columnVisibility, pinned, selectable]);
   const { visible, pinnedIds, lefts, grid } = layout;
 
   // One stable toggle for every row, so a row re-renders only when its own data or selection changes.
-  const tableRef = useRef(table);
-  tableRef.current = table;
   const toggle = useCallback((id: string) => {
     tableRef.current.getRow(id).toggleSelected();
   }, []);

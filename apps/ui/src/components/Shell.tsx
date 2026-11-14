@@ -168,8 +168,8 @@ function Sidebar({ className, onNavigate }: { className?: string; onNavigate?: (
           </>
         )}
       </nav>
-      <PersonaMenu />
-      {persona === 'packer' && (
+      {import.meta.env.DEV ? <PersonaMenu /> : <SignedInUser />}
+      {import.meta.env.DEV && persona === 'packer' && (
         <p className="px-4 pb-3 text-xs text-side-muted">
           Viewing as a child user: 3 tabs, 2 companies.
         </p>
@@ -178,21 +178,42 @@ function Sidebar({ className, onNavigate }: { className?: string; onNavigate?: (
   );
 }
 
+/** Avatar, name and role (PERM-1: Admin or Child), shared by both sidebar footers. */
+function UserLabel({ user }: { user: { initials: string; name: string; isAdmin: boolean } }) {
+  return (
+    <>
+      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-white/12 text-xs font-semibold text-white">
+        {user.initials}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-13 font-medium">{user.name}</span>
+        <span className="block truncate text-xs text-side-muted">
+          {user.isAdmin ? 'Admin' : 'Child'}
+        </span>
+      </span>
+    </>
+  );
+}
+
+/** The signed-in user, without the mock persona switcher (production builds, F-M03-end-03). */
+function SignedInUser() {
+  const { session } = useAppState();
+  if (!session) return null;
+  return (
+    <div className="mx-2 mb-2 flex items-center gap-2.5 px-2 py-2">
+      <UserLabel user={session.user} />
+    </div>
+  );
+}
+
+/** Development only: switch between the mock admin and child personas (PERM-3 mirroring). */
 function PersonaMenu() {
   const { session, persona, setPersona } = useAppState();
   if (!session) return null;
   return (
     <Menu.Root>
       <Menu.Trigger className="mx-2 mb-2 flex items-center gap-2.5 rounded-ctl px-2 py-2 text-left hover:bg-side-hover">
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-white/12 text-xs font-semibold text-white">
-          {session.user.initials}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-13 font-medium">{session.user.name}</span>
-          <span className="block truncate text-xs text-side-muted">
-            {session.user.isAdmin ? 'Admin' : 'Packer'}
-          </span>
-        </span>
+        <UserLabel user={session.user} />
         <ChevronsUpDown className="size-4 text-side-muted" aria-hidden />
       </Menu.Trigger>
       <Menu.Portal>
