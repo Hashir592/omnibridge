@@ -165,6 +165,37 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
     }
   });
 
+  it('[USR-7][SEC-1] reset mail caps: 3 per email and 10 per address an hour, 100 a day in all', async () => {
+    // A clock of its own, a day after the others, so earlier rows never count.
+    const base = at(t0, 3 * 24 * 60 * MIN);
+    const key = randomBytes(32);
+    const perEmail = [];
+    for (let i = 0; i < 4; i += 1) {
+      perEmail.push(await store.allowReset(key, '198.51.100.1', at(base, i * MIN)));
+    }
+    expect(perEmail).toEqual([true, true, true, false]);
+    expect(await store.allowReset(key, '198.51.100.1', at(base, 61 * MIN))).toBe(true);
+
+    const ip = '198.51.100.2';
+    const perIp = [];
+    for (let i = 0; i < 11; i += 1) {
+      perIp.push(await store.allowReset(randomBytes(32), ip, at(base, 2 * 60 * MIN + i * 1000)));
+    }
+    expect(perIp.filter(Boolean)).toHaveLength(10);
+    expect(perIp[10]).toBe(false);
+
+    // 100 allowed in 24 hours overall: 4 + 10 so far, then 86 from fresh addresses, then no more.
+    const t = at(base, 4 * 60 * MIN);
+    for (let i = 0; i < 86; i += 1) {
+      expect(await store.allowReset(randomBytes(32), `198.51.101.${String(i)}`, t)).toBe(true);
+    }
+    expect(await store.allowReset(randomBytes(32), '198.51.102.1', t)).toBe(false);
+    // A day later it opens again, and the old rows are gone.
+    expect(await store.allowReset(randomBytes(32), '198.51.102.1', at(base, 25 * 60 * MIN))).toBe(
+      true,
+    );
+  });
+
   it('[USR-6] a session enters only a workspace its user belongs to, and revokes everywhere', async () => {
     const id = randomUUID();
     await store.createSession({

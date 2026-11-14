@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWebApp } from './app.ts';
 import { HashGate, Passwords } from './auth/passwords.ts';
 import { PlatformKeys, totpAad } from './auth/platform-keys.ts';
-import { AuthService, type AuthNotifier } from './auth/service.ts';
+import { AuthService, type AuthNotifier, type AuthServiceOptions } from './auth/service.ts';
 import { newTotpSecret, recoveryCodeHmac, totpCode, totpStep } from './auth/totp.ts';
 
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
@@ -113,28 +113,28 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     clock = new Date(clock.getTime() + ms);
   };
 
-  const service = (gate?: HashGate) =>
-    new AuthService({
-      store,
-      passwords: gate === undefined ? passwords : new Passwords(gate),
-      platformKeys,
-      tenancy,
-      audit: new AuditLog(main.db),
-      notifier: {
-        locked: (input) => {
-          notified.locked.push(input);
-          return Promise.resolve();
-        },
-        passwordReset: (input) => {
-          notified.reset.push(input);
-          return Promise.resolve();
-        },
+  const serviceOptions = (gate?: HashGate): AuthServiceOptions => ({
+    store,
+    passwords: gate === undefined ? passwords : new Passwords(gate),
+    platformKeys,
+    tenancy,
+    audit: new AuditLog(main.db),
+    notifier: {
+      locked: (input) => {
+        notified.locked.push(input);
+        return Promise.resolve();
       },
-      logger,
-      hmacKey,
-      origins: [ORIGIN],
-      now: () => clock,
-    });
+      passwordReset: (input) => {
+        notified.reset.push(input);
+        return Promise.resolve();
+      },
+    },
+    logger,
+    hmacKey,
+    origins: [ORIGIN],
+    now: () => clock,
+  });
+  const service = (gate?: HashGate) => new AuthService(serviceOptions(gate));
 
   const app = (auth = service(), trustedProxies?: string, log = logger) =>
     buildWebApp({
@@ -596,7 +596,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
   });
 
   it('[USR-7] reset link expires after 30 minutes and reset does not bypass MFA', async () => {
-    const server = app();
+    const auth = service();
+    const server = app(auth);
     const user = await makeUser();
     const anon = await new Browser(server).start();
     const before = notified.reset.length;
@@ -607,6 +608,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       (await anon.send('POST', '/auth/password/forgot', { email: 'nobody@example.test' }))
         .statusCode,
     ).toBe(202);
+    await auth.idle();
     // One mail job, for the real account only; the worker makes the link.
     expect(notified.reset.slice(before)).toEqual([{ userId: user.id, workspaceId: A }]);
 
@@ -668,6 +670,44 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(text).toContain('/auth/password/reset/[REDACTED]');
     expect(text).not.toContain(marker);
     await web.close();
+  });
+
+  it('[USR-7] forgot-password answers before any lookup, so a real email takes no longer', async () => {
+    // A store whose reset bookkeeping never finishes: the 202 must not wait for it (F-M02h-04).
+    const hung = new Proxy(store, {
+      get: (target, prop, receiver) =>
+        prop === 'allowReset'
+          ? () => new Promise<boolean>(() => undefined)
+          : (Reflect.get(target, prop, receiver) as unknown),
+    });
+    const auth = new AuthService({ ...serviceOptions(), store: hung });
+    const server = app(auth);
+    const user = await makeUser();
+    const anon = await new Browser(server).start();
+    const res = await anon.send('POST', '/auth/password/forgot', { email: user.email });
+    expect(res.statusCode).toBe(202);
+    await server.close();
+  });
+
+  it('[USR-7][SEC-1] reset mail is capped at 3 an hour per address; over the cap it still answers 202', async () => {
+    const auth = service();
+    const server = app(auth);
+    const user = await makeUser();
+    const anon = await new Browser(server, '192.0.2.71').start();
+    const before = notified.reset.length;
+    for (let i = 0; i < 5; i += 1) {
+      later(61_000); // past the one-a-minute job key, so only the cap can stop a mail
+      const res = await anon.send('POST', '/auth/password/forgot', { email: user.email });
+      expect(res.statusCode).toBe(202);
+      await auth.idle();
+    }
+    expect(notified.reset.slice(before)).toHaveLength(3);
+    // An hour after the first, one more is allowed.
+    later(60 * MIN);
+    await anon.send('POST', '/auth/password/forgot', { email: user.email });
+    await auth.idle();
+    expect(notified.reset.slice(before)).toHaveLength(4);
+    await server.close();
   });
 
   it('[SEC-1] state-changing request without CSRF token is rejected', async () => {

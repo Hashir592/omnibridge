@@ -118,6 +118,8 @@ export class AuthService {
   readonly #secure: boolean;
   /** The session each request resolved to, for its handler. */
   readonly #sessions = new WeakMap<FastifyRequest, StoredSession>();
+  /** Reset requests still being worked on after their 202 (see forgotPassword). */
+  readonly #background = new Set<Promise<void>>();
 
   constructor(options: AuthServiceOptions) {
     this.#o = options;
@@ -522,8 +524,31 @@ export class AuthService {
   // ---- (6) and (7) password reset ----
 
   /** Always succeeds from the outside (USR-7): nothing tells whether the email has an account. */
-  async forgotPassword(email: string): Promise<void> {
-    const account = await this.#o.store.loginLookup(email.trim().toLowerCase());
+  /**
+   * Answers at once and does the work afterwards, so a real and an unknown email take the same
+   * time to answer (USR-7, F-M02h-04). Errors are logged, never shown.
+   */
+  forgotPassword(email: string, ip: string): void {
+    const work = this.#forgotPassword(email.trim().toLowerCase(), ip, this.#now())
+      .catch((err: unknown) => {
+        this.#o.logger.error({ err, event: 'auth.reset_failed' }, 'password reset request failed');
+      })
+      .finally(() => this.#background.delete(work));
+    this.#background.add(work);
+  }
+
+  /** Resolves once every reset request started so far has finished (tests, shutdown). */
+  async idle(): Promise<void> {
+    await Promise.all([...this.#background]);
+  }
+
+  async #forgotPassword(email: string, ip: string, now: Date): Promise<void> {
+    // Every request counts toward the caps, real email or not (F-M02h-05).
+    if (!(await this.#o.store.allowReset(this.emailKey(email), ip, now))) {
+      this.#o.logger.info({ event: 'auth.reset_capped' }, 'password reset over a cap: not sent');
+      return;
+    }
+    const account = await this.#o.store.loginLookup(email);
     if (account === undefined) return;
     const [first] = await this.#o.store.userWorkspaces(account.userId);
     if (first === undefined) {
