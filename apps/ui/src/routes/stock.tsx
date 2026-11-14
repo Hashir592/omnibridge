@@ -7,7 +7,7 @@ import { ChannelMark, CompanyBadge } from '../components/badges.tsx';
 import { PageHeader } from '../components/Card.tsx';
 import { SkuStatus, coverText } from '../components/stock.tsx';
 import { TabGate } from '../components/TabGate.tsx';
-import { SignalLabel } from '../kit/Badge.tsx';
+import { Badge, SignalLabel } from '../kit/Badge.tsx';
 import { Button } from '../kit/Button.tsx';
 import { Combobox } from '../kit/Combobox.tsx';
 import { Dialog } from '../kit/Dialog.tsx';
@@ -156,11 +156,23 @@ function skuColumns(): Array<DataColumn<SkuRow>> {
               {formatInt(s.listings.total)} listing{s.listings.total === 1 ? '' : 's'}
             </span>
           </span>
-          <Sub>
-            {s.listings.fba > 0
-              ? `${String(s.listings.fba)} Fulfilled by Amazon`
-              : 'Merchant fulfilled'}
-          </Sub>
+          {s.syncMode === 'auto' ? (
+            <Sub>
+              {s.listings.fba > 0
+                ? `${String(s.listings.fba)} Fulfilled by Amazon`
+                : 'Merchant fulfilled'}
+            </Sub>
+          ) : (
+            <span
+              title={
+                s.syncMode === 'manual'
+                  ? 'Manual stock allocation on every listing'
+                  : 'Some listings use a manual allocation'
+              }
+            >
+              <Badge>{s.syncMode === 'manual' ? 'Manual' : 'Mixed'}</Badge>
+            </span>
+          )}
         </>
       ),
     },

@@ -291,3 +291,159 @@ export function reviewRequests(allowed: Set<string>, company: string | null): Re
         : [],
   };
 }
+
+/* ---------- Amazon buyer messages (client change C6, CS-6) ---------- */
+
+export interface AmazonConversation {
+  id: string;
+  channelAccountId: string;
+  companyId: string;
+  topic: string;
+  lastAt: string;
+  unread: number;
+  state: 'open' | 'done';
+  order: { id: string; ref: string } | null;
+  /** Amazon expects a reply within 24 hours of the buyer's last message; null once answered. */
+  replyDueAt: string | null;
+}
+
+export interface AmazonThread {
+  conversation: AmazonConversation;
+  messages: Message[];
+  deleteAfter: string;
+}
+
+const AMAZON_TOPICS = [
+  'Delivery date',
+  'Item arrived damaged',
+  'Return request',
+  'Question about the size',
+  'Order not received',
+  'Invoice request',
+];
+const AMAZON_BUYER = [
+  'Hi, could you tell me when this will be delivered? I need it by Friday.',
+  'The glass jar arrived cracked. Can you send a replacement, please?',
+  'Can I return this? It is the wrong size for my shelf.',
+  'Is the large board 45 cm or 50 cm long?',
+  'Tracking says delivered but nothing has arrived.',
+  'Could you send a VAT invoice for this order, please?',
+];
+
+const ar = rng(6_6);
+const AMAZON_CONVERSATIONS: Array<AmazonConversation & { body: Message[] }> = Array.from(
+  { length: 18 },
+  (_, i) => {
+    const a = amazonAccounts[i % amazonAccounts.length] ?? amazonAccounts[0];
+    const own = amazonOrders.filter((o) => o.channelAccountId === a?.id);
+    const o = own.length > 0 ? ar.pick(own) : undefined;
+    const lastAt = ago(i * 2.3 * HOUR + ar.int(5, 50) * 60_000);
+    const answered = i % 4 === 3;
+    const done = i > 13;
+    const t = ar.int(0, AMAZON_TOPICS.length - 1);
+    const body: Message[] = [
+      { id: `am_${String(i)}_0`, from: 'buyer', by: null, at: lastAt, text: AMAZON_BUYER[t] ?? '' },
+      ...(answered
+        ? [
+            {
+              id: `am_${String(i)}_1`,
+              from: 'seller' as const,
+              by: 'Jo Support',
+              at: new Date(Date.parse(lastAt) + 40 * 60_000).toISOString(),
+              text: 'Thank you for your message. We have looked into this and replied on your order.',
+            },
+          ]
+        : []),
+    ];
+    return {
+      id: `amc_${String(i)}`,
+      channelAccountId: a?.id ?? '',
+      companyId: a?.companyId ?? '',
+      topic: AMAZON_TOPICS[t] ?? '',
+      lastAt,
+      unread: !answered && !done && i < 9 ? 1 : 0,
+      state: done ? 'done' : 'open',
+      order: o ? { id: o.id, ref: o.ref } : null,
+      replyDueAt: answered || done ? null : new Date(Date.parse(lastAt) + 24 * HOUR).toISOString(),
+      body,
+    };
+  },
+);
+
+const stripAmazon = (c: AmazonConversation & { body?: Message[] }): AmazonConversation => {
+  const copy = { ...c };
+  delete copy.body;
+  return copy;
+};
+
+export function amazonConversations(allowed: Set<string>, p: URLSearchParams) {
+  const company = p.get('company');
+  const accounts = amazonAccounts.filter(
+    (a) => allowed.has(a.companyId) && (!company || company === 'all' || a.companyId === company),
+  );
+  const account = p.get('account') ?? accounts[0]?.id ?? '';
+  const view = p.get('view') ?? 'open';
+  const mine = AMAZON_CONVERSATIONS.filter((c) => c.channelAccountId === account);
+  return {
+    accounts: accounts.map((a) => ({
+      channelAccountId: a.id,
+      unread: AMAZON_CONVERSATIONS.filter(
+        (c) => c.channelAccountId === a.id && c.unread > 0 && c.state === 'open',
+      ).length,
+    })),
+    account,
+    items: mine
+      .filter((c) => (view === 'unread' ? c.unread > 0 && c.state === 'open' : c.state === view))
+      .map(stripAmazon),
+    counts: {
+      open: mine.filter((c) => c.state === 'open').length,
+      unread: mine.filter((c) => c.unread > 0 && c.state === 'open').length,
+      done: mine.filter((c) => c.state === 'done').length,
+    },
+  };
+}
+
+export type AmazonInbox = ReturnType<typeof amazonConversations>;
+
+export function amazonThread(allowed: Set<string>, id: string): AmazonThread | null {
+  const c = AMAZON_CONVERSATIONS.find((x) => x.id === id);
+  if (!c || !allowed.has(c.companyId)) return null;
+  return {
+    conversation: stripAmazon(c),
+    messages: c.body,
+    deleteAfter: new Date(Date.parse(c.lastAt) + 30 * DAY).toISOString(),
+  };
+}
+
+/* ---------- conversation actions (mark read, unread, archived or done) ---------- */
+
+export interface ConversationPatch {
+  unread?: boolean;
+  state?: 'open' | 'archived' | 'done';
+}
+
+/** eBay: read, unread, archived (CS-1). Returns false for an unknown or not-permitted thread. */
+export function patchConversation(
+  allowed: Set<string>,
+  id: string,
+  patch: ConversationPatch,
+): boolean {
+  const c = CONVERSATIONS.find((x) => x.id === id);
+  if (!c || !allowed.has(c.companyId)) return false;
+  if (patch.unread !== undefined) c.unread = patch.unread ? Math.max(1, c.unread) : 0;
+  if (patch.state === 'open' || patch.state === 'archived') c.state = patch.state;
+  return true;
+}
+
+/** Amazon: read, unread, done (CS-6). */
+export function patchAmazonConversation(
+  allowed: Set<string>,
+  id: string,
+  patch: ConversationPatch,
+): boolean {
+  const c = AMAZON_CONVERSATIONS.find((x) => x.id === id);
+  if (!c || !allowed.has(c.companyId)) return false;
+  if (patch.unread !== undefined) c.unread = patch.unread ? Math.max(1, c.unread) : 0;
+  if (patch.state === 'open' || patch.state === 'done') c.state = patch.state;
+  return true;
+}

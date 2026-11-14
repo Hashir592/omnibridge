@@ -132,6 +132,15 @@ export interface Connection {
   /** INT-4 / invariant 13: when on, every outbound write for this account stops. */
   killSwitch: boolean;
   note: string | null;
+  /**
+   * C6 (CS-6), Amazon accounts only: the relay setup. Amazon copies buyer messages to `inbound`;
+   * replies go from `sender`, which the seller approves in Seller Central.
+   */
+  buyerMessages?: {
+    inbound: string;
+    sender: string;
+    lastTest: 'passed' | 'failed' | null;
+  };
 }
 
 const PROVIDER: Record<Channel, Connection['provider']> = {
@@ -141,12 +150,24 @@ const PROVIDER: Record<Channel, Connection['provider']> = {
 };
 
 const STATE: Record<string, Partial<Connection>> = {
-  ca_1: { usage: { used: 18_240, limit: 0, unit: 'calls today' } },
+  ca_1: {
+    usage: { used: 18_240, limit: 0, unit: 'calls today' },
+    buyerMessages: {
+      inbound: 'amazon-msg+3f9c1a7e52b04d8c9e6a1b2c3d4e5f60@omnibridge.co.uk',
+      sender: 'amazon-msg@omnibridge.co.uk',
+      lastTest: 'passed',
+    },
+  },
   ca_2: {
     usage: { used: 4_120, limit: 5_000, unit: 'calls today' },
     note: 'eBay daily call budget above 80%. Non-urgent syncs are slowed down.',
   },
   ca_3: {
+    buyerMessages: {
+      inbound: 'amazon-msg+8b27d0c4e91f4a6b8c3d2e1f0a9b8c7d@omnibridge.co.uk',
+      sender: 'amazon-msg@omnibridge.co.uk',
+      lastTest: 'failed',
+    },
     status: 'needs_reauth',
     authFailures: 3,
     lastSuccessAt: ago(26 * HOUR),

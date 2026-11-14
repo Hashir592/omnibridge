@@ -160,3 +160,125 @@ test('[PERM-3] a child user opening an admin page by link sees no data', async (
   await expect(page.getByText('You do not have access to this page')).toBeVisible();
   await expect(page.getByText('VAT payable')).toHaveCount(0);
 });
+
+test('[CS-6] Amazon messages: mark done moves a thread to Done, and back', async ({ page }) => {
+  await open(page, '/customer-service?section=amazon', 'Send reply');
+  const done = page.getByRole('tab', { name: /^Done/ });
+  const before = Number((await done.textContent())?.replace(/\D/g, '') ?? 0);
+  await page.getByRole('button', { name: 'Mark done' }).click();
+  await expect(page.getByText('Marked done')).toBeVisible();
+  await expect(done).toContainText(String(before + 1));
+  await done.click();
+  await page.getByRole('button', { name: 'Move to inbox' }).first().click();
+  await expect(done).toContainText(String(before));
+});
+
+test('[CS-1] eBay messages: mark unread sticks, and archive moves the thread', async ({ page }) => {
+  await open(page, '/customer-service', 'Send reply');
+  await page.getByRole('button', { name: 'Mark unread' }).click();
+  await expect(page.getByRole('button', { name: 'Mark read' })).toBeVisible();
+  const archived = page.getByRole('tab', { name: /^Archived/ });
+  const before = Number((await archived.textContent())?.replace(/\D/g, '') ?? 0);
+  await page.getByRole('button', { name: 'Archive' }).click();
+  await expect(archived).toContainText(String(before + 1));
+});
+
+test('[SHP-9] Ship together: untick an order, or take it out of the group', async ({ page }) => {
+  await open(page, '/orders?placed=today&channel=ca_3', 'Placed: Today');
+  await page.getByRole('button', { name: /^Same buyer, 3 orders/ }).click();
+  await page.getByRole('menuitem', { name: 'Ship together…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Ship together' });
+  await expect(dialog.getByRole('button', { name: 'Create 1 label for 3 orders' })).toBeVisible();
+  await dialog.getByRole('checkbox').first().uncheck();
+  await expect(dialog.getByRole('button', { name: 'Create 1 label for 2 orders' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Remove from group' }).last().click();
+  await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(page.getByText(/removed from the group/).first()).toBeVisible();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(2);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: /^Same buyer, 2 orders/ })).toBeVisible();
+});
+
+// T-0306 client changes: axe on every changed screen, and the new controls by keyboard.
+const changed = [
+  {
+    name: 'orders with a same-buyer group',
+    path: '/orders?placed=today&channel=ca_3',
+    ready: 'Placed: Today',
+  },
+  { name: 'shipping desk with a group', path: '/shipping', ready: 'Pick orders to ship' },
+  { name: 'order detail with the Same buyer panel', path: '/orders/ord_0495', ready: 'Same buyer' },
+  { name: 'Amazon messages', path: '/customer-service?section=amazon', ready: 'Send reply' },
+  { name: 'SKU detail on manual allocation', path: '/stock/sku_0', ready: 'Stock by channel' },
+] as const;
+
+for (const s of changed) {
+  test(`[NFR-8] ${s.name} has no serious accessibility issues and works with the keyboard`, async ({
+    page,
+  }) => {
+    await open(page, s.path, s.ready);
+    await expectNoSeriousA11yIssues(page);
+    await walkWithKeyboard(page);
+  });
+}
+
+test('[HOME-3] the Orders today quick view opens with Enter and closes with Esc', async ({
+  page,
+}) => {
+  await open(page, '/', 'Needs action');
+  const chevron = page.getByRole('button', { name: "Show today's eBay orders" });
+  await chevron.focus();
+  await page.keyboard.press('Enter');
+  const panel = page.getByRole('region', { name: "Today's eBay orders" });
+  await expect(panel.getByText(/View all/)).toBeVisible();
+  await expect(page.getByRole('button', { name: "Hide today's eBay orders" })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await expectNoSeriousA11yIssues(page);
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(page.getByRole('button', { name: "Show today's eBay orders" })).toBeFocused();
+});
+
+test('[ORD-9] a same-buyer group is reachable and usable by keyboard', async ({ page }) => {
+  await open(page, '/orders?placed=today&channel=ca_3', 'Placed: Today');
+  const chip = page.getByRole('button', { name: /^Same buyer, 3 orders/ });
+  await chip.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('menuitem', { name: 'Ship together…' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(chip).toBeFocused();
+  // Each member keeps its own checkbox and is labelled as part of the group.
+  await expect(page.getByText(/order 2 of 3$/)).toBeVisible();
+  await expect(page.getByText(/order 3 of 3$/)).toBeVisible();
+  for (const row of await page
+    .getByRole('row')
+    .filter({ hasText: /Same buyer|of 3/ })
+    .all())
+    await expect(row.getByRole('checkbox')).toHaveCount(1);
+});
+
+test('[INV-10] manual allocation: over-allocation warns and a bad number blocks Save', async ({
+  page,
+}) => {
+  await open(page, '/stock/sku_0', 'Stock by channel');
+  await expect(page.getByText('Allocated 260 · Available 186')).toBeVisible();
+  await expect(page.getByText('More allocated than you have.')).toBeVisible();
+  await expect(page.getByText('Capped by stock', { exact: true })).toBeVisible();
+  await expect(page.getByText('Allocation used up', { exact: true })).toBeVisible();
+  const first = page.getByRole('textbox', { name: /^Allocation for / }).first();
+  await first.fill('x');
+  await expect(page.getByRole('button', { name: 'Save allocation' })).toBeDisabled();
+  await first.fill('100');
+  await expect(page.getByText('Allocated 160 · Available 186')).toBeVisible();
+});
+
+test('[PRF-6] order profit: profit inc VAT is profit ex VAT plus net VAT', async ({ page }) => {
+  await open(page, '/orders/ord_0039', 'Ship to');
+  const table = page.getByRole('table', { name: 'Profit on this order' });
+  const profit = table.getByRole('row', { name: /^Profit/ });
+  await expect(profit).toContainText('£13.43');
+  await expect(profit).toContainText('£2.70');
+  await expect(profit).toContainText('£16.13');
+});

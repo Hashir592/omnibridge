@@ -57,6 +57,13 @@ export interface DataTableProps<T extends RowData> {
   error?: ReactNode;
   /** When this value changes the table scrolls back to the top (new page, new filters). */
   scrollKey?: string;
+  /**
+   * A decoration drawn at the row's left edge (inside the checkbox cell, so the table must be
+   * selectable), for example the same-buyer group rail. Pass a stable function.
+   */
+  rowAccent?: (row: T) => ReactNode;
+  /** A background class for a whole row (pinned cells too), for example a same-buyer group. */
+  rowTone?: (row: T) => string | undefined;
 }
 
 // Module scope keeps the feature set stable between renders (TanStack Table 9 rule).
@@ -84,6 +91,8 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     empty,
     error,
     scrollKey,
+    rowAccent,
+    rowTone,
   } = props;
   const selectable = !!selected && !!onSelectedChange;
 
@@ -144,6 +153,8 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     }
     const track = (w: number | string) => (typeof w === 'number' ? `${String(w)}px` : w);
     return {
+      rowAccent,
+      rowTone,
       visible,
       pinnedIds,
       lefts,
@@ -155,7 +166,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
       ].join(' '),
     };
     // columnVisibility drives getVisibleLeafColumns, so it stands in for the table here.
-  }, [byId, columnVisibility, pinned, selectable]);
+  }, [byId, columnVisibility, pinned, selectable, rowAccent, rowTone]);
   const { visible, pinnedIds, lefts, grid } = layout;
 
   // One stable toggle for every row, so a row re-renders only when its own data or selection changes.
@@ -321,6 +332,8 @@ function TableBodyImpl<T extends RowData>({
 const TableBody = memo(TableBodyImpl) as typeof TableBodyImpl;
 
 interface Layout<T> {
+  rowAccent: ((row: T) => ReactNode) | undefined;
+  rowTone: ((row: T) => string | undefined) | undefined;
   visible: Array<DataColumn<T>>;
   pinnedIds: Set<string>;
   lefts: Map<string, number>;
@@ -357,7 +370,9 @@ function TableRowImpl<T>({
   layout,
   onToggle,
 }: TableRowProps<T>) {
-  const pinBg = selected ? 'bg-selected' : 'bg-card group-hover:bg-hover';
+  const tone = layout.rowTone?.(original) ?? 'bg-card';
+  const pinBg = selected ? 'bg-selected' : `${tone} group-hover:bg-hover`;
+  const accent = layout.rowAccent?.(original);
   return (
     <div
       role="row"
@@ -365,7 +380,7 @@ function TableRowImpl<T>({
       aria-selected={layout.selectable ? selected : undefined}
       className={cn(
         'group absolute inset-x-0 grid border-b border-divider text-13',
-        selected ? 'bg-selected' : 'bg-card hover:bg-hover',
+        selected ? 'bg-selected' : `${tone} hover:bg-hover`,
       )}
       style={{
         gridTemplateColumns: layout.grid,
@@ -378,6 +393,7 @@ function TableRowImpl<T>({
     >
       {layout.selectable && (
         <div role="cell" className={cn('sticky left-0 z-10', pinBg)}>
+          {accent}
           {/* The whole cell is the hit area, so it is at least 40 px on a tablet. */}
           <label className="grid h-full w-full cursor-pointer place-items-center">
             <input

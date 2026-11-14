@@ -1,7 +1,9 @@
 // Client preview screenshots (T-0305). Not a test and not part of the gate (ADR-046 is unchanged):
 // it saves one PNG per screen, in click-through order, for Hashir to send to the client.
 // Start the dev server first (`corepack pnpm --dir apps/ui dev`), then from the repo root:
-//   node apps/ui/scripts/client-preview.mjs docs/design/client-preview/<YYYYMMDD>
+//   node apps/ui/scripts/client-preview.mjs docs/design/client-preview/<YYYYMMDD> [all|changes]
+// "all" (default) is the T-0305 set of every screen; "changes" is the T-0306 set of the client's
+// seven changes (C1 to C7).
 // The folder is an argument, not a default: code that names a docs path would need the full gate
 // on every docs-only change (tests/config/ci.test.ts).
 // Synthetic mock data only; the clock is fixed so every relative date is the same on each run.
@@ -15,12 +17,140 @@ if (!OUT) {
   console.error('Usage: node apps/ui/scripts/client-preview.mjs <output folder>');
   process.exit(1);
 }
-const NOW = new Date('2026-10-21T10:00:00Z');
+const SET = process.argv[3] ?? 'all';
+const NOW = new Date(SET === 'changes' ? '2026-11-12T10:00:00Z' : '2026-10-21T10:00:00Z');
 const DESKTOP = { width: 1440, height: 900 };
 const TABLET = { width: 820, height: 1180 };
 
+const show = (locator) => locator.first().scrollIntoViewIfNeeded();
+
+/** T-0306: the client's seven changes, in click-through order. */
+const CHANGES = [
+  [
+    '01-home-orders-today-quick-view',
+    '/',
+    'Needs action',
+    DESKTOP,
+    async (page) => {
+      await page.getByRole('button', { name: "Show today's eBay orders" }).click();
+      await page
+        .getByRole('region', { name: "Today's eBay orders" })
+        .getByText(/View all/)
+        .waitFor();
+      await show(page.getByRole('region', { name: "Today's eBay orders" }));
+    },
+  ],
+  [
+    '02-orders-sku-column-and-same-buyer-group',
+    '/orders?placed=today&channel=ca_3',
+    'Placed: Today',
+  ],
+  [
+    '03-orders-same-buyer-menu',
+    '/orders?placed=today&channel=ca_3',
+    'Placed: Today',
+    DESKTOP,
+    async (page) => {
+      await page.getByRole('button', { name: /^Same buyer, 3 orders/ }).click();
+      await page.getByRole('menuitem', { name: 'Ship together…' }).waitFor();
+    },
+  ],
+  ['04-orders-related-order-not-shown', '/orders?view=today', 'related orders not shown'],
+  [
+    '05-ship-together-dialog',
+    '/orders?placed=today&channel=ca_3',
+    'Placed: Today',
+    DESKTOP,
+    async (page) => {
+      await page.getByRole('button', { name: /^Same buyer, 3 orders/ }).click();
+      await page.getByRole('menuitem', { name: 'Ship together…' }).click();
+      await page.getByText('Create 1 label').waitFor();
+      await page.getByText('Weight', { exact: true }).waitFor();
+    },
+  ],
+  [
+    '06-not-the-same-buyer-dialog',
+    '/orders?placed=today&channel=ca_3',
+    'Placed: Today',
+    DESKTOP,
+    async (page) => {
+      await page.getByRole('button', { name: /^Same buyer, 3 orders/ }).click();
+      await page.getByRole('menuitem', { name: 'Not the same buyer…' }).click();
+      await page.getByRole('button', { name: 'Dismiss group' }).waitFor();
+    },
+  ],
+  [
+    '07-shipping-desk-same-buyer-group',
+    '/shipping',
+    'Pick orders to ship',
+    DESKTOP,
+    async (page) => {
+      await show(page.getByRole('button', { name: /^Same buyer, 3 orders/ }));
+    },
+  ],
+  ['08-order-detail-same-buyer-panel', '/orders/ord_0495', 'Same buyer'],
+  [
+    '09-order-detail-profit-ex-and-inc-vat',
+    '/orders/ord_0039',
+    'Ship to',
+    DESKTOP,
+    async (page) => {
+      await show(page.getByRole('table', { name: 'Profit on this order' }));
+    },
+  ],
+  [
+    '10-account-health-amazon-seller-feedback',
+    '/account-health',
+    'Order Defect Rate',
+    DESKTOP,
+    async (page) => {
+      await show(page.getByRole('heading', { name: 'Seller feedback' }));
+    },
+  ],
+  [
+    '11-account-health-recovery-estimate',
+    '/account-health',
+    'Order Defect Rate',
+    DESKTOP,
+    async (page) => {
+      await show(page.getByText(/late shipments leave/));
+    },
+  ],
+  ['12-customer-service-amazon-messages', '/customer-service?section=amazon', 'Send reply'],
+  [
+    '13-connections-amazon-buyer-messages-setup',
+    '/connections',
+    'Sales channels',
+    DESKTOP,
+    async (page) => {
+      await show(page.getByRole('region', { name: 'Buyer messages setup' }));
+    },
+  ],
+  ['14-stock-list-manual-and-mixed', '/stock', 'of 200 SKUs'],
+  [
+    '15-sku-detail-manual-allocation',
+    '/stock/sku_0',
+    'Stock by channel',
+    DESKTOP,
+    async (page) => {
+      await show(page.getByText(/^Allocated /));
+    },
+  ],
+  [
+    '16-sku-detail-back-to-auto-results',
+    '/stock/sku_0',
+    'Stock by channel',
+    DESKTOP,
+    async (page) => {
+      await page.getByRole('radio', { name: 'Auto' }).click();
+      await page.getByRole('button', { name: 'Switch to Auto' }).click();
+      await show(page.getByText('Back on Auto: every listing was pushed'));
+    },
+  ],
+];
+
 /** [file name, path, text that shows the page is ready, viewport, optional step before the shot] */
-const SHOTS = [
+const ALL = [
   ['01-sign-in', '/sign-in', 'Sign in'],
   ['02-home', '/', 'Needs action'],
   ['03-orders', '/orders', 'of 500 orders'],
@@ -69,7 +199,7 @@ const SHOTS = [
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 try {
-  for (const [name, path, ready, viewport = DESKTOP, before] of SHOTS) {
+  for (const [name, path, ready, viewport = DESKTOP, before] of SET === 'changes' ? CHANGES : ALL) {
     const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
     await page.clock.setFixedTime(NOW);
     await page.goto(BASE + path);

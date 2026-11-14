@@ -3,7 +3,7 @@
  * Amazon and eBay are separate routes and separate shapes, so no screen can put their metrics
  * side by side (HLT-3). Only permitted companies' accounts are returned.
  */
-import { channelAccounts } from './data.ts';
+import { channelAccounts, orders } from './data.ts';
 import { HOUR, ago } from './random.ts';
 
 export type Band = 'good' | 'at_risk' | 'critical';
@@ -16,6 +16,22 @@ export interface AmazonMetric {
   target: string;
   period: string;
   band: Band;
+  /** HLT-7 (SHOULD): when an amber or red metric recovers on its own. An Estimate, Amazon only. */
+  recovery?: string;
+}
+
+/** HLT-6: seller feedback from the daily report. The rater email is dropped at parse time. */
+export interface AmazonFeedback {
+  average12m: number;
+  count12m: number;
+  breakdown: Array<{ period: string; positive: number; neutral: number; negative: number }>;
+  recent: Array<{
+    stars: number;
+    at: string;
+    comment: string;
+    order: { id: string; ref: string };
+  }>;
+  updatedAt: string;
 }
 
 export interface AmazonHealth {
@@ -23,6 +39,7 @@ export interface AmazonHealth {
   accountStatus: 'normal' | 'at_risk' | 'deactivated';
   rating: { score: number; band: Band } | null;
   metrics: AmazonMetric[];
+  feedback: AmazonFeedback;
   updatedAt: string;
 }
 
@@ -44,7 +61,7 @@ export interface EbayHealth {
   updatedAt: string;
 }
 
-const AMAZON: Record<string, AmazonHealth> = {
+const AMAZON: Record<string, Omit<AmazonHealth, 'feedback'>> = {
   ca_1: {
     channelAccountId: 'ca_1',
     accountStatus: 'normal',
@@ -72,6 +89,56 @@ const AMAZON: Record<string, AmazonHealth> = {
     ],
   },
 };
+
+const DAY = 86_400_000;
+const inDays = (n: number) =>
+  new Date(Date.now() + n * DAY).toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
+
+// HLT-7 lines for the amber and red metrics (from OmniBridge's own merchant-fulfilled orders).
+const RECOVERY: Record<string, Record<string, string>> = {
+  ca_3: {
+    lsr: `3 late shipments leave the 30-day window by ${inDays(2)}. With no new late shipments, Late Shipment Rate falls under 4% on ${inDays(2)}.`,
+    vtr: `11 orders without valid tracking leave the 30-day window by ${inDays(9)}. With valid tracking on every new order, Valid Tracking Rate passes 95% on ${inDays(9)}.`,
+  },
+};
+
+const COMMENTS: Array<[number, string]> = [
+  [5, 'Arrived the next day and very well packed.'],
+  [5, 'Exactly as described, thank you.'],
+  [4, 'Good product, delivery took a little longer than expected.'],
+  [2, 'Box was damaged and one jar was chipped.'],
+  [5, 'Lovely quality, will order again.'],
+  [3, 'Fine, but smaller than the photo suggests.'],
+];
+
+function feedbackFor(accountId: string, seed: number): AmazonFeedback {
+  const own = orders.filter((o) => o.channelAccountId === accountId).slice(0, 12);
+  const scale = seed === 0 ? 1 : 0.55;
+  const row = (period: string, total: number, neutralPct: number, negativePct: number) => {
+    const negative = Math.round(total * negativePct);
+    const neutral = Math.round(total * neutralPct);
+    return { period, positive: total - neutral - negative, neutral, negative };
+  };
+  return {
+    average12m: seed === 0 ? 4.8 : 4.4,
+    count12m: Math.round(214 * scale),
+    breakdown: [
+      row('30 days', Math.round(23 * scale), 0.04, seed === 0 ? 0.04 : 0.09),
+      row('90 days', Math.round(61 * scale), 0.05, seed === 0 ? 0.03 : 0.07),
+      row('12 months', Math.round(214 * scale), 0.04, seed === 0 ? 0.02 : 0.06),
+    ],
+    recent: COMMENTS.slice(seed, seed + 5).map(([stars, comment], i) => {
+      const o = own[i] ?? own[0];
+      return {
+        stars,
+        comment,
+        at: new Date(Date.now() - (i * 1.7 + 0.4) * DAY).toISOString(),
+        order: { id: o?.id ?? '', ref: o?.ref ?? '' },
+      };
+    }),
+    updatedAt: ago(7 * HOUR),
+  };
+}
 
 function m(
   key: string,
@@ -170,9 +237,19 @@ const permitted = (allowed: Set<string>, company: string | null) =>
   );
 
 export function amazonHealth(allowed: Set<string>, company: string | null): AmazonHealth[] {
-  return permitted(allowed, company).flatMap((a) => {
+  return permitted(allowed, company).flatMap((a, i) => {
     const h = AMAZON[a.id];
-    return h ? [h] : [];
+    if (!h) return [];
+    return [
+      {
+        ...h,
+        metrics: h.metrics.map((x) => {
+          const recovery = x.band === 'good' ? undefined : RECOVERY[a.id]?.[x.key];
+          return recovery ? { ...x, recovery } : x;
+        }),
+        feedback: feedbackFor(a.id, a.id === 'ca_1' ? 0 : i),
+      },
+    ];
   });
 }
 
