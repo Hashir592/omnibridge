@@ -31,12 +31,22 @@ module.exports = {
       name: 'providers-only-from-worker',
       comment:
         'Invariant 10: provider APIs are called only from packages/providers, through the queue. ' +
-        'Web handlers make no provider calls (OAuth code exchanges will get a named exception).',
+        'Web handlers make no provider calls (OAuth code exchanges will get a named exception). ' +
+        'Named exception (T-0602, PS-022): the eBay account deletion webhook reads eBay public ' +
+        'keys through the eBay provider, because eBay needs an answer within 3 seconds.',
       severity: 'error',
       from: {
         path: '^(apps/(web|ui|pii-vault|site)|packages/(core|db|pii-db|contract|crypto|logger))/',
+        pathNot: '^apps/web/src/webhooks/ebay(\\.test)?\\.ts$',
       },
       to: { path: '^packages/providers/' },
+    },
+    {
+      name: 'ebay-webhook-only-ebay-provider',
+      comment: 'The PS-022 exception covers the eBay provider only, from that one file.',
+      severity: 'error',
+      from: { path: '^apps/web/src/webhooks/ebay(\\.test)?\\.ts$' },
+      to: { path: '^packages/providers/(?!ebay/)' },
     },
     {
       name: 'pii-db-only-from-vault',

@@ -22,6 +22,7 @@ import { queueNotifier } from './auth/notifier.ts';
 import { Passwords } from './auth/passwords.ts';
 import { PlatformKeys } from './auth/platform-keys.ts';
 import { AuthService } from './auth/service.ts';
+import { ebayWebhookFromEnv } from './webhooks/ebay.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
 const logger = createLogger({ service: 'web', version });
@@ -113,6 +114,11 @@ const app = buildWebApp({
   auth,
   jobs: new JobRecordRepository(main.db),
   files: { store: fileStore, linkKey },
+  // The eBay account deletion endpoint (EBAY-2), when its secrets are mounted.
+  ...(() => {
+    const ebay = ebayWebhookFromEnv(logger);
+    return ebay === undefined ? {} : { ebay };
+  })(),
   // compose sets uniquelocal: only the private-network edge may name the client address.
   ...(process.env.TRUSTED_PROXIES ? { trustedProxies: process.env.TRUSTED_PROXIES } : {}),
 });

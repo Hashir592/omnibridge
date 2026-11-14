@@ -409,6 +409,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/webhooks/ebay/account-deletion': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** eBay account deletion: subscription challenge */
+    get: operations['ebayAccountDeletionChallenge'];
+    put?: never;
+    /** eBay account deletion notice */
+    post: operations['ebayAccountDeletion'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -502,6 +520,36 @@ export interface components {
     CreatedInput: {
       /** Format: uuid */
       id: string;
+    };
+    EbayAccountDeletionNotice: {
+      metadata: {
+        topic: string;
+      } & {
+        [key: string]: unknown;
+      };
+      notification: {
+        [key: string]: unknown;
+      };
+    } & {
+      [key: string]: unknown;
+    };
+    EbayAccountDeletionNoticeInput: {
+      metadata: {
+        topic: string;
+      } & {
+        [key: string]: unknown;
+      };
+      notification: {
+        [key: string]: unknown;
+      };
+    } & {
+      [key: string]: unknown;
+    };
+    EbayChallengeResponse: {
+      challengeResponse: string;
+    };
+    EbayChallengeResponseInput: {
+      challengeResponse: string;
     };
     Health: {
       /** @enum {string} */
@@ -615,6 +663,7 @@ export interface components {
         | 'not_found'
         | 'method_not_allowed'
         | 'conflict'
+        | 'precondition_failed'
         | 'payload_too_large'
         | 'unsupported_media_type'
         | 'rate_limited'
@@ -642,6 +691,7 @@ export interface components {
         | 'not_found'
         | 'method_not_allowed'
         | 'conflict'
+        | 'precondition_failed'
         | 'payload_too_large'
         | 'unsupported_media_type'
         | 'rate_limited'
@@ -1859,6 +1909,86 @@ export interface operations {
         content: {
           'application/json': components['schemas']['Created'];
         };
+      };
+    };
+  };
+  ebayAccountDeletionChallenge: {
+    parameters: {
+      query: {
+        challenge_code: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EbayChallengeResponse'];
+        };
+      };
+    };
+  };
+  ebayAccountDeletion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EbayAccountDeletionNoticeInput'];
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

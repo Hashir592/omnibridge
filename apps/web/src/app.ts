@@ -30,6 +30,7 @@ import fastifyHelmet from '@fastify/helmet';
 import Fastify, { type FastifyRequest } from 'fastify';
 import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
 import { authHandlers } from './auth/routes.ts';
+import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
 import type { AuthService } from './auth/service.ts';
 import { contractRoutesPlugin, installContract, type Handlers } from './contract.ts';
 
@@ -105,6 +106,11 @@ export interface WebAppOptions {
   resolveSession?: (request: FastifyRequest) => SessionActor | undefined;
   /** Tests only: a stand-in platform resolver. */
   resolvePlatform?: (request: FastifyRequest) => PlatformActor | undefined;
+  /**
+   * The eBay account deletion endpoint (EBAY-2). Without it the challenge answers 503 and a
+   * notice 401: nothing is accepted unverified.
+   */
+  ebay?: EbayWebhook;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
 }
@@ -133,6 +139,7 @@ export function buildWebApp({
   auth,
   resolveSession,
   resolvePlatform,
+  ebay,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false });
@@ -179,6 +186,7 @@ export function buildWebApp({
 
   const handlers: Handlers<typeof contractRoutes> = {
     ...authHandlers(auth),
+    ...ebayHandlers(ebay),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';
@@ -390,6 +398,7 @@ export function buildWebApp({
             }),
         ...(tenancy === undefined ? {} : { tenancy }),
         ...(members === undefined ? {} : { roleOf: (ctx: TenantContext) => members.roleOf(ctx) }),
+        ...(ebay === undefined ? {} : { verifyWebhook: webhookVerifier(ebay) }),
       },
     }),
   );

@@ -241,6 +241,11 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         changePassword: { body: { currentPassword: MARKER, password: 'a long enough password 1' } },
         signOut: {},
         signOutEverywhere: {},
+        // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
+        ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
+        ebayAccountDeletion: {
+          body: { metadata: { topic: MARKER }, notification: { userId: userB } },
+        },
       },
       markers: [MARKER, B, b.company, b.job, b.file, userB],
     });
