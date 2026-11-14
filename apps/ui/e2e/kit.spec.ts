@@ -45,6 +45,8 @@ test('[NFR-8] dialog, sheet and confirm work with the keyboard and return focus'
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'Change carrier service' });
   await expect(dialog).toBeVisible();
+  // Wait for the dialog to take focus before tabbing, so a slow open cannot race the loop (F-M03-r2-02).
+  await expect.poll(() => dialog.evaluate((d) => d.contains(document.activeElement))).toBe(true);
   // Focus is trapped: tabbing many times never leaves the dialog.
   for (let i = 0; i < 8; i++) {
     await page.keyboard.press('Tab');

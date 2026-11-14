@@ -1,3 +1,4 @@
+import { ShoppingCart } from 'lucide-react';
 import type { Channel } from '../mocks/types.ts';
 
 /**
@@ -63,39 +64,18 @@ function EbayMark() {
   );
 }
 
-/** A shopping cart with a bag and motion lines: the "own website" channel. */
+/**
+ * The "own website" channel: a plain, generic cart in the UI's own graphite. It is not any shop's
+ * logo; a per-workspace logo arrives with the website connection in M11 (ADR-057).
+ */
 function WebsiteMark() {
   return (
-    <svg viewBox="0 0 18 18" className="size-[18px]" aria-hidden>
-      <rect x="0.5" y="0.5" width="17" height="17" rx="3.5" fill="#FFFFFF" stroke="#DDE1E7" />
-      {/* motion lines */}
-      <path
-        d="M2.4 8.6h2.4M1.9 10.4h3.1M2.6 12.2h2.2"
-        stroke="#F26B1D"
-        strokeWidth="1"
-        strokeLinecap="round"
-      />
-      {/* bag */}
-      <rect x="8.7" y="5.6" width="4.2" height="4.4" rx="0.6" fill="#F26B1D" />
-      <path
-        d="M9.8 5.8V4.9a1 1 0 0 1 2 0v0.9"
-        stroke="#1F2A44"
-        strokeWidth="0.8"
-        fill="none"
-        strokeLinecap="round"
-      />
-      {/* cart: handle, basket and wheels */}
-      <path
-        d="M5.6 6.4h1.3l1.1 5.4h6.3l1.1-3.6"
-        stroke="#1F2A44"
-        strokeWidth="1.2"
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="8.9" cy="13.6" r="0.95" fill="#1F2A44" />
-      <circle cx="13.3" cy="13.6" r="0.95" fill="#1F2A44" />
-    </svg>
+    <span
+      className="grid size-[18px] place-items-center rounded-[4px] border border-border bg-card text-ink-muted"
+      aria-hidden
+    >
+      <ShoppingCart className="size-3" strokeWidth={2} />
+    </span>
   );
 }
 
