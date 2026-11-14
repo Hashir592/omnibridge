@@ -842,6 +842,127 @@
       ],
       "risk": "light",
       "status": "todo"
+    },
+    {
+      "module": "M06",
+      "session": "S3",
+      "supports": [],
+      "status": "todo",
+      "id": "T-0601",
+      "title": "Public site and legal pages (Astro)",
+      "goal": "omnibridge.co.uk is ready for Amazon and eBay review: every page live, no login wall, no tracking.",
+      "prd_ids": [
+        "WWW-1",
+        "WWW-2",
+        "WWW-3",
+        "WWW-4",
+        "WWW-5",
+        "WWW-6",
+        "DP-1",
+        "DP-2",
+        "DP-3",
+        "MAIL-1"
+      ],
+      "scope": [
+        "apps/site (Astro, ADR stack) with every PRD §10.2 page; S2 may restyle later, ship clean and plain now",
+        "Footer from platform settings (WWW-2); placeholders until the client sends the Operator details; a build check fails if a placeholder is still present in production mode",
+        "Privacy policy and terms drafts covering WWW-5 and WWW-6, including the sub-processors (netcup, Zoho, Scaleway TEM) and the Amazon email relay (CS-6)",
+        "No scripts beyond the site's own; security headers; static-web-server container with limits",
+        "docs/ops/mailboxes.md: the MAIL-1 Zoho setup and DNS records for Hashir"
+      ],
+      "out_of_scope": [
+        "Going live (devops, T-0604)",
+        "Analytics"
+      ],
+      "depends_on": [],
+      "acceptance": [
+        "[WWW-4] Playwright: every page loads with no login wall and no 'under construction' text",
+        "[WWW-3] a test finds no third-party script or cookie",
+        "[WWW-2] footer values come from settings",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal"
+    },
+    {
+      "module": "M06",
+      "session": "S3",
+      "supports": [],
+      "status": "todo",
+      "id": "T-0602",
+      "title": "eBay account-deletion endpoint (minimal, compliant)",
+      "goal": "The eBay endpoint can be subscribed as soon as the site is live.",
+      "prd_ids": [
+        "EBAY-2"
+      ],
+      "scope": [
+        "GET challenge: SHA-256 hex of challengeCode + verificationToken + endpoint, JSON, no BOM",
+        "POST: verify X-EBAY-SIGNATURE via the public-key API (mock now, verify-live later), answer 200 within 3 s",
+        "No eBay data held yet: record a receipt with no identifiers; M04 wires real deletion (FA-14: match in the vault, queue only on a hit)",
+        "Rate limit and body-size limit; signed-webhook auth in the contract"
+      ],
+      "out_of_scope": [
+        "Real deletion (M04)"
+      ],
+      "depends_on": [],
+      "acceptance": [
+        "[EBAY-2] challenge hash matches eBay's sample",
+        "[EBAY-2] bad signature rejected; good one answered 200 in under 3 s",
+        "No PII or identifiers stored (marker scan)",
+        "CI full gate green at merge"
+      ],
+      "risk": "high"
+    },
+    {
+      "module": "M06",
+      "session": "S3",
+      "supports": [],
+      "status": "todo",
+      "id": "T-0603",
+      "title": "Terms acceptance on first login",
+      "goal": "Users accept the current terms and privacy policy, logged with the version.",
+      "prd_ids": [
+        "WWW-7"
+      ],
+      "scope": [
+        "Terms version in platform settings; a new version forces acceptance at next login",
+        "Acceptance logged in the audit log with version and time"
+      ],
+      "out_of_scope": [],
+      "depends_on": [
+        "T-0601"
+      ],
+      "acceptance": [
+        "[WWW-7] a new version forces re-acceptance; acceptance is audited",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal"
+    },
+    {
+      "module": "M06",
+      "session": "S3",
+      "supports": [],
+      "status": "todo",
+      "id": "T-0604",
+      "title": "Early deploy pack for the devops person",
+      "goal": "The devops person can put the site and the eBay endpoint live on the shared VPS in about 2 days without guessing.",
+      "prd_ids": [],
+      "scope": [
+        "infra/early-deploy/: a Compose file with only site, the endpoint service, and Caddy (HTTPS, security headers), all with limits; no databases holding customer data",
+        "docs/ops/runbooks/early-deploy.md: server basics, firewall, DNS records at GoDaddy, certificates, secrets (eBay verification token) via SOPS, deploy, rollback, smoke checks",
+        "A smoke script: every page 200 over HTTPS, valid certificate, challenge GET correct"
+      ],
+      "out_of_scope": [
+        "Main app, databases, backups (Release 1 deploy)"
+      ],
+      "depends_on": [
+        "T-0601",
+        "T-0602"
+      ],
+      "acceptance": [
+        "Runbook dry-run on local Docker passes the smoke script",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal"
     }
   ]
 }

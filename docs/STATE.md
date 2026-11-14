@@ -8,7 +8,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway FIX REQUIRED (3 Majors, 7 Minors, no round 2). Then T-0204 → T-0207 → T-0206 (S5 audit) → M02 end. T-0205 deferred to Release 3.
 - **M03:** T-0305 (PR #40), T-0306 client changes (PR #41) and the M03 end fixes (PR #42) merged. S4 has the M03 end round 2 block. Next S2 task: T-0307 (generic Website mark, light).
 - **Client changes:** designs in `docs/plan/client-changes-20261112.md` (ADR-055, ADR-057). Real logic lands in M09, M10, M12 (Release 1) and M18, M20 (Release 3).
-- **Order now (one session at a time):** S4 M03 end round 2 → S3 M02 halfway fixes → T-0208 (faster CI, do it early: it saves time on every later PR) → T-0204 → T-0207 → T-0206 → M02 end → M06. S2 T-0307 whenever S2 is free.
+- **Order now (one session at a time; site first, Hashir 14 Nov 2026):** S3 M02 halfway fixes → T-0208 → M06: T-0601 + T-0603 (batch), T-0602 (high), T-0604 deploy pack → devops puts the site live (target week of 23 Nov 2026) → T-0204 → T-0207 → T-0206 → M02 end. S2 T-0307 whenever S2 is free.
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; quiet output; short sessions; batches up to 5.
 - **Process (ADR-053, ADR-054, ADR-056):** sessions merge their own green PRs. CI is the only full gate; locally `--quick` (plus a task's integration tests for high risk). Halfway checkpoints only for M02, M04, M10, M12, M17, M18. Reviews do not block the next module.
 - **Hashir:** GitHub CLI must stay on the Hashir592 account (`gh auth switch -u Hashir592`). Dev machine to 16 GB in 1 to 2 weeks.

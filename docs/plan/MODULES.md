@@ -12,7 +12,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
 |---|---|---|---|---|
 | 1 | M01 Platform foundations | 1 | S3 | done |
 | 2 | M02 Identity, tenancy and audit (T-0205 moved to Release 3) | 1 | S3 | M01 |
-| 3 | M06 Public site, legal pages and eBay deletion endpoint | 1 | S3 (+S2 design) | M02 |
+| 3 | M06 Public site, legal pages and eBay deletion endpoint (**site first**, Hashir 14 Nov 2026: runs after the M02 halfway fixes and T-0208; the rest of M02 follows it) | 1 | S3 (+S2 design) | M02 halfway fixes |
 | 4 | **Early public deploy** (devops person): the public site and endpoint on the shared VPS over HTTPS, then send the Amazon, Ads and eBay applications | 1 | devops | M06 |
 | 5 | M04 PII vault and deletion (core), plus the backup and restore scripts from M01b | 1 | S3 | M06 |
 | 6 | M05 core: notification centre and critical email alerts (console views come with the modules that feed them) | 1 | S3 | M04 |
