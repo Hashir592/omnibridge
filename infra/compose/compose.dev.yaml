@@ -70,11 +70,11 @@ services:
       DB_MAIN_HOST: db-main
       DB_MAIN_PORT: '5432'
       DB_MAIN_NAME: omnibridge
-      DB_MAIN_USER: ob_app
-      DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
+      DB_MAIN_USER: ob_ops
+      DB_MAIN_PASSWORD_FILE: /run/secrets/ob_ops_password
       SECRETS_KEK_FILE: /run/secrets/secrets_kek
       AUTH_HMAC_KEY_FILE: /run/secrets/auth_hmac_key
-    secrets: [ob_app_password, secrets_kek, auth_hmac_key]
+    secrets: [ob_ops_password, secrets_kek, auth_hmac_key]
     networks: [ob_db]
     depends_on:
       migrate-main: { condition: service_completed_successfully }

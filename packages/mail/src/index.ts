@@ -4,7 +4,13 @@
  */
 export const PACKAGE_NAME = '@omnibridge/mail';
 
-export { Mailer, SYSTEM_FROM, type SmtpConfig } from './mailer.ts';
+export {
+  isPlainAddress,
+  Mailer,
+  RecipientRejected,
+  SYSTEM_FROM,
+  type SmtpConfig,
+} from './mailer.ts';
 export {
   EmailLintError,
   escapeHtml,

@@ -138,4 +138,4 @@ Extra commands for S4:
 corepack pnpm exec vitest run packages/db/src/auth.int.test.ts apps/web/src/auth.int.test.ts
 corepack pnpm exec playwright test tests/e2e/auth.spec.ts
 ```
-The Playwright test needs the dev stack up (`docker compose -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml up -d`; the `seed` service runs first). It signs in as the DEV ONLY demo user: `demo.admin@example.test`, password `DEV ONLY lantern harbour 2026`, TOTP secret (base32) `IRCVMLKPJZGFSWJNKRHVIUBNKNCUGUSFKQ`.
+The Playwright test needs the dev stack up (`docker compose -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml up -d`; the `seed` service runs first). It signs in as the DEV ONLY demo user: `demo.admin@example.test`, password `DEV ONLY lantern harbour 2026`, TOTP secret (base32) `IRCVMLKPJZGFSLKUJ5KFALKTIVBVERKU`.

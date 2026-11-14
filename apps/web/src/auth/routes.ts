@@ -62,9 +62,9 @@ export function authHandlers(auth: AuthService | undefined): Handlers<typeof aut
       const { body: result, cookies } = await auth.confirmEnrolment(request, account, body.code);
       return { status: 200, body: result, headers: headers(cookies) };
     },
-    forgotPassword: async ({ body }) => {
-      await auth.forgotPassword(body.email);
-      return { status: 202, body: null, headers: headers() };
+    forgotPassword: ({ request, body }) => {
+      auth.forgotPassword(body.email, request.ip);
+      return Promise.resolve({ status: 202, body: null, headers: headers() });
     },
     getPasswordReset: async ({ params }) => ({
       status: 200,
@@ -90,10 +90,10 @@ export function authHandlers(auth: AuthService | undefined): Handlers<typeof aut
       body: null,
       headers: headers(await auth.enterPlatform(request, account)),
     }),
-    changePassword: async ({ body, account }) => ({
+    changePassword: async ({ request, body, account }) => ({
       status: 204,
       body: null,
-      headers: headers(await auth.changePassword(account, body)),
+      headers: headers(await auth.changePassword(request, account, body)),
     }),
     signOut: async ({ request }) => ({
       status: 204,

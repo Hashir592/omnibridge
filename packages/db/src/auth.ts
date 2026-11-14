@@ -152,6 +152,16 @@ export class AuthStore {
     };
   }
 
+  /**
+   * Counts one password reset request and says whether a mail may go out for it: 3 per email
+   * and 10 per address an hour, 100 a day in all (F-M02h-05).
+   */
+  async allowReset(key: Buffer, ip: string, now: Date): Promise<boolean> {
+    const { rows } = await sql<{ ok: boolean }>`SELECT app.auth_reset_allow(${key}, ${ip}::inet,
+      ${now}) AS ok`.execute(this.#db);
+    return rows[0]?.ok ?? false;
+  }
+
   async clearFailures(key: Buffer): Promise<void> {
     await sql`SELECT app.auth_clear_failures(${key})`.execute(this.#db);
   }

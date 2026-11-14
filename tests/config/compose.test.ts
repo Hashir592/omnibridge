@@ -182,8 +182,9 @@ describe('compose stack: secrets (SEC-5)', () => {
     expect(secretsOf('pii-vault')).toEqual(['pii_kek', 'vault_app_password']);
     expect(secretsOf('migrate-main')).toEqual(['ob_owner_password']);
     // Besides the worker, only the one-off KEK re-wrap job holds ob_platform (T-0201).
+    // It logs in as ob_ops (ADR-051): platform keys and tenant rows, never sessions.
     expect(secretsOf('rewrap-keys')).toEqual([
-      'ob_app_password',
+      'ob_ops_password',
       'ob_platform_password',
       'secrets_kek',
     ]);

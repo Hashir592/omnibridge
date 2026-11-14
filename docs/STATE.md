@@ -1,12 +1,12 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 14 Nov 2026 by S2.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 15 Nov 2026 by S3.
 
 ## Now
 
 - **Phase:** B, local Docker only. **Plan replaced on 12 Nov 2026** after the architecture audit (ADR-054): three releases, the order in `docs/plan/MODULES.md`. Release 1 = website + first approved marketplace + Evri: orders, stock, labels, tracking. The public site goes live early, deployed by Hashir's devops person.
-- **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway FIX REQUIRED (3 Majors, 7 Minors, no round 2). Then T-0204 → T-0207 → T-0206 (S5 audit) → M02 end. T-0205 deferred to Release 3.
-- **M03:** T-0305 (PR #40), T-0306 client changes (PR #41) and the M03 end fixes (PR #42) merged. S4 has the M03 end round 2 block. Next S2 task: T-0307 (generic Website mark, light).
+- **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway fixes done (carry-over in `docs/reviews/M02-halfway-carryover.md`): ADR-051 role split with new roles `ob_tenant_rw`, `ob_auth` and `ob_ops` (**recreate the local db-main volume once, then run `scripts/dev-secrets.sh`**), reset-token log redaction, change-password lockout, reset-mail caps. Next S3 (Hashir: site first): T-0208 → M06 (T-0601+T-0603, T-0602, T-0604) → T-0204 → T-0207 → T-0206 → M02 end. T-0205 deferred to Release 3.
+- **M03:** T-0305 (PR #40), T-0306 client changes (PR #41) and the M03 end fixes (PR #42) merged. M03 end round 2: APPROVED (S4, 14 Nov). Next S2 task: T-0307 (generic Website mark, light).
 - **Client changes:** designs in `docs/plan/client-changes-20261112.md` (ADR-055, ADR-057). Real logic lands in M09, M10, M12 (Release 1) and M18, M20 (Release 3).
 - **Order now (one session at a time; site first, Hashir 14 Nov 2026):** S3 M02 halfway fixes → T-0208 → M06: T-0601 + T-0603 (batch), T-0602 (high), T-0604 deploy pack → devops puts the site live (target week of 23 Nov 2026) → T-0204 → T-0207 → T-0206 → M02 end. S2 T-0307 whenever S2 is free.
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; quiet output; short sessions; batches up to 5.

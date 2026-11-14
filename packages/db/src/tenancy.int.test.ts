@@ -226,8 +226,9 @@ describe('tenancy core (TEN-1, TEN-2, TEN-3, TEN-6, TEN-10)', () => {
     ).rejects.toThrow(/row-level security/);
   });
 
-  it('[TEN-1] the policies written TO ob_app bind ob_worker too (ADR-049)', async () => {
-    // ob_worker is a member of ob_app: the restrictive company policy must still apply to it.
+  it('[TEN-1] the tenant policies bind ob_worker too (ADR-049, ADR-051)', async () => {
+    // ob_worker shares the ob_tenant_rw group with ob_app: the restrictive company policy must
+    // still apply to it.
     const client = await raw('ob_worker').connect();
     const count = async (companyIds: string) => {
       await client.query('BEGIN');
