@@ -649,12 +649,12 @@ export class AuthService {
 
   async chooseWorkspace(request: FastifyRequest, workspaceId: string): Promise<string[]> {
     const session = this.#sessionOf(request);
-    await this.#requireTerms(session.userId);
+    await this.#requireTerms(session);
     return this.#advance(session, 'workspace', workspaceId, this.#now(), false);
   }
 
   async enterPlatform(request: FastifyRequest, account: AccountActor): Promise<string[]> {
-    await this.#requireTerms(account.userId);
+    await this.#requireTerms(this.#sessionOf(request));
     const user = await this.#user(account.userId);
     if (!user.platformAdmin) throw forbidden('Only platform operators can open the console');
     return this.#advance(this.#sessionOf(request), 'platform', null, this.#now(), false);
@@ -698,8 +698,14 @@ export class AuthService {
     return { body: { next: 'workspace_picker' }, cookies: [] };
   }
 
-  async #requireTerms(userId: string): Promise<void> {
-    if (!(await this.#o.store.termsAccepted(userId, this.#o.termsVersion))) {
+  /**
+   * A session fresh from sign-in (signed_in) opens nothing until the current version is accepted.
+   * A session already in a workspace or the console passed this at its sign-in; a new version
+   * is asked for at the next sign-in (WWW-7), not in the middle of one.
+   */
+  async #requireTerms(session: StoredSession): Promise<void> {
+    if (session.stage !== 'signed_in') return;
+    if (!(await this.#o.store.termsAccepted(session.userId, this.#o.termsVersion))) {
       throw forbidden('Accept the terms and privacy policy to continue');
     }
   }

@@ -13,9 +13,19 @@ RUN corepack enable && corepack install
 RUN --mount=type=cache,id=omnibridge-pnpm-store,target=/pnpm-store \
     pnpm fetch --store-dir /pnpm-store
 COPY . .
+# The Operator details for the footer and legal pages (WWW-2), given at build time. Placeholders
+# when unset; OB_SITE_PRODUCTION=1 makes the build fail while any placeholder is left.
+ARG OB_SITE_OPERATOR_LEGAL_NAME=''
+ARG OB_SITE_OPERATOR_COMPANY_NUMBER=''
+ARG OB_SITE_OPERATOR_REGISTERED_ADDRESS=''
+ARG OB_SITE_PRODUCTION=''
 RUN --mount=type=cache,id=omnibridge-pnpm-store,target=/pnpm-store \
     pnpm install --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store \
- && pnpm --filter @omnibridge/site run build
+ && OB_SITE_OPERATOR_LEGAL_NAME="$OB_SITE_OPERATOR_LEGAL_NAME" \
+    OB_SITE_OPERATOR_COMPANY_NUMBER="$OB_SITE_OPERATOR_COMPANY_NUMBER" \
+    OB_SITE_OPERATOR_REGISTERED_ADDRESS="$OB_SITE_OPERATOR_REGISTERED_ADDRESS" \
+    OB_SITE_PRODUCTION="$OB_SITE_PRODUCTION" \
+    pnpm --filter @omnibridge/site run build
 
 FROM ${SWS_IMAGE} AS runtime
 COPY --from=build --chown=root:root /repo/apps/site/dist /public

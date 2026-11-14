@@ -719,7 +719,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
   it('[WWW-7] a new version forces re-acceptance; acceptance is audited', async () => {
     const one = await makeUser({ terms: false });
     // Not accepted yet: MFA passes, but nothing opens until the terms are accepted.
-    const first = await signedIn(app(), one);
+    const server = app();
+    const first = await signedIn(server, one);
     expect(first.next).toBe('terms');
     expect((await first.b.send('GET', '/companies')).statusCode).toBe(401);
     expect((await first.b.send('POST', '/auth/workspace', { workspaceId: A })).statusCode).toBe(
@@ -734,7 +735,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(accepted.json()).toEqual({ next: 'app' });
     expect((await first.b.send('GET', '/companies')).statusCode).toBe(200);
     // Next sign-in: accepted, straight in.
-    expect((await signedIn(app(), one)).next).toBe('app');
+    expect((await signedIn(server, one)).next).toBe('app');
 
     // A new version: asked again at the next sign-in.
     const NEW = '2027-01-01';
@@ -749,6 +750,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       [one.id],
     );
     expect(rows.rows.map((r) => r.version)).toEqual([TERMS, NEW]);
+    await server.close();
+    await v2.close();
     await expect(
       owner.query('DELETE FROM app.terms_acceptances WHERE user_id = $1', [one.id]),
     ).rejects.toThrow(/append-only/);
