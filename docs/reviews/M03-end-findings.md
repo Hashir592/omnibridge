@@ -2,7 +2,7 @@
 Reviewed: T-0301, T-0302, T-0303 (PRs #7, #11, #19, plus #23 and #32 that touch the UI), `main` at `c753c60`. verify.sh: PASS in parts (see `docs/reviews/M02-halfway-findings.md`, "How I ran it": one e2e flake, then 39/39 on a rerun)
 Acceptance re-run: 16/17 PASS, 1 FAIL (T-0303 ui-perf, F-M03-end-01)
 
-From S4, 27 Oct 2026. Verdict: **BLOCKED** (1 Blocker, 0 Majors). Round 1 of at most 2 (ADR-044). I reviewed accessibility, permission mirroring, PII handling, contract use, bundle size and render performance, not taste (S2-frontend.md).
+From S4, 27 Oct 2026. Verdict round 1: **BLOCKED** (1 Blocker, 0 Majors); round 2: **APPROVED**, see the end of this file. Round 1 of at most 2 (ADR-044). I reviewed accessibility, permission mirroring, PII handling, contract use, bundle size and render performance, not taste (S2-frontend.md).
 
 ## How I ran it
 
@@ -84,3 +84,36 @@ Resolution: `kit.spec.ts` now polls after each Tab with `expect.poll(() => dialo
 - The footer links (Privacy, Terms, Help) are dead until M06 (S1 ruling, S2 Risk 4).
 - `ui-perf` could print its p95 into the CI step summary as well as the log, so the three-run evidence is easy to read.
 - When S3 builds the order, home and shipping routes, the swap from `mockApi` to the typed client is per function; the walker test for company/tab leakage must cover each.
+
+## Round 2 (S4, 14 Nov 2026) — Verdict: **APPROVED** (0 Blockers, 0 Majors, 2 Minors carried)
+
+Reviewed `main` at `309923e` (PR #42 merged as `31672c6`). Gate evidence per ADR-054/056 is the CI run of the PR head `e7bbfcf` (run 43590559912): all jobs green, unit 283, integration 117, e2e 81 passed; `main` at `309923e` is green too (the push run at `31672c6` was cancelled by the next merge, not failed). I re-ran the fixes myself in a clean worktree; I did not re-run the whole local gate (ADR-054: CI is the gate).
+
+| Finding | Result | Evidence |
+|---|---|---|
+| F-M03-end-01 (Blocker) | **Closed by ruling** | The acceptance item was amended by its owner: ADR-054/FA-18 and `docs/backlog.json` now read "ui-perf is a local benchmark only; a unit test checks that a 100-row page renders within a fixed render count". That is a ruling by S1, not a weakening by S2; the 16 ms budget text is untouched in the benchmark. I checked the replacement test catches what it claims (below). |
+| F-M03-end-02 | Fixed | `.perf-build` is git-ignored and written only on `OB_UI_PERF=1`; after a production build `apps/ui/dist` holds `assets` and `index.html` only; no `.perf-build` appears from a normal run; `playwright test --list` shows 0 `ui-perf` tests by default. |
+| F-M03-end-03 | Fixed for the switcher | `grep "Mock persona" apps/ui/dist` finds nothing; no `mockServiceWorker`/`setupWorker` either. Production shows the signed-in user with Admin or Child (PERM-1). Residual: see F-M03-r2-01. |
+| F-M03-end-04 | **Mostly fixed** | `expect.poll` is in place and the assertion is unchanged. My runs of the fixed code: 24 (1 failed), 12, 24 and 30 (with 4 workers) passed, so 1 failure in 90 runs. See F-M03-r2-02. |
+
+**The new gate test is real.** `DataTable.test.tsx` "[NFR-8] a 100-row page renders only the visible rows, and a parent re-render renders none" passes on main (10/10 in the file). I broke the code two ways and it failed both times:
+- With `DataTable.tsx` as it was before PR #42 (`ac3c603`): `expected 30 to be +0` (30 cells redrawn on two parent re-renders). So the test finds the very cost S2 fixed.
+- With the virtualiser overscan raised from 4 to 200: `expected 100 to be less than or equal to 20` (and a second assertion at 212 > 60 in the other table test).
+Counting renders gives the same answer on a fast laptop and a loaded runner, which was the point of F-M03-end-01. What it does not prove is frame time on a real page; that is now S1's accepted trade (a local benchmark remains).
+
+### F-M03-r2-01 — Minor — The production SPA still gets its session from the mock route
+Area: 8 Requirement coverage  IDs: PERM-1
+Evidence: `apps/ui/src/app/session.tsx:25` uses `mockApi.session`, which calls `GET /api/mock/session` (`mocks/api.ts:36`); `dist/assets/api-*.js` contains `mockApi`. With MSW out of the bundle, a production build would find no such route. This was already known (S2: "waits for T-0204") and grants nothing, since the server is the gate.
+Required fix: With T-0204, replace `mockApi.session` with the typed client's session call, and write the M22 build check: `Mock persona` and `mocks/` absent from `dist`.
+Resolution: (S2 fills in at T-0204)
+
+### F-M03-r2-02 — Minor — The focus-trap test still failed once in 90 runs after the fix
+Area: 8 Requirement coverage  IDs: NFR-8
+Evidence: `playwright test --project=ui kit.spec.ts --repeat-each=6 --workers=2`: 23 passed, 1 failed, test `kit.spec.ts:39`. Three more runs (12, 24 and 30 repeats, up to 4 workers) all passed, and I did not capture the failure message. Likely cause unknown: the poll covers a late focus move after Tab; it does not cover a slow dialog open.
+Required fix: Under ADR-054 a flaky test is fixed or quarantined the day it is seen. Give the project `trace: 'retain-on-failure'` so the next failure explains itself, and wait for the first focusable element inside the dialog (`toBeFocused`) before the Tab loop. Never delete the test.
+Resolution: (S2 fills in)
+
+### Follow-ups (not findings)
+- PR #42's first CI run failed on 4 teardown errors in `packages/db/src/audit.int.test.ts` (database closed while connections were open); a re-run passed. S3 owns it: fix it in the M02 halfway fix batch if it recurs. I did not see it in the later green runs.
+- `ui-perf` is now on request only; if S2 wants the p95 number kept visible, print it when someone runs it (already done), nothing more.
+
