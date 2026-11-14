@@ -52,5 +52,22 @@ export const NAV: NavItem[] = [
   { key: 'audit', label: 'Audit Log', path: '/audit-log', icon: ScrollText, adminOnly: true },
 ];
 
-/** Mock-up screens built so far; every other tab shows a "not in the mock-ups" state. */
-export const BUILT = new Set<string>(['/orders']);
+/** Tabs with a mock-up screen; every other tab shows the placeholder (router.tsx). */
+export const BUILT = new Set<string>([
+  '/',
+  '/orders',
+  '/shipping',
+  '/stock',
+  '/sales-profit',
+  '/finance',
+  '/account-health',
+  '/users',
+  '/connections',
+  '/customer-service',
+  '/advertising',
+  '/forecasting',
+  '/reminders',
+  '/notes',
+  '/audit-log',
+  '/settings',
+]);

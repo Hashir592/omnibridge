@@ -19,6 +19,10 @@ Each screen has one image per platform (`-win32` for local runs, `-linux` for CI
 
 Sign in, TOTP code, recovery code, MFA set-up, forgot and reset password, accept invite and the workspace picker, at `/sign-in`, `/sign-in/code`, `/sign-in/recovery`, `/sign-in/set-up-mfa`, `/forgot-password`, `/reset-password?token=`, `/invite/:token` and `/workspaces`. They sit outside the app shell in `AuthFrame` (`apps/ui/src/routes/auth/layout.tsx`): at 1024 px and wider, a graphite product panel on the left and logo, form and footer on the right; below 1024 px the panel is hidden. Form messages use `Notice`: icon and coloured text only.
 
+## Client preview screens (T-0305)
+
+Mock-ups on MSW synthetic data for every other tab, built from the kit only: Stock & Catalogue (`/stock`, `/stock/:skuId`, tablet layout included), Sales & Profit, Finance (VAT quarters, expenses, P&L), Account Health (Amazon and eBay tabs), Users (`/users`, `/users/:userId`), Connections, Customer Service, Advertising, Forecasting, Reminders, Notes, the notification panel behind the bell, Audit Log, Settings and the password-change screen (`/sign-in/password-change`). Shared pieces: `components/Card.tsx` (card, page header, figure, details row, simple table), `components/Statement.tsx` (money statements), `components/TabGate.tsx` (permission mirroring for a shared link) and `components/NoCustomerDetails.tsx` (the TOOL-3 line and warning). The only chart is the Sales & Profit bar and line chart (Recharts): petrol for this period and a dashed grey line for the comparison, with a legend and a "Show table" view. Warnings are plain icon and text, never a tinted box. These screens have axe and keyboard tests (`apps/ui/e2e/preview.spec.ts`) and no screenshot tests (ADR-046). The PNG set sent to the client is in `client-preview/20261021/`, made by `apps/ui/scripts/client-preview.mjs`.
+
 ## Colour tokens
 
 Tailwind 4 `@theme` tokens; use them as `bg-<token>`, `text-<token>` and so on. Contrast ratios are against white unless stated.

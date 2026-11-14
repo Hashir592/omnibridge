@@ -86,7 +86,7 @@ export interface OrderPage {
 }
 
 export interface Session {
-  user: { name: string; initials: string; isAdmin: boolean };
+  user: { name: string; initials: string; isAdmin: boolean; email: string };
   workspace: string;
   tabs: Tab[];
   companies: Company[];

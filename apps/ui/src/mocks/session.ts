@@ -36,7 +36,7 @@ export function getPersona(): Persona {
 export function currentSession(): Session {
   if (persona === 'admin') {
     return {
-      user: { name: 'Sam Admin', initials: 'SA', isAdmin: true },
+      user: { name: 'Sam Admin', initials: 'SA', isAdmin: true, email: 'sam.admin@example.com' },
       workspace: 'Demo workspace',
       tabs: ALL_TABS,
       companies,
@@ -45,7 +45,7 @@ export function currentSession(): Session {
   }
   const allowed = new Set(['co_1', 'co_2']);
   return {
-    user: { name: 'Pat Packer', initials: 'PP', isAdmin: false },
+    user: { name: 'Pat Packer', initials: 'PP', isAdmin: false, email: 'pat.packer@example.com' },
     workspace: 'Demo workspace',
     tabs: ['home', 'orders', 'shipping'],
     companies: companies.filter((c) => allowed.has(c.id)),
