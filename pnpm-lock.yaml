@@ -360,6 +360,9 @@ importers:
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@omnibridge/provider-ebay':
+        specifier: workspace:*
+        version: link:../../packages/providers/ebay
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -452,6 +455,9 @@ importers:
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@omnibridge/provider-ebay':
+        specifier: workspace:*
+        version: link:../../packages/providers/ebay
       fastify:
         specifier: 5.12.7
         version: 5.12.7

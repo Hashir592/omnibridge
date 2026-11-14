@@ -23,6 +23,7 @@
               "not_found",
               "method_not_allowed",
               "conflict",
+              "precondition_failed",
               "payload_too_large",
               "unsupported_media_type",
               "rate_limited",
@@ -344,6 +345,25 @@
         },
         "required": ["id"]
       },
+      "EbayChallengeResponseInput": {
+        "type": "object",
+        "properties": { "challengeResponse": { "type": "string" } },
+        "required": ["challengeResponse"]
+      },
+      "EbayAccountDeletionNoticeInput": {
+        "type": "object",
+        "properties": {
+          "metadata": {
+            "type": "object",
+            "properties": { "topic": { "type": "string" } },
+            "required": ["topic"],
+            "additionalProperties": {}
+          },
+          "notification": { "type": "object", "properties": {}, "additionalProperties": {} }
+        },
+        "required": ["metadata", "notification"],
+        "additionalProperties": {}
+      },
       "Problem": {
         "type": "object",
         "properties": {
@@ -360,6 +380,7 @@
               "not_found",
               "method_not_allowed",
               "conflict",
+              "precondition_failed",
               "payload_too_large",
               "unsupported_media_type",
               "rate_limited",
@@ -697,6 +718,26 @@
         },
         "required": ["id"],
         "additionalProperties": false
+      },
+      "EbayChallengeResponse": {
+        "type": "object",
+        "properties": { "challengeResponse": { "type": "string" } },
+        "required": ["challengeResponse"],
+        "additionalProperties": false
+      },
+      "EbayAccountDeletionNotice": {
+        "type": "object",
+        "properties": {
+          "metadata": {
+            "type": "object",
+            "properties": { "topic": { "type": "string" } },
+            "required": ["topic"],
+            "additionalProperties": {}
+          },
+          "notification": { "type": "object", "properties": {}, "additionalProperties": {} }
+        },
+        "required": ["metadata", "notification"],
+        "additionalProperties": {}
       }
     }
   },
@@ -1912,6 +1953,81 @@
         "summary": "Sign out on all devices",
         "x-permissions": {
           "auth": "signed-in",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/ebay/account-deletion": {
+      "get": {
+        "operationId": "ebayAccountDeletionChallenge",
+        "summary": "eBay account deletion: subscription challenge",
+        "parameters": [
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "in": "query",
+            "name": "challenge_code",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "public",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EbayChallengeResponse" }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "ebayAccountDeletion",
+        "summary": "eBay account deletion notice",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EbayAccountDeletionNoticeInput" }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "signed-webhook",
           "tab": "none",
           "adminOnly": false,
           "companyScoped": false

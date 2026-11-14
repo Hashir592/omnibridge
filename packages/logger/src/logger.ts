@@ -52,6 +52,9 @@ export const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
   'keyVersion',
   'kekVersion',
   'count',
+  // Provider webhooks (T-0602): the notice topic and whether it verified, never its ids.
+  'topic',
+  'verified',
 ]);
 
 const REDACTED = '[REDACTED]';

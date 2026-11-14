@@ -10,6 +10,7 @@ export const ERROR_CODES = [
   'not_found',
   'method_not_allowed',
   'conflict',
+  'precondition_failed',
   'payload_too_large',
   'unsupported_media_type',
   'rate_limited',

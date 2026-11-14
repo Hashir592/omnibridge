@@ -4,6 +4,7 @@ import { getHealth } from './routes/health.ts';
 import { getFile } from './routes/files.ts';
 import { getJob } from './routes/jobs.ts';
 import { createCompany, createWorkspace, listCompanies } from './routes/tenancy.ts';
+import { webhookRoutes } from './routes/webhooks.ts';
 
 /**
  * Every route the web app serves. The server registers routes only from this list, and the
@@ -19,6 +20,7 @@ export const contractRoutes = [
   listAuditEvents,
   exportAuditEvents,
   ...authRoutes,
+  ...webhookRoutes,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;

@@ -86,6 +86,11 @@ export interface AuthOptions {
    * token. Throws an ApiError to refuse.
    */
   checkRequest?: (request: FastifyRequest, route: AnyRoute) => void | Promise<void>;
+  /**
+   * The provider's signature check of a `signed-webhook` route, run once the body is parsed
+   * (EBAY-2). Without it those routes answer 401; a false answer is 412.
+   */
+  verifyWebhook?: (request: FastifyRequest, route: AnyRoute) => Promise<boolean>;
   /** Opens the request's one tenant transaction (required with resolveSession). */
   tenancy?: TenantRunner;
   /**
@@ -110,9 +115,11 @@ type Actor =
   | { kind: 'public' }
   | { kind: 'session'; session: SessionActor }
   | { kind: 'platform'; platform: PlatformActor }
-  | { kind: 'account'; account: AccountActor };
+  | { kind: 'account'; account: AccountActor }
+  | { kind: 'webhook' };
 
 const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
+const WEBHOOK_BODY_LIMIT = 64 * 1024;
 
 /** The caller of each request, set by the route's onRequest hook. */
 const actors = new WeakMap<FastifyRequest, Actor>();
@@ -128,7 +135,11 @@ async function authenticate(
   auth: AuthOptions,
 ): Promise<Actor> {
   const unauthorized = () => new ApiError({ status: 401, code: 'unauthorized' });
-  if (!SAFE_METHODS.has(route.method)) await auth.checkRequest?.(request, route);
+  // A signed webhook comes from the provider's servers, not a browser: its signature, checked
+  // once the body is parsed, stands in for the Origin check and CSRF token.
+  if (!SAFE_METHODS.has(route.method) && route.auth !== 'signed-webhook') {
+    await auth.checkRequest?.(request, route);
+  }
   switch (route.auth) {
     case 'public':
       return { kind: 'public' };
@@ -149,6 +160,9 @@ async function authenticate(
       if (account === undefined) throw unauthorized();
       return { kind: 'account', account };
     }
+    case 'signed-webhook':
+      if (auth.verifyWebhook === undefined) throw unauthorized();
+      return { kind: 'webhook' };
     default:
       throw unauthorized();
   }
@@ -373,6 +387,17 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
       onRequest: async (request) => {
         actors.set(request, await authenticate(route, request, auth));
       },
+      ...(route.auth === 'signed-webhook'
+        ? {
+            // A provider notice is small; anything bigger is refused before it is read.
+            bodyLimit: WEBHOOK_BODY_LIMIT,
+            preValidation: async (request: FastifyRequest) => {
+              if (!(await auth.verifyWebhook?.(request, route))) {
+                throw new ApiError({ status: 412, code: 'precondition_failed' });
+              }
+            },
+          }
+        : {}),
       handler: async (request, reply) => {
         const input = {
           params: route.params ? request.params : undefined,

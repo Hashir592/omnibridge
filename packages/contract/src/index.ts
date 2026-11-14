@@ -52,6 +52,12 @@ export {
 } from './route.ts';
 export { getHealth, HealthSchema, type Health } from './routes/health.ts';
 export {
+  EBAY_ACCOUNT_DELETION_PATH,
+  ebayAccountDeletion,
+  ebayAccountDeletionChallenge,
+  webhookRoutes,
+} from './routes/webhooks.ts';
+export {
   AuditEventSchema,
   auditFilters,
   exportAuditEvents,

@@ -19,6 +19,7 @@
   "dependencies": {
     "@omnibridge/core": "workspace:*",
     "@omnibridge/logger": "workspace:*",
+    "@omnibridge/provider-ebay": "workspace:*",
     "fastify": "5.12.7"
   }
 }
