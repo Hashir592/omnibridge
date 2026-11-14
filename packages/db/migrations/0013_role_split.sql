@@ -18,6 +18,10 @@
 -- session_advance allows only the stage moves the app makes, with platform only for a user whose
 -- platform_admin flag is set.
 
+-- Every migration runs in one transaction; SET LOCAL keeps these to that transaction.
+SET LOCAL lock_timeout = '1s';
+SET LOCAL statement_timeout = '30s';
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ob_tenant_rw')

@@ -7,6 +7,10 @@
 -- the same client address in the last hour, and 100 in the last 24 hours overall. Over a cap
 -- the route still answers 202 and nothing is sent. Rows older than 24 hours are dropped.
 
+-- Every migration runs in one transaction; SET LOCAL keeps these to that transaction.
+SET LOCAL lock_timeout = '1s';
+SET LOCAL statement_timeout = '30s';
+
 CREATE TABLE app.reset_requests (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   key bytea NOT NULL CHECK (octet_length(key) = 32),
