@@ -169,7 +169,8 @@ export const previewHandlers = [
     gate('admin') ? HttpResponse.json(auditPage(params(request))) : forbidden(),
   ),
 
-  http.get('*/api/mock/users', () => (gate('admin') ? HttpResponse.json(users) : forbidden())),
+  // The real route since T-0204 (GET /users); the mock answers it for the preview.
+  http.get('*/users', () => (gate('admin') ? HttpResponse.json(users) : forbidden())),
   http.get('*/api/mock/connections', () =>
     gate('admin') ? HttpResponse.json(connections) : forbidden(),
   ),

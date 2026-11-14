@@ -54,6 +54,8 @@ export interface InviteInfo {
   invitedBy: string;
   email: string;
   expiresAt: string;
+  /** The email already has an OmniBridge sign-in: they confirm with its password (T-0204). */
+  existingUser?: boolean;
 }
 
 /** GET /auth/workspaces → 200 (only after MFA). */

@@ -214,7 +214,7 @@ export const authHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.get('*/api/mock/invites/:token', ({ params }) =>
+  http.get('*/auth/invites/:token', ({ params }) =>
     usable(params.token as string)
       ? HttpResponse.json<InviteInfo>({
           workspaceName: 'Demo workspace',
@@ -225,9 +225,9 @@ export const authHandlers = [
       : problem(404, 'not_found', 'link_unusable'),
   ),
 
-  http.post('*/api/mock/invites/:token/accept', async ({ params, request }) => {
-    if (!usable(params.token as string)) return problem(404, 'not_found', 'link_unusable');
-    const { password } = (await request.json()) as { password?: string };
+  http.post('*/auth/invites/accept', async ({ request }) => {
+    const { token, password } = (await request.json()) as { token?: string; password?: string };
+    if (!usable(token)) return problem(404, 'not_found', 'link_unusable');
     if ((password ?? '').toLowerCase().includes('password')) return breached();
     current = 'new.user@example.test';
     return HttpResponse.json<SignInResult>({ next: 'mfa_setup' });

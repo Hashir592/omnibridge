@@ -24,7 +24,7 @@ import { useToast } from '../kit/Toast.tsx';
 import { cn } from '../lib/cn.ts';
 import { formatDate, formatTime } from '../lib/format.ts';
 import { TICKABLE_TABS, type WorkspaceUser } from '../mocks/admin.ts';
-import { mockApi } from '../mocks/api.ts';
+import { usersApi } from '../auth/api.ts';
 import type { Tab } from '../mocks/types.ts';
 
 const ADMIN_TABS = ['Connections', 'Users', 'Settings', 'Audit Log'];
@@ -66,7 +66,7 @@ export function UsersPage() {
 function UsersList() {
   const { session, persona, company } = useAppState();
   const [inviting, setInviting] = useState(false);
-  const q = useQuery({ queryKey: ['users', persona], queryFn: mockApi.users, enabled: !!session });
+  const q = useQuery({ queryKey: ['users', persona], queryFn: usersApi.list, enabled: !!session });
   const total = session?.companies.length ?? 0;
 
   return (
@@ -273,7 +273,7 @@ export function UserDetailPage() {
 function UserDetail() {
   const { userId } = userRoute.useParams();
   const { session, persona } = useAppState();
-  const q = useQuery({ queryKey: ['users', persona], queryFn: mockApi.users, enabled: !!session });
+  const q = useQuery({ queryKey: ['users', persona], queryFn: usersApi.list, enabled: !!session });
   const u = q.data?.find((x) => x.id === userId);
   return (
     <div className="h-full overflow-y-auto">

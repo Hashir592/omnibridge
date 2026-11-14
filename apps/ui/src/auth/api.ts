@@ -4,7 +4,9 @@
  * the `ob_csrf` cookie and the SPA echoes it in `x-csrf-token`.
  */
 import { createApiClient } from '@omnibridge/contract/client';
+import type { WorkspaceUser } from '../mocks/admin.ts';
 import type {
+  InviteInfo,
   MfaConfirmResult,
   MfaEnrolment,
   MfaResult,
@@ -61,6 +63,15 @@ async function reply<T>(
   };
 }
 
+/** Users of the workspace (T-0204, admin only): members and open invites. */
+export const usersApi = {
+  list: async (): Promise<WorkspaceUser[]> => {
+    const r = await reply<WorkspaceUser[]>(api.GET('/users'));
+    if (!r.ok) throw new Error(String(r.status));
+    return r.body as WorkspaceUser[];
+  },
+};
+
 export const authApi = {
   signIn: async (email: string, password: string) =>
     reply<SignInResult>(
@@ -94,6 +105,15 @@ export const authApi = {
       }),
     ),
   workspaces: () => reply<WorkspaceChoice[]>(api.GET('/auth/workspaces')),
+  invite: (token: string) =>
+    reply<InviteInfo>(api.GET('/auth/invites/{token}', { params: { path: { token } } })),
+  acceptInvite: async (token: string, name: string, password: string) =>
+    reply<SignInResult>(
+      api.POST('/auth/invites/accept', {
+        body: { token, name, password },
+        headers: await csrfHeaders(),
+      }),
+    ),
   chooseWorkspace: async (workspaceId: string) =>
     reply<never>(
       api.POST('/auth/workspace', { body: { workspaceId }, headers: await csrfHeaders() }),
