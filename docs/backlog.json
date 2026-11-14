@@ -2,7 +2,7 @@
   "version": 3,
   "updated": "2026-11-14",
   "owner": "S1",
-  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0304) is reviewed by S4 in the same session as the M02 halfway. From 12 Nov 2026 (ADR-054): build order and releases are in MODULES.md; T-0205 deferred to Release 3; halfway checkpoints only for M02, M04, M10, M12, M17, M18; CI is the only full gate.",
+  "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0304) is reviewed by S4 in the same session as the M02 halfway. From 12 Nov 2026 (ADR-054): build order and releases are in MODULES.md; T-0205 deferred to Release 3; halfway checkpoints only for M02, M04, M10, M12, M17, M18; CI is the only full gate. Brand logo (15 Nov 2026): the app shell, sign-in screen and email templates switch to the logo in the next S2 task that touches them (no separate session for it).",
   "tasks": [
     {
       "id": "T-0101",
@@ -868,7 +868,8 @@
         "Footer from platform settings (WWW-2); placeholders until the client sends the Operator details; a build check fails if a placeholder is still present in production mode",
         "Privacy policy and terms drafts covering WWW-5 and WWW-6, including the sub-processors (netcup, Zoho, Scaleway TEM) and the Amazon email relay (CS-6)",
         "No scripts beyond the site's own; security headers; static-web-server container with limits",
-        "docs/ops/mailboxes.md: the MAIL-1 Zoho setup and DNS records for Hashir"
+        "docs/ops/mailboxes.md: the MAIL-1 Zoho setup and DNS records for Hashir",
+        "Brand logo (Hashir, 15 Nov 2026): source docs/design/brand/omnibridge-logo-source.png. Make optimised assets in apps/site (header logo, clover-only mark, favicon set, Open Graph image; transparent background, WebP/PNG, total under 100 KB) and use them on every page. Keep the source file; do not redraw the logo."
       ],
       "out_of_scope": [
         "Going live (devops, T-0604)",
@@ -879,7 +880,8 @@
         "[WWW-4] Playwright: every page loads with no login wall and no 'under construction' text",
         "[WWW-3] a test finds no third-party script or cookie",
         "[WWW-2] footer values come from settings",
-        "CI full gate green at merge"
+        "CI full gate green at merge",
+        "Logo in the header and as the favicon on every page"
       ],
       "risk": "normal"
     },
