@@ -128,6 +128,7 @@ function Detail({ d }: { d: OrderDetail }) {
         </div>
         <div className="flex min-w-0 flex-col gap-5">
           <ShipTo d={d} />
+          {d.sameBuyer.length > 0 && <SameBuyer d={d} />}
           <Shipping d={d} />
           <Notes d={d} />
         </div>
@@ -366,43 +367,132 @@ function Items({ d }: { d: OrderDetail }) {
   );
 }
 
+/** VAT at 20% on an ex VAT amount, rounded half-up once per row (PRF-6). */
+const vat20 = (exPence: number) => Math.round(exPence * 0.2);
+
+/**
+ * Profit card (client change C4, PRF-6): one table with Ex VAT, VAT and Inc VAT. Profit is the
+ * ex VAT figure (PRF-2); Inc VAT is the cash before the VAT settlement. Fees are estimates until
+ * the channel settles them (PRF-5).
+ */
 function Profit({ d }: { d: OrderDetail }) {
   const m = d.money;
-  const net = m.totalPence - m.refundPence - m.vatPence;
-  const profit = net - m.feePence - m.labelPence - m.cogsPence;
+  const salesInc = m.totalPence - m.refundPence;
+  const salesVat = Math.round(salesInc / 6);
+  const rows = [
+    {
+      label: 'Sales',
+      note: 'Paid by the buyer, less refunds',
+      ex: salesInc - salesVat,
+      vat: salesVat,
+    },
+    { label: 'Channel fees', estimate: true, ex: -m.feePence, vat: -vat20(m.feePence) },
+    { label: 'Label cost', ex: -m.labelPence, vat: -vat20(m.labelPence) },
+    {
+      label: 'Cost of goods',
+      note: 'Snapshot when the order was placed',
+      ex: -m.cogsPence,
+      vat: -vat20(m.cogsPence),
+    },
+  ];
+  const profitEx = rows.reduce((a, r) => a + r.ex, 0);
+  const netVat = rows.reduce((a, r) => a + r.vat, 0);
+  const salesEx = rows[0]?.ex ?? 0;
+  const money = (p: number) => (p === 0 ? '-' : formatPence(p));
   return (
     <Card title="Profit" aside={<Signal>Estimate</Signal>}>
-      <div className="grid gap-x-10 px-5 py-3 sm:grid-cols-2">
-        <div>
-          <Row label="Paid, less VAT and refunds" value={formatPence(net)} />
-          <Row
-            label={
-              <>
-                Channel fees <span className="text-ink-muted">(estimate)</span>
-              </>
-            }
-            value={formatPence(-m.feePence)}
-          />
-          <Row label="Label cost" value={m.labelPence ? formatPence(-m.labelPence) : '-'} />
-          <Row label="Cost of goods (snapshot)" value={formatPence(-m.cogsPence)} />
-        </div>
-        <div className="mt-2 flex flex-col justify-center border-t border-divider pt-3 sm:mt-0 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-10">
-          <span className="text-xs text-ink-muted">Profit on this order</span>
-          <span
-            className={cn(
-              'num mt-0.5 text-xl font-semibold',
-              profit < 0 ? 'text-danger' : 'text-ink',
-            )}
-          >
-            {formatPence(profit)}
-          </span>
-          <span className="num mt-0.5 text-xs text-ink-muted">
-            {net > 0
-              ? `${String(Math.round((profit / net) * 100))}% of sales after VAT`
-              : 'No sales left after refunds'}
-          </span>
-        </div>
+      <div className="overflow-x-auto">
+        <table aria-label="Profit on this order" className="w-full border-collapse text-13">
+          <thead>
+            <tr className="h-10 bg-rail text-xs text-ink-muted">
+              <th scope="col" className="border-b border-divider pl-5 text-left font-medium">
+                Line
+              </th>
+              {['Ex VAT', 'VAT', 'Inc VAT'].map((h) => (
+                <th
+                  key={h}
+                  scope="col"
+                  className="border-b border-divider px-4 text-right font-medium last:pr-5"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-b border-divider">
+                <th scope="row" className="py-2 pl-5 text-left font-normal">
+                  <span className="flex items-center gap-2">
+                    {r.label}
+                    {r.estimate && <Signal>Estimate</Signal>}
+                  </span>
+                  {r.note && <span className="block text-xs text-ink-muted">{r.note}</span>}
+                </th>
+                <td className="num px-4 text-right">{money(r.ex)}</td>
+                <td className="num px-4 text-right text-ink-muted">{money(r.vat)}</td>
+                <td className="num px-4 pr-5 text-right">{money(r.ex + r.vat)}</td>
+              </tr>
+            ))}
+            <tr className="h-11 bg-rail">
+              <th scope="row" className="pl-5 text-left font-semibold">
+                Profit
+              </th>
+              <td
+                className={cn('num px-4 text-right font-semibold', profitEx < 0 && 'text-danger')}
+              >
+                {formatPence(profitEx)}
+              </td>
+              <td className="num px-4 text-right font-semibold">{formatPence(netVat)}</td>
+              <td className="num px-4 pr-5 text-right font-semibold">
+                {formatPence(profitEx + netVat)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+      <div className="flex flex-col gap-1 px-5 py-3 text-xs text-ink-muted">
+        <span className="num font-medium text-ink">
+          {salesEx > 0
+            ? `${String(Math.round((profitEx / salesEx) * 100))}% of sales after VAT`
+            : 'No sales left after refunds'}
+        </span>
+        <span>
+          Profit is the ex VAT figure. Inc VAT is the cash before you settle VAT with HMRC; the
+          difference is the net VAT of {formatPence(netVat)}.
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+/** C3: the other orders of this order's same-buyer group, with links. */
+function SameBuyer({ d }: { d: OrderDetail }) {
+  return (
+    <Card
+      title="Same buyer"
+      aside={<span className="num text-xs text-ink-muted">{d.sameBuyer.length + 1} orders</span>}
+    >
+      <ul className="px-5 py-2">
+        {d.sameBuyer.map((o) => (
+          <li key={o.id} className="border-b border-divider py-2.5 text-13 last:border-0">
+            <Link
+              to="/orders/$orderId"
+              params={{ orderId: o.id }}
+              className="ref font-medium whitespace-nowrap text-brand-600 hover:underline"
+            >
+              {o.ref}
+            </Link>
+            <span className="num block text-xs text-ink-muted">
+              Placed {formatDate(o.placedAt)} {formatTime(o.placedAt)} · {formatPence(o.totalPence)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-divider px-5 py-3 text-xs text-ink-muted">
+        Same buyer and address on this channel account. Ship them as one parcel with Ship together
+        on the order list or the shipping desk.
+      </p>
     </Card>
   );
 }

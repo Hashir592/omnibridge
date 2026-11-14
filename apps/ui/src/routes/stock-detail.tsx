@@ -3,11 +3,13 @@ import { Link, getRouteApi } from '@tanstack/react-router';
 import {
   ChevronLeft,
   CircleCheck,
+  CircleSlash,
   Clock,
   OctagonAlert,
   PackagePlus,
   Pencil,
   SlidersHorizontal,
+  TriangleAlert,
   Warehouse,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -18,7 +20,7 @@ import { SkuStatus, coverText } from '../components/stock.tsx';
 import { TabGate } from '../components/TabGate.tsx';
 import { SignalLabel, StatusLabel } from '../kit/Badge.tsx';
 import { Button } from '../kit/Button.tsx';
-import { Dialog } from '../kit/Dialog.tsx';
+import { ConfirmDialog, Dialog } from '../kit/Dialog.tsx';
 import { Field, Input } from '../kit/Field.tsx';
 import { Select } from '../kit/Select.tsx';
 import { EmptyState } from '../kit/states.tsx';
@@ -26,7 +28,13 @@ import { useToast } from '../kit/Toast.tsx';
 import { cn } from '../lib/cn.ts';
 import { formatDate, formatDateTime, formatInt, formatPence, formatTime } from '../lib/format.ts';
 import { mockApi } from '../mocks/api.ts';
-import { VAT_LABEL, type Listing, type SkuDetail } from '../mocks/stock.ts';
+import {
+  VAT_LABEL,
+  autoPushResults,
+  targetOf,
+  type Listing,
+  type SkuDetail,
+} from '../mocks/stock.ts';
 
 const route = getRouteApi('/stock/$skuId');
 
@@ -193,36 +201,7 @@ function Detail({ d }: { d: SkuDetail }) {
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-5">
-          <Card
-            title="Stock by channel"
-            aside={
-              <span className="text-xs text-ink-muted">
-                Pushed = available − buffer, never below 0
-              </span>
-            }
-          >
-            {d.listings.length === 0 ? (
-              <EmptyState
-                title="No listings on your channels"
-                body="Map a listing to this SKU from Unmapped listings, or list it on a channel."
-              />
-            ) : (
-              <SimpleTable
-                label="Stock by channel"
-                head={[
-                  { label: 'Channel account' },
-                  { label: 'Listing' },
-                  { label: 'Buffer', align: 'right' },
-                  { label: 'On channel', align: 'right' },
-                  { label: 'Last push' },
-                ]}
-              >
-                {d.listings.map((l) => (
-                  <ListingRow key={l.id} l={l} />
-                ))}
-              </SimpleTable>
-            )}
-          </Card>
+          <StockByChannel key={d.sku.id} d={d} />
 
           <Card title="Stock movements" aside={<Button size="sm">Export</Button>}>
             {d.movements.length === 0 ? (
@@ -607,5 +586,338 @@ function AdjustDialog({
         </Field>
       </div>
     </Dialog>
+  );
+}
+
+/* ---------- Stock by channel, with manual allocation (client change C7, INV-10) ---------- */
+
+type PushResult = { listingId: string; result: 'sent' | 'held' | 'failed' };
+
+function StockByChannel({ d }: { d: SkuDetail }) {
+  const toast = useToast();
+  const available = d.sku.available;
+  const mfn = d.listings.filter((l) => l.fulfilment === 'MFN');
+  const startMode: 'auto' | 'manual' =
+    mfn.length > 0 && mfn.every((l) => l.mode === 'manual') ? 'manual' : 'auto';
+  const [mode, setMode] = useState<'auto' | 'manual'>(startMode);
+  // The quantity typed per listing. Switching to Manual starts from what each listing shows now.
+  const [qty, setQty] = useState<Record<string, string>>(() =>
+    Object.fromEntries(mfn.map((l) => [l.id, String(l.manual?.qty ?? l.channelQty ?? 0)])),
+  );
+  const [confirm, setConfirm] = useState<'save' | 'auto' | null>(null);
+  const [results, setResults] = useState<PushResult[] | null>(null);
+  const mixed = startMode === 'auto' && mfn.some((l) => l.mode === 'manual');
+
+  const numberOf = (id: string) => {
+    const n = Number(qty[id]);
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  };
+  const sold = (l: Listing) => (l.manual ? l.manual.sold : 0);
+  const live = (l: Listing): Listing => {
+    const n = numberOf(l.id);
+    return mode === 'manual' && l.fulfilment === 'MFN'
+      ? {
+          ...l,
+          mode: 'manual',
+          manual: {
+            qty: n ?? 0,
+            sold: sold(l),
+            setAt: l.manual?.setAt ?? '',
+            setBy: l.manual?.setBy ?? '',
+          },
+        }
+      : { ...l, mode: 'auto', manual: null };
+  };
+  const allocated = mfn.reduce((a, l) => a + (numberOf(l.id) ?? 0), 0);
+  const invalid = mfn.some((l) => numberOf(l.id) === null);
+
+  if (d.listings.length === 0)
+    return (
+      <Card title="Stock by channel">
+        <EmptyState
+          title="No listings on your channels"
+          body="Map a listing to this SKU from Unmapped listings, or list it on a channel."
+        />
+      </Card>
+    );
+
+  return (
+    <Card
+      title="Stock by channel"
+      aside={
+        d.sku.bundle ? (
+          <span className="text-xs text-ink-muted">A bundle follows its component's stock</span>
+        ) : (
+          <div role="radiogroup" aria-label="Stock sync" className="flex items-center gap-2">
+            <span className="text-xs text-ink-muted">Stock sync</span>
+            <span className="flex rounded-full border border-border p-0.5">
+              {(['auto', 'manual'] as const).map((m) => (
+                <button
+                  key={m}
+                  role="radio"
+                  aria-checked={mode === m}
+                  onClick={() => {
+                    if (m === mode) return;
+                    if (m === 'auto') setConfirm('auto');
+                    else {
+                      setMode('manual');
+                      setResults(null);
+                    }
+                  }}
+                  className={cn(
+                    'h-7 rounded-full px-3 text-13 font-medium',
+                    mode === m ? 'bg-side text-white' : 'text-ink-muted hover:text-ink',
+                  )}
+                >
+                  {m === 'auto' ? 'Auto' : 'Manual'}
+                </button>
+              ))}
+            </span>
+          </div>
+        )
+      }
+    >
+      <p className="border-b border-divider px-5 py-3 text-13 text-ink-muted">
+        {mode === 'manual'
+          ? 'You choose how many each listing shows. A listing never shows more than you have: target = the lower of (allocation − sold since set) and (available − buffer).'
+          : mixed
+            ? 'Mixed: some listings use a manual allocation, the rest follow available stock.'
+            : 'Every listing shows available − buffer, never below 0.'}
+      </p>
+
+      {results && (
+        <div role="status" className="border-b border-divider px-5 py-3">
+          <p className="text-13 font-medium">Back on Auto: every listing was pushed</p>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {results.map((r) => {
+              const l = d.listings.find((x) => x.id === r.listingId);
+              const name = l ? accountName(l) : r.listingId;
+              return (
+                <li key={r.listingId} className="flex items-center justify-between gap-3 text-13">
+                  <span>{name}</span>
+                  {r.result === 'sent' ? (
+                    <StatusLabel tone="success">
+                      Sent:{' '}
+                      {formatInt(l ? targetOf({ ...l, mode: 'auto', manual: null }, available) : 0)}
+                    </StatusLabel>
+                  ) : r.result === 'held' ? (
+                    <StatusLabel tone="warning" icon={Clock}>
+                      Held by eBay revision limit, sends later
+                    </StatusLabel>
+                  ) : (
+                    <StatusLabel tone="danger">Failed, retrying</StatusLabel>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      <SimpleTable
+        label="Stock by channel"
+        head={
+          mode === 'manual'
+            ? [
+                { label: 'Channel account' },
+                { label: 'Listing' },
+                { label: 'Allocation', align: 'right' },
+                { label: 'Sold since set', align: 'right' },
+                { label: 'Live target', align: 'right' },
+                { label: 'Note' },
+              ]
+            : [
+                { label: 'Channel account' },
+                { label: 'Listing' },
+                { label: 'Buffer', align: 'right' },
+                { label: 'On channel', align: 'right' },
+                { label: 'Last push' },
+              ]
+        }
+      >
+        {d.listings.map((l) =>
+          mode === 'manual' ? (
+            <ManualRow
+              key={l.id}
+              l={live(l)}
+              available={available}
+              value={qty[l.id] ?? ''}
+              invalid={l.fulfilment === 'MFN' && numberOf(l.id) === null}
+              onChange={(v) => {
+                setQty({ ...qty, [l.id]: v });
+              }}
+            />
+          ) : (
+            <ListingRow
+              key={l.id}
+              l={{
+                ...l,
+                // After "back to Auto" every listing follows stock; before, a mixed SKU keeps each
+                // listing's own mode.
+                channelQty:
+                  l.fulfilment === 'FBA'
+                    ? l.channelQty
+                    : targetOf(results ? { ...l, mode: 'auto', manual: null } : l, available),
+                lastPush: pushedNow(results, l),
+              }}
+            />
+          ),
+        )}
+      </SimpleTable>
+
+      {mode === 'manual' && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-divider px-5 py-3">
+          <span className="num text-13 font-medium">
+            Allocated {formatInt(allocated)} · Available {formatInt(available)}
+          </span>
+          {allocated > available && (
+            <span className="flex items-center gap-1.5 text-13 text-warning">
+              <TriangleAlert className="size-4 shrink-0" aria-hidden />
+              <span className="text-ink">
+                More allocated than you have. Listings will be capped by stock.
+              </span>
+            </span>
+          )}
+          <Button
+            variant="primary"
+            className="ml-auto"
+            disabled={invalid}
+            onClick={() => {
+              setConfirm('save');
+            }}
+          >
+            Save allocation
+          </Button>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirm === 'save'}
+        onOpenChange={(o) => {
+          if (!o) setConfirm(null);
+        }}
+        title="Save the manual allocation?"
+        description={`Each listing then shows its live target. The new numbers go to the audit log and the stock change log. Allocated ${formatInt(allocated)}, available ${formatInt(available)}.`}
+        confirmLabel="Save allocation"
+        onConfirm={() => {
+          toast({
+            title: 'Allocation saved',
+            description: 'Only listings whose target changed are updated.',
+            tone: 'success',
+          });
+        }}
+      />
+      <ConfirmDialog
+        open={confirm === 'auto'}
+        onOpenChange={(o) => {
+          if (!o) setConfirm(null);
+        }}
+        title="Switch back to Auto?"
+        description="The manual numbers are cleared and every listing is pushed available − buffer straight away."
+        confirmLabel="Switch to Auto"
+        onConfirm={() => {
+          setMode('auto');
+          setResults(autoPushResults(mfn));
+        }}
+      />
+    </Card>
+  );
+}
+
+/** The push just made by "back to Auto", if there was one for this listing. */
+function pushedNow(results: PushResult[] | null, l: Listing): Listing['lastPush'] {
+  const r = results?.find((x) => x.listingId === l.id);
+  return r ? { at: new Date().toISOString(), result: r.result } : l.lastPush;
+}
+
+function accountName(l: Listing): string {
+  return { amazon: 'Amazon', ebay: 'eBay', website: 'Website' }[l.channel] + ' · ' + l.externalId;
+}
+
+function ManualRow({
+  l,
+  available,
+  value,
+  invalid,
+  onChange,
+}: {
+  l: Listing;
+  available: number;
+  value: string;
+  invalid: boolean;
+  onChange: (v: string) => void;
+}) {
+  const { session, company } = useAppState();
+  const account = session?.channelAccounts.find((a) => a.id === l.channelAccountId);
+  const c = company(l.companyId);
+  const fba = l.fulfilment === 'FBA';
+  const target = targetOf(l, available);
+  const left = l.manual ? l.manual.qty - l.manual.sold : 0;
+  const capped = !fba && l.manual !== null && left > Math.max(0, available - l.buffer);
+  const usedUp = !fba && l.manual !== null && left <= 0 && l.manual.qty > 0;
+  return (
+    <Tr>
+      <Td>
+        <span className="grid min-w-0 grid-cols-[18px_minmax(0,1fr)] items-center gap-x-2 gap-y-1">
+          <ChannelMark channel={l.channel} />
+          {c && (
+            <>
+              <span aria-hidden className="grid place-items-center">
+                <CompanySwatch company={c} />
+              </span>
+              <span className="truncate text-xs text-ink-muted">{account?.name}</span>
+            </>
+          )}
+        </span>
+      </Td>
+      <Td>
+        <Stack
+          value={<span className="ref">{l.externalId}</span>}
+          sub={fba ? 'Fulfilled by Amazon' : `Buffer ${String(l.buffer)}`}
+        />
+      </Td>
+      <Td align="right">
+        {fba ? (
+          <span className="text-ink-muted">Fulfilled by Amazon</span>
+        ) : (
+          <input
+            aria-label={`Allocation for ${account?.name ?? l.externalId}`}
+            aria-invalid={invalid || undefined}
+            inputMode="numeric"
+            value={value}
+            onChange={(e) => {
+              onChange(e.target.value.trim());
+            }}
+            className={cn(
+              'num h-8 w-20 rounded-ctl border bg-card px-2 text-right text-13 shadow-card outline-none focus:border-brand-600',
+              invalid ? 'border-danger' : 'border-border',
+            )}
+          />
+        )}
+      </Td>
+      <Td align="right">{fba ? '-' : formatInt(l.manual?.sold ?? 0)}</Td>
+      <Td align="right">
+        <span className="font-semibold">
+          {fba ? formatInt(l.channelQty ?? 0) : formatInt(target)}
+        </span>
+      </Td>
+      <Td>
+        {invalid ? (
+          <span className="text-xs font-medium text-danger">Whole number, 0 or more</span>
+        ) : usedUp ? (
+          <StatusLabel tone="neutral" icon={CircleSlash}>
+            Allocation used up
+          </StatusLabel>
+        ) : capped ? (
+          <StatusLabel tone="warning" icon={TriangleAlert}>
+            Capped by stock
+          </StatusLabel>
+        ) : fba ? (
+          <span className="text-xs text-ink-muted">Amazon manages it</span>
+        ) : (
+          <StatusLabel tone="info">Manual</StatusLabel>
+        )}
+      </Td>
+    </Tr>
   );
 }

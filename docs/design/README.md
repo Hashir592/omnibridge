@@ -23,6 +23,10 @@ Sign in, TOTP code, recovery code, MFA set-up, forgot and reset password, accept
 
 Mock-ups on MSW synthetic data for every other tab, built from the kit only: Stock & Catalogue (`/stock`, `/stock/:skuId`, tablet layout included), Sales & Profit, Finance (VAT quarters, expenses, P&L), Account Health (Amazon and eBay tabs), Users (`/users`, `/users/:userId`), Connections, Customer Service, Advertising, Forecasting, Reminders, Notes, the notification panel behind the bell, Audit Log, Settings and the password-change screen (`/sign-in/password-change`). Shared pieces: `components/Card.tsx` (card, page header, figure, details row, simple table), `components/Statement.tsx` (money statements), `components/TabGate.tsx` (permission mirroring for a shared link) and `components/NoCustomerDetails.tsx` (the TOOL-3 line and warning). The only chart is the Sales & Profit bar and line chart (Recharts): petrol for this period and a dashed grey line for the comparison, with a legend and a "Show table" view. Warnings are plain icon and text, never a tinted box. These screens have axe and keyboard tests (`apps/ui/e2e/preview.spec.ts`) and no screenshot tests (ADR-046). The PNG set sent to the client is in `client-preview/20261021/`, made by `apps/ui/scripts/client-preview.mjs`.
 
+## Client changes, round 2 (T-0306)
+
+The client's seven changes (`docs/plan/client-changes-20261112.md`) on the same mock data: the Home quick view per channel (C1), the Orders SKU column (C2), same-buyer groups on Orders, the shipping desk and order detail with Ship together and Not the same buyer (C3), the order Profit table with Ex VAT, VAT and Inc VAT (C4), Amazon seller feedback and recovery estimates on Account Health (C5), Amazon buyer messages and the Buyer messages setup on Connections (C6), and manual stock allocation on the SKU detail (C7). Shared pieces: `components/sameBuyer.tsx` (rail, chip, notes, dialogs), `components/channelLogos.tsx` and the kit table's `rowAccent` and `rowTone` hooks. Tests: `apps/ui/e2e/preview.spec.ts` and `apps/ui/src/mocks/groups.test.ts`. The PNG set is in `client-preview/20261112/`.
+
 ## Colour tokens
 
 Tailwind 4 `@theme` tokens; use them as `bg-<token>`, `text-<token>` and so on. Contrast ratios are against white unless stated.
@@ -117,5 +121,11 @@ Each change Hashir asked for that departs from `docs/design/DIRECTION.md` (S1 to
 | 20/10/2026 | Not covered | Auth screens use a split screen: graphite panel with a one-line product statement and four plain facts (left), form with logo and footer (right). No illustration or gradient. | Hashir: a lone centred card on an empty page looked unfinished; he chose the panel on the left |
 | 20/10/2026 | Not covered | Form errors and notices are inline: icon plus coloured text, no tinted box or border | Hashir: tinted alert boxes read as AI slop |
 | 19/10/2026 | Selected rows use `brand-100` (§2) | Selected rows and active filter chips use `selected #E9EEF6`; checkboxes are graphite | Hashir: a second green for selection was confusing |
+
+| 14/11/2026 | Not covered | Same-buyer groups: every member row has the light petrol tint (`brand-50`), a 4 px petrol rail and a thin bracket; the first row has the chip and the others show "2 of 3". | Hashir: the first version (rail and chip only) was hard to see |
+| 14/11/2026 | One icon set, no brand colours | Channel marks are small inline SVG logos (Amazon, eBay, Website cart) in their own brand colours, only inside the 18 px mark, always next to the channel name | Hashir: the a, e, w letters looked unprofessional |
+| 14/11/2026 | Status colours only for status | Rating stars are golden (`#FFA41C` fill, `#E47911` outline; empty `#C9CED6`), the industry standard | Hashir |
+| 14/11/2026 | Orders list columns | Items, Ship to and Shipping start hidden in Columns, so the SKU column and same-buyer notes fit at 1440 px | S2, for C2 and C3 |
+| 14/11/2026 | Not covered | Ship together lets the user untick orders for that one label, or take an order out of its group for good | Hashir; recorded in PS-021 for S1 to confirm |
 
 The first mock company's badge hue moved from teal to indigo, so a company badge never resembles the accent (TEN-2 rule).

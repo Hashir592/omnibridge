@@ -780,7 +780,7 @@
         "CI full gate green at merge"
       ],
       "risk": "normal",
-      "status": "todo"
+      "status": "done"
     }
   ]
 }

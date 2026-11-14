@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/cn.ts';
+import { ChannelLogo } from './channelLogos.tsx';
 import type { Channel, Company, OrderFlag, OrderStatus } from '../mocks/types.ts';
 
 const HUE: Record<Company['hue'], string> = {
@@ -49,22 +50,19 @@ export function CompanySwatch({ company }: { company: Company }) {
   return <span aria-hidden className={cn('size-2 shrink-0 rounded-full', HUE[company.hue])} />;
 }
 
-const CHANNEL: Record<Channel, { label: string; glyph: string }> = {
-  amazon: { label: 'Amazon', glyph: 'a' },
-  ebay: { label: 'eBay', glyph: 'e' },
-  website: { label: 'Website', glyph: 'w' },
+const CHANNEL: Record<Channel, { label: string }> = {
+  amazon: { label: 'Amazon' },
+  ebay: { label: 'eBay' },
+  website: { label: 'Website' },
 };
 
-/** Channel glyph and name, as two grid cells (see CompanyBadge). */
+/** Channel logo and name, as two grid cells (see CompanyBadge). */
 export function ChannelMark({ channel }: { channel: Channel }) {
   const c = CHANNEL[channel];
   return (
     <>
-      <span
-        aria-hidden
-        className="grid size-[18px] place-items-center rounded-[5px] bg-[#ece8e0] text-[10px] leading-none font-semibold text-ink"
-      >
-        {c.glyph}
+      <span aria-hidden className="grid size-[18px] place-items-center">
+        <ChannelLogo channel={channel} />
       </span>
       <span className="truncate text-13 leading-[18px] text-ink">{c.label}</span>
     </>

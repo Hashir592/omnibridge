@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, getRouteApi, useNavigate } from '@tanstack/react-router';
-import { Download, OctagonAlert } from 'lucide-react';
+import { Tooltip } from '@base-ui/react/tooltip';
+import { Download, Link2Off, OctagonAlert } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { rememberOrdersSearch } from '../app/lastSearch.ts';
 import { useAppState } from '../app/session.tsx';
@@ -12,6 +13,15 @@ import {
   STATUS,
   StatusChip,
 } from '../components/badges.tsx';
+import {
+  GROUP_TONE,
+  GroupChip,
+  GroupNotes,
+  GroupPosition,
+  GroupRail,
+  NotSameBuyerDialog,
+  ShipTogetherDialog,
+} from '../components/sameBuyer.tsx';
 import { EmptyState, ErrorState } from '../kit/states.tsx';
 import { EmptyCell, MoneyCell, Sub } from '../kit/table/cells.tsx';
 import { DataTable, type DataColumn } from '../kit/table/DataTable.tsx';
@@ -31,7 +41,14 @@ import { cn } from '../lib/cn.ts';
 import { daysFromToday, formatDate, formatInt, formatTime, overdueText } from '../lib/format.ts';
 import type { PageSize } from '../lib/paging.ts';
 import { mockApi } from '../mocks/api.ts';
-import type { Company, OrderFlag, OrderRow, OrderStatus } from '../mocks/types.ts';
+import type {
+  Company,
+  OrderFlag,
+  OrderListItem,
+  OrderRow,
+  OrderRowGroup,
+  OrderStatus,
+} from '../mocks/types.ts';
 
 export interface OrdersSearch {
   view?: 'all' | 'awaiting' | 'overdue' | 'today' | 'flagged' | undefined;
@@ -39,18 +56,35 @@ export interface OrdersSearch {
   channel?: string | undefined;
   status?: string | undefined;
   flag?: string | undefined;
+  /** C1 "View all": orders placed today (London day). */
+  placed?: 'today' | undefined;
+  /** C3 "+1 related order not shown": only this same-buyer group, whatever the filters. */
+  group?: string | undefined;
   page?: number | undefined;
   size?: PageSize | undefined;
 }
 
 const route = getRouteApi('/orders');
 
-function orderColumns(company: (id: string) => Company | undefined): Array<DataColumn<OrderRow>> {
+interface GroupActions {
+  shipTogether: (groupId: string) => void;
+  notSame: (group: OrderRowGroup) => void;
+  showGroup: (groupId: string) => void;
+}
+
+/** The same-buyer rail at the row's left edge (C3); module scope keeps it stable for the table. */
+const groupAccent = (o: OrderListItem) => (o.group ? <GroupRail group={o.group} /> : null);
+const groupTone = (o: OrderListItem) => (o.group ? GROUP_TONE : undefined);
+
+function orderColumns(
+  company: (id: string) => Company | undefined,
+  groups: GroupActions,
+): Array<DataColumn<OrderListItem>> {
   return [
     {
       id: 'order',
       header: 'Order',
-      width: 192,
+      width: 212,
       cell: (o) => (
         <>
           <Link
@@ -60,14 +94,38 @@ function orderColumns(company: (id: string) => Company | undefined): Array<DataC
           >
             {o.ref}
           </Link>
-          <Sub className="num">{whenLabel(o.placedAt)}</Sub>
+          <span className="flex min-w-0 items-center gap-2">
+            <Sub className="num shrink-0">{whenLabel(o.placedAt)}</Sub>
+            {o.group && o.group.index > 0 && <GroupPosition group={o.group} />}
+            {o.group?.index === 0 && (
+              <GroupChip
+                group={o.group}
+                onShipTogether={() => {
+                  groups.shipTogether(o.group?.id ?? '');
+                }}
+                onNotSame={() => {
+                  if (o.group) groups.notSame(o.group);
+                }}
+                onShowGroup={() => {
+                  groups.showGroup(o.group?.id ?? '');
+                }}
+              />
+            )}
+          </span>
         </>
       ),
     },
     {
+      id: 'sku',
+      header: 'SKU',
+      width: 160,
+      optional: true,
+      cell: (o) => <SkuCell o={o} />,
+    },
+    {
       id: 'channel',
       header: 'Channel',
-      width: 152,
+      width: 140,
       cell: (o) => {
         const c = company(o.companyId);
         return (
@@ -78,8 +136,8 @@ function orderColumns(company: (id: string) => Company | undefined): Array<DataC
         );
       },
     },
-    { id: 'status', header: 'Status', width: 148, cell: (o) => <StatusChip status={o.status} /> },
-    { id: 'shipBy', header: 'Ship by', width: 140, cell: (o) => <ShipBy o={o} /> },
+    { id: 'status', header: 'Status', width: 136, cell: (o) => <StatusChip status={o.status} /> },
+    { id: 'shipBy', header: 'Ship by', width: 132, cell: (o) => <ShipBy o={o} /> },
     {
       id: 'total',
       header: 'Total',
@@ -115,7 +173,14 @@ function orderColumns(company: (id: string) => Company | undefined): Array<DataC
       width: 'minmax(104px,1fr)',
       optional: true,
       cell: (o) =>
-        o.flags.length === 0 ? (
+        o.group?.index === 0 && (o.group.warnings.length > 0 || o.group.hidden > 0) ? (
+          <GroupNotes
+            group={o.group}
+            onShowGroup={() => {
+              groups.showGroup(o.group?.id ?? '');
+            }}
+          />
+        ) : o.flags.length === 0 ? (
           <EmptyCell label="No flags" />
         ) : (
           <span
@@ -152,11 +217,17 @@ export function OrdersPage() {
   const navigate = useNavigate({ from: '/orders' });
   const { session, persona, companyId, company } = useAppState();
   const [hidden, setHidden] = useState<Set<string>>(
-    () => new Set(isTablet() ? ['items', 'shipTo'] : []),
+    // Items, Ship to and Shipping start in the Columns menu: the SKU column shows "+N", and the
+    // Flags column needs room for same-buyer group notes (C2, C3).
+    () =>
+      new Set(
+        isTablet() ? ['items', 'shipTo', 'shipping', 'sku'] : ['items', 'shipTo', 'shipping'],
+      ),
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [qDraft, setQDraft] = useState(search.q ?? '');
-  const columns = useMemo(() => orderColumns(company), [company]);
+  const [shipGroup, setShipGroup] = useState<string | null>(null);
+  const [notSame, setNotSame] = useState<OrderRowGroup | null>(null);
 
   // Any filter change goes back to page 1; paging itself passes `page` explicitly.
   const setSearch = (patch: Partial<OrdersSearch>) =>
@@ -175,6 +246,19 @@ export function OrdersPage() {
     };
   }, [qDraft]);
 
+  const columns = useMemo(
+    () =>
+      orderColumns(company, {
+        shipTogether: setShipGroup,
+        notSame: setNotSame,
+        showGroup: (groupId) => {
+          setQDraft('');
+          void navigate({ search: { group: groupId } });
+        },
+      }),
+    [company, navigate],
+  );
+
   const view = search.view ?? 'all';
   const filterKey = [
     companyId,
@@ -184,6 +268,8 @@ export function OrdersPage() {
     search.channel,
     search.status,
     search.flag,
+    search.placed,
+    search.group,
   ];
   const size: PageSize = search.size ?? 50;
   const page = search.page ?? 1;
@@ -204,6 +290,8 @@ export function OrdersPage() {
         channel: search.channel,
         status: search.status,
         flag: search.flag,
+        placed: search.placed,
+        group: search.group,
         cursor: (page - 1) * size,
         limit: size,
       }),
@@ -247,6 +335,22 @@ export function OrdersPage() {
       onRemove: removeFrom('flag', id),
     })),
   ];
+  if (search.placed)
+    chips.push({
+      key: 'placed',
+      label: 'Placed: Today',
+      onRemove: () => {
+        setSearch({ placed: undefined });
+      },
+    });
+  if (search.group)
+    chips.push({
+      key: 'group',
+      label: 'Same-buyer group',
+      onRemove: () => {
+        setSearch({ group: undefined });
+      },
+    });
   if (search.q)
     chips.push({
       key: 'q',
@@ -372,6 +476,8 @@ export function OrdersPage() {
         rowId={(o) => o.id}
         rowLabel={(o) => `Select order ${o.ref}`}
         columns={columns}
+        rowAccent={groupAccent}
+        rowTone={groupTone}
         hidden={hidden}
         selected={selected}
         onSelectedChange={setSelected}
@@ -395,6 +501,23 @@ export function OrdersPage() {
         }
       />
 
+      {shipGroup && (
+        <ShipTogetherDialog
+          groupId={shipGroup}
+          onOpenChange={(o) => {
+            if (!o) setShipGroup(null);
+          }}
+        />
+      )}
+      {notSame && (
+        <NotSameBuyerDialog
+          group={notSame}
+          onOpenChange={(o) => {
+            if (!o) setNotSame(null);
+          }}
+        />
+      )}
+
       <Pager
         page={page}
         size={size}
@@ -408,6 +531,50 @@ export function OrdersPage() {
         }}
       />
     </div>
+  );
+}
+
+/** C2: the first line's SKU, and "+N" with a tooltip listing every SKU and quantity. */
+function SkuCell({ o }: { o: OrderListItem }) {
+  const [first, ...rest] = o.skus;
+  if (!first) return <EmptyCell label="No items" />;
+  return (
+    <>
+      <span className="flex min-w-0 items-center gap-1.5">
+        {!first.mapped && (
+          <Link2Off className="size-3.5 shrink-0 text-warning" aria-label="Unmapped" />
+        )}
+        <span className="ref truncate text-13 leading-[18px]">{first.sku}</span>
+        {rest.length > 0 && (
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              aria-label={`All SKUs: ${o.skus.map((l) => `${l.sku} × ${String(l.qty)}`).join(', ')}`}
+              className="num shrink-0 rounded-full bg-[#e2e5ea] px-1.5 text-[11px] leading-4 font-medium text-ink-muted hover:bg-[#d6dae0]"
+            >
+              +{rest.length}
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Positioner sideOffset={6} className="z-50">
+                <Tooltip.Popup className="rounded-ctl border border-border bg-card px-3 py-2 text-xs shadow-pop">
+                  <ul className="flex flex-col gap-1">
+                    {o.skus.map((l) => (
+                      <li key={l.sku} className="flex justify-between gap-4">
+                        <span className="ref">{l.sku}</span>
+                        <span className="num text-ink-muted">× {l.qty}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </Tooltip.Popup>
+              </Tooltip.Positioner>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        )}
+      </span>
+      <Sub className="num">
+        {o.itemCount} item{o.itemCount === 1 ? '' : 's'}
+        {!first.mapped && ', unmapped'}
+      </Sub>
+    </>
   );
 }
 

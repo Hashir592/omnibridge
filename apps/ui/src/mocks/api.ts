@@ -8,7 +8,15 @@ import type { AdsOverview } from './ads.ts';
 import type { Connection, WorkspaceUser } from './admin.ts';
 import type { AuditPage } from './audit.ts';
 import type { ForecastPage } from './forecast.ts';
-import type { Conversation, Feedback, FeedbackSummary, ReviewRequests, Thread } from './inbox.ts';
+import type {
+  AmazonInbox,
+  AmazonThread,
+  Conversation,
+  Feedback,
+  FeedbackSummary,
+  ReviewRequests,
+  Thread,
+} from './inbox.ts';
 import type { Notification } from './notifications.ts';
 import type { Note, Reminder } from './tools.ts';
 import type { ExpensePage, Pnl, VatCompany } from './finance.ts';
@@ -16,7 +24,7 @@ import type { AmazonHealth, EbayHealth } from './health.ts';
 import type { HomeSummary } from './home.ts';
 import type { ProfitSummary } from './profit.ts';
 import type { SkuDetail, SkuPage, UnmappedPage } from './stock.ts';
-import type { OrderDetail, OrderPage, Session } from './types.ts';
+import type { Channel, OrderDetail, OrderPage, OrderStatus, Session } from './types.ts';
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { accept: 'application/json' } });
@@ -71,7 +79,56 @@ export const mockApi = {
   notes: () => getJson<Note[]>('/api/mock/notes'),
   notifications: () => getJson<Notification[]>('/api/mock/notifications'),
   audit: (params: Params) => getJson<AuditPage>(`/api/mock/audit-log?${qs(params)}`),
+
+  // T-0306 client changes (PROPOSED SHAPES).
+  todayOrders: (channel: Channel, company: string) =>
+    getJson<TodayOrders>(`/api/mock/home/today-orders?${qs({ channel, company })}`),
+  amazonInbox: (params: Params) =>
+    getJson<AmazonInbox>(`/api/mock/customer-service/amazon/conversations?${qs(params)}`),
+  amazonThread: (id: string) =>
+    getJson<AmazonThread>(
+      `/api/mock/customer-service/amazon/conversations/${encodeURIComponent(id)}`,
+    ),
+  patchConversation: (
+    channel: 'ebay' | 'amazon',
+    id: string,
+    patch: { unread?: boolean; state?: 'open' | 'archived' | 'done' },
+  ) =>
+    send<undefined>(
+      'POST',
+      `/api/mock/customer-service/${channel === 'amazon' ? 'amazon/' : ''}conversations/${encodeURIComponent(id)}`,
+      patch,
+    ),
+  testBuyerMessages: (connectionId: string) =>
+    send<{ ok: boolean; receivedAt?: string; detail?: string }>(
+      'POST',
+      `/api/mock/connections/${encodeURIComponent(connectionId)}/buyer-messages/test`,
+    ),
+  removeFromGroup: (groupId: string, orderId: string, reason: string) =>
+    send<undefined>(
+      'POST',
+      `/api/mock/order-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(orderId)}/remove`,
+      { reason },
+    ),
+  dismissGroup: (groupId: string, reason: string) =>
+    send<undefined>('POST', `/api/mock/order-groups/${encodeURIComponent(groupId)}/dismiss`, {
+      reason,
+    }),
 };
+
+/** C1 (HOME-3): the latest orders placed today on one channel. No buyer details. */
+export interface TodayOrders {
+  total: number;
+  channelAccountIds: string[];
+  items: Array<{
+    id: string;
+    ref: string;
+    placedAt: string;
+    companyId: string;
+    totalPence: number;
+    status: OrderStatus;
+  }>;
+}
 
 type Params = Record<string, string | number | undefined>;
 

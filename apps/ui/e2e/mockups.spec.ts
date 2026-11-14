@@ -73,7 +73,10 @@ test('[NFR-9] orders show UK money, DD/MM/YYYY dates and masked buyers', async (
   const table = page.getByRole('table', { name: 'Orders' });
   await expect(table.getByText(/^£\d{1,3}(,\d{3})*\.\d{2}$/).first()).toBeVisible();
   await expect(table.getByText(/\d{2}\/\d{2}\/2026/).first()).toBeVisible();
-  // [ORD-5] buyers are masked in the list
+  // [ORD-5] buyers are masked in the list. Ship to starts in the Columns menu since T-0306.
+  await page.getByRole('button', { name: 'Columns' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Ship to' }).click();
+  await page.keyboard.press('Escape');
   await expect(table.getByText(/^[A-Z]\. [A-Z]\*\*\*, /).first()).toBeVisible();
 });
 

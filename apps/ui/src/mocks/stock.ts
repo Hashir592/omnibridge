@@ -42,6 +42,8 @@ export interface SkuRow {
   cogsPence: number;
   listings: { total: number; channels: Channel[]; fba: number };
   state: SkuState;
+  /** C7 (INV-10): auto, manual on every merchant-fulfilled listing, or mixed. */
+  syncMode: 'auto' | 'manual' | 'mixed';
   lastMovementAt: string;
   active: boolean;
 }
@@ -59,6 +61,12 @@ export interface Listing {
   bufferOverride: boolean;
   channelQty: number | null; // FBA: units Amazon holds (read only)
   lastPush: { at: string; result: 'sent' | 'failed' | 'held' } | null;
+  /**
+   * C7 (INV-10): manual allocation. The target sent to the channel is
+   * max(0, min(manualQty − manualSold, available − buffer)) in manual mode.
+   */
+  mode: 'auto' | 'manual';
+  manual: { qty: number; sold: number; setAt: string; setBy: string } | null;
 }
 
 export interface UnmappedListing {
@@ -188,6 +196,8 @@ function makeSkus(n: number): { rows: SkuRow[]; listings: Map<string, Listing[]>
         lastPush: fba
           ? null
           : { at: ago(r.int(2, 600) * 60_000), result: failed ? 'failed' : held ? 'held' : 'sent' },
+        mode: 'auto',
+        manual: null,
       });
     }
     if (ls.length === 0) ls.push(makeFallbackListing(i, sku, `${material} ${thing}, ${size}`));
@@ -218,6 +228,7 @@ function makeSkus(n: number): { rows: SkuRow[]; listings: Map<string, Listing[]>
                 ? 'low'
                 : 'in_stock',
       lastMovementAt: ago(r.int(1, 72 * 60) * 60_000),
+      syncMode: 'auto',
       active,
     });
   }
@@ -270,6 +281,8 @@ function makeFallbackListing(i: number, sku: string, title: string): Listing {
     bufferOverride: false,
     channelQty: 0,
     lastPush: { at: ago(3 * HOUR), result: 'sent' },
+    mode: 'auto',
+    manual: null,
   };
 }
 
@@ -281,7 +294,109 @@ function summarise(ls: Listing[]): SkuRow['listings'] {
   };
 }
 
-const { rows: SKUS, listings: LISTINGS } = makeSkus(186);
+const { rows: SKUS, listings: LISTINGS } = withManualAllocation(makeSkus(186));
+
+/**
+ * C7 demo data: BB-BAM-M100 (the first SKU, 186 available) runs on manual allocation across every
+ * merchant-fulfilled listing, with one listing capped by stock and one allocation used up; the
+ * second SKU has one manual listing, so the list shows Mixed.
+ */
+function withManualAllocation(made: ReturnType<typeof makeSkus>): ReturnType<typeof makeSkus> {
+  const [first, second] = made.rows;
+  const acct = (id: string) => channelAccounts.find((a) => a.id === id) as ChannelAccount;
+  const listing = (
+    accountId: string,
+    externalId: string,
+    fba: boolean,
+    manual: { qty: number; sold: number } | null,
+    buffer: number,
+    lastPush: Listing['lastPush'],
+  ): Listing => {
+    const a = acct(accountId);
+    return {
+      id: `lst_m100_${accountId}`,
+      channelAccountId: a.id,
+      channel: a.channel,
+      companyId: a.companyId,
+      externalSku: first?.sku ?? '',
+      externalId,
+      title: first?.title ?? '',
+      fulfilment: fba ? 'FBA' : 'MFN',
+      buffer,
+      bufferOverride: false,
+      channelQty: null,
+      lastPush,
+      mode: manual ? 'manual' : 'auto',
+      manual: manual ? { ...manual, setAt: ago(3 * DAY), setBy: 'Sam Admin' } : null,
+    };
+  };
+  if (first) {
+    const ls = [
+      listing('ca_1', 'B0D4M100A1', false, { qty: 200, sold: 0 }, 0, {
+        at: ago(40 * 60_000),
+        result: 'sent',
+      }),
+      listing('ca_3', 'B0D4M100F3', true, null, 0, null),
+      listing('ca_2', '284519003117', false, { qty: 30, sold: 4 }, 1, {
+        at: ago(2 * HOUR),
+        result: 'sent',
+      }),
+      listing('ca_5', '391027733408', false, { qty: 10, sold: 10 }, 0, {
+        at: ago(5 * HOUR),
+        result: 'sent',
+      }),
+      listing('ca_4', 'wp-1100', false, { qty: 20, sold: 2 }, 0, {
+        at: ago(90 * 60_000),
+        result: 'sent',
+      }),
+    ].map((l) => ({
+      ...l,
+      channelQty: l.fulfilment === 'FBA' ? 64 : targetOf(l, first.available),
+    }));
+    made.listings.set(first.id, ls);
+    made.rows[0] = { ...first, listings: summarise(ls), syncMode: 'manual' };
+  }
+  if (second) {
+    const ls = (made.listings.get(second.id) ?? []).map((l, i) =>
+      i === 0 && l.fulfilment === 'MFN'
+        ? {
+            ...l,
+            mode: 'manual' as const,
+            manual: { qty: 40, sold: 3, setAt: ago(6 * DAY), setBy: 'Chris Stock' },
+          }
+        : l,
+    );
+    made.listings.set(second.id, ls);
+    if (ls.some((l) => l.mode === 'manual')) made.rows[1] = { ...second, syncMode: 'mixed' };
+  }
+  return made;
+}
+
+/**
+ * PROPOSED SHAPE (PS-021): the pushes after switching a SKU back to Auto. The mock shows one of
+ * each result: the first eBay listing waits on eBay's revision limit and the website one fails.
+ */
+export function autoPushResults(
+  listings: readonly Listing[],
+): Array<{ listingId: string; result: 'sent' | 'held' | 'failed' }> {
+  const firstEbay = listings.find((l) => l.channel === 'ebay' && l.fulfilment === 'MFN');
+  return listings
+    .filter((l) => l.fulfilment === 'MFN')
+    .map((l) => ({
+      listingId: l.id,
+      result: l.id === firstEbay?.id ? 'held' : l.channel === 'website' ? 'failed' : 'sent',
+    }));
+}
+
+/** The quantity sent to a listing (INV-2, replaced by INV-10 for manual listings). */
+export function targetOf(
+  l: Pick<Listing, 'mode' | 'manual' | 'buffer'>,
+  available: number,
+): number {
+  const byStock = Math.max(0, available - l.buffer);
+  if (l.mode !== 'manual' || !l.manual) return byStock;
+  return Math.max(0, Math.min(l.manual.qty - l.manual.sold, byStock));
+}
 export const skus = SKUS;
 
 const UNMAPPED: UnmappedListing[] = Array.from({ length: 23 }, (_, i) => {

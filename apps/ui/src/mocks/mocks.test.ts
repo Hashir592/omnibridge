@@ -108,6 +108,7 @@ describe('mock shipping rules', () => {
     tracking: 'none',
     flags: [],
     shipToMasked: 'A. B***, G2',
+    delivery: 'standard',
   } satisfies Omit<OrderRow, 'shipBy'>;
   const later: OrderRow = { ...base, shipBy: new Date(Date.now() + 5 * 86_400_000).toISOString() };
   const late: OrderRow = { ...base, shipBy: new Date(Date.now() - 3_600_000).toISOString() };
