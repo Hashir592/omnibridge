@@ -54,7 +54,7 @@ Run the UI with the Vite dev server and MSW mocks (no Docker needed, so it uses 
 
 Hashir will look at the UI often and ask for many small changes ("change this button", "make this colour lighter"). While he is iterating:
 
-1. Make the change straight away and show it. No plan, no verify.sh, no code review and no report for each small change. A one-line "done, refresh" is enough.
+1. Make the change straight away. No plan, no verify.sh, no code review, no screenshot and no report for each small change (ADR-056). Hashir looks himself: reply "done, refresh <link>". Take a screenshot only if Hashir asks for one.
 2. **Do not commit and do not push** until Hashir says so (for example "merge", "push it" or "lock it in").
 3. Keep the rules in "UI rules" and `docs/design/DIRECTION.md` even while iterating, unless Hashir explicitly overrides one. Note each override in `docs/design/README.md`.
 4. When Hashir says to merge, run the workflow below once for everything changed: tests, the checks for the task's tier (ADR-043), commit, push, PR. You merge it yourself once CI is green (ADR-053); if CI is red, fix it first.
@@ -72,7 +72,8 @@ Steps 5â€“10 of the S3 workflow (`docs/sessions/S3-builder.md`) apply; steps 1â€
   - an axe accessibility check on each screen with zero serious or critical violations
   - test titles cite IDs, for example `[NFR-8]`
 - **Acceptance for UI:** the screenshot comparison passes within the agreed threshold. Changing a reference image needs Hashir's approval, so mention it in your report.
-- **Gate:** by the task's tier, exactly as for S3 (ADR-043): light = `verify.sh --quick`, no code review, CI runs the full gate; normal = `--quick` plus `/code-review` medium, CI runs the full gate; high = full local `verify.sh` plus `/code-review` high, then CI.
+- **Gate:** by the task's tier, exactly as for S3 (ADR-043, ADR-056): light = `--quick`, no review; normal = `--quick` plus one CodeRabbit review per PR (`/code-review` medium only if it cannot run); high = `--quick` plus `/code-review` high. CI runs the gate (UI-only changes take the ui lane). Push, `gh pr merge --auto --merge --delete-branch`, and never wait on CI.
+- **PNG sets** only for client-preview tasks; otherwise no screenshot runs beyond the 4 key-screen tests.
 - **Report:** the same 15-line format as S3, plus `Screens:` with reference image paths.
 
 ## Checkpoints

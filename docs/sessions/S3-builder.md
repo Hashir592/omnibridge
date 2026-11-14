@@ -36,7 +36,7 @@ You build OmniBridge one task at a time from `docs/backlog.json`. Each task cove
 1. Read the documents above. Then inspect the existing code your task touches.
 2. Write a short plan in chat (at most 15 lines): files, approach, the tests you will write first, and risks.
 3. **If the task has `"risk": "high"`, stop and wait for Hashir to say "go".** Otherwise continue.
-4. Set the task's `status` to `in_progress`. Create the branch `task/<id>-<slug>`. If STATE.md names a **batch** (ADR-043, up to 3 light or normal tasks of one module), all of its tasks share one branch `task/<first-id>-<last-id>-<slug>` and one PR.
+4. Set the task's `status` to `in_progress`. Create the branch `task/<id>-<slug>`. If STATE.md names a **batch** (ADR-043, ADR-056: up to 5 light or normal tasks of one module), all of its tasks share one branch `task/<first-id>-<last-id>-<slug>` and one PR.
 5. Implement it with tests:
    - Write tests **first** for money, VAT, deletion, tenancy and permissions.
    - Every test title names the IDs it proves, for example `it('[USR-5] locks after 10 failures', …)`.
@@ -47,19 +47,16 @@ You build OmniBridge one task at a time from `docs/backlog.json`. Each task cove
    - Never weaken, skip or delete a test.
    - Never add `eslint-disable`, `@ts-ignore` or `@ts-expect-error` to get green.
    - Never lower a threshold.
-7. Run a **code review** on your diff (ADR-030), by tier:
+7. Run **one code review per PR** (ADR-030, ADR-056), not per task:
    - **light**: no code review.
-   - **normal**: `/code-review` at medium effort (or CodeRabbit).
-   - **high**: `/code-review` at high effort (or CodeRabbit).
-   - **First choice: CodeRabbit.** Use the `/coderabbit:code-review` plugin skill, or the `coderabbit` CLI if it is installed.
-   - **Fallback: `/code-review`.** If CodeRabbit cannot run (CLI missing, not logged in, plugin error), run Claude Code's `/code-review` skill on the task diff instead. Say in your report which reviewer ran and why.
-   - Fix the real findings and re-run until the review is clean, or until only false positives remain. List each false positive with a one-line reason.
-   - **Never skip the review on normal or high tasks.** If neither reviewer can run, say so and stop.
+   - **normal**: CodeRabbit (`/coderabbit:code-review` or the `coderabbit` CLI); it does not use the Claude limit. Only if it cannot run, `/code-review` at medium, and say why.
+   - **high**: `/code-review` at high effort.
+   - Fix the real findings once; list false positives with a one-line reason. Re-run only if a fix changed logic.
+   - **Never skip the review on a normal or high PR.** If no reviewer can run, say so and stop.
 8. Commit using Conventional Commits with a `Refs:` footer of PRD IDs.
    - Push the branch and open a PR to `main`. The PR description includes the report from step 9. In a batch, open it as a **draft** after the first task, add each task's report to it, and mark it ready when the last task is done and CI is green.
-   - **Do not wait for CI.** Start the next task (or the next batch task) straight away. If CI goes red, fix it on the same branch first.
-   - **Merge it yourself** once CI is green (ADR-053): `gh pr merge --merge --delete-branch`. If CI is red, fix it on the branch first. Never merge on red.
-9. Close with a report of **at most 15 lines**:
+   - **Never wait for CI (ADR-056).** Right after pushing, run `gh pr merge --auto --merge --delete-branch`, then start the next task or end the turn. Never poll CI. If it goes red, fix it next: read only `gh run view <id> --log-failed | tail -100`, never the whole log. Never merge on red.
+9. Close with a report of **at most 10 lines**:
 
 ```
 Task: T-#### <title> — RESULT: done | blocked
@@ -121,7 +118,12 @@ The script fails if any of these is false:
 - Put secrets only in Docker secrets or the SOPS dev file, never in env files committed to git.
 - Make outbound HTTP only through the provider HTTP client, which enforces the mock allowlist.
 
-## Speed rules (ADR-054)
+## Speed rules (ADR-054, ADR-056)
+
+- **Trivial lane:** copy, colour, spacing, a rename or a one-line fix with no logic change: edit, run lint, typecheck and the touched package's tests only, commit onto the current branch. No plan, review, browser, report or own PR.
+- **Quiet output:** never paste whole test or build logs into chat; read summaries and the failing lines only.
+- **Browser:** only when a change alters what a screen shows and no test covers it; one screenshot, then close. No dev server left running.
+- **Short sessions:** one session per batch; end it after the merge so Hashir can `/clear`.
 
 - **Pre-approved dependencies:** `@types/*`, required peers of an approved package, and patch or minor moves inside an approved major that meet ADR-033. Add the DECISIONS line yourself (package, licence, reason); no round trip to S1.
 - **Flaky test:** fix it or quarantine it (non-blocking, with a follow-up task and a STATE.md line) the day you see it. Never delete it.

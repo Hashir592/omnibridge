@@ -6,10 +6,11 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 - **Phase:** B, local Docker only. **Plan replaced on 12 Nov 2026** after the architecture audit (ADR-054): three releases, the order in `docs/plan/MODULES.md`. Release 1 = website + first approved marketplace + Evri: orders, stock, labels, tracking. The public site goes live early, deployed by Hashir's devops person.
 - **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway FIX REQUIRED (3 Majors, 7 Minors, no round 2). Then T-0204 → T-0207 → T-0206 (S5 audit) → M02 end. T-0205 deferred to Release 3.
-- **M03:** T-0305 done (PR #40), T-0306 done (PR #41). M03 end fixes in PR #42 (ui-perf off the gate per FA-18, perf build out of dist, persona switcher DEV only, focus test polls); next: S4 M03 end round 2 (handoff 20261114-1145-S2-to-S4).
-- **Client changes (12 Nov 2026):** T-0306 **done** by S2: all 7 changes as mock-ups (PNGs in `docs/design/client-preview/20261112/`, shapes in PS-021, which also asks S1 to confirm Hashir's remove-one-order-from-a-group addition). S3 builds the real logic in M09 (manual allocation), M10 (SKU column, same-buyer groups), M12 (Ship together) in Release 1, and M18/M20 in Release 3.
-- **Order now (one session at a time):** S2 merges T-0305 as it is → S2 builds T-0306 (iteration mode, merge on Hashir's word) → S2 fixes M03 end Minors → S3 fixes M02 halfway → T-0204.
-- **Process (ADR-053, ADR-054):** sessions merge their own green PRs. CI is the only full gate; locally `--quick` (plus a task's integration tests for high risk). Halfway checkpoints only for M02, M04, M10, M12, M17, M18. Reviews do not block the next module.
+- **M03:** T-0305 (PR #40), T-0306 client changes (PR #41) and the M03 end fixes (PR #42) merged. S4 has the M03 end round 2 block. Next S2 task: T-0307 (generic Website mark, light).
+- **Client changes:** designs in `docs/plan/client-changes-20261112.md` (ADR-055, ADR-057). Real logic lands in M09, M10, M12 (Release 1) and M18, M20 (Release 3).
+- **Order now (one session at a time):** S4 M03 end round 2 → S3 M02 halfway fixes → T-0208 (faster CI, do it early: it saves time on every later PR) → T-0204 → T-0207 → T-0206 → M02 end → M06. S2 T-0307 whenever S2 is free.
+- **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; quiet output; short sessions; batches up to 5.
+- **Process (ADR-053, ADR-054, ADR-056):** sessions merge their own green PRs. CI is the only full gate; locally `--quick` (plus a task's integration tests for high risk). Halfway checkpoints only for M02, M04, M10, M12, M17, M18. Reviews do not block the next module.
 - **Hashir:** GitHub CLI must stay on the Hashir592 account (`gh auth switch -u Hashir592`). Dev machine to 16 GB in 1 to 2 weeks.
 - **Open questions:** none.
 

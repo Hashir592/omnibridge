@@ -102,10 +102,12 @@ The rules below are the contract: a builder who finds a case that is not covered
 - **Actions:**
   - **Ship together:** creates one label for the selected group members (SHP-9).
   - **Ship separately:** nothing special is needed; each order works exactly as it does today.
+  - **Remove from group** (ADR-057): takes one order out of its group for good, with a reason (for example it must go by DPD while the rest go by Evri). `POST /order-groups/:id/members/:orderId/remove`, audit `order_group.member_removed`. The order is never regrouped with those orders; the rest stay grouped while two or more remain, otherwise the group closes.
   - **Not the same buyer:** admins and users with the Orders tab can choose this. It dismisses the group, records `state = dismissed` and the reason in the audit log, and the same orders are never grouped again.
 
 ### C3.4 Ship together (SHP-9)
 
+- **Which orders:** the dialog lists every member, all ticked. Unticking one leaves it out of this label only; it stays in the group. The label call sends `orderIds`, and the lock re-check covers exactly those orders (ADR-057).
 - **One label, many orders.**
   - Weight is the sum of the orders' default weights plus one packaging allowance.
   - The carrier service is the highest needed by any member; the user can override it.
