@@ -15,7 +15,13 @@ Modes:
   --docs          Docs-only changes: install, format check, coverage and gitleaks (ADR-043). CI
                   uses it when a PR touches only docs/** and *.md, except docs a test reads
                   (READ_BY_TESTS in scripts/lib/docs-only.mjs).
+  --ui            UI-only changes (ADR-056): static checks, unit tests, the Playwright ui project
+                  and gitleaks; no Postgres and no Docker stack. CI uses it when a PR touches only
+                  apps/ui/** (scripts/lib/change-lane.mjs); main always runs the full gate.
   --help          Show this help.
+
+Output (ADR-056): one line per step. A failing step prints its last 60 lines; every step's full
+log is in .verify-logs/<step>.log (git-ignored).
 
 Options:
   --keep-stack    Full mode only: leave the Docker stack running afterwards (a stack that was
@@ -38,9 +44,10 @@ Full gate, in order:
   14 contract      adapter stubs against provider-mocks
   15 build         pnpm -r build
   16 stack         build images, then compose up --wait with the scan profile
-  17 e2e           Playwright against https://localhost:8443 and :8444
-  18 gitleaks      secrets in git history and the working tree
-  19 audit         osv-scanner and pnpm audit; high or critical fails
+  17 e2e           Playwright (chromium project) against https://localhost:8443 and :8444
+  18 ui-e2e        Playwright ui project against its own Vite server (no stack needed)
+  19 gitleaks      secrets in git history and the working tree
+  20 audit         osv-scanner and pnpm audit; high or critical fails
 EOF
 }
 
@@ -52,6 +59,7 @@ for arg in "$@"; do
     --full) mode=full ;;
     --quick) mode=quick ;;
     --docs) mode=docs ;;
+    --ui) mode=ui ;;
     --only=*)
       mode=only
       only="${arg#--only=}"
@@ -85,16 +93,22 @@ fi
 compose=(docker compose -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml --profile scan)
 started=$(date +%s)
 
+logs="$root/.verify-logs"
+mkdir -p "$logs"
+
+# Quiet output (ADR-056): one line per step; the full log goes to .verify-logs/<step>.log and a
+# failing step prints its last 60 lines.
 step() {
   local name=$1
   shift
-  local t0
+  local t0 log="$logs/$name.log"
   t0=$(date +%s)
-  printf '\n\033[1m==> %s\033[0m\n' "$name"
-  if "$@"; then
-    printf '\033[32m--- %s ok (%ss)\033[0m\n' "$name" "$(($(date +%s) - t0))"
+  if "$@" >"$log" 2>&1; then
+    printf -- '--- %s ok (%ss)\n' "$name" "$(($(date +%s) - t0))"
   else
-    printf '\033[31m--- %s FAILED\033[0m\n' "$name" >&2
+    printf -- '--- %s FAILED (%ss), last 60 lines of .verify-logs/%s.log:\n' \
+      "$name" "$(($(date +%s) - t0))" "$name" >&2
+    tail -n 60 "$log" >&2
     exit 1
   fi
 }
@@ -162,22 +176,67 @@ wait_ready() {
 # directory makes their writes of the same layer blobs collide.
 BAKE_TARGETS=(web worker pii-vault site provider-mocks)
 
+# OB_IMAGE_CACHE_DIR (set by CI, T-0208): built images are saved there as <target>-<key>.tar,
+# keyed by a hash of everything they are built from (scripts/lib/image-key.mjs). An image whose
+# key is unchanged is loaded instead of rebuilt; tars of other keys are pruned.
 build_images() {
-  local cache="${OB_BUILD_CACHE_DIR:-}"
+  local cache="${OB_BUILD_CACHE_DIR:-}" images="${OB_IMAGE_CACHE_DIR:-}"
   if [[ -z "$cache" ]]; then
     "${compose[@]}" build
     return
   fi
-  local sets=() target
-  for target in "${BAKE_TARGETS[@]}"; do
+  local -A key=()
+  local targets=() target k
+  if [[ -n "$images" ]]; then
+    mkdir -p "$images" || return 1
+    while read -r target k; do key[$target]=$k; done < <(node scripts/lib/image-key.mjs "${BAKE_TARGETS[@]}")
+    for target in "${BAKE_TARGETS[@]}"; do
+      if [[ -f "$images/$target-${key[$target]}.tar" ]]; then
+        docker load -q -i "$images/$target-${key[$target]}.tar" || return 1
+        echo "image $target: unchanged, loaded from the image cache"
+      else
+        targets+=("$target")
+      fi
+    done
+  else
+    targets=("${BAKE_TARGETS[@]}")
+  fi
+  if ((${#targets[@]} > 0)); then
+    bake_images "${targets[@]}" || return 1
+  fi
+  if [[ -n "$images" ]]; then
+    for target in "${targets[@]}"; do
+      docker save -o "$images/$target-${key[$target]}.tar" "omnibridge/$target:dev" || return 1
+    done
+    local tar keep
+    for tar in "$images"/*.tar; do
+      [[ -e "$tar" ]] || continue
+      keep=false
+      for target in "${BAKE_TARGETS[@]}"; do
+        if [[ "$(basename "$tar")" == "$target-${key[$target]}.tar" ]]; then keep=true; fi
+      done
+      if [[ "$keep" == false ]]; then rm -f "$tar"; fi
+    done
+  fi
+}
+
+# Builds the given targets with buildx bake and the local layer cache in OB_BUILD_CACHE_DIR.
+# Each target exports its cache to its own directory (parallel writes of one shared directory
+# collide), and a target's directory is replaced only when that target was built.
+bake_images() {
+  local cache="$OB_BUILD_CACHE_DIR" sets=() target
+  for target in "$@"; do
     mkdir -p "$cache/$target" || return 1
     sets+=(--set "$target.cache-from=type=local,src=$cache/$target")
     sets+=(--set "$target.cache-to=type=local,dest=$cache-new/$target,mode=max")
   done
   (cd infra/compose && docker buildx bake -f compose.yaml -f compose.dev.yaml \
     --allow "fs.read=$root" --allow "fs=$(dirname "$cache")" \
-    "${sets[@]}" --load "${BAKE_TARGETS[@]}") &&
-    rm -rf "$cache" && mv "$cache-new" "$cache"
+    "${sets[@]}" --load "$@") || return 1
+  for target in "$@"; do
+    rm -rf "${cache:?}/$target" && mv "$cache-new/$target" "$cache/$target" || return 1
+  done
+  rm -rf "$cache-new"
 }
 
 stack_down() {
@@ -186,13 +245,28 @@ stack_down() {
   fi
 }
 
-e2e() {
+playwright_install() {
   local install=(install chromium)
   if [[ -n "${CI:-}" && "$(uname -s)" == Linux ]]; then install=(install --with-deps chromium); fi
-  "${pnpm[@]}" exec playwright "${install[@]}" &&
-    # Its own Vite server on a port nobody else uses: a developer's or another session's dev server
-    # on 5173 is never reused, so the gate always tests this checkout.
-    OB_UI_PORT=5199 OB_E2E_OWN_SERVER=1 "${pnpm[@]}" exec playwright test || {
+  "${pnpm[@]}" exec playwright "${install[@]}"
+}
+
+# The line reporter keeps logs short (ADR-056); CI also keeps the HTML report as evidence.
+playwright_reporter() {
+  if [[ -n "${CI:-}" ]]; then echo line,html; else echo line; fi
+}
+
+# The ui project needs no stack: Playwright starts its own Vite server on a port nobody else uses,
+# so a developer's or another session's dev server on 5173 is never reused.
+ui_e2e() {
+  playwright_install &&
+    OB_UI_PORT=5199 OB_E2E_OWN_SERVER=1 "${pnpm[@]}" exec playwright test --project=ui \
+      --reporter="$(playwright_reporter)"
+}
+
+e2e() {
+  playwright_install &&
+    "${pnpm[@]}" exec playwright test --project=chromium --reporter="$(playwright_reporter)" || {
     local code=$?
     # Keep the evidence before stack_down removes the containers (git-ignored).
     mkdir -p .verify &&
@@ -224,7 +298,7 @@ audit() {
 
 # Every full-gate step, in gate order. --only picks from this list.
 FULL_STEPS=(install lint typecheck openapi depcruise names coverage limits squawk actionlint caddy
-  unit integration contract build stack e2e gitleaks audit)
+  unit integration contract build stack e2e ui-e2e gitleaks audit)
 
 run_step() {
   case "$1" in
@@ -239,12 +313,13 @@ run_step() {
     squawk) step squawk squawk ;;
     actionlint) step actionlint actionlint ;;
     caddy) step caddy caddy_validate ;;
-    unit) step unit "${pnpm[@]}" exec vitest run --project unit ;;
-    integration) step integration "${pnpm[@]}" exec vitest run --project integration ;;
-    contract) step contract "${pnpm[@]}" exec vitest run --project contract ;;
+    unit) step unit "${pnpm[@]}" exec vitest run --project unit --reporter=dot ;;
+    integration) step integration "${pnpm[@]}" exec vitest run --project integration --reporter=dot ;;
+    contract) step contract "${pnpm[@]}" exec vitest run --project contract --reporter=dot ;;
     build) step build "${pnpm[@]}" -r run build ;;
     stack) step stack stack_up ;;
     e2e) step e2e e2e ;;
+    ui-e2e) step ui-e2e ui_e2e ;;
     gitleaks) step gitleaks bash scripts/gitleaks.sh full ;;
     audit) step audit audit ;;
     *)
@@ -255,12 +330,17 @@ run_step() {
 }
 
 if [[ "$mode" == quick ]]; then
-  step lint lint
-  step typecheck "${pnpm[@]}" exec tsc -p tsconfig.json
-  step openapi "${pnpm[@]}" run --silent contract:check
-  step unit "${pnpm[@]}" exec vitest run --project unit
-  printf '\n\033[32mverify --quick passed in %ss (not a merge gate; run the full gate before merging)\033[0m\n' \
+  for name in lint typecheck openapi unit; do run_step "$name"; done
+  printf 'verify --quick passed in %ss (not a merge gate; CI runs the full gate)\n' \
     "$(($(date +%s) - started))"
+  exit 0
+fi
+
+if [[ "$mode" == ui ]]; then
+  for name in install lint typecheck openapi depcruise names coverage unit ui-e2e gitleaks; do
+    run_step "$name"
+  done
+  printf 'verify --ui passed in %ss (UI-only changes)\n' "$(($(date +%s) - started))"
   exit 0
 fi
 
@@ -269,7 +349,7 @@ if [[ "$mode" == docs ]]; then
   step format "${pnpm[@]}" exec prettier --check .
   run_step coverage
   run_step gitleaks
-  printf '\n\033[32mverify --docs passed in %ss (docs-only changes)\033[0m\n' "$(($(date +%s) - started))"
+  printf 'verify --docs passed in %ss (docs-only changes)\n' "$(($(date +%s) - started))"
   exit 0
 fi
 
@@ -294,7 +374,7 @@ for name in "${FULL_STEPS[@]}"; do
 done
 
 if [[ "$mode" == only ]]; then
-  printf '\n\033[32mverify --only=%s passed in %ss\033[0m\n' "$only" "$(($(date +%s) - started))"
+  printf 'verify --only=%s passed in %ss\n' "$only" "$(($(date +%s) - started))"
 else
-  printf '\n\033[32mverify: full gate passed in %ss\033[0m\n' "$(($(date +%s) - started))"
+  printf 'verify: full gate passed in %ss\n' "$(($(date +%s) - started))"
 fi
