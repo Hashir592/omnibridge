@@ -236,6 +236,8 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         listMyWorkspaces: {},
         chooseWorkspace: { body: { workspaceId: B } },
         enterPlatform: {},
+        getTerms: {},
+        acceptTerms: { body: { version: '2026-11-15' } },
         changePassword: { body: { currentPassword: MARKER, password: 'a long enough password 1' } },
         signOut: {},
         signOutEverywhere: {},

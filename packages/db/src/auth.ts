@@ -156,6 +156,19 @@ export class AuthStore {
    * Counts one password reset request and says whether a mail may go out for it: 3 per email
    * and 10 per address an hour, 100 a day in all (F-M02h-05).
    */
+  /** Whether the user has accepted this version of the terms and privacy policy (WWW-7). */
+  async termsAccepted(userId: string, version: string): Promise<boolean> {
+    const { rows } = await sql<{ ok: boolean }>`SELECT app.terms_accepted(${userId}::uuid,
+      ${version}) AS ok`.execute(this.#db);
+    return rows[0]?.ok ?? false;
+  }
+
+  /** Records an acceptance, with its version, time and address; append-only (WWW-7). */
+  async acceptTerms(userId: string, version: string, now: Date, ip: string): Promise<void> {
+    await sql`SELECT app.terms_accept(${userId}::uuid, ${version}, ${now},
+      ${ip}::inet)`.execute(this.#db);
+  }
+
   async allowReset(key: Buffer, ip: string, now: Date): Promise<boolean> {
     const { rows } = await sql<{ ok: boolean }>`SELECT app.auth_reset_allow(${key}, ${ip}::inet,
       ${now}) AS ok`.execute(this.#db);

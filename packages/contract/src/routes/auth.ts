@@ -25,8 +25,11 @@ export const SignInResultSchema = z
 
 export const MfaResultSchema = z
   .object({
-    /** `password_change`: the password is over 365 days old (USR-3, ADR-050). */
-    next: z.enum(['workspace_picker', 'app', 'password_change']),
+    /**
+     * `password_change`: the password is over 365 days old (USR-3, ADR-050). `terms`: the current
+     * terms and privacy policy are not accepted yet (WWW-7).
+     */
+    next: z.enum(['workspace_picker', 'app', 'password_change', 'terms']),
     /** Recovery-code sign in only: how many unused codes are left. */
     recoveryCodesLeft: z.number().int().min(0).max(10).optional(),
   })
@@ -200,6 +203,42 @@ export const enterPlatform = defineRoute({
   ...outsideTabs,
 });
 
+export const TermsSchema = z
+  .object({
+    /** The version to accept: the date the terms and privacy policy last changed. */
+    version: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    termsUrl: z.url(),
+    privacyUrl: z.url(),
+  })
+  .meta({ id: 'Terms' });
+
+export const TermsAcceptedSchema = z
+  .object({ next: z.enum(['workspace_picker', 'app']) })
+  .meta({ id: 'TermsAccepted' });
+
+/** The current terms and privacy policy to accept (WWW-7). */
+export const getTerms = defineRoute({
+  id: 'getTerms',
+  method: 'GET',
+  path: '/auth/terms',
+  summary: 'The current terms and privacy policy',
+  responses: { 200: TermsSchema },
+  auth: 'signed-in',
+  ...outsideTabs,
+});
+
+/** Accepts the current terms and privacy policy; logged with the version (WWW-7). */
+export const acceptTerms = defineRoute({
+  id: 'acceptTerms',
+  method: 'POST',
+  path: '/auth/terms',
+  summary: 'Accept the current terms and privacy policy',
+  body: z.object({ version: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+  responses: { 200: TermsAcceptedSchema },
+  auth: 'signed-in',
+  ...outsideTabs,
+});
+
 /** Changes the password (USR-3: rules, history, minimum age). Other sessions end. */
 export const changePassword = defineRoute({
   id: 'changePassword',
@@ -247,6 +286,8 @@ export const authRoutes = [
   listMyWorkspaces,
   chooseWorkspace,
   enterPlatform,
+  getTerms,
+  acceptTerms,
   changePassword,
   signOut,
   signOutEverywhere,

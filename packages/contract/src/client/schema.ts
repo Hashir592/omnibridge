@@ -255,6 +255,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/auth/terms': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The current terms and privacy policy */
+    get: operations['getTerms'];
+    put?: never;
+    /** Accept the current terms and privacy policy */
+    post: operations['acceptTerms'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/auth/workspace': {
     parameters: {
       query?: never;
@@ -555,12 +573,12 @@ export interface components {
     };
     MfaResult: {
       /** @enum {string} */
-      next: 'workspace_picker' | 'app' | 'password_change';
+      next: 'workspace_picker' | 'app' | 'password_change' | 'terms';
       recoveryCodesLeft?: number;
     };
     MfaResultInput: {
       /** @enum {string} */
-      next: 'workspace_picker' | 'app' | 'password_change';
+      next: 'workspace_picker' | 'app' | 'password_change' | 'terms';
       recoveryCodesLeft?: number;
     };
     NewCompany: {
@@ -658,6 +676,28 @@ export interface components {
     SignInResultInput: {
       /** @enum {string} */
       next: 'mfa_code' | 'mfa_setup';
+    };
+    Terms: {
+      /** Format: uri */
+      privacyUrl: string;
+      /** Format: uri */
+      termsUrl: string;
+      version: string;
+    };
+    TermsAccepted: {
+      /** @enum {string} */
+      next: 'workspace_picker' | 'app';
+    };
+    TermsAcceptedInput: {
+      /** @enum {string} */
+      next: 'workspace_picker' | 'app';
+    };
+    TermsInput: {
+      /** Format: uri */
+      privacyUrl: string;
+      /** Format: uri */
+      termsUrl: string;
+      version: string;
     };
     WorkspaceChoice: {
       companies: number;
@@ -1395,6 +1435,88 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  getTerms: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Terms'];
+        };
+      };
+    };
+  };
+  acceptTerms: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          version: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TermsAccepted'];
+        };
       };
     };
   };

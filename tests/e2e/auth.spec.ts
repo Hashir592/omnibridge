@@ -54,7 +54,15 @@ test('[AT-3] login with TOTP', async ({ request, baseURL }) => {
     verify = await post('/auth/mfa/verify', { code: totp(DEMO.totpSecret, step()) });
   }
   expect(verify.status()).toBe(200);
-  expect(await verify.json()).toEqual({ next: 'app' });
+  // WWW-7: on a fresh stack the demo user accepts the current terms first.
+  const after = (await verify.json()) as { next: string };
+  if (after.next === 'terms') {
+    const terms = (await (await request.get('/auth/terms')).json()) as { version: string };
+    const accepted = await post('/auth/terms', { version: terms.version });
+    expect(await accepted.json()).toEqual({ next: 'app' });
+  } else {
+    expect(after).toEqual({ next: 'app' });
+  }
 
   const companies = await request.get('/companies');
   expect(companies.status()).toBe(200);

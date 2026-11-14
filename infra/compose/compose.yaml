@@ -189,6 +189,8 @@ services:
       # The only origins allowed on state-changing requests (SEC-1). Dev default: the dev edge;
       # production sets the app's own origin (M22).
       APP_ORIGINS: ${APP_ORIGINS:-https://localhost:8443}
+      # WWW-7: the legal version users must accept; the date on the site's legal pages.
+      TERMS_VERSION: ${TERMS_VERSION:-2026-11-15}
       # Believe X-Forwarded-For only from private-network peers: web sits on Docker's private
       # networks behind the edge, and Caddy replaces any client-sent X-Forwarded-For. So the
       # sign-in delay and the audit see the client's address, not the edge's (ADR-008).

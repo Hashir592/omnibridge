@@ -87,6 +87,9 @@ const auth = new AuthService({
   logger,
   hmacKey,
   origins,
+  // The current terms and privacy policy version, a platform setting (WWW-7); it must match the
+  // date on the public site's legal pages (apps/site/src/settings.ts LEGAL_VERSION).
+  termsVersion: requireEnv('TERMS_VERSION'),
 });
 
 async function piiVaultHealthy(): Promise<boolean> {
