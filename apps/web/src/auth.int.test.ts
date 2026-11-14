@@ -149,7 +149,6 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
         workspaces: new WorkspaceRepository(main.db),
         companies: new CompanyRepository(main.db),
       },
-      members: new MembershipRepository(main.db),
       audit: new AuditLog(main.db),
       auth,
     });

@@ -82,7 +82,6 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
       version: '0',
       checks,
       tenancy,
-      members: new MembershipRepository(main.db),
       audit,
       ...(auditExportLimits === undefined ? {} : { auditExportLimits }),
       ...stubAuth(),
@@ -103,7 +102,8 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
         url,
         headers: headers(A, outsider),
       });
-      expect({ url, status: asOutsider.statusCode }).toEqual({ url, status: 403 });
+      // Not a member of A at all: refused before any role check (USR-8).
+      expect({ url, status: asOutsider.statusCode }).toEqual({ url, status: 401 });
       expect(asChild.body).not.toContain('audit_log');
     }
     // A refused export leaves no trace of an export.

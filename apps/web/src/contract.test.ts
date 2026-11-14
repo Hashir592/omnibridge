@@ -1,5 +1,11 @@
 import { defineRoute, listQuery, pageOf, type AnyRoute } from '@omnibridge/contract';
-import { ApiError, type SessionActor, type TenantRunner } from '@omnibridge/core';
+import {
+  ApiError,
+  NotAMember,
+  type MemberAccess,
+  type SessionActor,
+  type TenantRunner,
+} from '@omnibridge/core';
 import { createLogger } from '@omnibridge/logger';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
@@ -81,10 +87,17 @@ const SESSION: SessionActor = {
   sessionId: 'session-1',
 };
 /** No database here: the tenancy only hands the handler a context. */
-const tenancy: TenantRunner = {
-  runWorkspace: (actor, fn) => fn({ ...actor, companyIds: [] }),
-  run: (ctx, fn) => fn(ctx),
-};
+function tenancyAs(access: MemberAccess | 'not-a-member'): TenantRunner {
+  return {
+    runWorkspace: (actor, fn) => fn({ ...actor, companyIds: [] }),
+    run: (ctx, fn) => fn(ctx),
+    runMember: (actor, fn) =>
+      access === 'not-a-member'
+        ? Promise.reject(new NotAMember())
+        : fn({ ...actor, companyIds: [] }, access),
+  };
+}
+const tenancy = tenancyAs({ role: 'admin', tabs: 'all' });
 
 async function server(rs: readonly AnyRoute[] = routes, hs: object = handlers) {
   const app = Fastify({ loggerInstance: logger });
@@ -224,18 +237,15 @@ describe('authentication per route kind (SEC-3)', () => {
       await app.close();
       return res.statusCode;
     };
-    const base = { resolveSession: () => SESSION, tenancy };
-    expect(
-      await statusWith({ auth: { ...base, roleOf: () => Promise.resolve('admin' as const) } }),
-    ).toBe(200);
-    expect(
-      await statusWith({ auth: { ...base, roleOf: () => Promise.resolve('member' as const) } }),
-    ).toBe(403);
-    expect(await statusWith({ auth: { ...base, roleOf: () => Promise.resolve(undefined) } })).toBe(
-      403,
+    const as = (t: TenantRunner) => ({ auth: { resolveSession: () => SESSION, tenancy: t } });
+    expect(await statusWith(as(tenancyAs({ role: 'admin', tabs: 'all' })))).toBe(200);
+    expect(await statusWith(as(tenancyAs({ role: 'member', tabs: ['orders'] })))).toBe(403);
+    // Removed from the workspace: refused on the next request (USR-8).
+    expect(await statusWith(as(tenancyAs('not-a-member')))).toBe(401);
+    // No tenancy to look the member up: the server refuses to start at all.
+    await expect(statusWith({ auth: { resolveSession: () => SESSION } })).rejects.toThrow(
+      /need a tenancy/,
     );
-    // No way to look the role up: closed, never open.
-    expect(await statusWith({ auth: base })).toBe(403);
     expect(calls).toBe(1);
   });
 });

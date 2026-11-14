@@ -1,4 +1,11 @@
-import { isUuid, type TenantActor, type TenantContext, type TenantRunner } from '@omnibridge/core';
+import {
+  isUuid,
+  NotAMember,
+  type MemberAccess,
+  type TenantActor,
+  type TenantContext,
+  type TenantRunner,
+} from '@omnibridge/core';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { MainDb } from './schema.ts';
 
@@ -120,6 +127,32 @@ export class Tenancy implements TenantRunner {
         SELECT ids, set_config('app.company_ids', ids::text, true)
           FROM (SELECT app.workspace_company_ids() AS ids) AS scope`.execute(trx);
       return runBound(trx, { ...first, companyIds: rows[0]?.ids ?? [] }, fn);
+    });
+  }
+
+  runMember<T>(
+    actor: { workspaceId: string; userId: string },
+    fn: (ctx: TenantContext, access: MemberAccess) => Promise<T>,
+  ): Promise<T> {
+    const first: TenantContext = {
+      workspaceId: actor.workspaceId,
+      companyIds: [],
+      userId: actor.userId,
+    };
+    const problem = contextProblem(first);
+    if (problem !== undefined) return Promise.reject(problem);
+    return this.#db.transaction().execute(async (trx) => {
+      await setTenant(trx, first);
+      // Role, ticks and app.company_ids in one definer call (0015): no row means not a member.
+      const { rows } = await sql<{
+        role: 'admin' | 'member';
+        tabs: string[] | null;
+        company_ids: string[];
+      }>`SELECT role, tabs, company_ids FROM app.member_scope()`.execute(trx);
+      const row = rows[0];
+      if (row === undefined) throw new NotAMember();
+      const access: MemberAccess = { role: row.role, tabs: row.tabs ?? 'all' };
+      return runBound(trx, { ...first, companyIds: row.company_ids }, (ctx) => fn(ctx, access));
     });
   }
 }

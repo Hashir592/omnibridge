@@ -33,6 +33,31 @@ export interface TenantRunner {
   runWorkspace<T>(actor: TenantActor, fn: (ctx: TenantContext) => Promise<T>): Promise<T>;
   /** With exactly the context given, e.g. a workspace that is being created. */
   run<T>(ctx: TenantContext, fn: (ctx: TenantContext) => Promise<T>): Promise<T>;
+  /**
+   * For a signed-in member (T-0204): their role and ticks are read in the same transaction, and
+   * the companies in scope are exactly their permitted ones (invariant 4). Rejects with
+   * NotAMember when the user no longer belongs to the workspace (USR-8).
+   */
+  runMember<T>(
+    actor: { workspaceId: string; userId: string },
+    fn: (ctx: TenantContext, access: MemberAccess) => Promise<T>,
+  ): Promise<T>;
+}
+
+/** A member's role and ticks in one workspace (PERM-1 to PERM-4). */
+export interface MemberAccess {
+  /** `member` is a Child in the UI (PERM-1). */
+  readonly role: 'admin' | 'member';
+  /** The ticked tabs; `all` for an admin. */
+  readonly tabs: readonly string[] | 'all';
+}
+
+/** The user is not (or no longer) a member of the workspace (USR-8). */
+export class NotAMember extends Error {
+  constructor() {
+    super('not a member of this workspace');
+    this.name = 'NotAMember';
+  }
 }
 
 /** A signed-in workspace user, as the session check resolves them (T-0203 builds the real one). */

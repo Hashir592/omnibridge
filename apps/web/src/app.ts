@@ -21,7 +21,6 @@ import {
   type AuditFilter,
   type AuditLog,
   type CompanyRepository,
-  type MembershipRepository,
   type WorkspaceRepository,
 } from '@omnibridge/db';
 import { FileNotReadable, verifyFileLink, type FileStore } from '@omnibridge/files';
@@ -91,8 +90,6 @@ export interface WebAppOptions {
   /** Opens each request's one tenant transaction (TEN-1, invariant 3). */
   tenancy?: TenantRunner;
   directory?: TenantDirectory;
-  /** Workspace roles, for adminOnly routes (PERM-5). Without it those routes answer 403. */
-  members?: Pick<MembershipRepository, 'roleOf'>;
   /** The audit log (AUD-1, AUD-4). */
   audit?: Pick<AuditLog, 'record' | 'list'>;
   /** Overrides AUDIT_EXPORT_LIMITS; tests only. */
@@ -133,7 +130,6 @@ export function buildWebApp({
   files,
   tenancy,
   directory,
-  members,
   audit,
   auditExportLimits,
   auth,
@@ -397,7 +393,6 @@ export function buildWebApp({
               checkRequest: auth.checkRequest,
             }),
         ...(tenancy === undefined ? {} : { tenancy }),
-        ...(members === undefined ? {} : { roleOf: (ctx: TenantContext) => members.roleOf(ctx) }),
         ...(ebay === undefined ? {} : { verifyWebhook: webhookVerifier(ebay) }),
       },
     }),

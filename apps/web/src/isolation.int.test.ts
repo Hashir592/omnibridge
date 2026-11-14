@@ -180,7 +180,6 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       checks,
       tenancy,
       directory: { workspaces: r.workspaces, companies: r.companies },
-      members: r.memberships,
       audit: new AuditLog(main.db),
       jobs: r.jobs,
       files: { store, linkKey },

@@ -10,8 +10,10 @@ export {
 } from './errors.ts';
 export { runHttpHealthcheck } from './healthcheck.ts';
 export { pence, type Pence } from './money.ts';
+export { NotAMember } from './tenant.ts';
 export type {
   AccountActor,
+  MemberAccess,
   PlatformActor,
   SessionActor,
   TenantActor,

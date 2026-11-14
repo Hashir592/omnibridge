@@ -1,6 +1,7 @@
 import { STATUS_CODES, type IncomingMessage, type ServerResponse } from 'node:http';
 import fastifySwagger from '@fastify/swagger';
 import {
+  ADMIN_ONLY_TABS,
   assertRouteMetadata,
   ContractError,
   FileDownloadSchema,
@@ -17,6 +18,8 @@ import {
   ApiError,
   type AccountActor,
   type ErrorCode,
+  type MemberAccess,
+  NotAMember,
   type PlatformActor,
   type SessionActor,
   type TenantContext,
@@ -54,7 +57,7 @@ declare module 'fastify' {
  * acts on.
  */
 export type AuthInput<T extends AnyRoute> = T['auth'] extends 'session'
-  ? { session: SessionActor; tenant: TenantContext }
+  ? { session: SessionActor; tenant: TenantContext; access: MemberAccess }
   : T['auth'] extends 'platform'
     ? { platform: PlatformActor }
     : T['auth'] extends 'pre-mfa' | 'signed-in'
@@ -91,13 +94,11 @@ export interface AuthOptions {
    * (EBAY-2). Without it those routes answer 401; a false answer is 412.
    */
   verifyWebhook?: (request: FastifyRequest, route: AnyRoute) => Promise<boolean>;
-  /** Opens the request's one tenant transaction (required with resolveSession). */
-  tenancy?: TenantRunner;
   /**
-   * The signed-in user's role in the workspace, read inside the request's transaction. Without
-   * it every `adminOnly` route answers 403 (PERM-5); tab and company ticks arrive with T-0204.
+   * Opens the request's one tenant transaction (required with resolveSession). Session routes
+   * run through runMember, so the member's role and ticks are checked in that transaction.
    */
-  roleOf?: (tenant: TenantContext) => Promise<'admin' | 'member' | undefined>;
+  tenancy?: TenantRunner;
 }
 
 /** One handler per route id. A missing handler is a type error and a startup failure. */
@@ -119,6 +120,14 @@ type Actor =
   | { kind: 'webhook' };
 
 const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** May this member call this route? (PERM-3, PERM-4, PERM-5) */
+export function allowed(route: AnyRoute, access: MemberAccess): boolean {
+  if (access.role === 'admin') return true;
+  if (route.adminOnly) return false;
+  if ((ADMIN_ONLY_TABS as readonly string[]).includes(route.tab)) return false;
+  return route.tab === 'none' || (access.tabs !== 'all' && access.tabs.includes(route.tab));
+}
 const WEBHOOK_BODY_LIMIT = 64 * 1024;
 
 /** The caller of each request, set by the route's onRequest hook. */
@@ -348,7 +357,7 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
   { logLevels, auth = {} }: RegisterOptions<R> = {},
 ): void {
   const levels: Readonly<Record<string, 'warn' | 'error' | undefined>> = logLevels ?? {};
-  const { tenancy, roleOf } = auth;
+  const { tenancy } = auth;
   if (auth.resolveSession !== undefined && tenancy === undefined) {
     throw new ContractError('Session routes need a tenancy to open their tenant transaction');
   }
@@ -416,16 +425,24 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
           // response is sent; the handler's errors roll it back.
           if (tenancy === undefined) throw new ApiError({ status: 401, code: 'unauthorized' });
           const { session } = actor;
-          result = await tenancy.runWorkspace(
-            { workspaceId: session.workspaceId, userId: session.userId },
-            async (tenant) => {
-              // Admin-only routes check the role in the same transaction (PERM-5, AUD-4).
-              if (route.adminOnly && (await roleOf?.(tenant)) !== 'admin') {
-                throw new ApiError({ status: 403, code: 'forbidden' });
-              }
-              return call({ ...input, session, tenant });
-            },
-          );
+          try {
+            result = await tenancy.runMember(
+              { workspaceId: session.workspaceId, userId: session.userId },
+              async (tenant, access) => {
+                // Role and ticks come from the same transaction (PERM-3, PERM-5, AUD-4): an
+                // admin-only route needs an admin, a tab route needs that tab ticked, and the
+                // companies in scope are already only the permitted ones (invariant 4).
+                if (!allowed(route, access)) throw new ApiError({ status: 403, code: 'forbidden' });
+                return call({ ...input, session, tenant, access });
+              },
+            );
+          } catch (error) {
+            // Removed from the workspace: refused on the very next request (USR-8).
+            if (error instanceof NotAMember) {
+              throw new ApiError({ status: 401, code: 'unauthorized' });
+            }
+            throw error;
+          }
         } else if (actor.kind === 'platform') {
           result = await call({ ...input, platform: actor.platform });
         } else if (actor.kind === 'account') {
