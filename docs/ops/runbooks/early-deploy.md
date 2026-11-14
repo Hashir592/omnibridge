@@ -62,10 +62,10 @@ mkdir -p infra/early-deploy/.secrets && chmod 700 infra/early-deploy/.secrets
 sops -d --extract '["ebay_verification_token"]' /path/to/ops/early.sops.yaml > infra/early-deploy/.secrets/ebay_verification_token
 sops -d --extract '["ebay_client_id"]' /path/to/ops/early.sops.yaml > infra/early-deploy/.secrets/ebay_client_id
 sops -d --extract '["ebay_client_secret"]' /path/to/ops/early.sops.yaml > infra/early-deploy/.secrets/ebay_client_secret
-chmod 600 infra/early-deploy/.secrets/*
+chmod 644 infra/early-deploy/.secrets/*
 ```
 
-The directory is git-ignored. Never paste these values into chat, tickets or logs.
+The files are readable so the endpoint's non-root container user can read its mounted secrets. They stay private on the host because only the deploy user can enter the `700` directory. The directory is git-ignored. Never paste these values into chat, tickets or logs.
 
 ## 6. Settings (`infra/early-deploy/.env`, git-ignored)
 
