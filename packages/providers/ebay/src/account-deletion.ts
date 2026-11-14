@@ -55,7 +55,11 @@ function publicKey(key: string) {
   return createPublicKey({ key: Buffer.from(body, 'base64'), format: 'der', type: 'spki' });
 }
 
-/** True only for a notification signed by eBay; any missing, malformed or wrong part is false. */
+/**
+ * True only for a notification signed by eBay; any missing, malformed or wrong part is false.
+ * A failure to get the key (eBay or our credentials) is not a bad signature: it rejects, so the
+ * caller answers 5xx and eBay retries.
+ */
 export async function verifyNotification(
   message: unknown,
   header: string | undefined,
@@ -64,8 +68,9 @@ export async function verifyNotification(
   if (header === undefined) return false;
   const parsed = signatureHeader(header);
   if (parsed === undefined) return false;
+  const pem = await keys(parsed.kid);
   try {
-    const key = publicKey(await keys(parsed.kid));
+    const key = publicKey(pem);
     return verify(
       'sha1',
       Buffer.from(JSON.stringify(message)),
@@ -80,6 +85,8 @@ export async function verifyNotification(
 /** Public keys by kid, each kept for an hour. */
 export class PublicKeyCache {
   readonly #keys = new Map<string, { key: string; until: number }>();
+  /** One fetch per kid at a time: notices arriving together share it. */
+  readonly #pending = new Map<string, Promise<string>>();
   readonly #fetch: PublicKeySource;
   readonly #now: () => number;
 
@@ -91,11 +98,20 @@ export class PublicKeyCache {
   get = async (kid: string): Promise<string> => {
     const hit = this.#keys.get(kid);
     if (hit !== undefined && hit.until > this.#now()) return hit.key;
-    const key = await this.#fetch(kid);
-    // A few keys at most; an old one is replaced, never kept beside its successor.
-    if (this.#keys.size > 32) this.#keys.clear();
-    this.#keys.set(kid, { key, until: this.#now() + KEY_TTL_MS });
-    return key;
+    const pending = this.#pending.get(kid);
+    if (pending !== undefined) return pending;
+    const fetching = this.#fetch(kid)
+      .then((key) => {
+        // A few keys at most; an old one is replaced, never kept beside its successor.
+        if (this.#keys.size > 32) this.#keys.clear();
+        this.#keys.set(kid, { key, until: this.#now() + KEY_TTL_MS });
+        return key;
+      })
+      .finally(() => {
+        this.#pending.delete(kid);
+      });
+    this.#pending.set(kid, fetching);
+    return fetching;
   };
 }
 

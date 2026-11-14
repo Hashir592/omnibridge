@@ -11,6 +11,11 @@
       "@omnibridge/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "@omnibridge/source": "./src/sample.ts",
+      "types": "./dist/sample.d.ts",
+      "default": "./dist/sample.js"
     }
   },
   "scripts": {

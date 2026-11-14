@@ -11,4 +11,3 @@ export {
   type EbayApiOptions,
   type PublicKeySource,
 } from './account-deletion.ts';
-export { EBAY_SDK_SAMPLE } from './sample.ts';

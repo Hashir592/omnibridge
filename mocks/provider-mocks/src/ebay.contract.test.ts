@@ -1,10 +1,10 @@
 import { createLogger } from '@omnibridge/logger';
 import {
-  EBAY_SDK_SAMPLE as SAMPLE,
   ebayPublicKeyFetcher,
   PublicKeyCache,
   verifyNotification,
 } from '@omnibridge/provider-ebay';
+import { EBAY_SDK_SAMPLE as SAMPLE } from '@omnibridge/provider-ebay/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildMockServer } from './server.ts';
 

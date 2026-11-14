@@ -1,5 +1,6 @@
 import { createLogger } from '@omnibridge/logger';
-import { EBAY_SDK_SAMPLE as SAMPLE, PublicKeyCache } from '@omnibridge/provider-ebay';
+import { PublicKeyCache } from '@omnibridge/provider-ebay';
+import { EBAY_SDK_SAMPLE as SAMPLE } from '@omnibridge/provider-ebay/testing';
 import { describe, expect, it } from 'vitest';
 import { buildWebApp } from '../app.ts';
 import { ebayWebhook } from './ebay.ts';
@@ -47,6 +48,29 @@ const notice = (headers: Record<string, string> = { 'x-ebay-signature': SAMPLE.s
 });
 
 describe('eBay account deletion endpoint (EBAY-2)', () => {
+  it('[EBAY-2] a key that cannot be fetched answers 503, so eBay retries', async () => {
+    const lines: string[] = [];
+    const logger = createLogger({
+      service: 'test',
+      version: '0',
+      destination: { write: (line: string) => lines.push(line) },
+    });
+    const app = buildWebApp({
+      logger,
+      version: '0',
+      checks: { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resolve(true) },
+      ebay: ebayWebhook({
+        verificationToken: TOKEN,
+        endpoint: ENDPOINT,
+        keys: () => Promise.reject(new Error('eBay public key: HTTP 401')),
+        logger,
+      }),
+    });
+    expect((await app.inject(notice())).statusCode).toBe(503);
+    expect(lines.join('')).toContain('"event":"ebay.public_key_unavailable"');
+    await app.close();
+  });
+
   it('[EBAY-2] the challenge answers with the hash, as JSON with no byte-order mark', async () => {
     const { app } = server();
     const res = await app.inject({ method: 'GET', url: `${PATH}?challenge_code=abc123` });
@@ -108,9 +132,12 @@ describe('eBay account deletion endpoint (EBAY-2)', () => {
     await off.app.close();
 
     const { app } = server({ perMinute: 2 });
-    expect((await app.inject(notice())).statusCode).toBe(204);
-    expect((await app.inject(notice())).statusCode).toBe(204);
-    const third = await app.inject(notice());
+    // eBay's own verified notices are never limited, however many come from one address.
+    for (let i = 0; i < 5; i += 1) expect((await app.inject(notice())).statusCode).toBe(204);
+    // Bad ones are: after 2 failures in a minute the address waits.
+    expect((await app.inject(notice({}))).statusCode).toBe(412);
+    expect((await app.inject(notice({}))).statusCode).toBe(412);
+    const third = await app.inject(notice({}));
     expect(third.statusCode).toBe(429);
     expect(Number(third.headers['retry-after'])).toBeGreaterThan(0);
     // A notice bigger than 64 KB is refused before it is read.

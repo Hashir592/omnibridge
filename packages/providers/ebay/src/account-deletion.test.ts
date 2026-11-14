@@ -49,7 +49,10 @@ describe('eBay marketplace account deletion (EBAY-2)', () => {
         kid: 'x',
       }),
     ).toString('base64');
-    expect(await verifyNotification(SAMPLE.message, otherKid, keyOf)).toBe(false);
+    // A key that cannot be fetched is not a bad signature: it rejects, so the caller answers 5xx.
+    await expect(verifyNotification(SAMPLE.message, otherKid, keyOf)).rejects.toThrow(
+      /unknown kid/,
+    );
   });
 
   it('[EBAY-2] public keys are cached per kid for an hour', async () => {
@@ -63,6 +66,21 @@ describe('eBay marketplace account deletion (EBAY-2)', () => {
     now += 2 * 60_000;
     await cache.get(SAMPLE.kid);
     expect(fetchKey).toHaveBeenCalledTimes(2);
+  });
+
+  it('[EBAY-2] notices arriving together share one key fetch', async () => {
+    const fetchKey = vi.fn(
+      (kid: string) =>
+        new Promise<string>((resolve) => {
+          setTimeout(() => {
+            resolve(`key-${kid}`);
+          }, 20);
+        }),
+    );
+    const cache = new PublicKeyCache(fetchKey);
+    const keys = await Promise.all(Array.from({ length: 10 }, () => cache.get('k1')));
+    expect(new Set(keys)).toEqual(new Set(['key-k1']));
+    expect(fetchKey).toHaveBeenCalledTimes(1);
   });
 
   it('[EBAY-2] the key fetcher takes an application token, then reads the key for the kid', async () => {

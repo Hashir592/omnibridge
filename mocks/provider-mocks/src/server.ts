@@ -1,5 +1,5 @@
 import type { Logger } from '@omnibridge/logger';
-import { EBAY_SDK_SAMPLE } from '@omnibridge/provider-ebay';
+import { EBAY_SDK_SAMPLE } from '@omnibridge/provider-ebay/testing';
 import Fastify from 'fastify';
 
 /**

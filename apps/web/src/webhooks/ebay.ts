@@ -49,25 +49,37 @@ export interface EbayWebhook {
   verify: (request: FastifyRequest) => Promise<boolean>;
 }
 
-/** A fixed one-minute window per client address: enough to stop a flood, nothing to store. */
+/**
+ * A fixed one-minute window per client address, counting only what a flood would send: challenge
+ * requests and notices that fail verification. eBay's own verified notices are never limited,
+ * however many arrive together from its few addresses.
+ */
 function rateLimiter(perMinute: number, now: () => number) {
   const windows = new Map<string, { start: number; count: number }>();
-  return (ip: string): void => {
+  const current = (ip: string) => {
     const t = now();
     const w = windows.get(ip);
-    if (w === undefined || t - w.start >= 60_000) {
-      if (windows.size > 10_000) windows.clear();
-      windows.set(ip, { start: t, count: 1 });
-      return;
-    }
-    w.count += 1;
-    if (w.count > perMinute) {
-      throw new ApiError({
-        status: 429,
-        code: 'rate_limited',
-        retryAfterSeconds: Math.ceil((w.start + 60_000 - t) / 1000),
-      });
-    }
+    if (w !== undefined && t - w.start < 60_000) return w;
+    if (windows.size > 10_000) windows.clear();
+    const fresh = { start: t, count: 0 };
+    windows.set(ip, fresh);
+    return fresh;
+  };
+  return {
+    /** Refuses with 429 once the address has used its minute. */
+    check(ip: string): void {
+      const w = current(ip);
+      if (w.count >= perMinute) {
+        throw new ApiError({
+          status: 429,
+          code: 'rate_limited',
+          retryAfterSeconds: Math.max(1, Math.ceil((w.start + 60_000 - now()) / 1000)),
+        });
+      }
+    },
+    count(ip: string): void {
+      current(ip).count += 1;
+    },
   };
 }
 
@@ -77,14 +89,26 @@ export function ebayWebhook(options: EbayWebhookOptions): EbayWebhook {
   }
   const limit = rateLimiter(options.perMinute ?? 60, options.now ?? Date.now);
   const verify = async (request: FastifyRequest): Promise<boolean> => {
-    limit(request.ip);
+    // Checked before verifying, so a flood of bad notices cannot make us fetch keys from eBay.
+    limit.check(request.ip);
     const header = request.headers['x-ebay-signature'];
-    const ok = await verifyNotification(
-      request.body,
-      typeof header === 'string' ? header : undefined,
-      options.keys,
-    );
+    let ok: boolean;
+    try {
+      ok = await verifyNotification(
+        request.body,
+        typeof header === 'string' ? header : undefined,
+        options.keys,
+      );
+    } catch (err) {
+      // Not the sender's fault: answer 503 so eBay retries, and say what failed.
+      options.logger.error(
+        { event: 'ebay.public_key_unavailable', err },
+        'eBay public key could not be fetched',
+      );
+      throw new ApiError({ status: 503, code: 'service_unavailable' });
+    }
     if (!ok) {
+      limit.count(request.ip);
       options.logger.warn(
         { event: 'ebay.account_deletion.rejected' },
         'eBay notice: bad signature',
@@ -96,7 +120,8 @@ export function ebayWebhook(options: EbayWebhookOptions): EbayWebhook {
     verify,
     handlers: {
       ebayAccountDeletionChallenge: ({ query, request }) => {
-        limit(request.ip);
+        limit.check(request.ip);
+        limit.count(request.ip);
         return Promise.resolve({
           status: 200,
           body: {
