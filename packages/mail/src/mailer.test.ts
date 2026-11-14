@@ -4,7 +4,12 @@ import { renderLockNotice } from './templates.ts';
 
 describe('Mailer recipients (SEC-4, F-M02h-10)', () => {
   it('[SEC-4] only a plain local@domain address is accepted', () => {
-    for (const ok of ['sam@example.test', 'first.last+tag@sub.example.co.uk', 'a_b-c%d@x-y.io']) {
+    for (const ok of [
+      'sam@example.test',
+      'first.last+tag@sub.example.co.uk',
+      'a_b-c%d@x-y.io',
+      "o'brien@example.co.uk",
+    ]) {
       expect(isPlainAddress(ok)).toBe(true);
     }
     for (const bad of [

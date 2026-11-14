@@ -40,7 +40,9 @@ import {
 } from './totp.ts';
 
 /** Lifetimes (USR-6, USR-7, ADR-048). */
-export const PRE_MFA_MS = 10 * 60_000;
+export /** Reset requests worked on after their 202 at once, at most (F-M02h-04). */
+const MAX_RESET_BACKLOG = 64;
+const PRE_MFA_MS = 10 * 60_000;
 export const IDLE_MS = 30 * 60_000;
 export const ABSOLUTE_MS = 12 * 3_600_000;
 /** A session's last-seen time is written at most this often. */
@@ -300,7 +302,7 @@ export class AuthService {
     ip: string,
     now: Date,
     user: { userId: string } | undefined,
-    failure: 'password' | 'code' | 'recovery_code',
+    failure: 'password' | 'code' | 'recovery_code' | 'current_password',
   ): Promise<Date | null> {
     const result = await this.#o.store.recordFailure(key, ip, now);
     if (user !== undefined) {
@@ -529,6 +531,11 @@ export class AuthService {
    * time to answer (USR-7, F-M02h-04). Errors are logged, never shown.
    */
   forgotPassword(email: string, ip: string): void {
+    // Bounded: a flood answers 202 as usual but starts no more work than this at once.
+    if (this.#background.size >= MAX_RESET_BACKLOG) {
+      this.#o.logger.warn({ event: 'auth.reset_backlog_full' }, 'password reset backlog full');
+      return;
+    }
     const work = this.#forgotPassword(email.trim().toLowerCase(), ip, this.#now())
       .catch((err: unknown) => {
         this.#o.logger.error({ err, event: 'auth.reset_failed' }, 'password reset request failed');
@@ -609,7 +616,7 @@ export class AuthService {
     await this.#refuseIfBlocked(key, request.ip, now);
     const current = await this.#o.store.loginLookup(user.email);
     if (!(await this.#o.passwords.check(current?.passwordHash, input.currentPassword))) {
-      const lockedUntil = await this.#countFailure(key, request.ip, now, user, 'password');
+      const lockedUntil = await this.#countFailure(key, request.ip, now, user, 'current_password');
       if (lockedUntil !== null) {
         throw rateLimited(lockedUntil, now, 'Too many failed attempts. Sign in is paused.');
       }
