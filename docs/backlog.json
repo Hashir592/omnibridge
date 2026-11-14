@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "updated": "2026-11-12",
+  "updated": "2026-11-14",
   "owner": "S1",
   "notes": "Tasks for M01 and M02 only. Later modules are detailed two at a time. Risk is light, normal or high (ADR-043): it sets the local checks and code review. Risk 'high' also means the session waits for Hashir's 'go' before implementing. Up to 3 light or normal tasks of one module may run as one batch PR. M01 closed 20 Oct 2026. Checkpoints: M01 halfway after T-0103, M01 end after T-0106; M02 halfway after T-0203, M02 end after T-0206 (T-0207 runs before T-0206). Every test title cites the PRD IDs it proves, e.g. '[TEN-1]'. prd_ids lists only IDs owned by the task's module (MODULES.md); supports lists IDs owned elsewhere that the task contributes to. The coverage check counts prd_ids only. M03 (S2) tasks T-0301..T-0303 run in parallel; S2 uses design iteration mode (ADR-037). M03 checkpoints: halfway skipped; M03 end (T-0301..T-0304) is reviewed by S4 in the same session as the M02 halfway. From 12 Nov 2026 (ADR-054): build order and releases are in MODULES.md; T-0205 deferred to Release 3; halfway checkpoints only for M02, M04, M10, M12, M17, M18; CI is the only full gate.",
   "tasks": [
@@ -718,7 +718,8 @@
         "Mail base template header colour to the petrol brand-700 #0F6B66 (ADR-041)",
         "scripts/ui-refs.sh: tar only files that exist (a tracked file deleted in the working tree must not abort the copy-back)",
         "F-M02h-06: retention for sessions (revoked or expired > 30 days) and password resets (used or expired > 7 days), with an index and a test",
-        "Pool sizes: role connection caps must add up to less than max_connections"
+        "Pool sizes: role connection caps must add up to less than max_connections",
+        "Fix the teardown flake in packages/db/src/audit.int.test.ts (the test database shut down while connections were open; seen once by S2 on 14 Nov 2026): close pools before the container stops (ADR-057)"
       ],
       "out_of_scope": [
         "scan_failed rescan path (M05 platform console)",
@@ -781,6 +782,66 @@
       ],
       "risk": "normal",
       "status": "done"
+    },
+    {
+      "id": "T-0208",
+      "module": "M02",
+      "session": "S3",
+      "title": "Faster CI and quiet output (ADR-056)",
+      "goal": "CI answers in minutes and test output costs little of the session limit, with every check still running.",
+      "prd_ids": [],
+      "supports": [
+        "SEC-16"
+      ],
+      "scope": [
+        "CI ui lane: when only apps/ui/** changed (no lockfile, contract, package.json or infra change) run static checks, UI unit tests and the Playwright ui project; skip Postgres integration and the Docker stack. Fail safe: unsure means the full lane. Same required check name.",
+        "Run the full gate on every push to main as well as on PRs.",
+        "Speed the full lane: cache built images keyed by a hash of their inputs and skip rebuilding unchanged images; target under 7 min (ui lane under 5).",
+        "Quiet verify.sh: one line per step, the last 60 lines of a failing step, full logs in .verify-logs/ (git-ignored); Vitest dot and Playwright line reporters in CI and --quick."
+      ],
+      "out_of_scope": [
+        "Removing or weakening any check",
+        "Changing thresholds"
+      ],
+      "depends_on": [],
+      "acceptance": [
+        "A UI-only PR runs the ui lane and a mixed PR runs the full lane (shown on two test PRs)",
+        "main runs the full gate after each merge",
+        "Full-lane wall time recorded before and after",
+        "verify.sh --quick on a clean tree prints at most 25 lines",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0307",
+      "module": "M03",
+      "session": "S2",
+      "title": "Generic Website mark (ADR-057)",
+      "goal": "No shop's logo is built into OmniBridge.",
+      "prd_ids": [
+        "NFR-9"
+      ],
+      "supports": [],
+      "scope": [
+        "Replace the JeezMart-derived Website mark with a generic cart icon in the 18 px mark",
+        "Remove the JeezMart image from the repo",
+        "Note in docs/design/README.md that a per-workspace logo from the website connection comes in M11"
+      ],
+      "out_of_scope": [
+        "Per-workspace logo upload (M11)"
+      ],
+      "depends_on": [
+        "T-0306"
+      ],
+      "acceptance": [
+        "No JeezMart artwork left in apps/ or docs/design/",
+        "Orders reference images updated only if the mark change shows (Hashir approves)",
+        "CI full gate green at merge"
+      ],
+      "risk": "light",
+      "status": "todo"
     }
   ]
 }

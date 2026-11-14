@@ -61,7 +61,7 @@ It runs:
 - hard-coded-name check
 - requirement-ID coverage check
 
-It must pass completely before any merge, and **CI is where the full gate runs** (ADR-054). Locally, use `scripts/verify.sh --quick`, plus the integration tests your task touches for high-risk tasks. A task is done only when the full run passes in CI.
+It must pass completely before any merge, and **CI is where the full gate runs** (ADR-054). Locally, use `scripts/verify.sh --quick`, plus the integration tests your task touches for high-risk tasks. A task is done only when the full run passes in CI. Speed rules (ADR-056): never wait for CI (push, enable auto-merge, move on); one review per PR by tier; a trivial lane for copy, colour and one-line fixes; the browser only when it proves something; quiet output; short sessions.
 
 ## Conventions
 
