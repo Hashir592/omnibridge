@@ -149,6 +149,50 @@ describe('DataTable', () => {
   });
 });
 
+// ADR-054 (FA-18): the gate checks render work by counting, not by timing frames, so it gives
+// the same answer on a fast laptop and a busy CI runner. ui-perf stays a local benchmark.
+describe('DataTable render count', () => {
+  const page = Array.from({ length: 100 }, (_, i) => ({
+    id: `p${String(i)}`,
+    name: `Row ${String(i)}`,
+    qty: i,
+  }));
+  let cells = 0;
+  const counted: Array<DataColumn<Row>> = [
+    {
+      id: 'name',
+      header: 'Name',
+      width: 200,
+      cell: (r) => {
+        cells++;
+        return r.name;
+      },
+    },
+  ];
+
+  function Page({ tick }: { tick: number }) {
+    // `tick` changes the parent only; the rows and columns stay the same objects.
+    return (
+      <>
+        <output>{tick}</output>
+        <DataTable label="Page" rows={page} rowId={(r) => r.id} columns={counted} status="ready" />
+      </>
+    );
+  }
+
+  it('[NFR-8] a 100-row page renders only the visible rows, and a parent re-render renders none', () => {
+    cells = 0;
+    const { rerender } = render(<Page tick={0} />);
+    const first = cells;
+    // 600 px of 56 px rows plus the virtualiser's overscan: about 15 rows, never the whole page.
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThanOrEqual(20);
+    rerender(<Page tick={1} />);
+    rerender(<Page tick={2} />);
+    expect(cells - first).toBe(0);
+  });
+});
+
 describe('Pager', () => {
   it('[NFR-9] shows the range with UK number formatting and pages forward', () => {
     const onPage = vi.fn();

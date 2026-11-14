@@ -1,5 +1,6 @@
 node_modules/
 dist/
+apps/ui/.perf-build/
 coverage/
 .astro/
 *.tsbuildinfo

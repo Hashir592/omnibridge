@@ -17,6 +17,11 @@ const uiUrl = process.env.OB_UI_URL ?? `http://localhost:${uiPort}`;
 const perfPort = String(Number(uiPort) + 1);
 const perfUrl = process.env.OB_UI_PERF_URL ?? `http://localhost:${perfPort}`;
 const ownServer = !process.env.CI && !process.env.OB_E2E_OWN_SERVER;
+// ui-perf is a local benchmark, not a gate (ADR-054, FA-18): it runs only when asked for, with
+//   OB_UI_PERF=1 npx playwright test --project ui-perf
+// or against an already-running perf build by setting OB_UI_PERF_URL.
+// The gate checks render counts in a unit test instead (kit/table/DataTable.test.tsx).
+const perf = process.env.OB_UI_PERF === '1' || !!process.env.OB_UI_PERF_URL;
 const vite = 'node ../../node_modules/vite/bin/vite.js';
 
 export default defineConfig({
@@ -44,8 +49,8 @@ export default defineConfig({
       testIgnore: '**/*.perf.spec.ts',
       use: { ...devices['Desktop Chrome'], baseURL: uiUrl, viewport: { width: 1440, height: 900 } },
     },
-    // Left out when OB_UI_URL points at an outside server, because then no perf build is started.
-    ...(process.env.OB_UI_URL && !process.env.OB_UI_PERF_URL
+    // Only on request, and left out when OB_UI_URL points at an outside server without a perf URL.
+    ...(!perf || (process.env.OB_UI_URL && !process.env.OB_UI_PERF_URL)
       ? []
       : [
           {
@@ -75,15 +80,20 @@ export default defineConfig({
             reuseExistingServer: ownServer,
             timeout: 120_000,
           },
-          {
-            // Production build with the gallery, served by vite preview (apps/ui/dist/perf, git-ignored).
-            command: `${vite} build --outDir dist/perf --emptyOutDir && ${vite} preview --outDir dist/perf --port ${perfPort} --strictPort`,
-            cwd: 'apps/ui',
-            env: { VITE_UI_GALLERY: '1' },
-            url: perfUrl,
-            reuseExistingServer: ownServer,
-            timeout: 180_000,
-          },
+          // Production build with the gallery, served by vite preview. It is written to
+          // apps/ui/.perf-build (git-ignored), never inside dist, so it cannot be deployed (F-M03-end-02).
+          ...(perf && !process.env.OB_UI_PERF_URL
+            ? [
+                {
+                  command: `${vite} build --outDir .perf-build --emptyOutDir && ${vite} preview --outDir .perf-build --port ${perfPort} --strictPort`,
+                  cwd: 'apps/ui',
+                  env: { VITE_UI_GALLERY: '1' },
+                  url: perfUrl,
+                  reuseExistingServer: ownServer,
+                  timeout: 180_000,
+                },
+              ]
+            : []),
         ],
       }),
 });
