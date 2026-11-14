@@ -13,3 +13,7 @@ blob-report/
 infra/compose/.secrets/
 infra/compose/.local/
 .verify/
+
+# Machine-local Claude Code files (F-M02h-08).
+.claude/settings.local.json
+.claude/launch.json
