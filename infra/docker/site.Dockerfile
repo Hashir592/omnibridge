@@ -19,7 +19,9 @@ RUN --mount=type=cache,id=omnibridge-pnpm-store,target=/pnpm-store \
 
 FROM ${SWS_IMAGE} AS runtime
 COPY --from=build --chown=root:root /repo/apps/site/dist /public
-ENV SERVER_PORT=8080 \
+COPY --chown=root:root infra/docker/site-sws.toml /etc/sws.toml
+ENV SERVER_CONFIG_FILE=/etc/sws.toml \
+    SERVER_PORT=8080 \
     SERVER_ROOT=/public \
     SERVER_HEALTH=true \
     SERVER_LOG_LEVEL=warn

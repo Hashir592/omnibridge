@@ -1,0 +1,168 @@
+/* Public site (T-0601): clean and plain; S2 may restyle later. Brand petrol #0F6B66 (ADR-041). */
+:root {
+  --ink: #1b1f24;
+  --muted: #5b636d;
+  --line: #e3e6ea;
+  --brand: #0f6b66;
+  --brand-dark: #0b524e;
+  --bg: #ffffff;
+  --soft: #f5f7f8;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: var(--brand);
+}
+
+a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand img {
+  display: block;
+  height: 48px;
+  width: auto;
+}
+
+.site-header nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.site-header nav a {
+  text-decoration: none;
+  font-weight: 500;
+}
+
+main {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+}
+
+main.prose,
+.prose {
+  max-width: 46rem;
+}
+
+h1 {
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  line-height: 1.2;
+  margin: 0 0 1rem;
+}
+
+h2 {
+  font-size: 1.35rem;
+  margin: 2rem 0 0.5rem;
+}
+
+.lead {
+  font-size: 1.15rem;
+  color: var(--muted);
+  max-width: 44rem;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.6rem 1.1rem;
+  border-radius: 0.5rem;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.button:hover {
+  background: var(--brand-dark);
+}
+
+.site-header nav a.button.secondary {
+  background: transparent;
+  color: var(--brand);
+  border: 1px solid var(--brand);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  background: var(--soft);
+}
+
+.card h2,
+.card h3 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.updated {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 0.25rem;
+  vertical-align: top;
+}
+
+.site-footer {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 2.5rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}

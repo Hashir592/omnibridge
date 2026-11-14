@@ -1,0 +1,25 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base
+  title="Cookies"
+  description="OmniBridge uses only essential cookies. No tracking, advertising or analytics cookies."
+>
+  <div class="prose">
+    <h1>Cookies</h1>
+    <p class="lead">We use only the cookies the service needs to work. There are no tracking, advertising or analytics cookies, and no third-party scripts.</p>
+    <p>This public site sets no cookies at all.</p>
+    <p>When you sign in at app.omnibridge.co.uk, the app sets two essential cookies:</p>
+    <table>
+      <thead>
+        <tr><th>Cookie</th><th>What it does</th><th>How long</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>ob_session</code></td><td>Keeps you signed in</td><td>Until you sign out, after 30 minutes idle, or at most 12 hours</td></tr>
+        <tr><td><code>ob_csrf</code></td><td>Protects your account against forged requests</td><td>The same as the session</td></tr>
+      </tbody>
+    </table>
+    <p>Because these cookies are essential, they do not need consent and there is nothing to switch off.</p>
+  </div>
+</Base>

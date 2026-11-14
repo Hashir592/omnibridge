@@ -1,0 +1,33 @@
+---
+// Contact (PRD §10.2). The contact form arrives with the app in Release 1 (Hashir, 15 Nov 2026):
+// until then the page lists the public addresses and the registered office.
+import Base from '../layouts/Base.astro';
+import { CONTACT, readSettings } from '../settings.ts';
+
+const s = readSettings(process.env);
+---
+
+<Base
+  title="Contact"
+  description="Contact OmniBridge: support, privacy and security email addresses and our registered office."
+>
+  <div class="prose">
+    <h1>Contact</h1>
+    <div class="grid">
+      <section class="card">
+        <h2>Support and access requests</h2>
+        <p><a href={`mailto:${CONTACT.support}`}>{CONTACT.support}</a></p>
+      </section>
+      <section class="card">
+        <h2>Privacy and data requests</h2>
+        <p><a href={`mailto:${CONTACT.privacy}`}>{CONTACT.privacy}</a></p>
+      </section>
+      <section class="card">
+        <h2>Security issues</h2>
+        <p><a href={`mailto:${CONTACT.security}`}>{CONTACT.security}</a></p>
+      </section>
+    </div>
+    <h2>Registered office</h2>
+    <p>{s.operatorLegalName}<br />{s.operatorRegisteredAddress}<br />Company number {s.operatorCompanyNumber}</p>
+  </div>
+</Base>

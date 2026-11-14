@@ -1,0 +1,113 @@
+---
+// Terms of service (WWW-6). Drafted by the dev team; the client reviews it.
+import Base from '../layouts/Base.astro';
+import { CONTACT, LEGAL_VERSION, readSettings } from '../settings.ts';
+
+const s = readSettings(process.env);
+const updated = new Date(`${LEGAL_VERSION}T00:00:00Z`).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+---
+
+<Base
+  title="Terms of service"
+  description="The terms for using OmniBridge: accounts, acceptable use, your channel accounts, data processing, eBay and Amazon terms, liability and English law."
+>
+  <div class="prose">
+    <h1>Terms of service</h1>
+    <p class="updated">Last updated: {updated} (version {LEGAL_VERSION})</p>
+
+    <h2>1. The service</h2>
+    <p>
+      OmniBridge is a back-office service for sellers on Amazon, eBay and their own websites,
+      provided by {s.operatorLegalName} (“we”, “us”) to businesses (“customers”). These terms apply
+      to every customer and to every person who uses OmniBridge for a customer (“users”).
+    </p>
+
+    <h2>2. Accounts</h2>
+    <ul>
+      <li>Each user has their own named account. Shared logins are not allowed.</li>
+      <li>Every user must use two-step sign-in and keep their password and codes private.</li>
+      <li>The customer’s admins decide who has access and what each user can see, and remove users who leave.</li>
+    </ul>
+
+    <h2>3. Acceptable use</h2>
+    <p>You must not:</p>
+    <ul>
+      <li>use OmniBridge for anything unlawful or to send unsolicited messages to buyers;</li>
+      <li>try to reach another customer’s data, test or break our security without permission, or overload the service;</li>
+      <li>copy, resell or reverse-engineer the service;</li>
+      <li>use buyer data for anything other than fulfilling and supporting the buyer’s order.</li>
+    </ul>
+
+    <h2>4. Your channel accounts</h2>
+    <p>
+      You connect your own Amazon, eBay, website and carrier accounts and stay responsible for them:
+      for following each platform’s rules, for the listings, prices and stock you publish, and for
+      the orders you dispatch. You can disconnect an account at any time.
+    </p>
+
+    <h2>5. Data processing</h2>
+    <p>
+      For personal data in your workspace you are the controller and we are your processor. Our data
+      processing terms are part of these terms: we process personal data only on your instructions
+      to provide the service; keep it confidential and secure; use only the sub-processors listed in
+      our <a href="/privacy">privacy policy</a> and tell you before adding one; help you answer data
+      subject requests and report breaches without undue delay; delete buyers’ details within 30
+      days of delivery; and delete or return your data when the service ends, keeping only what the
+      law requires.
+    </p>
+
+    <h2>6. eBay terms for “Your Users”</h2>
+    <p>
+      If you connect an eBay account, you agree that eBay Inc. and its affiliates are third-party
+      beneficiaries of these terms and may enforce them. You must use eBay data only as eBay’s user
+      agreement and API terms allow, and you consent to us processing your eBay data to provide the
+      service. eBay data is deleted within 30 days of an eBay account deletion notice, and within
+      10 days if our eBay API access ends.
+    </p>
+
+    <h2>7. Amazon data rules</h2>
+    <p>
+      If you connect an Amazon account, Amazon’s data protection policy and acceptable use policy for
+      selling partner data apply to you and your users. Buyer personal data from Amazon may be used
+      only to fulfil orders and answer buyers, must not be exported or kept beyond what the service
+      keeps, and is deleted within 30 days of delivery and within 30 days of disconnecting the
+      account.
+    </p>
+
+    <h2>8. Liability</h2>
+    <p>
+      We provide the service with reasonable skill and care. Nothing in these terms limits liability
+      for death or personal injury caused by negligence, for fraud, or for anything else the law does
+      not allow to be limited. Otherwise we are not liable for loss of profit, revenue or data, or
+      for indirect loss, and our total liability in any 12 months is limited to the fees you paid us
+      in that period. We are not responsible for Amazon, eBay, carriers or other third-party
+      services.
+    </p>
+
+    <h2>9. Suspension and termination</h2>
+    <p>
+      We may suspend access to protect the service, other customers or a marketplace, or if these
+      terms are broken, and will tell you why. You may stop using the service at any time. When an
+      agreement ends we delete your workspace data as set out in our privacy policy.
+    </p>
+
+    <h2>10. Changes</h2>
+    <p>
+      We may change these terms. We update the date above, and users are asked to accept materially
+      changed terms at their next sign-in.
+    </p>
+
+    <h2>11. Law</h2>
+    <p>
+      These terms are governed by the law of England and Wales, and its courts have exclusive
+      jurisdiction. Questions about these terms: <a href={`mailto:${CONTACT.support}`}
+        >{CONTACT.support}</a
+      >.
+    </p>
+  </div>
+</Base>

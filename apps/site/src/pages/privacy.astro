@@ -1,0 +1,145 @@
+---
+// Privacy policy (WWW-5, DP-1 to DP-3). Drafted by the dev team; the client reviews it.
+import Base from '../layouts/Base.astro';
+import { CONTACT, LEGAL_VERSION, readSettings } from '../settings.ts';
+
+const s = readSettings(process.env);
+const updated = new Date(`${LEGAL_VERSION}T00:00:00Z`).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+---
+
+<Base
+  title="Privacy policy"
+  description="How OmniBridge processes personal data: who we are, what we process and why, retention, sub-processors, transfers, security and your rights."
+>
+  <div class="prose">
+    <h1>Privacy policy</h1>
+    <p class="updated">Last updated: {updated} (version {LEGAL_VERSION})</p>
+
+    <h2>1. Who we are</h2>
+    <p>
+      OmniBridge is a back-office service for UK sellers, operated by {s.operatorLegalName}, company
+      number {s.operatorCompanyNumber}, registered office {s.operatorRegisteredAddress} (“we”, “us”).
+    </p>
+    <p>
+      Each business that uses OmniBridge (a “workspace customer”) is the <strong>controller</strong>
+      of its own customers’ and staff data. We process that data on its behalf as its
+      <strong>processor</strong>, under the data processing terms that form part of our
+      <a href="/terms">terms of service</a>. For eBay data, eBay’s terms treat us as an independent
+      controller. For our own account and billing contacts, we are the controller.
+    </p>
+
+    <h2>2. What data we process and where it comes from</h2>
+    <ul>
+      <li>
+        <strong>From Amazon and Amazon Ads:</strong> orders, buyer names, delivery addresses and
+        phone numbers, buyer messages received through Amazon’s buyer–seller email relay, seller
+        feedback, account health, advertising and fee data.
+      </li>
+      <li>
+        <strong>From eBay:</strong> orders, buyer names and delivery addresses, messages and
+        feedback.
+      </li>
+      <li><strong>From the workspace customer’s own website:</strong> orders and delivery details.</li>
+      <li><strong>From carriers (Evri, DPD):</strong> labels, tracking and delivery events.</li>
+      <li>
+        <strong>From users of OmniBridge:</strong> name, work email, sign-in records (time and IP
+        address), and what they do in the service (the audit log).
+      </li>
+    </ul>
+
+    <h2>3. Why we process it</h2>
+    <ul>
+      <li>
+        To provide the service the workspace customer asked for: dispatching and tracking orders,
+        managing stock, answering buyers, reporting profit and VAT figures (contract and the
+        customer’s instructions).
+      </li>
+      <li>To keep the service and its users secure, including sign-in and audit records (legitimate interests).</li>
+      <li>To keep finance records the law requires (legal obligation).</li>
+    </ul>
+    <p>We do not sell data, use it for advertising or profile buyers.</p>
+
+    <h2>4. The 30-day rule for buyers’ details</h2>
+    <p>
+      Buyers’ personal details are deleted within 30 days of delivery, from every copy including
+      backups. The live copy goes 25 days after delivery. Orders that are cancelled lose their
+      personal details once the cancellation is confirmed. Buyer messages are deleted 30 days after
+      the conversation’s last activity.
+    </p>
+
+    <h2>5. How long we keep data</h2>
+    <table>
+      <thead>
+        <tr><th>Data</th><th>Kept for</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Buyers’ personal details on delivered orders</td><td>Gone from every copy by 30 days after delivery</td></tr>
+        <tr><td>Buyer messages</td><td>30 days after the conversation’s last activity</td></tr>
+        <tr><td>Order records without personal details, VAT and finance records</td><td>6 years after the end of the VAT period</td></tr>
+        <tr><td>Expenses and invoices</td><td>6 years</td></tr>
+        <tr><td>Amazon data after a seller disconnects or revokes access</td><td>Deleted within 30 days (finance records without personal details are kept as the law requires)</td></tr>
+        <tr><td>eBay data after an account deletion notice</td><td>Deleted within 30 days</td></tr>
+        <tr><td>Audit and security logs</td><td>6 years</td></tr>
+        <tr><td>Notifications</td><td>12 months</td></tr>
+      </tbody>
+    </table>
+
+    <h2>6. Who else processes data for us (sub-processors)</h2>
+    <table>
+      <thead>
+        <tr><th>Who</th><th>What for</th><th>Where</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>netcup GmbH</td><td>Server hosting</td><td>Germany</td></tr>
+        <tr><td>Scaleway SAS (Transactional Email)</td><td>Sending system email (invitations, password resets, alerts)</td><td>EU (France)</td></tr>
+        <tr><td>Zoho Corporation (Zoho Mail)</td><td>Our mailboxes, including the inbound addresses for Amazon’s buyer–seller email relay</td><td>EU data centre</td></tr>
+        <tr><td>Evri and DPD</td><td>Delivering parcels; they receive delivery details as carriers</td><td>United Kingdom</td></tr>
+        <tr><td>Our development team</td><td>Building and supporting the service, under an International Data Transfer Agreement</td><td>Pakistan</td></tr>
+      </tbody>
+    </table>
+
+    <h2>7. International transfers</h2>
+    <p>
+      Data is hosted in the EU. Our development team works from Pakistan, which has no UK adequacy
+      decision; access from there is covered by the ICO’s International Data Transfer Agreement and
+      limited to what support needs. Buyers’ personal details are kept in a separate encrypted store.
+    </p>
+
+    <h2>8. Security</h2>
+    <p>
+      Data travels over HTTPS. Buyers’ personal details are encrypted with a key for each workspace.
+      Every user signs in with two-step verification, access is limited to the tabs and companies
+      each user is given, and every access to full buyer details is logged. More on our
+      <a href="/security">security page</a>.
+    </p>
+
+    <h2>9. Your rights</h2>
+    <p>
+      You have the right to access, correct or delete your personal data, to object to or restrict
+      its processing, and to data portability. If you are a buyer, the seller you bought from is the
+      controller: you can ask them, or email us at <a href={`mailto:${CONTACT.privacy}`}
+        >{CONTACT.privacy}</a
+      > and we will pass your request on and help them answer it within one month.
+    </p>
+
+    <h2>10. Contact and complaints</h2>
+    <p>
+      Email <a href={`mailto:${CONTACT.privacy}`}>{CONTACT.privacy}</a> or write to us at {
+        s.operatorRegisteredAddress
+      }. If you are not happy with our answer you can complain to the Information Commissioner’s
+      Office: <a href="https://ico.org.uk/make-a-complaint/">ico.org.uk/make-a-complaint</a>, or 0303
+      123 1113.
+    </p>
+
+    <h2>11. Changes</h2>
+    <p>
+      When we change this policy we update the date above. Users of OmniBridge are asked to accept a
+      materially changed policy at their next sign-in.
+    </p>
+  </div>
+</Base>
