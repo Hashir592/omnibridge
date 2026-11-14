@@ -136,10 +136,10 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       now: () => clock,
     });
 
-  const app = (auth = service(), trustedProxies?: string) =>
+  const app = (auth = service(), trustedProxies?: string, log = logger) =>
     buildWebApp({
       ...(trustedProxies === undefined ? {} : { trustedProxies }),
-      logger,
+      logger: log,
       version: '0',
       checks,
       tenancy,
@@ -603,6 +603,23 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     });
     expect((await b.send('GET', '/companies')).statusCode).toBe(401);
     await server.close();
+  });
+
+  it('[SEC-5][USR-7] the reset token in the link lookup path never reaches the request log', async () => {
+    const lines: string[] = [];
+    const captured = createLogger({
+      service: 'test',
+      version: '0',
+      destination: { write: (line: string) => lines.push(line) },
+    });
+    const web = await app(service(), undefined, captured);
+    const marker = `TOKENMARK${randomUUID().replaceAll('-', '')}`;
+    const res = await web.inject({ method: 'GET', url: `/auth/password/reset/${marker}` });
+    expect(res.statusCode).toBe(404);
+    const text = lines.join('');
+    expect(text).toContain('/auth/password/reset/[REDACTED]');
+    expect(text).not.toContain(marker);
+    await web.close();
   });
 
   it('[SEC-1] state-changing request without CSRF token is rejected', async () => {
