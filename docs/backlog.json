@@ -634,7 +634,7 @@
         "route walker re-run with child-without-ticks role passes"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0205",
