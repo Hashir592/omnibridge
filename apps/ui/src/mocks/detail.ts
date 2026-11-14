@@ -4,7 +4,8 @@
  * no real people, no testkit PII markers.
  */
 import { channelAccounts } from './data.ts';
-import type { OrderDetail, OrderEvent, OrderLine, OrderRow } from './types.ts';
+import { SCENARIO_BUYERS } from './scenarios.ts';
+import type { OrderDetail, OrderEvent, OrderLine, OrderRow, OrderSkuLine } from './types.ts';
 
 function seeded(id: string): () => number {
   let a = 2166136261;
@@ -257,7 +258,7 @@ export function orderDetail(o: OrderRow): OrderDetail {
             },
           ]
         : [],
-    buyer: {
+    buyer: scenarioBuyer(o.id) ?? {
       name: `${pick(FIRST[ini] ?? ['Alex'])} ${pick(LAST[sur] ?? ['Bramley'])}`,
       lines: [`${String(Math.floor(r() * 120) + 1)} ${pick(STREETS)}`],
       town: TOWNS[areaLetters] ?? 'London',
@@ -265,5 +266,35 @@ export function orderDetail(o: OrderRow): OrderDetail {
       country: 'United Kingdom',
       phone: `07700 900${String(Math.floor(r() * 1000)).padStart(3, '0')}`,
     },
+    sameBuyer: [],
   };
+}
+
+/** A same-buyer scenario order shows the buyer the grouping matched on (C3). */
+function scenarioBuyer(id: string): OrderDetail['buyer'] | undefined {
+  const b = SCENARIO_BUYERS.get(id);
+  if (!b) return undefined;
+  return {
+    name: b.name,
+    lines: b.lines,
+    town: b.town,
+    postcode: b.postcode,
+    country: 'United Kingdom',
+    phone: b.phone,
+  };
+}
+
+/** The SKU lines of a list row (C2): code, quantity and whether it is mapped. No buyer data. */
+const skuCache = new Map<string, OrderSkuLine[]>();
+
+export function orderSkus(o: OrderRow): OrderSkuLine[] {
+  const hit = skuCache.get(o.id);
+  if (hit) return hit;
+  const lines = orderDetail(o).lines.map((l) => ({
+    sku: l.mapped ? l.sku : l.externalSku,
+    qty: l.qty,
+    mapped: l.mapped,
+  }));
+  skuCache.set(o.id, lines);
+  return lines;
 }

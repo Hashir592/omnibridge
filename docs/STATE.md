@@ -1,13 +1,13 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 13 Nov 2026 by S2.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 14 Nov 2026 by S2.
 
 ## Now
 
 - **Phase:** B, local Docker only. **Plan replaced on 12 Nov 2026** after the architecture audit (ADR-054): three releases, the order in `docs/plan/MODULES.md`. Release 1 = website + first approved marketplace + Evri: orders, stock, labels, tracking. The public site goes live early, deployed by Hashir's devops person.
 - **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway FIX REQUIRED (3 Majors, 7 Minors, no round 2). Then T-0204 → T-0207 → T-0206 (S5 audit) → M02 end. T-0205 deferred to Release 3.
 - **M03:** T-0305 client preview **done** (22 mock-up screens, axe and keyboard tests, PS-020 shapes; 34 PNGs in `docs/design/client-preview/20261021/`). Next for S2: T-0306 client changes. M03 end BLOCKED only on ui-perf, which ADR-054 removes from the blocking gate; Minors F-M03-end-02 to -04 remain.
-- **Client changes (12 Nov 2026):** 7 changes designed in `docs/plan/client-changes-20261112.md` (ADR-055, PRD v1.4, P-014). S2 shows them as mock-ups in T-0306; S3 builds the real logic in M09 (manual allocation), M10 (SKU column, same-buyer groups), M12 (Ship together) in Release 1, and M18/M20 in Release 3.
+- **Client changes (12 Nov 2026):** T-0306 **done** by S2: all 7 changes as mock-ups (PNGs in `docs/design/client-preview/20261112/`, shapes in PS-021, which also asks S1 to confirm Hashir's remove-one-order-from-a-group addition). S3 builds the real logic in M09 (manual allocation), M10 (SKU column, same-buyer groups), M12 (Ship together) in Release 1, and M18/M20 in Release 3.
 - **Order now (one session at a time):** S2 merges T-0305 as it is → S2 builds T-0306 (iteration mode, merge on Hashir's word) → S2 fixes M03 end Minors → S3 fixes M02 halfway → T-0204.
 - **Process (ADR-053, ADR-054):** sessions merge their own green PRs. CI is the only full gate; locally `--quick` (plus a task's integration tests for high risk). Halfway checkpoints only for M02, M04, M10, M12, M17, M18. Reviews do not block the next module.
 - **Hashir:** GitHub CLI must stay on the Hashir592 account (`gh auth switch -u Hashir592`). Dev machine to 16 GB in 1 to 2 weeks.

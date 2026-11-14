@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import {
   ArrowRight,
   BellRing,
+  ChevronDown,
   ChevronRight,
   Info,
   OctagonAlert,
@@ -10,13 +11,14 @@ import {
   Truck,
   type LucideIcon,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useAppState } from '../app/session.tsx';
-import { ChannelMark } from '../components/badges.tsx';
+import { ChannelMark, CompanySwatch, STATUS } from '../components/badges.tsx';
 import { cn } from '../lib/cn.ts';
 import { formatDate, formatInt, formatPence, formatTime } from '../lib/format.ts';
 import { mockApi } from '../mocks/api.ts';
 import type { HomeSummary, Severity } from '../mocks/home.ts';
+import type { Channel } from '../mocks/types.ts';
 
 // Placeholder tabs are registered from NAV at runtime, so their paths are plain strings.
 const SALES_PATH: string = '/sales-profit';
@@ -188,6 +190,14 @@ function Dispatch({ d }: { d: NonNullable<HomeSummary['dispatch']> }) {
 function OrdersToday({ rows }: { rows: NonNullable<HomeSummary['todayByChannel']> }) {
   const total = rows.reduce((a, r) => a + r.orders, 0);
   const max = Math.max(1, ...rows.map((r) => r.orders));
+  // C1 (HOME-3): one quick view open at a time; Esc closes it and returns focus to its chevron.
+  const [open, setOpen] = useState<Channel | null>(null);
+  const toggles = useRef(new Map<Channel, HTMLButtonElement>());
+  const close = () => {
+    if (!open) return;
+    toggles.current.get(open)?.focus();
+    setOpen(null);
+  };
   return (
     <Card
       title="Orders today"
@@ -197,27 +207,134 @@ function OrdersToday({ rows }: { rows: NonNullable<HomeSummary['todayByChannel']
         </Link>
       }
     >
-      <div className="px-5 py-4">
+      <div
+        className="px-5 py-4"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') close();
+        }}
+      >
         <p className="num text-2xl leading-8 font-semibold">{formatInt(total)}</p>
-        <ul className="mt-3 flex flex-col gap-2.5">
-          {rows.map((r) => (
-            <li
-              key={r.channel}
-              className="grid grid-cols-[18px_72px_minmax(0,1fr)_32px] items-center gap-x-2 text-13"
-            >
-              <ChannelMark channel={r.channel} />
-              <span aria-hidden className="h-1.5 rounded-full bg-[#e2e5ea]">
-                <span
-                  className="block h-full rounded-full bg-side"
-                  style={{ width: `${String((r.orders / max) * 100)}%` }}
-                />
-              </span>
-              <span className="num text-right font-medium">{formatInt(r.orders)}</span>
-            </li>
-          ))}
+        <ul className="mt-3 flex flex-col gap-1.5">
+          {rows.map((r) => {
+            const expanded = open === r.channel;
+            const panelId = `today-${r.channel}`;
+            return (
+              <li key={r.channel}>
+                <div className="grid grid-cols-[18px_72px_minmax(0,1fr)_32px_28px] items-center gap-x-2 text-13">
+                  <ChannelMark channel={r.channel} />
+                  <span aria-hidden className="h-1.5 rounded-full bg-[#e2e5ea]">
+                    <span
+                      className="block h-full rounded-full bg-side"
+                      style={{ width: `${String((r.orders / max) * 100)}%` }}
+                    />
+                  </span>
+                  <span className="num text-right font-medium">{formatInt(r.orders)}</span>
+                  <button
+                    ref={(el) => {
+                      if (el) toggles.current.set(r.channel, el);
+                    }}
+                    aria-expanded={expanded}
+                    aria-controls={panelId}
+                    aria-label={`${expanded ? 'Hide' : 'Show'} today's ${CHANNEL_NAME[r.channel]} orders`}
+                    onClick={() => {
+                      setOpen(expanded ? null : r.channel);
+                    }}
+                    className="grid size-7 place-items-center rounded-ctl text-ink-muted hover:bg-hover hover:text-ink"
+                  >
+                    <ChevronDown
+                      className={cn(
+                        'size-4 transition-transform duration-150',
+                        expanded && 'rotate-180',
+                      )}
+                      aria-hidden
+                    />
+                  </button>
+                </div>
+                {expanded && <TodayPanel id={panelId} channel={r.channel} />}
+              </li>
+            );
+          })}
         </ul>
       </div>
     </Card>
+  );
+}
+
+const CHANNEL_NAME: Record<Channel, string> = {
+  amazon: 'Amazon',
+  ebay: 'eBay',
+  website: 'Website',
+};
+
+/** The latest 10 orders placed today on one channel: ref, time, company, total and status. */
+function TodayPanel({ id, channel }: { id: string; channel: Channel }) {
+  const { session, persona, companyId, company } = useAppState();
+  const q = useQuery({
+    queryKey: ['today-orders', persona, companyId, channel],
+    queryFn: () => mockApi.todayOrders(channel, companyId),
+    enabled: !!session,
+  });
+  return (
+    <div
+      id={id}
+      role="region"
+      aria-label={`Today's ${CHANNEL_NAME[channel]} orders`}
+      className="mt-2 mb-1 rounded-ctl border border-border"
+    >
+      {!q.data ? (
+        <div aria-busy className="h-24" />
+      ) : q.data.items.length === 0 ? (
+        <p className="px-3 py-4 text-13 text-ink-muted">
+          No {CHANNEL_NAME[channel]} orders yet today. New orders appear here as they arrive.
+        </p>
+      ) : (
+        <>
+          <ul>
+            {q.data.items.map((o) => {
+              const c = company(o.companyId);
+              const st = STATUS[o.status];
+              const Icon = st.icon;
+              return (
+                <li key={o.id} className="border-b border-divider last:border-0">
+                  <Link
+                    to="/orders/$orderId"
+                    params={{ orderId: o.id }}
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-1.5 text-13 hover:bg-hover"
+                  >
+                    <span className="min-w-0">
+                      <span className="ref block truncate font-medium text-ink">{o.ref}</span>
+                      <span className="num flex items-center gap-1.5 text-xs text-ink-muted">
+                        {formatTime(o.placedAt)}
+                        {c && (
+                          <>
+                            <CompanySwatch company={c} />
+                            <span className="truncate">{c.tradingName}</span>
+                          </>
+                        )}
+                      </span>
+                    </span>
+                    <span className="text-right">
+                      <span className="num block font-medium">{formatPence(o.totalPence)}</span>
+                      <span className="flex items-center justify-end gap-1 text-xs text-ink-muted">
+                        <Icon className="size-3.5" aria-hidden />
+                        {st.label}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          <Link
+            to="/orders"
+            search={{ placed: 'today', channel: q.data.channelAccountIds.join(',') }}
+            className="flex items-center gap-1 border-t border-divider px-3 py-2 text-13 font-medium text-brand-600 hover:underline"
+          >
+            View all {formatInt(q.data.total)} <ArrowRight className="size-3.5" aria-hidden />
+          </Link>
+        </>
+      )}
+    </div>
   );
 }
 

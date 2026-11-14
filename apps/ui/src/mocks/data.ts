@@ -2,6 +2,7 @@
  * Seeded synthetic data for the mock-ups (T-0301). Generic names only; no real customers and no
  * testkit PII markers. Buyer details appear only as already-masked strings.
  */
+import { SCENARIOS, londonInstant } from './scenarios.ts';
 import type {
   Channel,
   ChannelAccount,
@@ -165,9 +166,44 @@ function generate(count: number): OrderRow[] {
       tracking,
       flags,
       shipToMasked: `${pick(LETTERS)}. ${pick(LETTERS)}***, ${pick(AREAS)}`,
+      delivery: 'standard',
     });
   }
   return rows;
 }
 
-export const orders: OrderRow[] = generate(500);
+/** Writes the same-buyer scenarios (C3) over the oldest generated orders, keeping 500 in all. */
+function withScenarios(rows: OrderRow[]): OrderRow[] {
+  const now = Date.now();
+  for (const s of SCENARIOS) {
+    const i = rows.findIndex((o) => o.id === s.replaces);
+    const account = channelAccounts.find((a) => a.id === s.channelAccountId);
+    if (i < 0 || !account) continue;
+    const placed =
+      'minutesAgo' in s.placed
+        ? now - s.placed.minutesAgo * 60_000
+        : londonInstant(s.placed.day, s.placed.hh, s.placed.mm, now);
+    const [first = 'A', last = 'B'] = s.buyer.name.trim().toUpperCase().split(/\s+/);
+    rows[i] = {
+      id: s.replaces,
+      ref: refFor(account.channel, i),
+      channel: account.channel,
+      channelAccountId: account.id,
+      companyId: account.companyId,
+      placedAt: new Date(placed).toISOString(),
+      shipBy: new Date(placed + s.shipByDays * DAY).toISOString(),
+      status: 'awaiting_dispatch',
+      itemCount: s.itemCount,
+      totalPence: s.unitPence * s.itemCount + (s.unitPence < 1500 ? 299 : 0),
+      shipping: null,
+      tracking: 'none',
+      flags: [...s.flags],
+      shipToMasked: `${first[0] ?? 'A'}. ${last[0] ?? 'B'}***, ${s.buyer.postcode.toUpperCase().replace(/\s+/g, '').slice(0, -3)}`,
+      delivery: s.delivery,
+    };
+  }
+  // Newest first, as the channel feeds deliver them.
+  return rows.sort((a, b) => b.placedAt.localeCompare(a.placedAt));
+}
+
+export const orders: OrderRow[] = withScenarios(generate(500));

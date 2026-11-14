@@ -10,7 +10,17 @@ import { auditPage } from './audit.ts';
 import { expensePage, pnl, vatFor } from './finance.ts';
 import { forecastPage } from './forecast.ts';
 import { amazonHealth, ebayHealth } from './health.ts';
-import { conversations, feedback, reviewRequests, thread } from './inbox.ts';
+import {
+  amazonConversations,
+  amazonThread,
+  conversations,
+  feedback,
+  patchAmazonConversation,
+  patchConversation,
+  type ConversationPatch,
+  reviewRequests,
+  thread,
+} from './inbox.ts';
 import { notificationsFor } from './notifications.ts';
 import { profitSummary } from './profit.ts';
 import { currentSession } from './session.ts';
@@ -86,6 +96,51 @@ export const previewHandlers = [
     const t = thread(allowed, String(p.id));
     return t ? HttpResponse.json(t) : HttpResponse.json({ code: 'not_found' }, { status: 404 });
   }),
+  // C6 (CS-6): Amazon buyer messages, one inbox per Amazon account. Bodies are buyer PII.
+  http.get('*/api/mock/customer-service/amazon/conversations', ({ request }) => {
+    const allowed = gate('customer_service');
+    return allowed ? HttpResponse.json(amazonConversations(allowed, params(request))) : forbidden();
+  }),
+  http.get('*/api/mock/customer-service/amazon/conversations/:id', ({ params: p }) => {
+    const allowed = gate('customer_service');
+    if (!allowed) return forbidden();
+    const t = amazonThread(allowed, String(p.id));
+    return t ? HttpResponse.json(t) : HttpResponse.json({ code: 'not_found' }, { status: 404 });
+  }),
+  // C6 setup check: Amazon relays a test message to the account's inbound address.
+  http.post('*/api/mock/connections/:id/buyer-messages/test', async ({ params: p }) => {
+    if (!gate('admin')) return forbidden();
+    await new Promise((r) => setTimeout(r, 900));
+    const c = connections.find((x) => x.id === String(p.id));
+    if (!c?.buyerMessages) return HttpResponse.json({ code: 'not_found' }, { status: 404 });
+    return HttpResponse.json(
+      c.buyerMessages.lastTest === 'failed'
+        ? {
+            ok: false,
+            detail: 'No test message arrived within 2 minutes. Check step 1 in Seller Central.',
+          }
+        : { ok: true, receivedAt: new Date().toISOString() },
+    );
+  }),
+  http.post('*/api/mock/customer-service/conversations/:id', async ({ params: p, request }) => {
+    const allowed = gate('customer_service');
+    if (!allowed) return forbidden();
+    const patch = (await request.json()) as ConversationPatch;
+    return patchConversation(allowed, String(p.id), patch)
+      ? new HttpResponse(null, { status: 204 })
+      : HttpResponse.json({ code: 'not_found' }, { status: 404 });
+  }),
+  http.post(
+    '*/api/mock/customer-service/amazon/conversations/:id',
+    async ({ params: p, request }) => {
+      const allowed = gate('customer_service');
+      if (!allowed) return forbidden();
+      const patch = (await request.json()) as ConversationPatch;
+      return patchAmazonConversation(allowed, String(p.id), patch)
+        ? new HttpResponse(null, { status: 204 })
+        : HttpResponse.json({ code: 'not_found' }, { status: 404 });
+    },
+  ),
   http.get('*/api/mock/customer-service/feedback', ({ request }) => {
     const allowed = gate('customer_service');
     return allowed

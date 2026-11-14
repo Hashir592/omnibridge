@@ -1,6 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { getRouteApi, useNavigate } from '@tanstack/react-router';
-import { CircleCheck, OctagonAlert, Settings2, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { Link, getRouteApi, useNavigate } from '@tanstack/react-router';
+import {
+  CircleCheck,
+  OctagonAlert,
+  Settings2,
+  Star,
+  TriangleAlert,
+  type LucideIcon,
+} from 'lucide-react';
+import { Fragment } from 'react';
 import { useAppState } from '../app/session.tsx';
 import { CompanySwatch } from '../components/badges.tsx';
 import { Card, PageHeader, SimpleTable, Td, Tr } from '../components/Card.tsx';
@@ -9,6 +17,7 @@ import { SignalLabel, StatusLabel, type StatusTone } from '../kit/Badge.tsx';
 import { Button } from '../kit/Button.tsx';
 import { Tabs } from '../kit/Tabs.tsx';
 import { EmptyState, ErrorState } from '../kit/states.tsx';
+import { cn } from '../lib/cn.ts';
 import { formatDate } from '../lib/format.ts';
 import { mockApi } from '../mocks/api.ts';
 import type { AmazonHealth, Band, EbayHealth } from '../mocks/health.ts';
@@ -175,20 +184,175 @@ function AmazonCard({ h }: { h: AmazonHealth }) {
         ]}
       >
         {h.metrics.map((m) => (
-          <Tr key={m.key}>
-            <Td className="font-medium">{m.label}</Td>
-            <Td align="right">
-              <span className="font-semibold">{m.value}</span>
-            </Td>
-            <Td className="text-ink-muted">{m.target}</Td>
-            <Td className="text-ink-muted">{m.period}</Td>
-            <Td>
-              <BandLabel band={m.band} />
-            </Td>
-          </Tr>
+          <Fragment key={m.key}>
+            <Tr className={cn(m.recovery && 'border-b-0')}>
+              <Td className="font-medium">{m.label}</Td>
+              <Td align="right">
+                <span className="font-semibold">{m.value}</span>
+              </Td>
+              <Td className="text-ink-muted">{m.target}</Td>
+              <Td className="text-ink-muted">{m.period}</Td>
+              <Td>
+                <BandLabel band={m.band} />
+              </Td>
+            </Tr>
+            {m.recovery && (
+              <tr className="border-b border-divider">
+                <td colSpan={5} className="px-5 pb-3 text-13">
+                  <span className="flex items-start gap-2 text-ink-muted">
+                    <SignalLabel
+                      signal="Estimate"
+                      title="From OmniBridge's own merchant-fulfilled orders; Amazon's figure wins"
+                    />
+                    <span>{m.recovery}</span>
+                  </span>
+                </td>
+              </tr>
+            )}
+          </Fragment>
         ))}
       </SimpleTable>
+      <SellerFeedback f={h.feedback} />
     </Card>
+  );
+}
+
+/** HLT-6: the account's seller feedback. Amazon has no reply API, so replies happen in Seller Central. */
+function SellerFeedback({ f }: { f: AmazonHealth['feedback'] }) {
+  const pct = (n: number, total: number) =>
+    total === 0 ? '0%' : `${String(Math.round((n / total) * 100))}%`;
+  const rows = [
+    { key: 'positive', label: 'Positive (4–5 stars)' },
+    { key: 'neutral', label: 'Neutral (3)' },
+    { key: 'negative', label: 'Negative (1–2)' },
+  ] as const;
+  return (
+    <section aria-label="Seller feedback" className="border-t border-border">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pt-4">
+        <h3 className="text-sm font-semibold">Seller feedback</h3>
+        <span className="num text-xs text-ink-muted">{age(f.updatedAt)}</span>
+        <Link
+          to="/customer-service"
+          search={{ section: 'feedback' }}
+          className="ml-auto text-13 font-medium text-brand-600 hover:underline"
+        >
+          View all
+        </Link>
+      </div>
+      <div className="grid gap-6 px-5 pt-3 pb-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <div>
+          <Stars value={f.average12m} size="lg" />
+          <p className="num mt-1.5 text-13">
+            <span className="font-semibold">{f.average12m.toFixed(1)} out of 5</span>
+            <span className="text-ink-muted"> over 12 months</span>
+          </p>
+          <p className="num text-xs text-ink-muted">Based on {f.count12m} ratings</p>
+        </div>
+        <table aria-label="Feedback by period" className="w-full border-collapse text-13">
+          <thead>
+            <tr className="text-xs text-ink-muted">
+              <th scope="col" className="pb-1.5 text-left font-medium">
+                Rating
+              </th>
+              {f.breakdown.map((b) => (
+                <th key={b.period} scope="col" className="pb-1.5 text-right font-medium">
+                  {b.period}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="border-t border-divider">
+                <th scope="row" className="py-1.5 text-left font-normal">
+                  {r.label}
+                </th>
+                {f.breakdown.map((b) => {
+                  const total = b.positive + b.neutral + b.negative;
+                  return (
+                    <td key={b.period} className="num py-1.5 text-right">
+                      {b[r.key]} <span className="text-ink-muted">({pct(b[r.key], total)})</span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <ul aria-label="Newest feedback" className="border-t border-divider">
+        {f.recent.map((c) => (
+          <li
+            key={`${c.at}-${c.order.id}`}
+            className="flex flex-wrap items-start gap-x-4 gap-y-1 border-b border-divider px-5 py-2.5 text-13 last:border-0"
+          >
+            <span className="flex w-28 shrink-0 flex-col gap-1">
+              <Stars value={c.stars} />
+              {c.stars <= 2 ? (
+                <StatusLabel tone="danger">Negative</StatusLabel>
+              ) : c.stars === 3 ? (
+                <StatusLabel tone="warning">Neutral</StatusLabel>
+              ) : null}
+            </span>
+            <span className="min-w-0 flex-1">{c.comment}</span>
+            <span className="num shrink-0 text-right text-xs text-ink-muted">
+              {formatDate(c.at)}
+              <Link
+                to="/orders/$orderId"
+                params={{ orderId: c.order.id }}
+                className="ref block text-brand-600 hover:underline"
+              >
+                {c.order.ref}
+              </Link>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-divider px-5 py-3 text-xs text-ink-muted">
+        Reply or ask for removal in Seller Central. Amazon has no reply API.
+      </p>
+    </section>
+  );
+}
+
+/** Five stars filled to the value (partial fill for averages), with the value as its label. */
+function Stars({ value, size = 'sm' }: { value: number; size?: 'sm' | 'lg' }) {
+  const icon = size === 'lg' ? 'size-5' : 'size-3.5';
+  const px = size === 'lg' ? 20 : 14; // the icon size above; stars sit 2 px apart
+  const row = (filled: (i: number) => boolean) => (
+    <span className="flex w-max gap-0.5">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Star
+          key={i}
+          aria-hidden
+          className={cn(
+            icon,
+            'shrink-0',
+            filled(i) ? 'fill-[#FFA41C] text-[#E47911]' : 'text-[#C9CED6]',
+          )}
+        />
+      ))}
+    </span>
+  );
+  const label = `${Number.isInteger(value) ? String(value) : value.toFixed(1)} out of 5 stars`;
+  // A rating is whole stars; only an average needs the partly filled last star.
+  if (Number.isInteger(value))
+    return (
+      <span role="img" aria-label={label} className="inline-block">
+        {row((i) => i <= value)}
+      </span>
+    );
+  const whole = Math.floor(value);
+  return (
+    <span role="img" aria-label={label} className="relative inline-block">
+      {row((i) => i <= whole)}
+      <span
+        className="absolute inset-y-0 overflow-hidden"
+        style={{ left: whole * (px + 2), width: (value - whole) * px }}
+      >
+        <Star aria-hidden className={cn(icon, 'shrink-0 fill-[#FFA41C] text-[#E47911]')} />
+      </span>
+    </span>
   );
 }
 

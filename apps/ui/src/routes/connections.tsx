@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import {
+  Check,
   CircleCheck,
+  Copy,
   CirclePause,
   CircleSlash,
   KeyRound,
@@ -239,6 +241,7 @@ function ConnectionCard({ c }: { c: Connection }) {
           </DetailRow>
         </dl>
       </div>
+      {c.buyerMessages && <BuyerMessages id={c.id} setup={c.buyerMessages} />}
       <div className="flex flex-wrap justify-end gap-2 border-t border-divider px-5 py-3">
         {c.status === 'needs_reauth' ? (
           <Button size="sm" variant="primary" icon={<KeyRound />}>
@@ -265,5 +268,109 @@ function ConnectionCard({ c }: { c: Connection }) {
         }}
       />
     </Card>
+  );
+}
+
+/**
+ * C6 (CS-6): Amazon copies buyer messages to the account's own inbound address, and replies go
+ * from the approved sender. The seller sets both up in Seller Central; "Send test" checks it.
+ */
+function BuyerMessages({
+  id,
+  setup,
+}: {
+  id: string;
+  setup: NonNullable<Connection['buyerMessages']>;
+}) {
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(
+    setup.lastTest === 'passed'
+      ? { ok: true, text: 'Last test passed: buyer messages are arriving.' }
+      : setup.lastTest === 'failed'
+        ? { ok: false, text: 'Last test failed: no test message arrived. Check step 1.' }
+        : null,
+  );
+  const [busy, setBusy] = useState(false);
+  return (
+    <section
+      aria-label="Buyer messages setup"
+      className="border-t border-divider px-5 py-4 text-13"
+    >
+      <h3 className="text-sm font-semibold">Buyer messages</h3>
+      <p className="mt-1 text-ink-muted">
+        Read and answer Amazon buyer messages in Customer Service.
+      </p>
+      <ol className="mt-3 flex list-decimal flex-col gap-2.5 pl-5">
+        <li>
+          In Seller Central, open Settings, Notification preferences, Messaging. Under Buyer
+          Messages, add this address:
+          <span className="mt-1 flex items-center gap-1.5">
+            <code className="ref min-w-0 truncate rounded-[6px] bg-rail px-2 py-1 text-xs">
+              {setup.inbound}
+            </code>
+            <CopyText value={setup.inbound} label="Copy inbound address" />
+          </span>
+        </li>
+        <li>
+          On the Messaging Permissions page, add an approved sender:
+          <span className="mt-1 flex items-center gap-1.5">
+            <code className="ref rounded-[6px] bg-rail px-2 py-1 text-xs">{setup.sender}</code>
+            <CopyText value={setup.sender} label="Copy approved sender" />
+          </span>
+        </li>
+      </ol>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void mockApi.testBuyerMessages(id).then((r) => {
+              setBusy(false);
+              const body = r.body as
+                { ok?: boolean; receivedAt?: string; detail?: string } | undefined;
+              setResult(
+                body?.ok
+                  ? {
+                      ok: true,
+                      text: `Test received at ${formatTime(body.receivedAt ?? new Date().toISOString())}. Buyer messages are arriving.`,
+                    }
+                  : { ok: false, text: body?.detail ?? 'The test could not run. Try again.' },
+              );
+            });
+          }}
+        >
+          {busy ? 'Sending test…' : 'Send test'}
+        </Button>
+        {result && (
+          <span role="status">
+            <StatusLabel tone={result.ok ? 'success' : 'danger'}>{result.text}</StatusLabel>
+          </span>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CopyText({ value, label }: { value: string; label: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      aria-label={done ? 'Copied' : label}
+      title={done ? 'Copied' : label}
+      onClick={() => {
+        if ('clipboard' in navigator) void navigator.clipboard.writeText(value);
+        setDone(true);
+        setTimeout(() => {
+          setDone(false);
+        }, 1500);
+      }}
+      className="grid size-7 shrink-0 place-items-center rounded-ctl text-ink-muted hover:bg-hover hover:text-ink"
+    >
+      {done ? (
+        <Check className="size-4 text-success" aria-hidden />
+      ) : (
+        <Copy className="size-4" aria-hidden />
+      )}
+    </button>
   );
 }

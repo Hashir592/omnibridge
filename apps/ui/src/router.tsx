@@ -57,10 +57,11 @@ const orders = createRoute({
     const view = str(s.view);
     const out: OrdersSearch = {};
     if (view && VIEWS.has(view)) out.view = view as NonNullable<OrdersSearch['view']>;
-    for (const k of ['q', 'channel', 'status', 'flag'] as const) {
+    for (const k of ['q', 'channel', 'status', 'flag', 'group'] as const) {
       const v = str(s[k]);
       if (v) out[k] = v;
     }
+    if (s.placed === 'today') out.placed = 'today';
     const page = Number(s.page);
     if (Number.isInteger(page) && page > 1) out.page = page;
     const size = Number(s.size);
@@ -191,9 +192,9 @@ const customerService = createRoute({
   path: '/customer-service',
   validateSearch: (s: Record<string, unknown>): CsSearch => {
     const out: CsSearch = {};
-    const section = oneOf(s.section, ['feedback', 'reviews'] as const);
+    const section = oneOf(s.section, ['amazon', 'feedback', 'reviews'] as const);
     if (section) out.section = section;
-    const view = oneOf(s.view, ['unread', 'archived'] as const);
+    const view = oneOf(s.view, ['unread', 'archived', 'done'] as const);
     if (view) out.view = view;
     for (const k of ['account', 'c'] as const) {
       const v = str(s[k]);

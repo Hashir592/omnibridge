@@ -68,6 +68,34 @@ export interface OrderRow {
   tracking: TrackingState;
   flags: OrderFlag[];
   shipToMasked: string;
+  /** The delivery service the buyer paid for (C3 warnings, SHP-9 highest service). */
+  delivery: 'standard' | 'next_day';
+}
+
+/** One SKU line of a list row (C2, ORD-1). An unmapped line carries its external SKU. */
+export interface OrderSkuLine {
+  sku: string;
+  qty: number;
+  mapped: boolean;
+}
+
+/** The same-buyer group a list row belongs to (C3, ORD-9). Order IDs only, never buyer data. */
+export interface OrderRowGroup {
+  id: string;
+  size: number;
+  /** 0 for the first member shown; members are adjacent, oldest first. */
+  index: number;
+  last: boolean;
+  /** Members the current filters hide ("+1 related order not shown"). */
+  hidden: number;
+  warnings: string[];
+  memberRefs: string[];
+}
+
+/** A list row as the orders route returns it: the row plus its SKU lines and group. */
+export interface OrderListItem extends OrderRow {
+  skus: OrderSkuLine[];
+  group: OrderRowGroup | null;
 }
 
 export interface OrderCounts {
@@ -79,7 +107,7 @@ export interface OrderCounts {
 }
 
 export interface OrderPage {
-  items: OrderRow[];
+  items: OrderListItem[];
   nextCursor: number | null;
   total: number;
   counts: OrderCounts;
@@ -138,4 +166,6 @@ export interface OrderDetail {
   label: { carrier: string; service: string; trackingNumber: string; createdAt: string } | null;
   notes: Array<{ at: string; by: string; text: string }>;
   buyer: BuyerDetails;
+  /** The other orders of this order's same-buyer group (C3 "Same buyer" panel). */
+  sameBuyer: Array<{ id: string; ref: string; placedAt: string; totalPence: number }>;
 }

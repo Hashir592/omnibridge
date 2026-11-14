@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, getRouteApi, useNavigate } from '@tanstack/react-router';
-import { Archive, Eye, Mail, MailOpen, Send, Star } from 'lucide-react';
+import { Archive, CircleCheck, Clock, Eye, Mail, MailOpen, Send, Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAppState } from '../app/session.tsx';
 import { CompanySwatch } from '../components/badges.tsx';
@@ -19,12 +19,14 @@ import { daysFromToday, formatDate, formatDateTime, formatTime } from '../lib/fo
 import { mockApi } from '../mocks/api.ts';
 import { TEMPLATES, type Conversation, type Feedback } from '../mocks/inbox.ts';
 
-export type CsSection = 'messages' | 'feedback' | 'reviews';
+export type CsSection = 'messages' | 'amazon' | 'feedback' | 'reviews';
 
 export interface CsSearch {
   section?: CsSection | undefined;
-  view?: 'unread' | 'archived' | undefined;
+  view?: 'unread' | 'archived' | 'done' | undefined;
   account?: string | undefined;
+  /** C6: which Amazon account's inbox. */
+  amz?: string | undefined;
   c?: string | undefined;
 }
 
@@ -67,6 +69,7 @@ function CustomerService() {
             }}
             items={[
               { value: 'messages', label: 'eBay messages', content: <Messages /> },
+              { value: 'amazon', label: 'Amazon messages', content: <AmazonMessages /> },
               { value: 'feedback', label: 'Feedback', content: <FeedbackSection /> },
               { value: 'reviews', label: 'Amazon review requests', content: <Reviews /> },
             ]}
@@ -82,9 +85,11 @@ function CustomerService() {
 function Messages() {
   const { search, set } = useCsSearch();
   const { session, persona, companyId } = useAppState();
-  const view = search.view ?? 'open';
+  const view = search.view === 'unread' || search.view === 'archived' ? search.view : 'open';
   const q = useQuery({
     queryKey: ['conversations', persona, companyId, view, search.account],
+    // Keep what is on screen while the next answer loads, so an action never flashes empty.
+    placeholderData: keepPreviousData,
     queryFn: () => mockApi.conversations({ company: companyId, view, account: search.account }),
     enabled: !!session,
   });
@@ -256,14 +261,7 @@ function ThreadView({ id }: { id: string }) {
             )}
           </p>
         </div>
-        <div className="ml-auto flex gap-1.5">
-          <Button size="sm" variant="ghost" icon={<Mail />}>
-            Mark unread
-          </Button>
-          <Button size="sm" variant="ghost" icon={<Archive />}>
-            Archive
-          </Button>
-        </div>
+        <ThreadActions channel="ebay" id={c.id} unread={c.unread > 0} state={c.state} />
       </div>
       <ol aria-label="Messages" className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
         {t.messages.map((m) => (
@@ -341,6 +339,78 @@ function ThreadView({ id }: { id: string }) {
   );
 }
 
+/* ---------- thread actions: read, unread, archive (eBay) or done (Amazon) ---------- */
+
+/** Threads the user marked unread in this visit, so opening them does not mark them read again. */
+const markedUnread = new Set<string>();
+
+function ThreadActions({
+  channel,
+  id,
+  unread,
+  state,
+}: {
+  channel: 'ebay' | 'amazon';
+  id: string;
+  unread: boolean;
+  state: 'open' | 'archived' | 'done';
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const act = async (
+    patch: { unread?: boolean; state?: 'open' | 'archived' | 'done' },
+    done?: string,
+  ) => {
+    setBusy(true);
+    const r = await mockApi.patchConversation(channel, id, patch);
+    setBusy(false);
+    if (!r.ok) {
+      toast({ title: 'That did not save. Try again.', tone: 'error' });
+      return;
+    }
+    if (patch.unread === true) markedUnread.add(id);
+    if (patch.unread === false) markedUnread.delete(id);
+    const keys =
+      channel === 'amazon' ? ['amazon-inbox', 'amazon-thread'] : ['conversations', 'thread'];
+    await Promise.all(keys.map((k) => qc.invalidateQueries({ queryKey: [k] })));
+    if (done) toast({ title: done, tone: 'success' });
+  };
+  // Opening a thread marks it read (CS-1, CS-6), unless the user just marked it unread.
+  useEffect(() => {
+    if (unread && !markedUnread.has(id)) void act({ unread: false });
+  }, [id, unread]);
+
+  const closed = state !== 'open';
+  return (
+    <div className="ml-auto flex gap-1.5">
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        icon={unread ? <MailOpen /> : <Mail />}
+        onClick={() => void act({ unread: !unread }, unread ? 'Marked read' : 'Marked unread')}
+      >
+        {unread ? 'Mark read' : 'Mark unread'}
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        icon={channel === 'amazon' ? <CircleCheck /> : <Archive />}
+        onClick={() =>
+          void act(
+            { state: closed ? 'open' : channel === 'amazon' ? 'done' : 'archived' },
+            closed ? 'Moved to the inbox' : channel === 'amazon' ? 'Marked done' : 'Archived',
+          )
+        }
+      >
+        {closed ? 'Move to inbox' : channel === 'amazon' ? 'Mark done' : 'Archive'}
+      </Button>
+    </div>
+  );
+}
+
 /* ---------- feedback (CS-3, CS-4) ---------- */
 
 function Stars({ n }: { n: number }) {
@@ -354,7 +424,7 @@ function Stars({ n }: { n: number }) {
         <Star
           key={i}
           aria-hidden
-          className={cn('size-3.5', i <= n ? 'fill-ink text-ink' : 'text-ink-faint')}
+          className={cn('size-3.5', i <= n ? 'fill-[#FFA41C] text-[#E47911]' : 'text-[#C9CED6]')}
         />
       ))}
     </span>
@@ -590,6 +660,292 @@ function Reviews() {
           ))}
         </SimpleTable>
       </Card>
+    </div>
+  );
+}
+
+/* ---------- Amazon buyer messages (client change C6, CS-6) ---------- */
+
+const REPLY_LIMIT = 4000;
+
+/** "Reply due in 5 h", from Amazon's 24-hour reply expectation. */
+function ReplyDue({ at }: { at: string }) {
+  const ms = Date.parse(at) - Date.now();
+  const hours = Math.floor(ms / 3_600_000);
+  if (ms <= 0)
+    return (
+      <StatusLabel tone="danger" icon={Clock}>
+        Reply overdue
+      </StatusLabel>
+    );
+  return (
+    <StatusLabel tone={hours <= 6 ? 'warning' : 'neutral'} icon={Clock}>
+      {hours < 1 ? 'Reply due in under 1 h' : `Reply due in ${String(hours)} h`}
+    </StatusLabel>
+  );
+}
+
+function AmazonMessages() {
+  const { search, set } = useCsSearch();
+  const { session, persona, companyId } = useAppState();
+  const view = search.view === 'unread' || search.view === 'done' ? search.view : 'open';
+  const q = useQuery({
+    queryKey: ['amazon-inbox', persona, companyId, search.amz, view],
+    // Keep what is on screen while the next answer loads, so an action never flashes empty.
+    placeholderData: keepPreviousData,
+    queryFn: () => mockApi.amazonInbox({ company: companyId, account: search.amz, view }),
+    enabled: !!session,
+  });
+  const d = q.data;
+  const items = d?.items ?? [];
+  const selected = items.find((c) => c.id === search.c) ?? items[0];
+  const name = (id: string) => session?.channelAccounts.find((a) => a.id === id)?.name ?? id;
+
+  if (q.isError)
+    return (
+      <Card>
+        <ErrorState
+          title="Amazon messages could not load"
+          body="The server did not answer. Try again; if it keeps failing, check Status."
+          action={{ label: 'Try again', onClick: () => void q.refetch() }}
+        />
+      </Card>
+    );
+  if (d && d.accounts.length === 0)
+    return (
+      <Card>
+        <EmptyState
+          title="No Amazon accounts for this company"
+          body="Buyer messages are read per Amazon account. Connect one in Connections, then set up Buyer messages there."
+        />
+      </Card>
+    );
+
+  return (
+    <div className="flex flex-col gap-3">
+      {d && d.accounts.length > 1 && (
+        <ViewTabs
+          label="Amazon account"
+          value={d.account}
+          onChange={(v) => {
+            set({ amz: v, c: undefined });
+          }}
+          tabs={d.accounts.map((a) => ({
+            id: a.channelAccountId,
+            label: name(a.channelAccountId),
+            count: a.unread,
+          }))}
+        />
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <ViewTabs<'open' | 'unread' | 'done'>
+          label="Message views"
+          value={view}
+          onChange={(v) => {
+            set({ view: v === 'open' ? undefined : v, c: undefined });
+          }}
+          tabs={[
+            { id: 'open', label: 'Inbox', count: d?.counts.open },
+            { id: 'unread', label: 'Unread', count: d?.counts.unread },
+            { id: 'done', label: 'Done', count: d?.counts.done },
+          ]}
+        />
+        <span className="ml-auto text-xs text-ink-muted">
+          Kept apart from eBay. Amazon expects a reply within 24 hours.
+        </span>
+      </div>
+      <Card className="grid min-h-[600px] overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="border-b border-divider lg:border-r lg:border-b-0">
+          {!d ? (
+            <div aria-busy className="h-64" />
+          ) : items.length === 0 ? (
+            <EmptyState
+              title={view === 'done' ? 'Nothing marked done yet' : 'No buyer messages here'}
+              body="Amazon copies each buyer message here within a few minutes of it being sent."
+            />
+          ) : (
+            <ul aria-label="Amazon conversations" className="max-h-[600px] overflow-y-auto">
+              {items.map((c) => {
+                const active = c.id === selected?.id;
+                return (
+                  <li key={c.id} className="border-b border-divider last:border-0">
+                    <button
+                      onClick={() => {
+                        set({ c: c.id });
+                      }}
+                      aria-current={active ? 'true' : undefined}
+                      className={cn(
+                        'flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-hover',
+                        active && 'bg-selected hover:bg-selected',
+                      )}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'truncate text-13',
+                              c.unread > 0 ? 'font-semibold' : 'font-medium',
+                            )}
+                          >
+                            {c.topic}
+                          </span>
+                          <span className="num ml-auto shrink-0 text-xs text-ink-muted">
+                            {when(c.lastAt)}
+                          </span>
+                        </span>
+                        <span className="ref mt-0.5 block truncate text-xs text-ink-muted">
+                          {c.order ? `Order ${c.order.ref}` : 'No order named'}
+                        </span>
+                        {c.replyDueAt && (
+                          <span className="mt-1 block">
+                            <ReplyDue at={c.replyDueAt} />
+                          </span>
+                        )}
+                      </span>
+                      {c.unread > 0 && (
+                        <span
+                          className="num mt-0.5 rounded-full bg-side px-1.5 text-[11px] leading-[18px] font-medium text-white"
+                          aria-label={`${String(c.unread)} unread`}
+                        >
+                          {c.unread}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+        {selected ? <AmazonThreadView id={selected.id} /> : <div className="hidden lg:block" />}
+      </Card>
+    </div>
+  );
+}
+
+function AmazonThreadView({ id }: { id: string }) {
+  const { session, persona } = useAppState();
+  const toast = useToast();
+  const [reply, setReply] = useState('');
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    setReply('');
+    setError(undefined);
+  }, [id]);
+  const q = useQuery({
+    queryKey: ['amazon-thread', id, persona],
+    queryFn: () => mockApi.amazonThread(id),
+    enabled: !!session,
+    gcTime: 0, // holds buyer PII: drop it from memory as soon as the thread closes
+  });
+  const t = q.data;
+  if (!t) return <div aria-busy className="h-64" />;
+  const c = t.conversation;
+  const over = reply.length > REPLY_LIMIT;
+
+  return (
+    <div className="flex min-w-0 flex-col">
+      <div className="flex flex-wrap items-start gap-3 border-b border-divider px-5 py-3.5">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">{c.topic}</h2>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
+            <span>Buyer, through Amazon’s message relay</span>
+            {c.order && (
+              <>
+                <span aria-hidden>·</span>
+                <Link
+                  to="/orders/$orderId"
+                  params={{ orderId: c.order.id }}
+                  className="ref text-brand-600 hover:underline"
+                >
+                  Order {c.order.ref}
+                </Link>
+              </>
+            )}
+            {c.replyDueAt && (
+              <>
+                <span aria-hidden>·</span>
+                <ReplyDue at={c.replyDueAt} />
+              </>
+            )}
+          </p>
+        </div>
+        <ThreadActions channel="amazon" id={c.id} unread={c.unread > 0} state={c.state} />
+      </div>
+      <ol aria-label="Messages" className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
+        {t.messages.map((m) => (
+          <li
+            key={m.id}
+            className={cn(
+              'max-w-[80%] rounded-card border px-4 py-2.5 text-13',
+              m.from === 'buyer'
+                ? 'self-start border-border bg-rail'
+                : 'self-end border-[#c3c8d0] bg-selected',
+            )}
+          >
+            <p className="mb-1 text-xs text-ink-muted">
+              {m.from === 'buyer' ? 'Buyer' : `You (${m.by ?? ''})`} ·{' '}
+              <span className="num">{formatDateTime(m.at)}</span>
+            </p>
+            <p className="whitespace-pre-line">{m.text}</p>
+          </li>
+        ))}
+      </ol>
+      <div className="border-t border-divider px-5 py-4">
+        <p className="mb-3 flex items-center gap-1.5 text-xs text-ink-muted">
+          <Eye className="size-3.5" aria-hidden /> Each view is logged. Message text is deleted 30
+          days after the last activity ({formatDate(t.deleteAfter)}).
+        </p>
+        <Field
+          label="Reply"
+          hint="Plain text, sent through Amazon. Links are blocked except to your own website."
+          error={
+            error ??
+            (over
+              ? `Too long by ${(reply.length - REPLY_LIMIT).toLocaleString('en-GB')} characters`
+              : undefined)
+          }
+        >
+          <textarea
+            aria-label="Reply"
+            value={reply}
+            onChange={(e) => {
+              setReply(e.target.value);
+              setError(undefined);
+            }}
+            rows={4}
+            className="w-full rounded-ctl border border-border bg-card px-3 py-2 text-13 shadow-card outline-none focus:border-brand-600"
+          />
+        </Field>
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span
+            className={cn('num text-xs', over ? 'font-medium text-danger' : 'text-ink-muted')}
+            aria-live="polite"
+          >
+            {reply.length.toLocaleString('en-GB')} / {REPLY_LIMIT.toLocaleString('en-GB')}{' '}
+            characters
+          </span>
+          <Button
+            variant="primary"
+            icon={<Send />}
+            disabled={over}
+            onClick={() => {
+              if (reply.trim() === '') {
+                setError('Write a reply first');
+                return;
+              }
+              setReply('');
+              toast({
+                title: 'Reply queued',
+                description: 'It is emailed to Amazon’s relay within a minute.',
+                tone: 'success',
+              });
+            }}
+          >
+            Send reply
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -14,6 +14,14 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAppState } from '../app/session.tsx';
 import { NumberField, parseKg, parseParcels } from '../components/NumberField.tsx';
 import { ChannelMark, FLAG } from '../components/badges.tsx';
+import {
+  GROUP_TONE,
+  GroupChip,
+  GroupPosition,
+  GroupRail,
+  NotSameBuyerDialog,
+  ShipTogetherDialog,
+} from '../components/sameBuyer.tsx';
 import { cn } from '../lib/cn.ts';
 import {
   daysFromToday,
@@ -33,7 +41,7 @@ import {
   ruleFor,
   type LabelResult,
 } from '../mocks/shipping.ts';
-import type { Channel, OrderRow } from '../mocks/types.ts';
+import type { Channel, OrderRow, OrderRowGroup } from '../mocks/types.ts';
 
 export interface ShippingSearch {
   due?: Due | undefined;
@@ -82,6 +90,27 @@ export function ShippingPage() {
     (o) =>
       (!search.due || dueOf(o) === search.due) && (!search.channel || o.channel === search.channel),
   );
+  // C3: the desk filters on this page, so a filter can hide group members here too. Recount each
+  // group against the rows shown: position, last row and how many members are hidden.
+  const shownGroups = useMemo(() => {
+    const byGroup = new Map<string, string[]>();
+    for (const o of shown)
+      if (o.group) byGroup.set(o.group.id, [...(byGroup.get(o.group.id) ?? []), o.id]);
+    const out = new Map<string, OrderRowGroup>();
+    for (const o of shown) {
+      if (!o.group) continue;
+      const ids = byGroup.get(o.group.id) ?? [];
+      out.set(o.id, {
+        ...o.group,
+        index: ids.indexOf(o.id),
+        last: ids[ids.length - 1] === o.id,
+        hidden: o.group.size - ids.length,
+      });
+    }
+    return out;
+  }, [shown]);
+  const [shipGroup, setShipGroup] = useState<string | null>(null);
+  const [notSame, setNotSame] = useState<OrderRowGroup | null>(null);
 
   useEffect(() => {
     setSelected(new Set());
@@ -210,6 +239,12 @@ export function ShippingPage() {
                 <QueueRow
                   key={o.id}
                   o={o}
+                  group={shownGroups.get(o.id)}
+                  onShipTogether={setShipGroup}
+                  onNotSame={setNotSame}
+                  onShowGroup={() => {
+                    setSearch({ due: undefined, channel: undefined });
+                  }}
                   checked={selected.has(o.id)}
                   only={selected.size === 1 && selected.has(o.id)}
                   onCheck={() => {
@@ -270,6 +305,27 @@ export function ShippingPage() {
           </aside>
         </div>
       </div>
+
+      {shipGroup && (
+        <ShipTogetherDialog
+          groupId={shipGroup}
+          onOpenChange={(open) => {
+            if (!open) setShipGroup(null);
+          }}
+          onDone={(ids) => {
+            setShipped((s) => new Set([...s, ...ids]));
+            setSelected(new Set());
+          }}
+        />
+      )}
+      {notSame && (
+        <NotSameBuyerDialog
+          group={notSame}
+          onOpenChange={(open) => {
+            if (!open) setNotSame(null);
+          }}
+        />
+      )}
 
       {/* Tablet: the panel sits below the queue, so keep a way to reach it. */}
       {selected.size > 0 && (
@@ -349,26 +405,35 @@ function ShipByText({ o }: { o: OrderRow }) {
 
 function QueueRow({
   o,
+  group,
   checked,
   only,
   onCheck,
   onOpen,
+  onShipTogether,
+  onNotSame,
+  onShowGroup,
 }: {
   o: OrderRow;
+  group: OrderRowGroup | undefined;
   checked: boolean;
   only: boolean;
   onCheck: () => void;
   onOpen: () => void;
+  onShipTogether: (groupId: string) => void;
+  onNotSame: (group: OrderRowGroup) => void;
+  onShowGroup: () => void;
 }) {
   const warn = o.flags.filter((f) => f !== 'fba');
   return (
     <li
       className={cn(
-        'flex min-h-16 items-center gap-3 border-b border-divider pr-4 pl-4 last:border-0',
-        checked ? 'bg-selected' : 'hover:bg-hover',
+        'relative flex min-h-16 flex-wrap items-center gap-x-3 border-b border-divider pr-4 pl-4 last:border-0',
+        checked ? 'bg-selected' : group ? `${GROUP_TONE} hover:bg-hover` : 'hover:bg-hover',
         only && 'shadow-[inset_3px_0_0_var(--color-side)]',
       )}
     >
+      {group && <GroupRail group={group} />}
       <label className="-my-2 -ml-2 grid size-10 shrink-0 cursor-pointer place-items-center">
         <input
           type="checkbox"
@@ -382,6 +447,7 @@ function QueueRow({
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="ref truncate text-13 font-medium text-ink">{o.ref}</span>
+            {group && group.index > 0 && <GroupPosition group={group} />}
             <span className="inline-grid grid-cols-[18px_auto] items-center gap-x-1.5 text-xs">
               <ChannelMark channel={o.channel} />
             </span>
@@ -415,6 +481,35 @@ function QueueRow({
           <span className="block text-xs text-ink-muted">{formatDate(o.shipBy)}</span>
         </span>
       </button>
+      {group?.index === 0 && (
+        <span className="-mt-1 flex basis-full flex-wrap items-center gap-x-3 gap-y-1 pb-2.5 pl-10">
+          <GroupChip
+            group={group}
+            onShipTogether={() => {
+              onShipTogether(group.id);
+            }}
+            onNotSame={() => {
+              onNotSame(group);
+            }}
+          />
+          {group.warnings[0] && (
+            <span
+              className="max-w-full truncate text-xs font-medium text-warning"
+              title={group.warnings.join('\n')}
+            >
+              {group.warnings[0]}
+            </span>
+          )}
+          {group.hidden > 0 && (
+            <button
+              onClick={onShowGroup}
+              className="text-xs font-medium text-brand-600 hover:underline"
+            >
+              +{group.hidden} related order{group.hidden === 1 ? '' : 's'} not shown
+            </button>
+          )}
+        </span>
+      )}
     </li>
   );
 }
