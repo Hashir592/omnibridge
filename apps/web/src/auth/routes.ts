@@ -90,10 +90,10 @@ export function authHandlers(auth: AuthService | undefined): Handlers<typeof aut
       body: null,
       headers: headers(await auth.enterPlatform(request, account)),
     }),
-    changePassword: async ({ body, account }) => ({
+    changePassword: async ({ request, body, account }) => ({
       status: 204,
       body: null,
-      headers: headers(await auth.changePassword(account, body)),
+      headers: headers(await auth.changePassword(request, account, body)),
     }),
     signOut: async ({ request }) => ({
       status: 204,

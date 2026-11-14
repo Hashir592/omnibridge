@@ -285,6 +285,21 @@ export class AuthService {
     user: { userId: string } | undefined,
     failure: 'password' | 'code' | 'recovery_code',
   ): Promise<never> {
+    const lockedUntil = await this.#countFailure(key, ip, now, user, failure);
+    if (lockedUntil !== null) {
+      throw rateLimited(lockedUntil, now, 'Too many failed attempts. Sign in is paused.');
+    }
+    throw unauthorized(failure === 'password' ? 'invalid_credentials' : 'invalid_code');
+  }
+
+  /** Records one failure (audit, lock notice); returns when the email is locked until, if it is. */
+  async #countFailure(
+    key: Buffer,
+    ip: string,
+    now: Date,
+    user: { userId: string } | undefined,
+    failure: 'password' | 'code' | 'recovery_code',
+  ): Promise<Date | null> {
     const result = await this.#o.store.recordFailure(key, ip, now);
     if (user !== undefined) {
       await this.#auditEverywhere(user.userId, 'auth.login_failed', ip, { failure });
@@ -300,10 +315,7 @@ export class AuthService {
         });
       }
     }
-    if (result.lockedUntil !== null) {
-      throw rateLimited(result.lockedUntil, now, 'Too many failed attempts. Sign in is paused.');
-    }
-    throw unauthorized(failure === 'password' ? 'invalid_credentials' : 'invalid_code');
+    return result.lockedUntil;
   }
 
   /** Writes one event into every workspace the user belongs to (AUD-2: logins, MFA changes). */
@@ -560,13 +572,22 @@ export class AuthService {
   }
 
   async changePassword(
+    request: FastifyRequest,
     account: AccountActor,
     input: { currentPassword: string; password: string },
   ): Promise<string[]> {
     const now = this.#now();
     const user = await this.#user(account.userId);
+    // The current password is a second verifier of the same secret, so it shares sign-in's
+    // email lock and per-address delay (USR-5, F-M02h-02).
+    const key = this.emailKey(user.email);
+    await this.#refuseIfBlocked(key, request.ip, now);
     const current = await this.#o.store.loginLookup(user.email);
     if (!(await this.#o.passwords.check(current?.passwordHash, input.currentPassword))) {
+      const lockedUntil = await this.#countFailure(key, request.ip, now, user, 'password');
+      if (lockedUntil !== null) {
+        throw rateLimited(lockedUntil, now, 'Too many failed attempts. Sign in is paused.');
+      }
       throw new ApiError({
         status: 422,
         code: 'validation_failed',
@@ -574,6 +595,8 @@ export class AuthService {
         errors: [{ location: 'body', path: 'currentPassword', message: 'wrong' }],
       });
     }
+    await this.#refuseIfLockedMeanwhile(key, request.ip, now);
+    await this.#o.store.clearFailures(key);
     await this.#checkNewPassword(user, input.password, now);
     await this.#o.store.setPassword(user.userId, await this.#o.passwords.hash(input.password), now);
     // Every session ends, this one included: sign in again with the new password and MFA.

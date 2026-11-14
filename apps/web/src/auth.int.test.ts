@@ -493,6 +493,54 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await server.close();
   });
 
+  it('[USR-5][USR-3] a wrong current password counts toward the same lock as sign-in', async () => {
+    const server = app();
+    const signIn = async (user: { email: string; secret: Buffer }, ip: string) => {
+      const b = await new Browser(server, ip).start();
+      expect((await b.signIn(user.email, PASSWORD)).statusCode).toBe(200);
+      later(30_000);
+      expect(
+        (await b.send('POST', '/auth/mfa/verify', { code: code(user.secret) })).statusCode,
+      ).toBe(200);
+      return b;
+    };
+    const change = (b: Browser, currentPassword: string) =>
+      b.send('POST', '/auth/password/change', {
+        currentPassword,
+        password: 'harbour lantern quartz 52',
+      });
+
+    // 10 wrong current passwords lock the email; the 10th answers 429 with Retry-After.
+    const one = await makeUser();
+    const b1 = await signIn(one, '192.0.2.61');
+    for (let i = 1; i <= 9; i += 1) {
+      later(31_000); // past the per-address delay
+      expect((await change(b1, `wrong current ${String(i)}`)).statusCode).toBe(422);
+    }
+    later(31_000);
+    const tenth = await change(b1, 'wrong current 10');
+    expect(tenth.statusCode).toBe(429);
+    expect(Number(tenth.headers['retry-after'])).toBe(15 * 60);
+    // The right current password is refused while the lock lasts, and so is sign-in.
+    later(31_000);
+    expect((await change(b1, PASSWORD)).statusCode).toBe(429);
+    expect(
+      (await (await new Browser(server, '192.0.2.62').start()).signIn(one.email, PASSWORD))
+        .statusCode,
+    ).toBe(429);
+
+    // A lock started by sign-in failures blocks the change too.
+    const two = await makeUser();
+    const b2 = await signIn(two, '192.0.2.63');
+    const attacker = await new Browser(server, '192.0.2.64').start();
+    for (let i = 1; i <= 10; i += 1) {
+      later(31_000);
+      await attacker.signIn(two.email, `guess ${String(i)}`);
+    }
+    expect((await change(b2, PASSWORD)).statusCode).toBe(429);
+    await server.close();
+  });
+
   it('[USR-3] a password older than 365 days must be changed before anything else', async () => {
     const server = app();
     const user = await makeUser({ passwordAgeMs: 366 * DAY });
