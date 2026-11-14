@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { laneOf } from '../../scripts/lib/change-lane.mjs';
 import { isDocsOnly, READ_BY_DOCS_GATE } from '../../scripts/lib/docs-only.mjs';
 import { readRepoFile, repoRoot } from './helpers.ts';
 
@@ -36,11 +37,11 @@ describe('CI workflow and gate', () => {
     const fullSteps = (/FULL_STEPS=\(([^)]*)\)/.exec(verify)?.[1] ?? '')
       .split(/\s+/)
       .filter(Boolean);
-    expect(fullSteps).toHaveLength(19);
+    expect(fullSteps).toHaveLength(20);
     const jobs = [...workflow.matchAll(/verify\.sh --only=([\w,-]+)/g)].map((m) =>
       (m[1] ?? '').split(','),
     );
-    expect(jobs).toHaveLength(3);
+    expect(jobs).toHaveLength(4);
     // Each job installs first; every other step runs in exactly one job, and nothing unknown.
     for (const job of jobs) expect(job[0]).toBe('install');
     const covered = jobs.flat().filter((step) => step !== 'install');
@@ -49,9 +50,45 @@ describe('CI workflow and gate', () => {
 
   it('[SEC-4] the required check keeps its name and needs every gate job', () => {
     expect(workflow).toContain('name: verify (full gate)');
-    expect(workflow).toMatch(/needs: \[changes, docs, static, tests, stack\]\n\s+if: always\(\)/);
+    expect(workflow).toMatch(
+      /needs: \[changes, docs, static, tests, ui, stack\]\n\s+if: always\(\)/,
+    );
     expect(workflow).toContain('run: bash scripts/verify.sh --docs');
-    expect(workflow).toContain("if: needs.changes.outputs.code == 'false'");
+    expect(workflow).toContain("if: needs.changes.outputs.lane == 'docs'");
+    expect(workflow).toContain('run: bash scripts/verify.sh --ui');
+    // A push to main is always the full lane, and its run is never cancelled by the next merge.
+    expect(workflow).toContain('echo "lane=full" >> "$GITHUB_OUTPUT"');
+    expect(workflow).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
+  });
+
+  it('[SEC-4] only apps/ui/** changes take the ui lane; unsure means full (ADR-056)', () => {
+    expect(laneOf(['apps/ui/src/routes/orders.tsx', 'apps/ui/e2e/kit.spec.ts'])).toBe('ui');
+    expect(laneOf(['apps/ui/src/a.tsx', 'docs/design/reference/orders-linux.png'])).toBe('ui');
+    expect(laneOf(['apps/ui/src/a.tsx', 'docs/STATE.md'])).toBe('ui');
+    expect(laneOf(['apps/ui/package.json'])).toBe('full');
+    expect(laneOf(['apps/ui/src/a.tsx', 'pnpm-lock.yaml'])).toBe('full');
+    expect(laneOf(['apps/ui/src/a.tsx', 'packages/contract/src/routes/auth.ts'])).toBe('full');
+    expect(laneOf(['apps/ui/src/a.tsx', 'infra/compose/compose.yaml'])).toBe('full');
+    expect(laneOf(['apps/ui/src/a.tsx', 'docs/ops/secrets-register.md'])).toBe('full');
+    expect(laneOf(['docs/design/reference/orders-linux.png'])).toBe('full');
+    expect(laneOf(['docs/STATE.md'])).toBe('docs');
+    expect(laneOf([])).toBe('full');
+  });
+
+  it('[SEC-4] the ui lane runs static checks, unit tests, the ui project and gitleaks (ADR-056)', () => {
+    const ui = /if \[\[ "\$mode" == ui \]\]; then\n\s+for name in ([\w -]+); do/.exec(verify)?.[1];
+    expect(ui?.split(' ')).toEqual([
+      'install',
+      'lint',
+      'typecheck',
+      'openapi',
+      'depcruise',
+      'names',
+      'coverage',
+      'unit',
+      'ui-e2e',
+      'gitleaks',
+    ]);
   });
 
   it('[SEC-4] only docs/**, *.md and docs/backlog.json take the docs fast path', () => {

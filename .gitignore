@@ -17,3 +17,5 @@ infra/compose/.local/
 # Machine-local Claude Code files (F-M02h-08).
 .claude/settings.local.json
 .claude/launch.json
+# verify.sh step logs (ADR-056).
+.verify-logs/
