@@ -118,6 +118,8 @@ await app.listen({ host: '0.0.0.0', port: Number(process.env.PORT ?? '8080') });
 
 const shutdown = async () => {
   await app.close();
+  // Reset requests answered with 202 may still be queuing their mail job.
+  await auth.idle();
   await boss.stop({ graceful: true, timeout: 10_000 });
   await main.destroy();
   process.exit(0);

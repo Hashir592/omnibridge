@@ -62,7 +62,8 @@ export async function seedDemoUser(deps: {
 }): Promise<{ created: boolean }> {
   const store = new AuthStore(deps.db);
   const demo = DEV_ONLY_DEMO_USER;
-  if ((await store.loginLookup(demo.email)) !== undefined) return { created: false };
+  // Read through auth_user, not the sign-in lookup: ob_ops never sees a password hash (ADR-051).
+  if ((await store.user(demo.id))?.passwordSetAt != null) return { created: false };
   const now = deps.now ?? new Date();
   // Older than a day, so a password change can be tried at once (USR-3 minimum age).
   const setAt = new Date(now.getTime() - 2 * 24 * 3_600_000);

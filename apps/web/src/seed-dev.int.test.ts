@@ -13,14 +13,18 @@ const seedScript = fileURLToPath(new URL('./seed-dev.ts', import.meta.url));
 describe('DEV ONLY seed (USR-4, ADR-050)', () => {
   let cluster: RoleCluster;
   let main: MainDbHandle;
+  let web: MainDbHandle;
 
   beforeAll(async () => {
-    cluster = await startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_app']);
+    cluster = await startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_ops', 'ob_app']);
     await migrateMain(cluster.connection('ob_owner'));
-    main = createMainDb({ ...cluster.connection('ob_app'), max: 2 });
+    // The seed logs in as ob_ops (ADR-051), so it is tested as ob_ops.
+    main = createMainDb({ ...cluster.connection('ob_ops'), max: 2 });
+    web = createMainDb({ ...cluster.connection('ob_app'), max: 1 });
   });
 
   afterAll(async () => {
+    await web.destroy();
     await main.destroy();
     await cluster.container.stop();
   });
@@ -54,7 +58,8 @@ describe('DEV ONLY seed (USR-4, ADR-050)', () => {
     };
     expect(await seedDemoUser(deps)).toEqual({ created: true });
     expect(await seedDemoUser(deps)).toEqual({ created: false });
-    const store = new AuthStore(main.db);
+    // Sign-in (web, ob_app) finds what the seed (ob_ops) wrote.
+    const store = new AuthStore(web.db);
     const account = await store.loginLookup(DEV_ONLY_DEMO_USER.email);
     expect(account).toMatchObject({ userId: DEV_ONLY_DEMO_USER.id, mfaConfirmed: true });
     expect(await new Passwords().check(account?.passwordHash, DEV_ONLY_DEMO_USER.password)).toBe(

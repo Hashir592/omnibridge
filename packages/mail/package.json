@@ -17,7 +17,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "nodemailer": "10.1.0"
+    "nodemailer": "10.1.7"
   },
   "devDependencies": {
     "@types/nodemailer": "8.0.2",

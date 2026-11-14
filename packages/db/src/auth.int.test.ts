@@ -35,6 +35,8 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
   let main: MainDbHandle;
   let store: AuthStore;
   let app: pg.Pool;
+  let worker: pg.Pool;
+  let ops: pg.Pool;
   const A = randomUUID();
   const B = randomUUID();
   const user = randomUUID();
@@ -42,10 +44,17 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
   const t0 = new Date('2026-10-21T09:00:00.000Z');
 
   beforeAll(async () => {
-    cluster = await startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_app']);
+    cluster = await startRoleCluster('db-main', 'omnibridge', [
+      'ob_owner',
+      'ob_app',
+      'ob_worker',
+      'ob_ops',
+    ]);
     await migrateMain(cluster.connection('ob_owner'));
     main = createMainDb({ ...cluster.connection('ob_app'), max: 4 });
     app = new pg.Pool({ ...cluster.connection('ob_app'), max: 2 });
+    worker = new pg.Pool({ ...cluster.connection('ob_worker'), max: 1 });
+    ops = new pg.Pool({ ...cluster.connection('ob_ops'), max: 1 });
     store = new AuthStore(main.db);
     const tenancy = new Tenancy(main.db);
     for (const [ws, name] of [
@@ -74,6 +83,8 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
   });
 
   afterAll(async () => {
+    await worker.end();
+    await ops.end();
     await app.end();
     await main.destroy();
     await cluster.container.stop();
@@ -95,6 +106,92 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
     for (const f of rows) {
       expect(f).toEqual({ name: f.name, definer: true, path: ['search_path=pg_catalog, pg_temp'] });
     }
+  });
+
+  it('[USR-6][SEC-3] ob_worker reaches only the reset-link definer, never sessions or hashes (ADR-051)', async () => {
+    const tok = () => randomBytes(32);
+    const denied = /permission denied for function/;
+    await expect(worker.query('SELECT * FROM app.auth_login_lookup($1)', [email])).rejects.toThrow(
+      denied,
+    );
+    await expect(worker.query('SELECT * FROM app.session_find($1)', [tok()])).rejects.toThrow(
+      denied,
+    );
+    await expect(
+      worker.query('SELECT app.session_create($1, $2, $3, $4, $5, $6, $7)', [
+        randomUUID(),
+        tok(),
+        tok(),
+        user,
+        'platform',
+        t0,
+        at(t0, 60 * MIN),
+      ]),
+    ).rejects.toThrow(denied);
+    await expect(
+      worker.query('SELECT app.auth_reset_create($1, $2, $3, $4)', [
+        tok(),
+        user,
+        t0,
+        at(t0, 30 * MIN),
+      ]),
+    ).resolves.toBeDefined();
+    // ob_ops (rewrap-keys, seed) cannot open sessions or read hashes either.
+    await expect(
+      ops.query('SELECT app.session_create($1, $2, $3, $4, $5, $6, $7)', [
+        randomUUID(),
+        tok(),
+        tok(),
+        user,
+        'pre_mfa',
+        t0,
+        at(t0, 10 * MIN),
+      ]),
+    ).rejects.toThrow(denied);
+    await expect(ops.query('SELECT * FROM app.auth_login_lookup($1)', [email])).rejects.toThrow(
+      denied,
+    );
+    await expect(ops.query('SELECT * FROM app.platform_key_get(NULL)')).resolves.toBeDefined();
+  });
+
+  it('[USR-6][SEC-3] a session starts at pre_mfa, and platform needs the platform_admin flag (ADR-051)', async () => {
+    const tok = () => randomBytes(32);
+    await expect(
+      app.query('SELECT app.session_create($1, $2, $3, $4, $5, $6, $7)', [
+        randomUUID(),
+        tok(),
+        tok(),
+        user,
+        'platform',
+        t0,
+        at(t0, 12 * 60 * MIN),
+      ]),
+    ).rejects.toThrow(/starts at pre_mfa/);
+    const id = randomUUID();
+    await store.createSession({
+      id,
+      tokenHash: tok(),
+      csrfHash: tok(),
+      userId: user,
+      stage: 'pre_mfa',
+      now: t0,
+      expiresAt: at(t0, 10 * MIN),
+    });
+    const advance = (stage: string, workspace: string | null, signedIn: boolean) =>
+      app
+        .query<{ ok: boolean }>(
+          'SELECT app.session_advance($1, $2, $3, $4, $5, $6, $7, $8) AS ok',
+          [id, tok(), tok(), stage, workspace, t0, signedIn, at(t0, 60 * MIN)],
+        )
+        .then((r) => r.rows[0]?.ok);
+    // pre_mfa can never jump to platform, nor move without MFA being passed.
+    expect(await advance('platform', null, true)).toBe(false);
+    expect(await advance('workspace', A, false)).toBe(false);
+    expect(await advance('signed_in', null, true)).toBe(true);
+    // signed_in → platform is refused: this user is not a platform admin.
+    expect(await advance('platform', null, false)).toBe(false);
+    expect(await advance('workspace', A, false)).toBe(true);
+    expect(await advance('signed_in', null, false)).toBe(false);
   });
 
   it('[USR-5] 10 failures in 15 minutes lock for 15 minutes from the 10th, once', async () => {
@@ -163,6 +260,37 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
     } finally {
       await owner.end();
     }
+  });
+
+  it('[USR-7][SEC-1] reset mail caps: 3 per email and 10 per address an hour, 100 a day in all', async () => {
+    // A clock of its own, a day after the others, so earlier rows never count.
+    const base = at(t0, 3 * 24 * 60 * MIN);
+    const key = randomBytes(32);
+    const perEmail = [];
+    for (let i = 0; i < 4; i += 1) {
+      perEmail.push(await store.allowReset(key, '198.51.100.1', at(base, i * MIN)));
+    }
+    expect(perEmail).toEqual([true, true, true, false]);
+    expect(await store.allowReset(key, '198.51.100.1', at(base, 61 * MIN))).toBe(true);
+
+    const ip = '198.51.100.2';
+    const perIp = [];
+    for (let i = 0; i < 11; i += 1) {
+      perIp.push(await store.allowReset(randomBytes(32), ip, at(base, 2 * 60 * MIN + i * 1000)));
+    }
+    expect(perIp.filter(Boolean)).toHaveLength(10);
+    expect(perIp[10]).toBe(false);
+
+    // 100 allowed in 24 hours overall: 4 + 10 so far, then 86 from fresh addresses, then no more.
+    const t = at(base, 4 * 60 * MIN);
+    for (let i = 0; i < 86; i += 1) {
+      expect(await store.allowReset(randomBytes(32), `198.51.101.${String(i)}`, t)).toBe(true);
+    }
+    expect(await store.allowReset(randomBytes(32), '198.51.102.1', t)).toBe(false);
+    // A day later it opens again, and the old rows are gone.
+    expect(await store.allowReset(randomBytes(32), '198.51.102.1', at(base, 25 * 60 * MIN))).toBe(
+      true,
+    );
   });
 
   it('[USR-6] a session enters only a workspace its user belongs to, and revokes everywhere', async () => {

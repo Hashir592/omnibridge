@@ -58,11 +58,19 @@ const REDACTED = '[REDACTED]';
 /** Synthetic PII in fixtures carries this marker so leaks can be found (ARCHITECTURE.md invariant 7). */
 const PII_MARKER = /PIIMARK-[^\s"'`,;:()[\]{}<>]*/g;
 const EMAIL = /\b[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/gi;
+/**
+ * A path segment that is a secret token (F-M02h-01, SEC-5): the segment after one of these route
+ * prefixes is redacted wherever a request path appears in a log line. Add new token routes here.
+ */
+const PATH_TOKEN = /(\/auth\/password\/reset\/)[^/?#\s"']+/g;
 const MAX_DEPTH = 6;
 
-/** Replaces PII markers and email addresses in free text. */
+/** Replaces PII markers, email addresses and path tokens in free text. */
 export function scrubString(value: string): string {
-  return value.replace(PII_MARKER, REDACTED).replace(EMAIL, REDACTED);
+  return value
+    .replace(PII_MARKER, REDACTED)
+    .replace(EMAIL, REDACTED)
+    .replace(PATH_TOKEN, `$1${REDACTED}`);
 }
 
 function scrubValue(value: unknown, depth: number): unknown {

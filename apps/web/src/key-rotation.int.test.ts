@@ -70,11 +70,12 @@ describe('all-workspace KEK re-wrap job (F-03, PS-015 (2), R2-02, SEC-6)', () =>
   beforeAll(async () => {
     cluster = await startRoleCluster('db-main', 'omnibridge', [
       'ob_owner',
-      'ob_app',
+      'ob_ops',
       'ob_platform',
     ]);
     await migrateMain(cluster.connection('ob_owner'));
-    main = createMainDb({ ...cluster.connection('ob_app'), max: 2 });
+    // rewrap-keys logs in as ob_ops (ADR-051), so it is tested as ob_ops.
+    main = createMainDb({ ...cluster.connection('ob_ops'), max: 2 });
     platform = createMainDb({ ...cluster.connection('ob_platform'), max: 1 });
     root = mkdtempSync(join(tmpdir(), 'ob-rewrap-'));
     const tenancy = new Tenancy(main.db);
@@ -181,7 +182,7 @@ describe('all-workspace KEK re-wrap job (F-03, PS-015 (2), R2-02, SEC-6)', () =>
   });
 
   it('[TEN-1] the workspace list is read only as ob_platform', async () => {
-    // As ob_app, RLS would show no workspace at all and the job would wrongly report done.
+    // As ob_ops, RLS would show no workspace at all and the job would wrongly report done.
     await expect(new WorkspaceDirectory(main.db).listIds()).rejects.toThrow(/ob_platform/);
     expect([...(await new WorkspaceDirectory(platform.db).listIds())].sort()).toEqual(
       [...workspaces].sort(),

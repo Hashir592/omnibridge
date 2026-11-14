@@ -87,7 +87,9 @@ describe('secrets handling (SEC-5)', () => {
     expect(holders('ob_worker_password')).toEqual(['db-main', 'worker']);
     // The sign-in HMAC key stays in web (T-0203): the worker sends mail but never checks codes.
     expect(holders('auth_hmac_key')).toEqual(['seed', 'web']);
-    expect(holders('ob_app_password')).toEqual(['db-main', 'rewrap-keys', 'seed', 'web']);
+    // Only web holds the role with every auth definer (ADR-051); the one-off jobs use ob_ops.
+    expect(holders('ob_app_password')).toEqual(['db-main', 'web']);
+    expect(holders('ob_ops_password')).toEqual(['db-main', 'rewrap-keys', 'seed']);
     expect(service('worker').environment?.DB_MAIN_USER).toBe('ob_worker');
     expect(service('worker').environment?.DB_PLATFORM_USER).toBe('ob_platform');
     expect(service('web').environment?.DB_PLATFORM_USER).toBeUndefined();

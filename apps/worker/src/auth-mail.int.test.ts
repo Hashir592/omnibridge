@@ -24,6 +24,7 @@ const APP = 'https://app.omnibridge.test';
 describe('auth mail jobs (USR-5, USR-7, ADR-050)', () => {
   let cluster: RoleCluster;
   let main: MainDbHandle;
+  let web: MainDbHandle;
   let tenancy: Tenancy;
   const ws = randomUUID();
   const people = { admin: randomUUID(), other: randomUUID(), member: randomUUID() };
@@ -54,10 +55,12 @@ describe('auth mail jobs (USR-5, USR-7, ADR-050)', () => {
     );
 
   beforeAll(async () => {
-    cluster = await startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_worker']);
+    cluster = await startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_worker', 'ob_app']);
     await migrateMain(cluster.connection('ob_owner'));
     // The worker's own role (ADR-049).
     main = createMainDb({ ...cluster.connection('ob_worker'), max: 4 });
+    // Web (ob_app) is what reads the link back; the worker may only create it (ADR-051).
+    web = createMainDb({ ...cluster.connection('ob_app'), max: 1 });
     tenancy = new Tenancy(main.db);
     await tenancy.run({ workspaceId: ws, companyIds: [] }, (ctx) =>
       new WorkspaceRepository(main.db).create(ctx, { name: 'Mail test' }),
@@ -78,6 +81,7 @@ describe('auth mail jobs (USR-5, USR-7, ADR-050)', () => {
   });
 
   afterAll(async () => {
+    await web.destroy();
     await main.destroy();
     await cluster.container.stop();
   });
@@ -134,10 +138,11 @@ describe('auth mail jobs (USR-5, USR-7, ADR-050)', () => {
     const token = link?.[1] ?? '';
     expect(token).not.toBe('');
     const hash = createHash('sha256').update(token).digest();
-    expect(await store.findReset(hash, new Date(now.getTime() + 29 * 60_000))).toMatchObject({
+    const reader = new AuthStore(web.db);
+    expect(await reader.findReset(hash, new Date(now.getTime() + 29 * 60_000))).toMatchObject({
       userId: people.member,
     });
-    expect(await store.findReset(hash, new Date(now.getTime() + 30 * 60_000))).toBeUndefined();
+    expect(await reader.findReset(hash, new Date(now.getTime() + 30 * 60_000))).toBeUndefined();
     // The token itself is in no row.
     const owner = new pg.Pool({ ...cluster.connection('ob_owner'), max: 1 });
     try {

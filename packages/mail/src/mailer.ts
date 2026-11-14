@@ -4,6 +4,27 @@ import { lintEmail, type Email } from './templates.ts';
 /** The single sender for system email (MAIL-2). */
 export const SYSTEM_FROM = 'OmniBridge <notifications@omnibridge.co.uk>';
 
+/**
+ * A plain `local@domain` address: no display name, quotes, comments, angle brackets, commas or
+ * whitespace. Anything else is refused before it reaches nodemailer's address parser, which has
+ * had flaws that delivered mail to a recipient the header did not name (F-M02h-10). The local
+ * part allows the unquoted RFC 5322 characters (o'brien@, a+b@); the domain is ASCII DNS labels.
+ */
+const PLAIN_ADDRESS =
+  /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$/;
+
+/** Thrown when a recipient is not a plain address; the address itself is never in the message. */
+export class RecipientRejected extends Error {
+  constructor() {
+    super('recipient is not a plain local@domain address');
+    this.name = 'RecipientRejected';
+  }
+}
+
+export function isPlainAddress(to: string): boolean {
+  return to.length <= 254 && PLAIN_ADDRESS.test(to);
+}
+
 export interface SmtpConfig {
   host: string;
   port: number;
@@ -37,6 +58,7 @@ export class Mailer {
   }
 
   async send(to: string, email: Email): Promise<string> {
+    if (!isPlainAddress(to)) throw new RecipientRejected();
     lintEmail(email);
     const info = await this.#transport.sendMail({
       from: SYSTEM_FROM,

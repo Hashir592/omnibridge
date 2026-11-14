@@ -40,7 +40,9 @@ import {
 } from './totp.ts';
 
 /** Lifetimes (USR-6, USR-7, ADR-048). */
-export const PRE_MFA_MS = 10 * 60_000;
+export /** Reset requests worked on after their 202 at once, at most (F-M02h-04). */
+const MAX_RESET_BACKLOG = 64;
+const PRE_MFA_MS = 10 * 60_000;
 export const IDLE_MS = 30 * 60_000;
 export const ABSOLUTE_MS = 12 * 3_600_000;
 /** A session's last-seen time is written at most this often. */
@@ -118,6 +120,8 @@ export class AuthService {
   readonly #secure: boolean;
   /** The session each request resolved to, for its handler. */
   readonly #sessions = new WeakMap<FastifyRequest, StoredSession>();
+  /** Reset requests still being worked on after their 202 (see forgotPassword). */
+  readonly #background = new Set<Promise<void>>();
 
   constructor(options: AuthServiceOptions) {
     this.#o = options;
@@ -285,6 +289,21 @@ export class AuthService {
     user: { userId: string } | undefined,
     failure: 'password' | 'code' | 'recovery_code',
   ): Promise<never> {
+    const lockedUntil = await this.#countFailure(key, ip, now, user, failure);
+    if (lockedUntil !== null) {
+      throw rateLimited(lockedUntil, now, 'Too many failed attempts. Sign in is paused.');
+    }
+    throw unauthorized(failure === 'password' ? 'invalid_credentials' : 'invalid_code');
+  }
+
+  /** Records one failure (audit, lock notice); returns when the email is locked until, if it is. */
+  async #countFailure(
+    key: Buffer,
+    ip: string,
+    now: Date,
+    user: { userId: string } | undefined,
+    failure: 'password' | 'code' | 'recovery_code' | 'current_password',
+  ): Promise<Date | null> {
     const result = await this.#o.store.recordFailure(key, ip, now);
     if (user !== undefined) {
       await this.#auditEverywhere(user.userId, 'auth.login_failed', ip, { failure });
@@ -300,10 +319,7 @@ export class AuthService {
         });
       }
     }
-    if (result.lockedUntil !== null) {
-      throw rateLimited(result.lockedUntil, now, 'Too many failed attempts. Sign in is paused.');
-    }
-    throw unauthorized(failure === 'password' ? 'invalid_credentials' : 'invalid_code');
+    return result.lockedUntil;
   }
 
   /** Writes one event into every workspace the user belongs to (AUD-2: logins, MFA changes). */
@@ -510,8 +526,36 @@ export class AuthService {
   // ---- (6) and (7) password reset ----
 
   /** Always succeeds from the outside (USR-7): nothing tells whether the email has an account. */
-  async forgotPassword(email: string): Promise<void> {
-    const account = await this.#o.store.loginLookup(email.trim().toLowerCase());
+  /**
+   * Answers at once and does the work afterwards, so a real and an unknown email take the same
+   * time to answer (USR-7, F-M02h-04). Errors are logged, never shown.
+   */
+  forgotPassword(email: string, ip: string): void {
+    // Bounded: a flood answers 202 as usual but starts no more work than this at once.
+    if (this.#background.size >= MAX_RESET_BACKLOG) {
+      this.#o.logger.warn({ event: 'auth.reset_backlog_full' }, 'password reset backlog full');
+      return;
+    }
+    const work = this.#forgotPassword(email.trim().toLowerCase(), ip, this.#now())
+      .catch((err: unknown) => {
+        this.#o.logger.error({ err, event: 'auth.reset_failed' }, 'password reset request failed');
+      })
+      .finally(() => this.#background.delete(work));
+    this.#background.add(work);
+  }
+
+  /** Resolves once every reset request started so far has finished (tests, shutdown). */
+  async idle(): Promise<void> {
+    await Promise.all([...this.#background]);
+  }
+
+  async #forgotPassword(email: string, ip: string, now: Date): Promise<void> {
+    // Every request counts toward the caps, real email or not (F-M02h-05).
+    if (!(await this.#o.store.allowReset(this.emailKey(email), ip, now))) {
+      this.#o.logger.info({ event: 'auth.reset_capped' }, 'password reset over a cap: not sent');
+      return;
+    }
+    const account = await this.#o.store.loginLookup(email);
     if (account === undefined) return;
     const [first] = await this.#o.store.userWorkspaces(account.userId);
     if (first === undefined) {
@@ -560,13 +604,22 @@ export class AuthService {
   }
 
   async changePassword(
+    request: FastifyRequest,
     account: AccountActor,
     input: { currentPassword: string; password: string },
   ): Promise<string[]> {
     const now = this.#now();
     const user = await this.#user(account.userId);
+    // The current password is a second verifier of the same secret, so it shares sign-in's
+    // email lock and per-address delay (USR-5, F-M02h-02).
+    const key = this.emailKey(user.email);
+    await this.#refuseIfBlocked(key, request.ip, now);
     const current = await this.#o.store.loginLookup(user.email);
     if (!(await this.#o.passwords.check(current?.passwordHash, input.currentPassword))) {
+      const lockedUntil = await this.#countFailure(key, request.ip, now, user, 'current_password');
+      if (lockedUntil !== null) {
+        throw rateLimited(lockedUntil, now, 'Too many failed attempts. Sign in is paused.');
+      }
       throw new ApiError({
         status: 422,
         code: 'validation_failed',
@@ -574,6 +627,8 @@ export class AuthService {
         errors: [{ location: 'body', path: 'currentPassword', message: 'wrong' }],
       });
     }
+    await this.#refuseIfLockedMeanwhile(key, request.ip, now);
+    await this.#o.store.clearFailures(key);
     await this.#checkNewPassword(user, input.password, now);
     await this.#o.store.setPassword(user.userId, await this.#o.passwords.hash(input.password), now);
     // Every session ends, this one included: sign in again with the new password and MFA.
