@@ -1,0 +1,41 @@
+# Local dry run of the early deploy (T-0604): the same stack on local addresses with Caddy's own
+# certificates, the eBay APIs from provider-mocks, and synthetic values only. Used by dry-run.sh.
+services:
+  ebay-endpoint:
+    environment:
+      EBAY_ENDPOINT_URL: https://localhost:9443/webhooks/ebay/account-deletion
+      EBAY_API_BASE: http://provider-mocks:8080/ebay
+
+  caddy:
+    environment:
+      SITE_ADDRESS: localhost:9444
+      WWW_ADDRESS: www.localhost:9444
+      APP_ADDRESS: localhost:9443
+      CADDY_EXTRA_GLOBAL: local_certs
+    ports: !override
+      - 127.0.0.1:9443:9443
+      - 127.0.0.1:9444:9444
+
+  provider-mocks:
+    image: omnibridge/provider-mocks:early
+    build:
+      context: ../..
+      dockerfile: infra/docker/node-app.Dockerfile
+      args: { APP: provider-mocks }
+    environment:
+      PORT: '8080'
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [ob_edge]
+    mem_limit: 96m
+    cpus: 0.25
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/_mock/health]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s

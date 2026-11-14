@@ -19,3 +19,7 @@ infra/compose/.local/
 .claude/launch.json
 # verify.sh step logs (ADR-056).
 .verify-logs/
+
+# Early deploy secrets (T-0604): synthetic in the dry run, from the ops repo in production.
+infra/early-deploy/.secrets/
+infra/early-deploy/.env

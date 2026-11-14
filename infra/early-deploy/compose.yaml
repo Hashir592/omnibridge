@@ -1,0 +1,130 @@
+# Early public deploy (T-0604, ADR-054): only the public site, the eBay account deletion endpoint
+# and Caddy for HTTPS. No database and no customer data. Runbook: docs/ops/runbooks/early-deploy.md
+#
+#   docker compose -f infra/early-deploy/compose.yaml --env-file infra/early-deploy/.env up -d --build --wait
+#
+# Every service has mem_limit, cpus, pids_limit and a healthcheck (invariant 14, OPS-8).
+name: omnibridge-early
+
+x-hardening: &hardening
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: '3' }
+
+services:
+  site:
+    <<: *hardening
+    image: omnibridge/site:early
+    build:
+      context: ../..
+      dockerfile: infra/docker/site.Dockerfile
+      args:
+        # WWW-2: the footer and legal pages name the Operator; a production build refuses
+        # placeholders, so these must be set in .env.
+        OB_SITE_OPERATOR_LEGAL_NAME: ${OB_SITE_OPERATOR_LEGAL_NAME:?set it in .env}
+        OB_SITE_OPERATOR_COMPANY_NUMBER: ${OB_SITE_OPERATOR_COMPANY_NUMBER:?set it in .env}
+        OB_SITE_OPERATOR_REGISTERED_ADDRESS: ${OB_SITE_OPERATOR_REGISTERED_ADDRESS:?set it in .env}
+        OB_SITE_PRODUCTION: '1'
+    networks: [ob_edge]
+    mem_limit: 24m
+    cpus: 0.1
+    pids_limit: 32
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/health]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+  # The eBay endpoint on its own (apps/web/src/ebay-endpoint.ts), from the web image.
+  ebay-endpoint:
+    <<: *hardening
+    image: omnibridge/web:early
+    build:
+      context: ../..
+      dockerfile: infra/docker/node-app.Dockerfile
+      args: { APP: web }
+    command: [node, dist/ebay-endpoint.js]
+    environment:
+      PORT: '8080'
+      APP_VERSION: ${APP_VERSION:-early}
+      # Exactly the URL subscribed at eBay: it is part of the challenge hash.
+      EBAY_ENDPOINT_URL: ${EBAY_ENDPOINT_URL:-https://app.omnibridge.co.uk/webhooks/ebay/account-deletion}
+      EBAY_API_BASE: ${EBAY_API_BASE:-https://api.ebay.com}
+      EBAY_VERIFICATION_TOKEN_FILE: /run/secrets/ebay_verification_token
+      EBAY_CLIENT_ID_FILE: /run/secrets/ebay_client_id
+      EBAY_CLIENT_SECRET_FILE: /run/secrets/ebay_client_secret
+      # Only Caddy on this private network may name the client address.
+      TRUSTED_PROXIES: uniquelocal
+    secrets: [ebay_verification_token, ebay_client_id, ebay_client_secret]
+    networks: [ob_edge]
+    mem_limit: 96m
+    cpus: 0.25
+    pids_limit: 64
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:8080/webhooks/ebay/account-deletion?challenge_code=healthcheck
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  caddy:
+    image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    restart: unless-stopped
+    ports:
+      - ${HTTP_PORT:-80}:80
+      - ${HTTPS_PORT:-443}:443
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-omnibridge.co.uk}
+      WWW_ADDRESS: ${WWW_ADDRESS:-www.omnibridge.co.uk}
+      APP_ADDRESS: ${APP_ADDRESS:-app.omnibridge.co.uk}
+      ACME_EMAIL: ${ACME_EMAIL:-developer@omnibridge.co.uk}
+      # Empty in production; `local_certs` for the local dry run.
+      CADDY_EXTRA_GLOBAL: ${CADDY_EXTRA_GLOBAL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [ob_edge]
+    depends_on:
+      site: { condition: service_healthy }
+      ebay-endpoint: { condition: service_healthy }
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8081/healthz]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+networks:
+  ob_edge:
+    name: ob_edge
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+# From the ops repo with SOPS (runbook step 5); never committed. The dry run writes synthetic ones.
+secrets:
+  ebay_verification_token:
+    file: ${EBAY_SECRETS_DIR:-./.secrets}/ebay_verification_token
+  ebay_client_id:
+    file: ${EBAY_SECRETS_DIR:-./.secrets}/ebay_client_id
+  ebay_client_secret:
+    file: ${EBAY_SECRETS_DIR:-./.secrets}/ebay_client_secret

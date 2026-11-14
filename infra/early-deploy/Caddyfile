@@ -1,0 +1,44 @@
+# HTTPS edge for the early public deploy (T-0604, WWW-1). Certificates come from Let's Encrypt
+# automatically; the dry run sets CADDY_EXTRA_GLOBAL=local_certs and local addresses instead.
+{
+	email {$ACME_EMAIL}
+	admin off
+	{$CADDY_EXTRA_GLOBAL}
+}
+
+(security) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+}
+
+# The public site (WWW-1).
+{$SITE_ADDRESS} {
+	import security
+	reverse_proxy site:8080
+}
+
+# www redirects to the bare domain (WWW-1).
+{$WWW_ADDRESS} {
+	import security
+	redir https://{$SITE_ADDRESS}{uri} permanent
+}
+
+# The app domain serves only the eBay account deletion endpoint until the full app is live.
+{$APP_ADDRESS} {
+	import security
+	handle /webhooks/ebay/account-deletion {
+		reverse_proxy ebay-endpoint:8080
+	}
+	handle {
+		respond 404
+	}
+}
+
+# Container healthcheck only; not published.
+http://:8081 {
+	respond /healthz 200
+}
