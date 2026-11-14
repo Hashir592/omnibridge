@@ -67,6 +67,7 @@ services:
       - ob_owner_password
       - ob_app_password
       - ob_worker_password
+      - ob_ops_password
       - ob_platform_password
     volumes:
       - db_main_data:/var/lib/postgresql
@@ -228,7 +229,7 @@ services:
       args: { APP: worker }
     environment:
       <<: *db-main-env
-      # ob_worker: ob_app's rights plus the audit purge, nothing else (ADR-049).
+      # ob_worker: the tenant grants, the reset-link definer and the audit purge (ADR-049, ADR-051).
       DB_MAIN_USER: ob_worker
       DB_MAIN_PASSWORD_FILE: /run/secrets/ob_worker_password
       # The scheduled fan-out lists workspace ids as ob_platform, nothing else (T-0202).
@@ -270,7 +271,7 @@ services:
 
   # KEK rotation for every workspace (SEC-6, runbook "Rotate a master key"). One-off and opt-in:
   #   docker compose -f infra/compose/compose.yaml --profile ops run --rm rewrap-keys
-  # The only container with ob_platform (to list the workspaces), ob_app, the secrets KEK and a
+  # The only container with ob_platform (to list the workspaces), ob_ops, the secrets KEK and a
   # writable files volume, so web itself never holds ob_platform (T-0201). The worker holds
   # ob_platform too, for the scheduled fan-out, but mounts the files volume read-only (T-0202).
   rewrap-keys:
@@ -284,14 +285,15 @@ services:
     command: [node, dist/rewrap-keys.js]
     environment:
       <<: *db-main-env
-      DB_MAIN_USER: ob_app
-      DB_MAIN_PASSWORD_FILE: /run/secrets/ob_app_password
+      # ob_ops: the tenant grants and the platform-key definers, never sessions (ADR-051).
+      DB_MAIN_USER: ob_ops
+      DB_MAIN_PASSWORD_FILE: /run/secrets/ob_ops_password
       DB_PLATFORM_USER: ob_platform
       DB_PLATFORM_PASSWORD_FILE: /run/secrets/ob_platform_password
       SECRETS_KEK_FILE: /run/secrets/secrets_kek
       FILES_DIR: /data/files
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
-    secrets: [ob_app_password, ob_platform_password, secrets_kek]
+    secrets: [ob_ops_password, ob_platform_password, secrets_kek]
     volumes:
       - files_data:/data/files
     networks: [ob_db]
@@ -384,6 +386,8 @@ secrets:
     file: ./.secrets/ob_app_password
   ob_worker_password:
     file: ./.secrets/ob_worker_password
+  ob_ops_password:
+    file: ./.secrets/ob_ops_password
   auth_hmac_key:
     file: ./.secrets/auth_hmac_key
   ob_platform_password:
