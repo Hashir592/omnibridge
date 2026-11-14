@@ -117,6 +117,12 @@ lint() {
   "${pnpm[@]}" exec eslint --max-warnings 0 . && "${pnpm[@]}" exec prettier --check .
 }
 
+# The core stack, and the early public deploy (T-0604) with its dry-run override.
+limits() {
+  bash scripts/check-limits.sh &&
+    bash scripts/check-limits.sh infra/early-deploy/compose.yaml infra/early-deploy/compose.dryrun.yaml
+}
+
 actionlint() {
   docker_run --rm -v "$(docker_src "$root"):/repo" -w /repo "$ACTIONLINT_IMAGE" -color
 }
@@ -309,7 +315,7 @@ run_step() {
     depcruise) step depcruise "${pnpm[@]}" exec depcruise apps packages mocks --config .dependency-cruiser.cjs ;;
     names) step names bash scripts/check-names.sh ;;
     coverage) step coverage node scripts/req-coverage.mjs ;;
-    limits) step limits bash scripts/check-limits.sh ;;
+    limits) step limits limits ;;
     squawk) step squawk squawk ;;
     actionlint) step actionlint actionlint ;;
     caddy) step caddy caddy_validate ;;
