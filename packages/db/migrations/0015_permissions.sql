@@ -160,12 +160,13 @@ GRANT EXECUTE ON FUNCTION app.member_scope() TO ob_tenant_rw;
 -- An invite link, by its token (before any workspace is chosen): what the accept page shows.
 CREATE FUNCTION app.invite_find(p_token bytea, p_now timestamptz)
   RETURNS TABLE (id uuid, workspace_id uuid, workspace_name text, email text, role text,
-                 user_exists boolean)
+                 user_exists boolean, invited_by_name text, expires_at timestamptz)
   LANGUAGE sql STABLE SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
 AS $$
   SELECT i.id, i.workspace_id, w.name, i.email, i.role,
-         EXISTS (SELECT 1 FROM app.users u WHERE u.email = i.email)
+         EXISTS (SELECT 1 FROM app.users u WHERE u.email = i.email),
+         (SELECT u.name FROM app.users u WHERE u.id = i.invited_by), i.expires_at
     FROM app.invites i JOIN app.workspaces w ON w.id = i.workspace_id
    WHERE i.token_hash = p_token AND i.accepted_at IS NULL AND i.revoked_at IS NULL
      AND i.expires_at > p_now
@@ -235,7 +236,10 @@ CREATE POLICY companies_definer_read ON app.companies FOR SELECT TO ob_owner USI
 CREATE TABLE app.auth_events (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id uuid REFERENCES app.users (id),
-  action text NOT NULL CHECK (action IN ('auth.login_failed', 'auth.locked')),
+  -- Account events of a user with several workspaces (MFA set up, sign out everywhere) have no
+  -- one workspace either, so they are kept here too.
+  action text NOT NULL CHECK (action IN ('auth.login_failed', 'auth.locked', 'mfa.enrolled',
+                                         'auth.signed_out_everywhere')),
   ip inet,
   detail jsonb NOT NULL DEFAULT '{}',
   occurred_at timestamptz NOT NULL
@@ -258,6 +262,24 @@ AS $$
   INSERT INTO app.auth_events (user_id, action, ip, detail, occurred_at)
     VALUES (p_user, p_action, p_ip, p_detail, p_now)
 $$;
+
+-- For the admin's Users list (PERM-2): whether each member of the current workspace has set up
+-- MFA and when they last signed in. Nothing else of the auth tables leaves.
+CREATE FUNCTION app.member_auth_status()
+  RETURNS TABLE (user_id uuid, mfa boolean, last_sign_in_at timestamptz)
+  LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp
+AS $$
+  SELECT m.user_id,
+         EXISTS (SELECT 1 FROM app.user_auth a
+                  WHERE a.user_id = m.user_id AND a.mfa_confirmed_at IS NOT NULL),
+         (SELECT max(s.signed_in_at) FROM app.sessions s
+           WHERE s.user_id = m.user_id AND s.stage <> 'pre_mfa')
+    FROM app.memberships m
+   WHERE m.workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid
+$$;
+REVOKE ALL ON FUNCTION app.member_auth_status() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.member_auth_status() TO ob_auth;
 
 REVOKE ALL ON FUNCTION app.invite_find(bytea, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.invite_accept(bytea, uuid, text, timestamptz) FROM PUBLIC;

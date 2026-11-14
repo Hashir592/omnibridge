@@ -1,4 +1,11 @@
-import { defineRoute, listQuery, pageOf, type AnyRoute } from '@omnibridge/contract';
+import {
+  ADMIN_ONLY_TABS,
+  defineRoute,
+  listQuery,
+  pageOf,
+  TABS,
+  type AnyRoute,
+} from '@omnibridge/contract';
 import {
   ApiError,
   NotAMember,
@@ -207,6 +214,56 @@ describe('authentication per route kind (SEC-3)', () => {
     const res = await app.inject({ method: 'GET', url: '/me' });
     expect(res.json()).toEqual({ workspace: SESSION.workspaceId, user: SESSION.userId });
     await app.close();
+  });
+
+  it('[PERM-3][AT-2] child with {Orders} gets 403 on every other tab, using fixture routes for every tab', async () => {
+    // One fixture route per tab, so every tab the app will ever have is covered now (PERM-4).
+    const fixtures = TABS.map((tab) =>
+      defineRoute({
+        id: `tab${tab.replace(/(^|-)([a-z])/g, (_m, _d: string, c: string) => c.toUpperCase())}`,
+        method: 'GET',
+        path: `/fixture/${tab}`,
+        responses: { 200: Thing },
+        auth: 'session',
+        tab,
+        adminOnly: (ADMIN_ONLY_TABS as readonly string[]).includes(tab),
+        companyScoped: false,
+      }),
+    );
+    const hs = Object.fromEntries(
+      fixtures.map((r) => [r.id, () => Promise.resolve({ status: 200, body: { id: r.id } })]),
+    );
+    const statusOf = async (access: MemberAccess) => {
+      const app = Fastify({ loggerInstance: logger });
+      installContract(app);
+      void app.register(
+        contractRoutesPlugin(fixtures, hs as Handlers<typeof fixtures>, {
+          auth: { resolveSession: () => SESSION, tenancy: tenancyAs(access) },
+        }),
+      );
+      await app.ready();
+      const out: Record<string, number> = {};
+      for (const tab of TABS) {
+        out[tab] = (await app.inject({ method: 'GET', url: `/fixture/${tab}` })).statusCode;
+      }
+      await app.close();
+      return out;
+    };
+    const child = await statusOf({ role: 'member', tabs: ['orders'] });
+    for (const tab of TABS) {
+      const want = tab === 'orders' || tab === 'none' ? 200 : 403;
+      expect({ tab, status: child[tab] }).toEqual({ tab, status: want });
+    }
+    // A child with no ticks reaches only the routes outside the tabs (PERM-6).
+    const empty = await statusOf({ role: 'member', tabs: [] });
+    expect(
+      Object.entries(empty)
+        .filter(([, s]) => s === 200)
+        .map(([t]) => t),
+    ).toEqual(['none']);
+    // An admin reaches every tab, the admin-only ones included.
+    const admin = await statusOf({ role: 'admin', tabs: 'all' });
+    expect(Object.values(admin).every((s) => s === 200)).toBe(true);
   });
 
   it('[AUD-4][SEC-3] an adminOnly route answers 403 to anyone but a workspace admin', async () => {

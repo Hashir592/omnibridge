@@ -1,16 +1,19 @@
 import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
+  AccessReviewRepository,
   AuditLog,
   AuthStore,
   createMainDb,
   FileRepository,
+  InviteRepository,
   JobLeaseRepository,
   JobRecordRepository,
   mainDbConfig,
   MembershipRepository,
   Tenancy,
   UserRepository,
+  WorkspaceRepository,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import { Mailer } from '@omnibridge/mail';
@@ -18,6 +21,7 @@ import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
 import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
+import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
 import { workerHandlerDbConfig } from './db.ts';
 import { registerHandlers } from './handlers.ts';
 import { createWorkerBoss, startHeartbeat } from './heartbeat.ts';
@@ -106,6 +110,18 @@ await registerHandlers(queue, {
     users,
     mailer,
     appOrigin: requireEnv('APP_ORIGIN'),
+    logger: log,
+  }),
+  'auth.invite': inviteHandler({
+    invites: new InviteRepository(handlerDb.db),
+    users,
+    workspaces: new WorkspaceRepository(handlerDb.db),
+    mailer,
+    appOrigin: requireEnv('APP_ORIGIN'),
+    logger: log,
+  }),
+  'users.access_review': accessReviewHandler({
+    reviews: new AccessReviewRepository(handlerDb.db),
     logger: log,
   }),
 });

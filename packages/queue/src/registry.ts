@@ -52,6 +52,28 @@ export const authPasswordResetJob = defineJob({
 });
 
 /**
+ * Invite email (USR-1, TEN-7): the worker makes the token, stores only its hash on the invite and
+ * mails the link, so the token never sits in the queue. A retry makes a new link.
+ */
+export const authInviteJob = defineJob({
+  type: 'auth.invite',
+  payload: z.object({ invite_id: z.uuid() }),
+  retry: { limit: 5, delaySeconds: 30, backoff: true, maxDelaySeconds: 900 },
+  expireInSeconds: 120,
+});
+
+/**
+ * The quarterly access review for one workspace (USR-9): creates the next review task when the
+ * last one is 90 days old. Sent once a day per workspace by the sweep; a repeat creates nothing.
+ */
+export const accessReviewJob = defineJob({
+  type: 'users.access_review',
+  payload: z.object({}),
+  retry: { limit: 5, delaySeconds: 60, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 300,
+});
+
+/**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
@@ -61,6 +83,8 @@ export const JOBS: readonly JobDefinition[] = [
   auditRetentionJob,
   authLockNoticeJob,
   authPasswordResetJob,
+  authInviteJob,
+  accessReviewJob,
 ];
 
 /**
@@ -73,8 +97,18 @@ export const auditRetentionSweepJob = definePlatformJob({
   heavy: true,
 });
 
+/** The daily access review sweep (USR-9): one users.access_review job per workspace (03:00). */
+export const accessReviewSweepJob = definePlatformJob({
+  type: 'users.access-review-sweep',
+  cron: '0 3 * * *',
+  heavy: false,
+});
+
 /**
  * Every platform job with a cron (no workspace). The migrate job creates their queues, and the
  * worker schedules and consumes each one.
  */
-export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [auditRetentionSweepJob];
+export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [
+  auditRetentionSweepJob,
+  accessReviewSweepJob,
+];

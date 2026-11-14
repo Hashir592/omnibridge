@@ -51,6 +51,7 @@ export {
   type RouteResult,
 } from './route.ts';
 export { getHealth, HealthSchema, type Health } from './routes/health.ts';
+export * from './routes/users.ts';
 export {
   EBAY_ACCOUNT_DELETION_PATH,
   ebayAccountDeletion,

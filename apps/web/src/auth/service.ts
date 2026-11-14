@@ -60,6 +60,8 @@ export interface AuthNotifier {
   }): Promise<void>;
   /** The worker makes the reset token and emails the link, so the token never sits in a queue. */
   passwordReset(input: { userId: string; workspaceId: string }): Promise<void>;
+  /** The worker makes the invite token and mails the link (USR-1). */
+  invite(input: { workspaceId: string; inviteId: string }): Promise<void>;
 }
 
 export interface AuthServiceOptions {
@@ -308,10 +310,21 @@ export class AuthService {
   ): Promise<Date | null> {
     const result = await this.#o.store.recordFailure(key, ip, now);
     if (user !== undefined) {
-      await this.#auditEverywhere(user.userId, 'auth.login_failed', ip, { failure });
+      // No workspace is chosen yet: failures are kept per person, never in a workspace (ADR-052).
+      await this.#o.store.recordAuthEvent({
+        userId: user.userId,
+        action: 'auth.login_failed',
+        ip,
+        detail: { failure },
+        now,
+      });
       if (result.newlyLocked && result.lockedUntil !== null) {
-        await this.#auditEverywhere(user.userId, 'auth.locked', ip, {
-          locked_until: result.lockedUntil.toISOString(),
+        await this.#o.store.recordAuthEvent({
+          userId: user.userId,
+          action: 'auth.locked',
+          ip,
+          detail: { locked_until: result.lockedUntil.toISOString() },
+          now,
         });
         const workspaceIds = (await this.#o.store.userWorkspaces(user.userId)).map((w) => w.id);
         await this.#o.notifier.locked({
@@ -324,23 +337,43 @@ export class AuthService {
     return result.lockedUntil;
   }
 
-  /** Writes one event into every workspace the user belongs to (AUD-2: logins, MFA changes). */
-  async #auditEverywhere(
+  /**
+   * Writes one event into the one workspace it belongs to (AUD-2, ADR-052): an admin of one
+   * workspace never sees what a user did in another.
+   */
+  async #auditIn(
+    workspaceId: string,
     userId: string,
     action: AuditAction,
     ip: string,
-    after?: Readonly<Record<string, unknown>>,
   ): Promise<void> {
-    for (const w of await this.#o.store.userWorkspaces(userId)) {
-      await this.#o.tenancy.run({ workspaceId: w.id, companyIds: [], userId }, (ctx) =>
-        this.#o.audit.record(ctx, {
-          action,
-          actor: { kind: 'user', userId },
-          entityId: userId,
-          ...(after === undefined ? {} : { after }),
-          ip,
-        }),
-      );
+    await this.#o.tenancy.run({ workspaceId, companyIds: [], userId }, (ctx) =>
+      this.#o.audit.record(ctx, {
+        action,
+        actor: { kind: 'user', userId },
+        entityId: userId,
+        ip,
+      }),
+    );
+  }
+
+  /**
+   * An account event (MFA set up, sign out everywhere) goes into the user's workspace when there
+   * is exactly one; with several there is no one workspace it belongs to, so it is kept per
+   * person (ADR-052).
+   */
+  async #auditAccount(
+    userId: string,
+    action: 'mfa.enrolled' | 'auth.signed_out_everywhere',
+    ip: string,
+    workspaceId: string | null,
+  ): Promise<void> {
+    const workspaces = await this.#o.store.userWorkspaces(userId);
+    const only = workspaceId ?? (workspaces.length === 1 ? (workspaces[0]?.id ?? null) : null);
+    if (only !== null) {
+      await this.#auditIn(only, userId, action, ip);
+    } else {
+      await this.#o.store.recordAuthEvent({ userId, action, ip, detail: {}, now: this.#now() });
     }
   }
 
@@ -362,21 +395,97 @@ export class AuthService {
     }
     await this.#refuseIfLockedMeanwhile(key, ip, now);
     await this.#o.store.clearFailures(key);
+    return {
+      body: { next: account.mfaConfirmed ? 'mfa_code' : 'mfa_setup' },
+      cookies: await this.#preMfaSession(account.userId, now),
+    };
+  }
+
+  /** A new session at the pre-MFA stage, after a correct password (USR-4, ADR-051). */
+  async #preMfaSession(userId: string, now: Date): Promise<string[]> {
     const sessionToken = token();
     const csrf = token();
     await this.#o.store.createSession({
       id: randomUUID(),
       tokenHash: sha256(sessionToken),
       csrfHash: sha256(csrf),
-      userId: account.userId,
+      userId,
       stage: 'pre_mfa',
       now,
       expiresAt: new Date(now.getTime() + PRE_MFA_MS),
     });
+    return this.#issue(sessionToken, csrf);
+  }
+
+  // ---- invites (USR-1, TEN-7) ----
+
+  async inviteInfo(rawToken: string): Promise<{
+    workspaceName: string;
+    invitedBy: string;
+    email: string;
+    expiresAt: string;
+    existingUser: boolean;
+  }> {
+    const invite = await this.#o.store.findInvite(sha256(rawToken), this.#now());
+    if (invite === undefined) throw notFound();
     return {
-      body: { next: account.mfaConfirmed ? 'mfa_code' : 'mfa_setup' },
-      cookies: this.#issue(sessionToken, csrf),
+      workspaceName: invite.workspaceName,
+      invitedBy: invite.invitedBy,
+      email: maskEmail(invite.email),
+      expiresAt: invite.expiresAt.toISOString(),
+      existingUser: invite.userExists,
     };
+  }
+
+  /**
+   * Accepts an invite. A new person sets their first password (USR-3 rules); someone who already
+   * has a sign-in confirms with it, under the same lock as sign-in (USR-5). Either way the session
+   * then starts at MFA, so an invite never skips it (USR-4).
+   */
+  async acceptInvite(
+    input: { token: string; name: string; password: string },
+    ip: string,
+  ): Promise<WithCookies<{ next: 'mfa_code' | 'mfa_setup' }>> {
+    const now = this.#now();
+    const tokenHash = sha256(input.token);
+    const invite = await this.#o.store.findInvite(tokenHash, now);
+    if (invite === undefined) throw notFound();
+    if (invite.userExists) {
+      const key = this.emailKey(invite.email);
+      await this.#refuseIfBlocked(key, ip, now);
+      const account = await this.#o.store.loginLookup(invite.email);
+      const ok = await this.#o.passwords.check(account?.passwordHash, input.password);
+      if (!ok || account === undefined) return this.#failed(key, ip, now, account, 'password');
+      await this.#refuseIfLockedMeanwhile(key, ip, now);
+      await this.#o.store.clearFailures(key);
+      const joined = await this.#o.store.acceptInvite(tokenHash, randomUUID(), input.name, now);
+      if (joined === undefined) throw notFound();
+      await this.#auditJoined(joined.workspaceId, joined.userId, invite.role, ip);
+      return {
+        body: { next: account.mfaConfirmed ? 'mfa_code' : 'mfa_setup' },
+        cookies: await this.#preMfaSession(account.userId, now),
+      };
+    }
+    const rules = passwordProblems(input.password, { name: input.name, email: invite.email });
+    if (rules.length > 0) throw passwordRejected(rules);
+    const hash = await this.#o.passwords.hash(input.password);
+    const joined = await this.#o.store.acceptInvite(tokenHash, randomUUID(), input.name, now);
+    if (joined === undefined) throw notFound();
+    await this.#o.store.setPassword(joined.userId, hash, now);
+    await this.#auditJoined(joined.workspaceId, joined.userId, invite.role, ip);
+    return { body: { next: 'mfa_setup' }, cookies: await this.#preMfaSession(joined.userId, now) };
+  }
+
+  async #auditJoined(workspaceId: string, userId: string, role: string, ip: string): Promise<void> {
+    await this.#o.tenancy.run({ workspaceId, companyIds: [], userId }, (ctx) =>
+      this.#o.audit.record(ctx, {
+        action: 'user.joined',
+        actor: { kind: 'user', userId },
+        entityId: userId,
+        after: { role },
+        ip,
+      }),
+    );
   }
 
   // ---- (2) and (3) MFA ----
@@ -458,7 +567,9 @@ export class AuthService {
       next = 'app';
     }
     const cookies = await this.#advance(session, stage, workspaceId, now, true);
-    await this.#auditEverywhere(user.userId, 'auth.login', request.ip);
+    // The sign-in is recorded in the workspace it enters; with the picker, when one is chosen.
+    if (workspaceId !== null)
+      await this.#auditIn(workspaceId, user.userId, 'auth.login', request.ip);
     return { body: { next }, cookies };
   }
 
@@ -523,7 +634,7 @@ export class AuthService {
       throw forbidden('Start setting up two-step sign in first');
     }
     await this.#o.store.clearFailures(key);
-    await this.#auditEverywhere(user.userId, 'mfa.enrolled', request.ip);
+    await this.#auditAccount(user.userId, 'mfa.enrolled', request.ip, null);
     const done = await this.#finishSignIn(request, { ...user, mfaConfirmed: true }, now);
     return { body: { recoveryCodes }, cookies: done.cookies };
   }
@@ -650,7 +761,12 @@ export class AuthService {
   async chooseWorkspace(request: FastifyRequest, workspaceId: string): Promise<string[]> {
     const session = this.#sessionOf(request);
     await this.#requireTerms(session);
-    return this.#advance(session, 'workspace', workspaceId, this.#now(), false);
+    const cookies = await this.#advance(session, 'workspace', workspaceId, this.#now(), false);
+    // Leaving the picker for a workspace completes the sign-in there (ADR-052).
+    if (session.stage === 'signed_in') {
+      await this.#auditIn(workspaceId, session.userId, 'auth.login', request.ip);
+    }
+    return cookies;
   }
 
   async enterPlatform(request: FastifyRequest, account: AccountActor): Promise<string[]> {
@@ -722,8 +838,14 @@ export class AuthService {
   }
 
   async signOutEverywhere(request: FastifyRequest, account: AccountActor): Promise<string[]> {
+    const session = this.#sessionOf(request);
     await this.#o.store.revokeUserSessions(account.userId, this.#now());
-    await this.#auditEverywhere(account.userId, 'auth.signed_out_everywhere', request.ip);
+    await this.#auditAccount(
+      account.userId,
+      'auth.signed_out_everywhere',
+      request.ip,
+      session.workspaceId,
+    );
     return this.#cleared();
   }
 }

@@ -6,12 +6,16 @@ import { contractRoutes } from '@omnibridge/contract';
 import type { TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
+  AccessReviewRepository,
   AuditLog,
+  AuthStore,
   ChannelAccountRepository,
   CompanyRepository,
   createMainDb,
   FileRepository,
+  InviteRepository,
   JobRecordRepository,
+  MemberAccessRepository,
   MembershipRepository,
   migrateMain,
   Tenancy,
@@ -50,8 +54,9 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
   const B = randomUUID();
   const userA = randomUUID();
   const userB = randomUUID();
+  const childA = randomUUID();
   const admin = randomUUID();
-  const b = { company: '', job: '', file: '' };
+  const b = { company: '', job: '', file: '', invite: '', review: '' };
   const a = { company: '', job: '' };
 
   const repos = () => ({
@@ -74,6 +79,9 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         accounts: await new ChannelAccountRepository(main.db).list(ctx),
         users: await r.users.list(ctx),
         audit: await new AuditLog(main.db).list(ctx, {}, { limit: 200 }),
+        members: await new MemberAccessRepository(main.db).list(ctx),
+        invites: await new InviteRepository(main.db).pending(ctx),
+        reviews: await new AccessReviewRepository(main.db).list(ctx),
       });
     });
 
@@ -105,11 +113,32 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         await r.users.create(ctx, {
           id: user,
           email: `${user}@example.test`,
-          name: `${MARKER}-${user}`,
+          // Only B's rows carry the marker, so anything of A may show up freely.
+          name: ws === B ? `${MARKER}-${user}` : 'User of A',
         });
         await r.memberships.add(ctx, { userId: user, role: 'admin' });
       });
     }
+    // A child of A with nothing ticked (PERM-6): the second walk runs as them.
+    await tenancy.run({ workspaceId: A, companyIds: [], userId: childA }, async (ctx) => {
+      await r.users.create(ctx, { id: childA, email: `${childA}@example.test`, name: 'Child A' });
+      await r.memberships.add(ctx, { userId: childA, role: 'member' });
+    });
+    await tenancy.runWorkspace({ workspaceId: B, userId: userB }, async (ctx) => {
+      b.invite = (
+        await new InviteRepository(main.db).create(
+          ctx,
+          {
+            email: `${MARKER.toLowerCase()}@example.test`,
+            role: 'member',
+            tabs: [],
+            companyIds: [],
+          },
+          new Date(),
+        )
+      ).id;
+      b.review = (await new AccessReviewRepository(main.db).ensureDue(ctx, new Date()))?.id ?? '';
+    });
     a.company = await tenancy.runWorkspace({ workspaceId: A }, (ctx) =>
       r.companies.create(ctx, { legalName: 'A Ltd', tradingName: 'A', registeredAddress: address }),
     );
@@ -184,18 +213,24 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       jobs: r.jobs,
       files: { store, linkKey },
       ...stubAuth(),
+      people: {
+        members: new MemberAccessRepository(main.db),
+        invites: new InviteRepository(main.db),
+        reviews: new AccessReviewRepository(main.db),
+        workspaces: r.workspaces,
+        store: new AuthStore(main.db),
+        notifier: { invite: () => Promise.resolve() },
+        audit: new AuditLog(main.db),
+        tenancy,
+      },
     });
   };
 
-  it('[TEN-1][AT-1] route walker: no cross-workspace read or write on any route', async () => {
-    const server = app();
-    const sessionA = sessionHeaders({ workspaceId: A, userId: userA, sessionId: 'session-a' });
+  /** Walks every route as `caller` (a session of workspace A) against workspace B (AT-1, AT-2). */
+  async function walkAgainstB(server: ReturnType<typeof app>, caller: Record<string, string>) {
     // A valid link for B's file, signed for A's own session: only the tenant check can stop it.
     const link = signFileLink({ fileId: b.file, sessionId: 'session-a' }, linkKey);
-    const workspacesBefore = (await platformPool.query('SELECT id FROM app.workspaces')).rowCount;
-    const before = await snapshotB();
-
-    const outcomes = await walkIsolation({
+    return walkIsolation({
       routes: contractRoutes,
       inject: async (req) => {
         const res = await server.inject({
@@ -207,7 +242,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         return { statusCode: res.statusCode, body: res.body };
       },
       anonymous: {},
-      workspaceA: sessionA,
+      workspaceA: caller,
       againstB: {
         getHealth: {},
         getJob: { params: { id: b.job } },
@@ -240,14 +275,45 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         changePassword: { body: { currentPassword: MARKER, password: 'a long enough password 1' } },
         signOut: {},
         signOutEverywhere: {},
+        // Users (T-0204): B's members, invites and reviews, and a platform route.
+        listUsers: {},
+        inviteUser: {
+          body: { email: 'walker@example.test', role: 'child', tabs: [], companyIds: [b.company] },
+        },
+        revokeInvite: { params: { inviteId: b.invite } },
+        setUserAccess: {
+          params: { userId: userB },
+          body: { role: 'child', tabs: ['orders'], companyIds: [b.company] },
+        },
+        removeUser: { params: { userId: userB } },
+        listAccessReviews: {},
+        completeAccessReview: { params: { reviewId: b.review } },
+        inviteFirstAdmin: { params: { workspaceId: B }, body: { email: 'walker@example.test' } },
+        getInvite: { params: { token: `${MARKER}-not-a-real-token` } },
+        acceptInvite: {
+          body: {
+            token: `${MARKER}-not-a-real-token`,
+            name: MARKER,
+            password: 'a long enough password 1',
+          },
+        },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
           body: { metadata: { topic: MARKER }, notification: { userId: userB } },
         },
       },
-      markers: [MARKER, B, b.company, b.job, b.file, userB],
+      markers: [MARKER, B, b.company, b.job, b.file, b.invite, b.review, userB],
     });
+  }
+
+  it('[TEN-1][AT-1] route walker: no cross-workspace read or write on any route', async () => {
+    const server = app();
+    const sessionA = sessionHeaders({ workspaceId: A, userId: userA, sessionId: 'session-a' });
+    const workspacesBefore = (await platformPool.query('SELECT id FROM app.workspaces')).rowCount;
+    const before = await snapshotB();
+
+    const outcomes = await walkAgainstB(server, sessionA);
 
     console.info(
       `route walker: ${String(outcomes.length / 2)} routes walked, ${String(outcomes.length)} calls`,
@@ -258,6 +324,20 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     expect((await platformPool.query('SELECT id FROM app.workspaces')).rowCount).toBe(
       workspacesBefore,
     );
+    await server.close();
+  });
+
+  it('[TEN-1][AT-2] route walker re-run as a child with no ticks: nothing of B, nothing written', async () => {
+    const server = app();
+    const child = sessionHeaders({ workspaceId: A, userId: childA, sessionId: 'session-child' });
+    const before = await snapshotB();
+    const outcomes = await walkAgainstB(server, child);
+    expect(new Set(outcomes.map((o) => o.route))).toEqual(new Set(contractRoutes.map((r) => r.id)));
+    expect(outcomes.filter((o) => !o.ok)).toEqual([]);
+    expect(await snapshotB()).toBe(before);
+    // And of A, a child with nothing ticked sees no company at all (PERM-6, invariant 4).
+    const companies = await server.inject({ method: 'GET', url: '/companies', headers: child });
+    expect(companies.json()).toEqual({ items: [] });
     await server.close();
   });
 

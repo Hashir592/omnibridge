@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
+import type { TenantContext } from '@omnibridge/core';
 import { sql, type Kysely } from 'kysely';
 import type { MainDb } from './schema.ts';
+import { withTenantTransaction } from './tenant.ts';
 
 /**
  * Sign-in, MFA, lockout, sessions and password resets (T-0203, migration 0011).
@@ -168,6 +170,8 @@ export class AuthStore {
         email: string;
         role: 'admin' | 'member';
         userExists: boolean;
+        invitedBy: string;
+        expiresAt: Date;
       }
     | undefined
   > {
@@ -178,6 +182,8 @@ export class AuthStore {
       email: string;
       role: 'admin' | 'member';
       user_exists: boolean;
+      invited_by_name: string | null;
+      expires_at: Date;
     }>`SELECT * FROM app.invite_find(${tokenHash}, ${now})`.execute(this.#db);
     const r = rows[0];
     return r === undefined
@@ -189,6 +195,8 @@ export class AuthStore {
           email: r.email,
           role: r.role,
           userExists: r.user_exists,
+          invitedBy: r.invited_by_name ?? 'OmniBridge',
+          expiresAt: r.expires_at,
         };
   }
 
@@ -212,10 +220,23 @@ export class AuthStore {
       : { userId: r.user_id, workspaceId: r.workspace_id, created: r.created };
   }
 
+  /** MFA set-up and last sign-in of each member of the context's workspace (Users list). */
+  async memberAuthStatus(
+    ctx: TenantContext,
+  ): Promise<Map<string, { mfa: boolean; lastSignInAt: Date | null }>> {
+    const rows = await withTenantTransaction(this.#db, ctx, (trx) =>
+      sql<{ user_id: string; mfa: boolean; last_sign_in_at: Date | null }>`
+        SELECT * FROM app.member_auth_status()`.execute(trx),
+    );
+    return new Map(
+      rows.rows.map((r) => [r.user_id, { mfa: r.mfa, lastSignInAt: r.last_sign_in_at }]),
+    );
+  }
+
   /** A failed sign-in or lockout, per person, outside any workspace (ADR-052). */
   async recordAuthEvent(event: {
     userId: string | null;
-    action: 'auth.login_failed' | 'auth.locked';
+    action: 'auth.login_failed' | 'auth.locked' | 'mfa.enrolled' | 'auth.signed_out_everywhere';
     ip: string;
     detail: Readonly<Record<string, unknown>>;
     now: Date;

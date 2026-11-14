@@ -345,6 +345,145 @@
         },
         "required": ["id"]
       },
+      "WorkspaceUserInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": { "type": "string" },
+          "email": { "type": "string" },
+          "role": { "type": "string", "enum": ["admin", "child"] },
+          "tabs": { "type": "array", "items": { "type": "string" } },
+          "companyIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "mfa": { "type": "boolean" },
+          "state": { "type": "string", "enum": ["active", "invited"] },
+          "lastSignInAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "inviteExpiresAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "tabs",
+          "companyIds",
+          "mfa",
+          "state",
+          "lastSignInAt",
+          "inviteExpiresAt"
+        ]
+      },
+      "UserAccessInput": {
+        "type": "object",
+        "properties": {
+          "role": { "type": "string", "enum": ["admin", "child"] },
+          "tabs": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "home",
+                "orders",
+                "shipping",
+                "stock-catalogue",
+                "customer-service",
+                "account-health",
+                "advertising",
+                "sales-profit",
+                "forecasting",
+                "finance",
+                "reminders",
+                "notes"
+              ]
+            }
+          },
+          "companyIds": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        },
+        "required": ["role", "tabs", "companyIds"]
+      },
+      "AccessReviewInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "dueAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["id", "dueAt", "createdAt", "completedAt"]
+      },
+      "InviteInfoInput": {
+        "type": "object",
+        "properties": {
+          "workspaceName": { "type": "string" },
+          "invitedBy": { "type": "string" },
+          "email": { "type": "string" },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "existingUser": { "type": "boolean" }
+        },
+        "required": ["workspaceName", "invitedBy", "email", "expiresAt", "existingUser"]
+      },
       "EbayChallengeResponseInput": {
         "type": "object",
         "properties": { "challengeResponse": { "type": "string" } },
@@ -717,6 +856,149 @@
           }
         },
         "required": ["id"],
+        "additionalProperties": false
+      },
+      "WorkspaceUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": { "type": "string" },
+          "email": { "type": "string" },
+          "role": { "type": "string", "enum": ["admin", "child"] },
+          "tabs": { "type": "array", "items": { "type": "string" } },
+          "companyIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "mfa": { "type": "boolean" },
+          "state": { "type": "string", "enum": ["active", "invited"] },
+          "lastSignInAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "inviteExpiresAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "tabs",
+          "companyIds",
+          "mfa",
+          "state",
+          "lastSignInAt",
+          "inviteExpiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "UserAccess": {
+        "type": "object",
+        "properties": {
+          "role": { "type": "string", "enum": ["admin", "child"] },
+          "tabs": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "home",
+                "orders",
+                "shipping",
+                "stock-catalogue",
+                "customer-service",
+                "account-health",
+                "advertising",
+                "sales-profit",
+                "forecasting",
+                "finance",
+                "reminders",
+                "notes"
+              ]
+            }
+          },
+          "companyIds": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        },
+        "required": ["role", "tabs", "companyIds"],
+        "additionalProperties": false
+      },
+      "AccessReview": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "dueAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["id", "dueAt", "createdAt", "completedAt"],
+        "additionalProperties": false
+      },
+      "InviteInfo": {
+        "type": "object",
+        "properties": {
+          "workspaceName": { "type": "string" },
+          "invitedBy": { "type": "string" },
+          "email": { "type": "string" },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "existingUser": { "type": "boolean" }
+        },
+        "required": ["workspaceName", "invitedBy", "email", "expiresAt", "existingUser"],
         "additionalProperties": false
       },
       "EbayChallengeResponse": {
@@ -2034,6 +2316,495 @@
         },
         "responses": {
           "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "listUsers",
+        "summary": "List the users of this workspace",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "users",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/WorkspaceUser" }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/users/invites": {
+      "post": {
+        "operationId": "inviteUser",
+        "summary": "Invite a user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                  },
+                  "role": { "type": "string", "enum": ["admin", "child"] },
+                  "tabs": {
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "home",
+                        "orders",
+                        "shipping",
+                        "stock-catalogue",
+                        "customer-service",
+                        "account-health",
+                        "advertising",
+                        "sales-profit",
+                        "forecasting",
+                        "finance",
+                        "reminders",
+                        "notes"
+                      ]
+                    }
+                  },
+                  "companyIds": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  }
+                },
+                "required": ["email", "role", "tabs", "companyIds"]
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "users",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WorkspaceUser" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/users/invites/{inviteId}/revoke": {
+      "post": {
+        "operationId": "revokeInvite",
+        "summary": "Revoke an invite",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "inviteId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "users",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/users/{userId}/access": {
+      "put": {
+        "operationId": "setUserAccess",
+        "summary": "Change a user's role and ticks",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/UserAccessInput" } }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "userId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "users",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/users/{userId}": {
+      "delete": {
+        "operationId": "removeUser",
+        "summary": "Remove a user from this workspace",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "userId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "users",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/access-reviews": {
+      "get": {
+        "operationId": "listAccessReviews",
+        "summary": "The quarterly access reviews",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "users",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/AccessReview" }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/access-reviews/{reviewId}/complete": {
+      "post": {
+        "operationId": "completeAccessReview",
+        "summary": "Complete an access review",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "reviewId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "users",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/platform/workspaces/{workspaceId}/invites": {
+      "post": {
+        "operationId": "inviteFirstAdmin",
+        "summary": "Invite a workspace's first admin",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                  }
+                },
+                "required": ["email"]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "workspaceId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "platform",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": ["id"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/auth/invites/{token}": {
+      "get": {
+        "operationId": "getInvite",
+        "summary": "An invite link",
+        "parameters": [
+          {
+            "schema": { "type": "string", "minLength": 16, "maxLength": 128 },
+            "in": "path",
+            "name": "token",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "public",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/InviteInfo" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/auth/invites/accept": {
+      "post": {
+        "operationId": "acceptInvite",
+        "summary": "Accept an invite",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": { "type": "string", "minLength": 16, "maxLength": 128 },
+                  "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "password": { "type": "string", "minLength": 1, "maxLength": 1024 }
+                },
+                "required": ["token", "name", "password"]
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "public",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "next": { "type": "string", "enum": ["mfa_code", "mfa_setup"] } },
+                  "required": ["next"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "4XX": {
             "description": "Client error (RFC 9457 problem)",
             "content": {
