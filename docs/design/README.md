@@ -123,7 +123,7 @@ Each change Hashir asked for that departs from `docs/design/DIRECTION.md` (S1 to
 | 19/10/2026 | Selected rows use `brand-100` (§2) | Selected rows and active filter chips use `selected #E9EEF6`; checkboxes are graphite | Hashir: a second green for selection was confusing |
 
 | 14/11/2026 | Not covered | Same-buyer groups: every member row has the light petrol tint (`brand-50`), a 4 px petrol rail and a thin bracket; the first row has the chip and the others show "2 of 3". | Hashir: the first version (rail and chip only) was hard to see |
-| 14/11/2026 | One icon set, no brand colours | Channel marks are small inline SVG logos (Amazon, eBay, Website cart) in their own brand colours, only inside the 18 px mark, always next to the channel name | Hashir: the a, e, w letters looked unprofessional |
+| 14/11/2026 | One icon set, no brand colours | Channel marks are small inline SVG logos (Amazon, eBay) in their own brand colours, only inside the 18 px mark, always next to the channel name. The Website mark is a generic graphite cart (T-0307): it must never be a shop's own logo; a per-workspace logo comes with the website connection in M11 (ADR-057) | Hashir: the a, e, w letters looked unprofessional |
 | 14/11/2026 | Status colours only for status | Rating stars are golden (`#FFA41C` fill, `#E47911` outline; empty `#C9CED6`), the industry standard | Hashir |
 | 14/11/2026 | Orders list columns | Items, Ship to and Shipping start hidden in Columns, so the SKU column and same-buyer notes fit at 1440 px | S2, for C2 and C3 |
 | 14/11/2026 | Not covered | Ship together lets the user untick orders for that one label, or take an order out of its group for good | Hashir; recorded in PS-021 for S1 to confirm |

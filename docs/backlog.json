@@ -841,7 +841,7 @@
         "CI full gate green at merge"
       ],
       "risk": "light",
-      "status": "todo"
+      "status": "done"
     },
     {
       "module": "M06",
