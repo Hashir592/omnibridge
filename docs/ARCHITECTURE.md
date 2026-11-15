@@ -128,7 +128,7 @@ Each invariant names the check that enforces it. A change that needs to break on
 
 **Integrations**
 
-15. **No provider API is called outside `packages/providers`**, and no provider call is made from a web request handler except the OAuth code exchanges. Check: dependency-cruiser rules. (INT-1, INT-2)
+15. **No provider API is called outside `packages/providers`**, and no provider call is made from a web request handler except the OAuth code exchanges and the eBay webhook's cached public-key read (ADR-058). Check: dependency-cruiser rules. (INT-1, INT-2)
 16. **The Amazon and eBay governors are separate packages** with no shared retry helper. The eBay budget is reserved before the call is sent, and nothing is sent at or above 95% of the cap. Check: dependency-cruiser rules plus the governor simulation tests. (RL-1–3, AT-7)
 17. **Dev and CI never reach live providers.** The HTTP client refuses any host that is not on the mock allowlist unless `PROVIDER_MODE=live`, which is only set on production. Live behaviour is checked in explicit verify-live tasks. (Hard constraint 6, INT-7)
 18. **No scraping or browser automation** of any marketplace or carrier site, ever. (INT-7)
