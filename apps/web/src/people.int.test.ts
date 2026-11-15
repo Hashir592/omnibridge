@@ -162,6 +162,19 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
       payload: { email: 'x@example.test', role: 'child', tabs: [], companyIds: [randomUUID()] },
     });
     expect(bad.statusCode).toBe(404);
+    // Someone already in the workspace is not invited again.
+    const again = await server.inject({
+      method: 'POST',
+      url: '/users/invites',
+      headers: headers(admin),
+      payload: {
+        email: `${child.slice(0, 8)}@example.test`,
+        role: 'child',
+        tabs: [],
+        companyIds: [],
+      },
+    });
+    expect(again.statusCode).toBe(409);
     await server.close();
   });
 

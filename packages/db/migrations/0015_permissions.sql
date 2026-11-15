@@ -158,24 +158,49 @@ REVOKE ALL ON FUNCTION app.member_scope() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.member_scope() TO ob_tenant_rw;
 
 -- An invite link, by its token (before any workspace is chosen): what the accept page shows.
+-- Only the invites table has an ob_owner policy of its own (any workspace, found by token); every
+-- other read goes through the narrow keyed policies, by setting the one workspace, user or email
+-- it needs first (as the 0011 definers do), and clears them before returning.
 CREATE FUNCTION app.invite_find(p_token bytea, p_now timestamptz)
   RETURNS TABLE (id uuid, workspace_id uuid, workspace_name text, email text, role text,
                  user_exists boolean, invited_by_name text, expires_at timestamptz)
-  LANGUAGE sql STABLE SECURITY DEFINER
+  LANGUAGE plpgsql STABLE SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
 AS $$
-  SELECT i.id, i.workspace_id, w.name, i.email, i.role,
-         EXISTS (SELECT 1 FROM app.users u WHERE u.email = i.email),
-         (SELECT u.name FROM app.users u WHERE u.id = i.invited_by), i.expires_at
-    FROM app.invites i JOIN app.workspaces w ON w.id = i.workspace_id
+DECLARE
+  inv app.invites%ROWTYPE;
+BEGIN
+  SELECT * INTO inv FROM app.invites i
    WHERE i.token_hash = p_token AND i.accepted_at IS NULL AND i.revoked_at IS NULL
-     AND i.expires_at > p_now
+     AND i.expires_at > p_now;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+  PERFORM set_config('app.workspace_id', inv.workspace_id::text, true);
+  PERFORM set_config('app.auth_email', inv.email, true);
+  PERFORM set_config('app.auth_user_id', coalesce(inv.invited_by::text, ''), true);
+  id := inv.id;
+  workspace_id := inv.workspace_id;
+  email := inv.email;
+  role := inv.role;
+  expires_at := inv.expires_at;
+  SELECT w.name INTO workspace_name FROM app.workspaces w WHERE w.id = inv.workspace_id;
+  user_exists := EXISTS (SELECT 1 FROM app.users u WHERE u.email = inv.email);
+  SELECT u.name INTO invited_by_name FROM app.users u WHERE u.id = inv.invited_by;
+  PERFORM set_config('app.workspace_id', '', true);
+  PERFORM set_config('app.auth_email', '', true);
+  PERFORM set_config('app.auth_user_id', '', true);
+  RETURN NEXT;
+END
 $$;
 
--- Accepts an invite once: the person (new, or already a user under that email) joins the
--- workspace with the invite's role and ticks. Returns the user and whether they are new; no row
--- when the link is unknown, used, revoked or expired, or they are already a member.
-CREATE FUNCTION app.invite_accept(p_token bytea, p_new_user uuid, p_name text, p_now timestamptz)
+-- Accepts an invite once: the person joins the workspace with the invite's role and ticks.
+-- p_new_only: the caller checked no password, so only a brand-new person may join this way; an
+-- email that already has a sign-in returns no row (the caller confirms that password first and
+-- calls with false). No row also when the link is unknown, used, revoked or expired, or the
+-- person is already a member.
+CREATE FUNCTION app.invite_accept(p_token bytea, p_new_user uuid, p_name text,
+                                  p_now timestamptz, p_new_only boolean)
   RETURNS TABLE (user_id uuid, workspace_id uuid, created boolean)
   LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
@@ -192,13 +217,18 @@ BEGIN
   IF NOT FOUND THEN
     RETURN;
   END IF;
+  -- From here, only this invite's workspace and this email are in reach.
+  PERFORM set_config('app.workspace_id', inv.workspace_id::text, true);
+  PERFORM set_config('app.auth_email', inv.email, true);
   SELECT u.id INTO uid FROM app.users u WHERE u.email = inv.email;
   IF uid IS NULL THEN
     INSERT INTO app.users (id, email, name) VALUES (p_new_user, inv.email, p_name);
     uid := p_new_user;
     fresh := true;
-  ELSIF EXISTS (SELECT 1 FROM app.memberships m
-                 WHERE m.workspace_id = inv.workspace_id AND m.user_id = uid) THEN
+  ELSIF p_new_only OR EXISTS (SELECT 1 FROM app.memberships m
+                               WHERE m.workspace_id = inv.workspace_id AND m.user_id = uid) THEN
+    PERFORM set_config('app.workspace_id', '', true);
+    PERFORM set_config('app.auth_email', '', true);
     RETURN;
   END IF;
   INSERT INTO app.memberships (workspace_id, user_id, role) VALUES (inv.workspace_id, uid, inv.role);
@@ -211,6 +241,8 @@ BEGIN
                       WHERE co.workspace_id = inv.workspace_id AND co.id = c);
   END IF;
   UPDATE app.invites i SET accepted_at = p_now, accepted_by = uid WHERE i.id = inv.id;
+  PERFORM set_config('app.workspace_id', '', true);
+  PERFORM set_config('app.auth_email', '', true);
   user_id := uid;
   workspace_id := inv.workspace_id;
   created := fresh;
@@ -218,17 +250,11 @@ BEGIN
 END
 $$;
 
--- The definer functions read invites, users and memberships across workspaces: policies for
--- ob_owner, the owner they run as (FORCE RLS applies to the owner too).
+-- Owner policies for the definers above, as narrow as they can be: invites are found by token in
+-- any workspace (the function's WHERE), and a new user row may be inserted. Every other table is
+-- reached through its tenant policy (app.workspace_id) or the 0011 keyed lookups.
 CREATE POLICY invites_definer ON app.invites TO ob_owner USING (true) WITH CHECK (true);
-CREATE POLICY memberships_definer ON app.memberships TO ob_owner USING (true) WITH CHECK (true);
-CREATE POLICY membership_tabs_definer ON app.membership_tabs TO ob_owner
-  USING (true) WITH CHECK (true);
-CREATE POLICY membership_companies_definer ON app.membership_companies TO ob_owner
-  USING (true) WITH CHECK (true);
-CREATE POLICY users_definer ON app.users TO ob_owner USING (true) WITH CHECK (true);
-CREATE POLICY workspaces_definer_read ON app.workspaces FOR SELECT TO ob_owner USING (true);
-CREATE POLICY companies_definer_read ON app.companies FOR SELECT TO ob_owner USING (true);
+CREATE POLICY users_definer_insert ON app.users FOR INSERT TO ob_owner WITH CHECK (true);
 
 -- Failed sign-ins and lockouts (ADR-052): before any workspace is chosen, so per person (or per
 -- email key when no account matched), never in a workspace's audit log. Platform-only reading
@@ -282,9 +308,9 @@ REVOKE ALL ON FUNCTION app.member_auth_status() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.member_auth_status() TO ob_auth;
 
 REVOKE ALL ON FUNCTION app.invite_find(bytea, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.invite_accept(bytea, uuid, text, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.invite_accept(bytea, uuid, text, timestamptz, boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.auth_event_record(uuid, text, inet, jsonb, timestamptz) FROM PUBLIC;
 -- Web only (ADR-051).
 GRANT EXECUTE ON FUNCTION app.invite_find(bytea, timestamptz) TO ob_auth;
-GRANT EXECUTE ON FUNCTION app.invite_accept(bytea, uuid, text, timestamptz) TO ob_auth;
+GRANT EXECUTE ON FUNCTION app.invite_accept(bytea, uuid, text, timestamptz, boolean) TO ob_auth;
 GRANT EXECUTE ON FUNCTION app.auth_event_record(uuid, text, inet, jsonb, timestamptz) TO ob_auth;

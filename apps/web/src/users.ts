@@ -152,6 +152,14 @@ export function peopleHandlers(
 
     inviteUser: async ({ tenant, session, body, request }) => {
       checkCompanies(tenant, body.companyIds);
+      const email = body.email.trim().toLowerCase();
+      if ((await p.members.list(tenant)).some((m) => m.email === email)) {
+        throw new ApiError({
+          status: 409,
+          code: 'conflict',
+          detail: 'This person is already a member of this workspace',
+        });
+      }
       const invite = await p.invites.create(
         tenant,
         {

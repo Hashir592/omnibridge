@@ -458,7 +458,13 @@ export class AuthService {
       if (!ok || account === undefined) return this.#failed(key, ip, now, account, 'password');
       await this.#refuseIfLockedMeanwhile(key, ip, now);
       await this.#o.store.clearFailures(key);
-      const joined = await this.#o.store.acceptInvite(tokenHash, randomUUID(), input.name, now);
+      const joined = await this.#o.store.acceptInvite(
+        tokenHash,
+        randomUUID(),
+        input.name,
+        now,
+        false,
+      );
       if (joined === undefined) throw notFound();
       await this.#auditJoined(joined.workspaceId, joined.userId, invite.role, ip);
       return {
@@ -469,7 +475,9 @@ export class AuthService {
     const rules = passwordProblems(input.password, { name: input.name, email: invite.email });
     if (rules.length > 0) throw passwordRejected(rules);
     const hash = await this.#o.passwords.hash(input.password);
-    const joined = await this.#o.store.acceptInvite(tokenHash, randomUUID(), input.name, now);
+    // newOnly: no password was checked, so this may never join (or set the password of) an
+    // account that appeared for this email meanwhile.
+    const joined = await this.#o.store.acceptInvite(tokenHash, randomUUID(), input.name, now, true);
     if (joined === undefined) throw notFound();
     await this.#o.store.setPassword(joined.userId, hash, now);
     await this.#auditJoined(joined.workspaceId, joined.userId, invite.role, ip);

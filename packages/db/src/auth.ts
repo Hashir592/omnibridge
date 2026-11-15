@@ -209,9 +209,11 @@ export class AuthStore {
     newUserId: string,
     name: string,
     now: Date,
+    /** True when no password was checked: only a brand-new person may join this way. */
+    newOnly: boolean,
   ): Promise<{ userId: string; workspaceId: string; created: boolean } | undefined> {
     const { rows } = await sql<{ user_id: string; workspace_id: string; created: boolean }>`
-      SELECT * FROM app.invite_accept(${tokenHash}, ${newUserId}::uuid, ${name}, ${now})`.execute(
+      SELECT * FROM app.invite_accept(${tokenHash}, ${newUserId}::uuid, ${name}, ${now}, ${newOnly})`.execute(
       this.#db,
     );
     const r = rows[0];

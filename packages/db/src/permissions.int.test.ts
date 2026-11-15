@@ -86,7 +86,7 @@ describe('roles, ticks and invites (T-0204)', () => {
 
   it('[PERM-6] new child has no tabs and no companies', async () => {
     const token = await invite({ email: 'new.child@example.test', role: 'member' });
-    const accepted = await store.acceptInvite(token, randomUUID(), 'Nia Child', t0);
+    const accepted = await store.acceptInvite(token, randomUUID(), 'Nia Child', t0, true);
     expect(accepted?.created).toBe(true);
     const { access, companyIds } = await scopeOf(accepted?.userId ?? '');
     expect(access).toEqual({ role: 'member', tabs: [] });
@@ -100,7 +100,7 @@ describe('roles, ticks and invites (T-0204)', () => {
       tabs: ['orders'],
       companyIds: [companies[0] ?? ''],
     });
-    const accepted = await store.acceptInvite(token, randomUUID(), 'Tia Ticked', t0);
+    const accepted = await store.acceptInvite(token, randomUUID(), 'Tia Ticked', t0, true);
     const child = accepted?.userId ?? '';
     expect(await scopeOf(child)).toEqual({
       access: { role: 'member', tabs: ['orders'] },
@@ -117,7 +117,8 @@ describe('roles, ticks and invites (T-0204)', () => {
 
   it('[PERM-2][USR-8] changed ticks apply to the next transaction, and a removed member is not one', async () => {
     const token = await invite({ email: 'changes@example.test', role: 'member', tabs: ['orders'] });
-    const user = (await store.acceptInvite(token, randomUUID(), 'Cai Change', t0))?.userId ?? '';
+    const user =
+      (await store.acceptInvite(token, randomUUID(), 'Cai Change', t0, true))?.userId ?? '';
     const access = new MemberAccessRepository(main.db);
     await tenancy.runMember({ workspaceId: ws, userId: admin }, (c) =>
       access.set(c, user, { role: 'member', tabs: ['shipping', 'notes'], companyIds: companies }),
@@ -139,7 +140,8 @@ describe('roles, ticks and invites (T-0204)', () => {
     ).rejects.toBeInstanceOf(LastAdmin);
     // With a second admin, the first may step down.
     const token = await invite({ email: 'second.admin@example.test', role: 'admin' });
-    const second = (await store.acceptInvite(token, randomUUID(), 'Sol Second', t0))?.userId ?? '';
+    const second =
+      (await store.acceptInvite(token, randomUUID(), 'Sol Second', t0, true))?.userId ?? '';
     expect(
       await asAdmin((c) => access.set(c, second, { role: 'admin', tabs: [], companyIds: [] })),
     ).toBe(true);
@@ -159,13 +161,32 @@ describe('roles, ticks and invites (T-0204)', () => {
     });
     const late = new Date(t0.getTime() + 72 * HOUR);
     expect(await store.findInvite(token, late)).toBeUndefined();
-    expect(await store.acceptInvite(token, randomUUID(), 'Lou Late', late)).toBeUndefined();
+    expect(await store.acceptInvite(token, randomUUID(), 'Lou Late', late, true)).toBeUndefined();
+  });
+
+  it('[USR-1] with no password checked, an invite never joins an email that already has a sign-in', async () => {
+    // The admin's own email: an account exists, so only the password-confirmed path may join it.
+    const other = randomUUID();
+    await tenancy.run({ workspaceId: ws, companyIds: [], userId: other }, (c) =>
+      new UserRepository(main.db).create(c, {
+        id: other,
+        email: 'already@example.test',
+        name: 'Al Ready',
+      }),
+    );
+    const token = await invite({ email: 'already@example.test', role: 'member' });
+    expect(await store.acceptInvite(token, randomUUID(), 'Intruder', t0, true)).toBeUndefined();
+    // Confirmed with their password (newOnly false), the same person joins.
+    expect(await store.acceptInvite(token, randomUUID(), 'Al Ready', t0, false)).toMatchObject({
+      userId: other,
+      created: false,
+    });
   });
 
   it('[USR-1] an invite works once, and a revoked one not at all', async () => {
     const once = await invite({ email: 'once@example.test', role: 'member' });
-    expect(await store.acceptInvite(once, randomUUID(), 'Oz Once', t0)).toBeDefined();
-    expect(await store.acceptInvite(once, randomUUID(), 'Oz Once', t0)).toBeUndefined();
+    expect(await store.acceptInvite(once, randomUUID(), 'Oz Once', t0, true)).toBeDefined();
+    expect(await store.acceptInvite(once, randomUUID(), 'Oz Once', t0, true)).toBeUndefined();
 
     const token = randomBytes(32);
     const revoked = await tenancy.runWorkspace({ workspaceId: ws, userId: admin }, async (c) => {
