@@ -146,6 +146,44 @@ export interface MembershipsTable {
   created_at: Generated<Date>;
 }
 
+export interface MembershipTabsTable {
+  workspace_id: string;
+  user_id: string;
+  tab: string;
+}
+
+export interface MembershipCompaniesTable {
+  workspace_id: string;
+  user_id: string;
+  company_id: string;
+}
+
+/** Revoked or accepted, never deleted (migration 0015); only the token hash and revoke change. */
+export interface InvitesTable {
+  workspace_id: string;
+  id: string;
+  email: string;
+  role: MembershipRole;
+  tabs: string[];
+  company_ids: string[];
+  invited_by: string | null;
+  token_hash: Buffer | null;
+  created_at: Date;
+  expires_at: Date;
+  accepted_at: ColumnType<Date | null, never, never>;
+  accepted_by: ColumnType<string | null, never, never>;
+  revoked_at: Date | null;
+}
+
+export interface AccessReviewsTable {
+  workspace_id: string;
+  id: string;
+  due_at: Date;
+  created_at: Date;
+  completed_at: Date | null;
+  completed_by: string | null;
+}
+
 export type AuditActorKind = 'user' | 'system' | 'platform';
 
 /** Append-only (migration 0010): ob_app inserts and reads, and never sets the id or time. */
@@ -177,4 +215,8 @@ export interface MainDb {
   'app.job_leases': JobLeasesTable;
   'app.files': FilesTable;
   'app.audit_events': AuditEventsTable;
+  'app.membership_tabs': MembershipTabsTable;
+  'app.membership_companies': MembershipCompaniesTable;
+  'app.invites': InvitesTable;
+  'app.access_reviews': AccessReviewsTable;
 }

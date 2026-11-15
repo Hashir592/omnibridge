@@ -44,6 +44,7 @@ function spyTenancy() {
       contexts.push(ctx);
       return fn(ctx);
     },
+    runMember: () => Promise.reject(new Error('jobs never run as a member')),
     run: (ctx, fn) => fn(ctx),
   };
   return { tenancy, opened, contexts };

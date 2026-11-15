@@ -63,6 +63,9 @@ export { queueMetrics, type QueueMetricsOptions } from './metrics.ts';
 export {
   auditRetentionJob,
   authLockNoticeJob,
+  accessReviewJob,
+  accessReviewSweepJob,
+  authInviteJob,
   authPasswordResetJob,
   auditRetentionSweepJob,
   filesScanJob,

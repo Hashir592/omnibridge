@@ -1,11 +1,14 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
+  AccessReviewRepository,
   AuditLog,
   AuthStore,
   CompanyRepository,
   createMainDb,
+  InviteRepository,
   issuePasswordReset,
+  MemberAccessRepository,
   MembershipRepository,
   migrateMain,
   Tenancy,
@@ -129,6 +132,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
         notified.reset.push(input);
         return Promise.resolve();
       },
+      invite: () => Promise.resolve(),
     },
     logger,
     hmacKey,
@@ -149,10 +153,39 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
         workspaces: new WorkspaceRepository(main.db),
         companies: new CompanyRepository(main.db),
       },
-      members: new MembershipRepository(main.db),
       audit: new AuditLog(main.db),
       auth,
+      people: {
+        members: new MemberAccessRepository(main.db),
+        invites: new InviteRepository(main.db),
+        reviews: new AccessReviewRepository(main.db),
+        workspaces: new WorkspaceRepository(main.db),
+        store,
+        notifier: { invite: () => Promise.resolve() },
+        audit: new AuditLog(main.db),
+        tenancy,
+      },
     });
+
+  /** An invite to workspace A with a token the test holds, as the worker would mail it. */
+  async function inviteLink(email: string, role: 'admin' | 'member' = 'member') {
+    const raw = randomBytes(32).toString('base64url');
+    await tenancy.runWorkspace({ workspaceId: A }, async (ctx) => {
+      const repo = new InviteRepository(main.db);
+      const created = await repo.create(ctx, { email, role, tabs: [], companyIds: [] }, clock);
+      await repo.setToken(ctx, created.id, createHash('sha256').update(raw).digest());
+    });
+    return raw;
+  }
+
+  /** The user-level auth events of a user (ADR-052), read as the owner. */
+  const authEvents = async (userId: string) =>
+    (
+      await owner.query<{ action: string; ip: string }>(
+        'SELECT action, host(ip) AS ip FROM app.auth_events WHERE user_id = $1 ORDER BY id',
+        [userId],
+      )
+    ).rows;
 
   /** A user with a password and, unless `mfa` is false, a confirmed TOTP secret. */
   async function makeUser(
@@ -328,11 +361,14 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       { userId: user.id, workspaceIds: [A] },
     ]);
     expect(told[0]?.lockedUntil.getTime()).toBe(clock.getTime() + MIN);
-    const events = await tenancy.run({ workspaceId: A, companyIds: [] }, (ctx) =>
+    // Failures are kept per person, never in a workspace's audit log (ADR-052).
+    const events = await authEvents(user.id);
+    expect(events.map((e) => e.action)).toContain('auth.locked');
+    expect(events.filter((e) => e.action === 'auth.login_failed')).toHaveLength(10);
+    const inWorkspace = await tenancy.run({ workspaceId: A, companyIds: [] }, (ctx) =>
       new AuditLog(main.db).list(ctx, { userId: user.id }, { limit: 50 }),
     );
-    expect(events.items.map((e) => e.action)).toContain('auth.locked');
-    expect(events.items.filter((e) => e.action === 'auth.login_failed')).toHaveLength(10);
+    expect(inWorkspace.items.map((e) => e.action)).not.toContain('auth.login_failed');
     // 15 minutes after the 10th failure it opens again.
     later(MIN);
     expect((await b.signIn(user.email, PASSWORD)).statusCode).toBe(200);
@@ -394,7 +430,11 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       platformKeys,
       tenancy,
       audit: new AuditLog(main.db),
-      notifier: { locked: () => Promise.resolve(), passwordReset: () => Promise.resolve() },
+      notifier: {
+        locked: () => Promise.resolve(),
+        passwordReset: () => Promise.resolve(),
+        invite: () => Promise.resolve(),
+      },
       logger,
       hmacKey,
       origins: [ORIGIN],
@@ -428,14 +468,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       { email: user.email, password: 'wrong two' },
       { headers: { 'x-forwarded-for': '203.0.113.98' } },
     );
-    const events = await tenancy.run({ workspaceId: A, companyIds: [] }, (ctx) =>
-      new AuditLog(main.db).list(
-        ctx,
-        { userId: user.id, action: 'auth.login_failed' },
-        { limit: 10 },
-      ),
-    );
-    expect(events.items.map((e) => e.ip).sort()).toEqual(['198.51.100.77', '203.0.113.99']);
+    const events = (await authEvents(user.id)).filter((e) => e.action === 'auth.login_failed');
+    expect(events.map((e) => e.ip).sort()).toEqual(['198.51.100.77', '203.0.113.99']);
     await server.close();
   });
 
@@ -755,6 +789,74 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await expect(
       owner.query('DELETE FROM app.terms_acceptances WHERE user_id = $1', [one.id]),
     ).rejects.toThrow(/append-only/);
+  });
+
+  it('[USR-1][USR-4] accepting an invite sets the first password and still needs MFA; the link works once', async () => {
+    const server = app();
+    const email = `new-${randomUUID().slice(0, 8)}@example.test`;
+    const token = await inviteLink(email);
+    const anon = await new Browser(server).start();
+    const info = await anon.send('GET', `/auth/invites/${token}`);
+    expect(info.statusCode).toBe(200);
+    expect(info.json()).toMatchObject({ email: 'n***@example.test', existingUser: false });
+    // USR-3 rules apply to the first password.
+    const weak = await anon.send('POST', '/auth/invites/accept', {
+      token,
+      name: 'Nova Newcomer',
+      password: 'password123',
+    });
+    expect(weak.statusCode).toBe(422);
+    const ok = await anon.send('POST', '/auth/invites/accept', {
+      token,
+      name: 'Nova Newcomer',
+      password: 'lantern orchard copper 17',
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ next: 'mfa_setup' });
+    // The new session is pre-MFA: no workspace route yet (USR-4).
+    expect((await anon.send('GET', '/companies')).statusCode).toBe(401);
+    // Used once.
+    expect((await anon.send('GET', `/auth/invites/${token}`)).statusCode).toBe(404);
+    expect(
+      (
+        await anon.send('POST', '/auth/invites/accept', {
+          token,
+          name: 'Nova Newcomer',
+          password: 'lantern orchard copper 17',
+        })
+      ).statusCode,
+    ).toBe(404);
+    // And the new person can sign in with the password they chose.
+    const again = await new Browser(server).start();
+    expect((await again.signIn(email, 'lantern orchard copper 17')).json()).toEqual({
+      next: 'mfa_setup',
+    });
+    await server.close();
+  });
+
+  it('[USR-1][USR-5] someone who already has a sign-in confirms the invite with their password', async () => {
+    const server = app();
+    const user = await makeUser({ workspaces: [B] });
+    const token = await inviteLink(user.email);
+    const b = await new Browser(server, '192.0.2.81').start();
+    expect((await b.send('GET', `/auth/invites/${token}`)).json()).toMatchObject({
+      existingUser: true,
+    });
+    const wrong = await b.send('POST', '/auth/invites/accept', {
+      token,
+      name: 'Anything',
+      password: 'not their password',
+    });
+    expect(wrong.statusCode).toBe(401);
+    expect((await authEvents(user.id)).map((e) => e.action)).toContain('auth.login_failed');
+    const right = await b.send('POST', '/auth/invites/accept', {
+      token,
+      name: 'Anything',
+      password: PASSWORD,
+    });
+    expect(right.json()).toEqual({ next: 'mfa_code' });
+    expect((await store.userWorkspaces(user.id)).map((w) => w.id).sort()).toEqual([A, B].sort());
+    await server.close();
   });
 
   it('[SEC-1] state-changing request without CSRF token is rejected', async () => {

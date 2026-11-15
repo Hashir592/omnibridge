@@ -21,7 +21,6 @@ import {
   type AuditFilter,
   type AuditLog,
   type CompanyRepository,
-  type MembershipRepository,
   type WorkspaceRepository,
 } from '@omnibridge/db';
 import { FileNotReadable, verifyFileLink, type FileStore } from '@omnibridge/files';
@@ -31,6 +30,7 @@ import Fastify, { type FastifyRequest } from 'fastify';
 import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
 import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
+import { peopleHandlers, type PeopleOptions } from './users.ts';
 import type { AuthService } from './auth/service.ts';
 import { contractRoutesPlugin, installContract, type Handlers } from './contract.ts';
 
@@ -91,8 +91,6 @@ export interface WebAppOptions {
   /** Opens each request's one tenant transaction (TEN-1, invariant 3). */
   tenancy?: TenantRunner;
   directory?: TenantDirectory;
-  /** Workspace roles, for adminOnly routes (PERM-5). Without it those routes answer 403. */
-  members?: Pick<MembershipRepository, 'roleOf'>;
   /** The audit log (AUD-1, AUD-4). */
   audit?: Pick<AuditLog, 'record' | 'list'>;
   /** Overrides AUDIT_EXPORT_LIMITS; tests only. */
@@ -111,6 +109,8 @@ export interface WebAppOptions {
    * notice 401: nothing is accepted unverified.
    */
   ebay?: EbayWebhook;
+  /** Users, invites and the access review (T-0204). Without it those routes answer 503. */
+  people?: PeopleOptions;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
 }
@@ -133,13 +133,13 @@ export function buildWebApp({
   files,
   tenancy,
   directory,
-  members,
   audit,
   auditExportLimits,
   auth,
   resolveSession,
   resolvePlatform,
   ebay,
+  people,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false });
@@ -187,6 +187,7 @@ export function buildWebApp({
   const handlers: Handlers<typeof contractRoutes> = {
     ...authHandlers(auth),
     ...ebayHandlers(ebay),
+    ...peopleHandlers(people, auth),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';
@@ -397,7 +398,6 @@ export function buildWebApp({
               checkRequest: auth.checkRequest,
             }),
         ...(tenancy === undefined ? {} : { tenancy }),
-        ...(members === undefined ? {} : { roleOf: (ctx: TenantContext) => members.roleOf(ctx) }),
         ...(ebay === undefined ? {} : { verifyWebhook: webhookVerifier(ebay) }),
       },
     }),

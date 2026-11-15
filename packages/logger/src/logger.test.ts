@@ -51,10 +51,11 @@ describe('logger', () => {
     expect(text).toContain('"url":"/search"');
   });
 
-  it('[SEC-5][USR-7] a reset token in a request path is never logged', () => {
+  it('[SEC-5][USR-7][USR-1] a reset or invite token in a request path is never logged', () => {
     const { logger, output } = capture();
     logger.info({ req: { method: 'GET', url: '/auth/password/reset/TOKENMARK-1' } }, 'in');
     logger.warn('failed for /auth/password/reset/TOKENMARK-2?x=1');
+    logger.info({ req: { method: 'GET', url: '/auth/invites/TOKENMARK-3' } }, 'in');
     const text = output();
     expect(text).not.toContain('TOKENMARK');
     expect(text).toContain('"url":"/auth/password/reset/[REDACTED]"');

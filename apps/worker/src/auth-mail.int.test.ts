@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { TenantContext } from '@omnibridge/core';
 import {
+  AccessReviewRepository,
   AuthStore,
   createMainDb,
+  InviteRepository,
   MembershipRepository,
   migrateMain,
   Tenancy,
@@ -17,6 +19,7 @@ import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
+import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
 
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
 const APP = 'https://app.omnibridge.test';
@@ -155,5 +158,51 @@ describe('auth mail jobs (USR-5, USR-7, ADR-050)', () => {
     } finally {
       await owner.end();
     }
+  });
+
+  it('[USR-1][TEN-7] the invite email carries a working link; only its hash is kept on the invite', async () => {
+    sent.length = 0;
+    const invite = await tenancy.run(
+      { workspaceId: ws, companyIds: [], userId: people.admin },
+      (ctx) =>
+        new InviteRepository(main.db).create(
+          ctx,
+          { email: 'invitee@example.test', role: 'member', tabs: [], companyIds: [] },
+          new Date('2026-11-16T09:00:00.000Z'),
+        ),
+    );
+    const handler = inviteHandler({
+      invites: new InviteRepository(main.db),
+      users: new UserRepository(main.db),
+      workspaces: new WorkspaceRepository(main.db),
+      mailer,
+      appOrigin: APP,
+      logger,
+    });
+    expect(await run(handler, { invite_id: invite.id })).toEqual({ sent: 1 });
+    expect(sent[0]?.to).toBe('invitee@example.test');
+    expect(sent[0]?.email.subject).toBe('Admin Person invited you to Mail test on OmniBridge');
+    const token = /https:\/\/app\.omnibridge\.test\/invite\/([A-Za-z0-9_-]{43})/.exec(
+      sent[0]?.email.text ?? '',
+    )?.[1];
+    expect(token).toBeDefined();
+    // Web (ob_app) finds the invite by the token's hash; the token itself is in no row.
+    const found = await new AuthStore(web.db).findInvite(
+      createHash('sha256')
+        .update(token ?? '')
+        .digest(),
+      new Date('2026-11-16T10:00:00.000Z'),
+    );
+    expect(found).toMatchObject({ email: 'invitee@example.test', invitedBy: 'Admin Person' });
+  });
+
+  it('[USR-9] the access review job opens a review once per 90 days', async () => {
+    const handler = accessReviewHandler({
+      reviews: new AccessReviewRepository(main.db),
+      logger,
+      now: () => new Date('2026-11-16T03:00:00.000Z'),
+    });
+    expect(await run(handler, {})).toEqual({ created: 1 });
+    expect(await run(handler, {})).toEqual({ created: 0 });
   });
 });

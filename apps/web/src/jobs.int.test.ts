@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { TenantContext } from '@omnibridge/core';
 import {
   JobRecordRepository,
+  MembershipRepository,
   migrateMain,
   Tenancy,
+  UserRepository,
   WorkspaceRepository,
   type MainDb,
 } from '@omnibridge/db';
@@ -50,7 +52,23 @@ describe('GET /jobs/:id (NFR-4)', () => {
     });
     records = new JobRecordRepository(db);
     tenancy = new Tenancy(db);
-    await tenancy.run(A, (ctx) => new WorkspaceRepository(db).create(ctx, { name: 'Jobs test' }));
+    // The session user is an admin of both workspaces: only the tenant check keeps B's job apart.
+    for (const [ctx, name] of [
+      [A, 'Jobs test'],
+      [B, 'Jobs test B'],
+    ] as const) {
+      await tenancy.run({ ...ctx, userId: USER }, async (c) => {
+        await new WorkspaceRepository(db).create(c, { name });
+        if (ctx === A) {
+          await new UserRepository(db).create(c, {
+            id: USER,
+            email: `${USER}@example.test`,
+            name: 'U',
+          });
+        }
+        await new MembershipRepository(db).add(c, { userId: USER, role: 'admin' });
+      });
+    }
     // A job record as the queue writes it; the pg-boss send itself is not needed here.
     jobId = (
       await records.createAndEnqueue(

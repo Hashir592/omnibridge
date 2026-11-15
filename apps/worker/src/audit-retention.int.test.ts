@@ -136,7 +136,10 @@ describe('audit retention job (AUD-3)', () => {
   it('[AUD-3] the worker schedules the sweep at 02:30 London time', async () => {
     await registerPlatformHandlers(
       boss,
-      { 'audit.retention-sweep': () => Promise.resolve() },
+      {
+        'audit.retention-sweep': () => Promise.resolve(),
+        'users.access-review-sweep': () => Promise.resolve(),
+      },
       logger,
     );
     expect(await boss.getSchedules()).toEqual(
@@ -144,6 +147,11 @@ describe('audit retention job (AUD-3)', () => {
         expect.objectContaining({
           name: 'audit.retention-sweep',
           cron: '30 2 * * *',
+          timezone: 'Europe/London',
+        }),
+        expect.objectContaining({
+          name: 'users.access-review-sweep',
+          cron: '0 3 * * *',
           timezone: 'Europe/London',
         }),
       ]),

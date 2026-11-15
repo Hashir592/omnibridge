@@ -109,7 +109,7 @@ describe('mock auth API', () => {
 
   it('[USR-7] [TEN-7] used or expired reset and invite links get one 404', async () => {
     expect((await call('GET', '/auth/password/reset/expired')).status).toBe(404);
-    expect((await call('GET', '/api/mock/invites/expired')).status).toBe(404);
+    expect((await call('GET', '/auth/invites/expired')).status).toBe(404);
     expect((await call('GET', '/auth/password/reset/demo-reset')).status).toBe(200);
   });
 

@@ -4,6 +4,7 @@ import { getHealth } from './routes/health.ts';
 import { getFile } from './routes/files.ts';
 import { getJob } from './routes/jobs.ts';
 import { createCompany, createWorkspace, listCompanies } from './routes/tenancy.ts';
+import { userRoutes } from './routes/users.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
 
 /**
@@ -21,6 +22,7 @@ export const contractRoutes = [
   exportAuditEvents,
   ...authRoutes,
   ...webhookRoutes,
+  ...userRoutes,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;

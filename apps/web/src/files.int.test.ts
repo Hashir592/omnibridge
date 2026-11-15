@@ -6,8 +6,10 @@ import type { TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
   FileRepository,
+  MembershipRepository,
   migrateMain,
   Tenancy,
+  UserRepository,
   WorkspaceRepository,
   type MainDb,
 } from '@omnibridge/db';
@@ -54,9 +56,16 @@ describe('GET /files/:id signed links (NFR-5)', () => {
         pool: new pg.Pool({ ...cluster.connection('ob_app'), max: 3 }),
       }),
     });
-    await new Tenancy(db).run(ws, (ctx) =>
-      new WorkspaceRepository(db).create(ctx, { name: 'Files test' }),
-    );
+    // The session user is an admin of the workspace (USR-8: only members get session routes).
+    await new Tenancy(db).run({ ...ws, userId: USER }, async (ctx) => {
+      await new WorkspaceRepository(db).create(ctx, { name: 'Files test' });
+      await new UserRepository(db).create(ctx, {
+        id: USER,
+        email: `${USER}@example.test`,
+        name: 'U',
+      });
+      await new MembershipRepository(db).add(ctx, { userId: USER, role: 'admin' });
+    });
     const root = mkdtempSync(join(tmpdir(), 'ob-web-files-'));
     store = new EncryptedLocalFileStore({
       root,

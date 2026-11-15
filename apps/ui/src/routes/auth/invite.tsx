@@ -6,8 +6,7 @@ import { Button } from '../../kit/Button.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
 import { Skeleton } from '../../kit/Skeleton.tsx';
 import { authApi, type ApiProblem } from '../../auth/api.ts';
-import { inviteApi } from '../../mocks/api.ts';
-import type { InviteInfo, WorkspaceChoice } from '../../auth/shapes.ts';
+import type { InviteInfo, SignInResult, WorkspaceChoice } from '../../auth/shapes.ts';
 import { AuthFrame, Notice } from './layout.tsx';
 import { LinkUnusable } from './password.tsx';
 import { PasswordRules, passwordLocallyValid, personalParts, useEnterApp } from './parts.tsx';
@@ -22,7 +21,7 @@ export function AcceptInvitePage() {
   const invite = useQuery({
     queryKey: ['invite', token],
     queryFn: async () => {
-      const r = await inviteApi.invite(token);
+      const r = await authApi.invite(token);
       if (r.status === 404) return null;
       if (!r.ok) throw new Error(String(r.status));
       return r.body as InviteInfo;
@@ -49,21 +48,28 @@ export function AcceptInvitePage() {
 
   const submit = async (e: SyntheticEvent) => {
     e.preventDefault();
+    const existing = invite.data?.existingUser === true;
     const next = {
       ...(name.trim() ? {} : { name: 'Enter your full name' }),
-      ...(passwordLocallyValid(password, personal)
+      ...(existing || passwordLocallyValid(password, personal)
         ? {}
         : { password: 'Your password does not meet the rules below' }),
-      ...(confirm === password ? {} : { confirm: 'The passwords do not match' }),
+      ...(existing || confirm === password ? {} : { confirm: 'The passwords do not match' }),
     };
     setErrors(next);
     if (next.name || next.password || next.confirm) return;
     setBusy(true);
     setResult(undefined);
     try {
-      const r = await inviteApi.acceptInvite(token, name.trim(), password);
+      const r = await authApi.acceptInvite(token, name.trim(), password);
       if (r.ok) {
-        await navigate({ to: '/sign-in/set-up-mfa' });
+        // Either way the session continues at MFA (USR-4).
+        const toCode = (r.body as SignInResult).next === 'mfa_code';
+        await navigate({ to: toCode ? '/sign-in/code' : '/sign-in/set-up-mfa' });
+        return;
+      }
+      if (r.status === 401) {
+        setErrors({ password: 'That is not the password for this email' });
         return;
       }
       if (r.status === 404) setResult('gone');
@@ -96,25 +102,39 @@ export function AcceptInvitePage() {
         <Field label="Full name" error={errors.name}>
           <Input name="name" autoComplete="name" autoFocus value={name} onChange={setName} />
         </Field>
-        <Field label="Password" error={errors.password}>
-          <Input
-            type="password"
-            name="new-password"
-            autoComplete="new-password"
-            value={password}
-            onChange={setPassword}
-          />
-        </Field>
-        <PasswordRules password={password} personal={personal} />
-        <Field label="Confirm password" error={errors.confirm}>
-          <Input
-            type="password"
-            name="confirm-password"
-            autoComplete="new-password"
-            value={confirm}
-            onChange={setConfirm}
-          />
-        </Field>
+        {d?.existingUser === true ? (
+          <Field label="Your OmniBridge password" error={errors.password}>
+            <Input
+              type="password"
+              name="current-password"
+              autoComplete="current-password"
+              value={password}
+              onChange={setPassword}
+            />
+          </Field>
+        ) : (
+          <>
+            <Field label="Password" error={errors.password}>
+              <Input
+                type="password"
+                name="new-password"
+                autoComplete="new-password"
+                value={password}
+                onChange={setPassword}
+              />
+            </Field>
+            <PasswordRules password={password} personal={personal} />
+            <Field label="Confirm password" error={errors.confirm}>
+              <Input
+                type="password"
+                name="confirm-password"
+                autoComplete="new-password"
+                value={confirm}
+                onChange={setConfirm}
+              />
+            </Field>
+          </>
+        )}
         {result === 'breached' && (
           <Notice tone="danger" title="This password appears in a list of leaked passwords.">
             Choose a different one.

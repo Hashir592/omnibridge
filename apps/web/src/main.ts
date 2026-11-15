@@ -1,15 +1,17 @@
 import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
+  AccessReviewRepository,
   AuditLog,
   AuthStore,
   CompanyRepository,
   createMainDb,
   FileRepository,
+  InviteRepository,
   JobLeaseRepository,
   JobRecordRepository,
   mainDbConfig,
-  MembershipRepository,
+  MemberAccessRepository,
   ping,
   Tenancy,
   WorkspaceRepository,
@@ -109,9 +111,18 @@ const app = buildWebApp({
     workspaces: new WorkspaceRepository(main.db),
     companies: new CompanyRepository(main.db),
   },
-  members: new MembershipRepository(main.db),
   audit: new AuditLog(main.db),
   auth,
+  people: {
+    members: new MemberAccessRepository(main.db),
+    invites: new InviteRepository(main.db),
+    reviews: new AccessReviewRepository(main.db),
+    workspaces: new WorkspaceRepository(main.db),
+    store: authStore,
+    notifier: queueNotifier(queue),
+    audit: new AuditLog(main.db),
+    tenancy,
+  },
   jobs: new JobRecordRepository(main.db),
   files: { store: fileStore, linkKey },
   // The eBay account deletion endpoint (EBAY-2), when its secrets are mounted.

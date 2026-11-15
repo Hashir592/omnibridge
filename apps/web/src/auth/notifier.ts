@@ -1,4 +1,9 @@
-import { authLockNoticeJob, authPasswordResetJob, type JobQueue } from '@omnibridge/queue';
+import {
+  authInviteJob,
+  authLockNoticeJob,
+  authPasswordResetJob,
+  type JobQueue,
+} from '@omnibridge/queue';
 import type { AuthNotifier } from './service.ts';
 
 /**
@@ -27,6 +32,13 @@ export function queueNotifier(
         // At most one reset email a minute for a user, however often the form is sent.
         idempotencyKey: `reset:${userId}:${String(Math.floor(now().getTime() / 60_000))}`,
         payload: { user_id: userId },
+      });
+    },
+    async invite({ workspaceId, inviteId }) {
+      await queue.send(authInviteJob, {
+        ctx: { workspaceId, companyIds: [] },
+        idempotencyKey: `invite:${inviteId}`,
+        payload: { invite_id: inviteId },
       });
     },
   };

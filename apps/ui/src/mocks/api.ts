@@ -3,9 +3,8 @@
  * contract does not have yet, so the typed client cannot reach them. Each function is replaced by
  * an `api.GET(...)` call from @omnibridge/contract/client once S3 builds the real route.
  */
-import type { InviteInfo, SignInResult } from '../auth/shapes.ts';
 import type { AdsOverview } from './ads.ts';
-import type { Connection, WorkspaceUser } from './admin.ts';
+import type { Connection } from './admin.ts';
 import type { AuditPage } from './audit.ts';
 import type { ForecastPage } from './forecast.ts';
 import type {
@@ -58,7 +57,6 @@ export const mockApi = {
     ),
   ebayHealth: (company: string) =>
     getJson<EbayHealth[]>(`/api/mock/account-health/ebay?company=${encodeURIComponent(company)}`),
-  users: () => getJson<WorkspaceUser[]>('/api/mock/users'),
   connections: () => getJson<Connection[]>('/api/mock/connections'),
   conversations: (params: Params) =>
     getJson<{
@@ -171,17 +169,3 @@ async function send<T>(
     retryAfter: Number.isFinite(retry) && retry > 0 ? retry : undefined,
   };
 }
-
-/**
- * Invite routes (T-0303), PROPOSED SHAPES until T-0204 builds them; see mocks/auth.ts. The other
- * auth routes are real since T-0203: src/auth/api.ts.
- */
-export const inviteApi = {
-  invite: (token: string) =>
-    send<InviteInfo>('GET', `/api/mock/invites/${encodeURIComponent(token)}`),
-  acceptInvite: (token: string, name: string, password: string) =>
-    send<SignInResult>('POST', `/api/mock/invites/${encodeURIComponent(token)}/accept`, {
-      name,
-      password,
-    }),
-};

@@ -5,6 +5,7 @@ import type { Logger } from '@omnibridge/logger';
 import { PLATFORM_JOBS, schedulePlatformJob, type JobQueue } from '@omnibridge/queue';
 import type { PgBoss } from 'pg-boss';
 import { sweepAuditRetention } from './audit-retention.ts';
+import { sweepAccessReviews } from './users-jobs.ts';
 
 /**
  * Schedules every platform job in PLATFORM_JOBS on its London cron and consumes it. A platform
@@ -59,6 +60,10 @@ export async function startPlatformJobs({
       'audit.retention-sweep': async () => {
         const workspaces = await sweepAuditRetention({ directory, queue });
         logger.info({ event: 'audit.retention_sweep', count: workspaces }, 'audit retention sent');
+      },
+      'users.access-review-sweep': async () => {
+        const workspaces = await sweepAccessReviews({ directory, queue });
+        logger.info({ event: 'users.access_review_sweep', count: workspaces }, 'reviews sent');
       },
     },
     logger,

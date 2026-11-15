@@ -28,7 +28,7 @@ export { createQueues } from './queue-schema.ts';
 export { Tenancy, withTenantTransaction } from './tenant.ts';
 export { JobLeaseRepository } from './job-leases.ts';
 export { FileRepository } from './files.ts';
-export { ChannelAccountCompanyLocked, WorkspaceLimitReached } from './errors.ts';
+export { ChannelAccountCompanyLocked, LastAdmin, WorkspaceLimitReached } from './errors.ts';
 export { WorkspaceRepository, type NewWorkspace, type Workspace } from './workspaces.ts';
 export {
   CompanyRepository,
@@ -42,6 +42,17 @@ export {
   type NewChannelAccount,
 } from './channel-accounts.ts';
 export { MembershipRepository, UserRepository, type User } from './users.ts';
+export {
+  ACCESS_REVIEW_INTERVAL_MS,
+  AccessReviewRepository,
+  INVITE_LIFETIME_MS,
+  InviteRepository,
+  MemberAccessRepository,
+  type Access,
+  type AccessReview,
+  type Invite,
+  type Member,
+} from './permissions.ts';
 export { rewrapAllDataKeys, type DataKeyTotals } from './rewrap.ts';
 export {
   AuditLog,
