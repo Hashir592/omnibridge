@@ -191,6 +191,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - retries up to 24 h, then the dead-letter queue
   - nightly reconciliation
   - published OpenAPI for the JeezMart developer
+  - module toggle `website_connector` (ADR-059): off by default, routes 404 when off, route-walker test with it off
 - **Owns:** WEB-1, WEB-2, WEB-3, WEB-4, WEB-5, WEB-6, OPS-12, AT-14
 - **Depends on:** M10.
 - **External gate:** the JeezMart side is built by the dev team in the JeezMart codebase.
