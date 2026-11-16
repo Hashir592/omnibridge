@@ -99,6 +99,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - erasure requests and subject access exports
   - completing the eBay deletion handler
   - canary records
+  - user deletion also hard-deletes that user's rows in `app.terms_acceptances` (ADR-058b)
 - **Owns:** DP-4, DP-5, DP-6, DP-7, DP-8, DEL-1, DEL-2, DEL-3, DEL-4, DEL-5, AT-8, AT-9, AT-10
 - **Depends on:** M02, M01b (restore drill), M06 (endpoint).
 - **External gate:** none.
