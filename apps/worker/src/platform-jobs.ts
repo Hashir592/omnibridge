@@ -1,10 +1,11 @@
-import { createMainDb, type PoolErrorHandler } from '@omnibridge/db';
+import { createMainDb, type AuthStore, type PoolErrorHandler } from '@omnibridge/db';
 // The only worker module allowed to hold ob_platform (dependency-cruiser, ADR-049).
 import { platformDbConfig, WorkspaceDirectory } from '@omnibridge/db/platform';
 import type { Logger } from '@omnibridge/logger';
 import { PLATFORM_JOBS, schedulePlatformJob, type JobQueue } from '@omnibridge/queue';
 import type { PgBoss } from 'pg-boss';
 import { sweepAuditRetention } from './audit-retention.ts';
+import { sweepHousekeeping } from './housekeeping.ts';
 import { sweepAccessReviews } from './users-jobs.ts';
 
 /**
@@ -44,11 +45,14 @@ export async function registerPlatformHandlers(
 export async function startPlatformJobs({
   boss,
   queue,
+  auth,
   logger,
   onDbError,
 }: {
   boss: PgBoss;
   queue: Pick<JobQueue, 'send'>;
+  /** The worker's own role (ob_worker), the only one allowed to purge sessions and resets. */
+  auth: Pick<AuthStore, 'purgeExpired'>;
   logger: Logger;
   onDbError: PoolErrorHandler;
 }): Promise<() => Promise<void>> {
@@ -64,6 +68,10 @@ export async function startPlatformJobs({
       'users.access-review-sweep': async () => {
         const workspaces = await sweepAccessReviews({ directory, queue });
         logger.info({ event: 'users.access_review_sweep', count: workspaces }, 'reviews sent');
+      },
+      'housekeeping.daily-sweep': async () => {
+        const workspaces = await sweepHousekeeping({ auth, directory, queue, logger });
+        logger.info({ event: 'housekeeping.sweep', count: workspaces }, 'job retention sent');
       },
     },
     logger,

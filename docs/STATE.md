@@ -1,15 +1,15 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 15 Nov 2026 by S3.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 16 Nov 2026 by S3.
 
 ## Now
 
 - **Phase:** B, local Docker only. **Plan replaced on 12 Nov 2026** after the architecture audit (ADR-054): three releases, the order in `docs/plan/MODULES.md`. Release 1 = website + first approved marketplace + Evri: orders, stock, labels, tracking. The public site goes live early, deployed by Hashir's devops person.
-- **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway fixes merged (PR #47, carry-over `docs/reviews/M02-halfway-carryover.md`; **recreate the local db-main volume once, then run `scripts/dev-secrets.sh`**); T-0208 faster CI merged (PR #48). T-0204 (invites, roles, ticks, USR-8, ADR-052, access review) in review. Next S3: T-0207 → T-0206 (S5 audit) → M02 end.
+- **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway fixes merged (PR #47, carry-over `docs/reviews/M02-halfway-carryover.md`; **recreate the local db-main volume once, then run `scripts/dev-secrets.sh`**); T-0208 faster CI merged (PR #48). T-0204 merged (PR #52, ADR-058). T-0207 housekeeping in review: no-transaction migrations (ADR-047), job/session/reset retention (daily `housekeeping.daily-sweep`, 02:45 London), healthz 503 reason, petrol mail header, ui-refs fix, role connection caps (sum 37 < 40), audit teardown flake; plus ADR-058 (a): the eBay key read counts against a daily budget in governor-ebay before sending (412 when spent). **The caps apply only to a new volume: recreate the local db-main and db-pii volumes once (or `ALTER ROLE … CONNECTION LIMIT` as the roles scripts list).** Next: S2, then S5 T-0206, then S4 M02 end.
 - **M06 (site first):** T-0601 site + T-0603 terms acceptance merged (PR #49). T-0602 eBay deletion endpoint: PR #50. T-0604 early deploy pack: `infra/early-deploy/` and `docs/ops/runbooks/early-deploy.md`, dry run passes (`bash infra/early-deploy/dry-run.sh`). Waiting on the client: Operator legal details and the legal text review. S2: the SPA screen for `next: 'terms'`.
 - **M03:** T-0305 (PR #40), T-0306 client changes (PR #41) and the M03 end fixes (PR #42) merged. M03 end round 2: APPROVED (S4, 14 Nov). Next S2 task: T-0307 (generic Website mark, light).
 - **Client changes:** designs in `docs/plan/client-changes-20261112.md` (ADR-055, ADR-057). Real logic lands in M09, M10, M12 (Release 1) and M18, M20 (Release 3).
-- **Order now (one session at a time):** done: M02 halfway fixes #47, T-0208 #48, M06 #49–#51, T-0204 #52. Next: S3 T-0207 → S2 wires the T-0204/T-0603 screens + logo in app shell and sign-in → S5 T-0206 → S4 M02 end. Site live: devops, week of 23 Nov 2026, blocked on the client's Operator details and legal review.
+- **Order now (one session at a time):** done: M02 halfway fixes #47, T-0208 #48, M06 #49–#51, T-0204 #52, T-0207. Next: S2 wires the T-0204/T-0603 screens + logo in app shell and sign-in → S5 T-0206 → S4 M02 end. Site live: devops, week of 23 Nov 2026, blocked on the client's Operator details and legal review.
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; quiet output; short sessions; batches up to 5.
 - **Process (ADR-053, ADR-054, ADR-056):** sessions merge their own green PRs. CI is the only full gate; locally `--quick` (plus a task's integration tests for high risk). Halfway checkpoints only for M02, M04, M10, M12, M17, M18. Reviews do not block the next module.
 - **Hashir:** GitHub CLI must stay on the Hashir592 account (`gh auth switch -u Hashir592`). Dev machine to 16 GB in 1 to 2 weeks.
@@ -33,6 +33,9 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Secrets:** new dev secrets `auth_hmac_key` (web and seed) and `ob_worker_password`. After pulling, run `scripts/dev-secrets.sh`; recreate the db-main volume once if it predates `ob_worker`.
 
 ## Follow-ups noted (not in T-0203 scope)
+
+- S1 (ADR-058 b): the M04/M05 deletion task must hard-delete `app.terms_acceptances` with the user; no backlog note yet (S1 edits the backlog).
+- S2: `apps/ui/src/mocks/mocks.test.ts` page-size test now allows a page to finish a same-buyer group (the mock data is date-relative; main was red from 16 Nov).
 
 - T-0204: invites (accept sets the first password through `AuthStore.setPassword`), roles and ticks; user and permission audit events; the invite screens move off the mock. USR-8: today a workspace session does not re-check its membership, so a removed member keeps reading until the session ends; revoke with `session_revoke_user` on removal and check the membership in `resolveSession`.
 - T-0206 (S5 audit): a failed sign-in for a real account also writes audit rows, a few milliseconds that an unknown email skips. argon2 equalises the main cost (ADR-048); check whether the residual gap matters.

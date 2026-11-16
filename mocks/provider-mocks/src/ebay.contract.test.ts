@@ -21,7 +21,12 @@ describe('eBay adapter against the provider mocks (EBAY-2)', () => {
 
   it("[EBAY-2] the key fetcher gets a token, reads the key, and eBay's sample verifies", async () => {
     const keys = new PublicKeyCache(
-      ebayPublicKeyFetcher({ apiBase: base, clientId: 'synthetic', clientSecret: 'synthetic' }),
+      ebayPublicKeyFetcher({
+        apiBase: base,
+        clientId: 'synthetic',
+        clientSecret: 'synthetic',
+        budget: () => true,
+      }),
     );
     expect(await verifyNotification(SAMPLE.message, SAMPLE.signature, keys.get)).toBe(true);
     await expect(keys.get('unknown-kid')).rejects.toThrow(/HTTP 404/);

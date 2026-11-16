@@ -736,7 +736,7 @@
         "test: /healthz 503 logs the failing dependency name"
       ],
       "risk": "normal",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0306",

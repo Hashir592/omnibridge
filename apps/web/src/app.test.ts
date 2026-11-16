@@ -66,6 +66,42 @@ describe('web /healthz', () => {
     });
   });
 
+  it('[NFR-2] a 503 logs the failing dependency by name, with no error text (R2-01)', async () => {
+    const lines: string[] = [];
+    const captured = createLogger({
+      service: 'web-test',
+      version: '0',
+      destination: {
+        write: (line: string) => {
+          lines.push(line);
+          return 0;
+        },
+      },
+    });
+    const app = buildWebApp({
+      logger: captured,
+      version: '1',
+      checks: {
+        dbMain: () => Promise.resolve(true),
+        dbPii: () => Promise.reject(new Error('connect ECONNREFUSED db-pii:5432 secret-marker')),
+      },
+    });
+    const res = await app.inject({ method: 'GET', url: '/healthz' });
+    await app.close();
+    expect(res.statusCode).toBe(503);
+    const degraded = lines
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((l) => l.event === 'health.degraded');
+    expect(degraded).toEqual([
+      expect.objectContaining({
+        db_main: 'ok',
+        db_pii: 'error',
+        msg: 'healthz 503: db_pii failing',
+      }),
+    ]);
+    expect(lines.join('')).not.toContain('secret-marker');
+  });
+
   it('[NFR-2] treats a failing check as an error rather than crashing', async () => {
     const res = await healthz({
       dbMain: () => Promise.reject(new Error('connection refused')),

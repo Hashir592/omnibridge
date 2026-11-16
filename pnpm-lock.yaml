@@ -357,6 +357,9 @@ importers:
       '@omnibridge/files':
         specifier: workspace:*
         version: link:../../packages/files
+      '@omnibridge/governor-ebay':
+        specifier: workspace:*
+        version: link:../../packages/governors/ebay
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger

@@ -65,6 +65,8 @@ export {
   authLockNoticeJob,
   accessReviewJob,
   accessReviewSweepJob,
+  housekeepingSweepJob,
+  jobsRetentionJob,
   authInviteJob,
   authPasswordResetJob,
   auditRetentionSweepJob,

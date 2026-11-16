@@ -138,9 +138,19 @@ caddy_validate() {
       "$CADDY_IMAGE" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 }
 
-# The migration runner wraps each file in one transaction (sql-migrations.ts), so squawk is told so.
+# The migration runner wraps each file in one transaction (sql-migrations.ts), so squawk is told so,
+# except for a file marked `-- migrate: no-transaction` (ADR-047), which runs outside one.
 squawk() {
-  "${pnpm[@]}" exec squawk --pg-version 18 --assume-in-transaction packages/db/migrations/*.sql packages/pii-db/migrations/*.sql
+  local tx=() notx=() f
+  for f in packages/db/migrations/*.sql packages/pii-db/migrations/*.sql; do
+    if [[ "$(head -n 1 "$f" | tr -d '\r')" == "-- migrate: no-transaction" ]]; then
+      notx+=("$f")
+    else
+      tx+=("$f")
+    fi
+  done
+  "${pnpm[@]}" exec squawk --pg-version 18 --assume-in-transaction "${tx[@]}" &&
+    { [[ ${#notx[@]} -eq 0 ]] || "${pnpm[@]}" exec squawk --pg-version 18 "${notx[@]}"; }
 }
 
 # Steps run inside `if` (see step), where set -e is off, so every multi-command step chains with &&.

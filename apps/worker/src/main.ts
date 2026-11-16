@@ -21,6 +21,7 @@ import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
 import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
+import { jobsRetentionHandler } from './housekeeping.ts';
 import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
 import { workerHandlerDbConfig } from './db.ts';
 import { registerHandlers } from './handlers.ts';
@@ -124,9 +125,19 @@ await registerHandlers(queue, {
     reviews: new AccessReviewRepository(handlerDb.db),
     logger: log,
   }),
+  'jobs.retention': jobsRetentionHandler({
+    records: new JobRecordRepository(handlerDb.db),
+    logger: log,
+  }),
 });
 // The scheduled fan-out, the worker's only use of ob_platform (invariant 2).
-const closePlatformJobs = await startPlatformJobs({ boss, queue, logger: log, onDbError });
+const closePlatformJobs = await startPlatformJobs({
+  boss,
+  queue,
+  auth: new AuthStore(bookkeepingDb.db),
+  logger: log,
+  onDbError,
+});
 const metrics = await startMetricsServer(
   queueMetrics({ boss, types: JOBS.map((def) => def.type) }),
   Number(process.env.METRICS_PORT ?? '9464'),

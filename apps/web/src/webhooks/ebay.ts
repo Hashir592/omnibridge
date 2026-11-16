@@ -6,9 +6,11 @@
  * time and that it was verified, never the user's id, name, token or the notification id. M04
  * wires the real deletion (FA-14: match in the vault, queue only on a hit).
  *
- * The signature check fetches eBay's public key through packages/providers (cached an hour). It
- * is the one named exception to "web makes no provider calls" (invariant 10, PS-022): eBay needs
- * the answer within 3 seconds, so it cannot wait for the queue.
+ * The signature check fetches eBay's public key through packages/providers (cached an hour per
+ * kid). It is the one named exception to "web makes no provider calls" (invariant 15, ADR-058):
+ * eBay needs the answer within 3 seconds, so it cannot wait for the queue. Each call is counted
+ * against the eBay governor's daily budget before it is sent (invariant 16); once the budget is
+ * spent the notice is answered 412 and eBay sends it again later.
  */
 import { ApiError, readSecretFile, requireEnv } from '@omnibridge/core';
 import type {
@@ -16,9 +18,11 @@ import type {
   ebayAccountDeletion,
   ebayAccountDeletionChallenge,
 } from '@omnibridge/contract';
+import { DailyCallBudget, EBAY_WEBHOOK_DAILY_BUDGET } from '@omnibridge/governor-ebay';
 import type { Logger } from '@omnibridge/logger';
 import {
   challengeResponse,
+  EbayBudgetExhausted,
   ebayPublicKeyFetcher,
   isVerificationToken,
   PublicKeyCache,
@@ -100,6 +104,14 @@ export function ebayWebhook(options: EbayWebhookOptions): EbayWebhook {
         options.keys,
       );
     } catch (err) {
+      if (err instanceof EbayBudgetExhausted) {
+        // The governor refused before sending (ADR-058): 412, and eBay retries later.
+        options.logger.warn(
+          { event: 'ebay.budget_exhausted' },
+          `eBay daily budget spent (${err.api}): public key not read`,
+        );
+        throw new ApiError({ status: 412, code: 'precondition_failed' });
+      }
       // Not the sender's fault: answer 503 so eBay retries, and say what failed.
       options.logger.error(
         { event: 'ebay.public_key_unavailable', err },
@@ -173,11 +185,13 @@ export function webhookVerifier(ebay: EbayWebhook) {
  */
 export function ebayWebhookFromEnv(logger: Logger): EbayWebhook | undefined {
   if (!process.env.EBAY_VERIFICATION_TOKEN_FILE) return undefined;
+  const budget = new DailyCallBudget(EBAY_WEBHOOK_DAILY_BUDGET);
   const keys = new PublicKeyCache(
     ebayPublicKeyFetcher({
       apiBase: requireEnv('EBAY_API_BASE'),
       clientId: readSecretFile('EBAY_CLIENT_ID'),
       clientSecret: readSecretFile('EBAY_CLIENT_SECRET'),
+      budget: (api) => budget.take(api),
     }),
   );
   return ebayWebhook({

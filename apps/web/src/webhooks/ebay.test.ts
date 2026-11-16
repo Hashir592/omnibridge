@@ -1,5 +1,5 @@
 import { createLogger } from '@omnibridge/logger';
-import { PublicKeyCache } from '@omnibridge/provider-ebay';
+import { EbayBudgetExhausted, PublicKeyCache } from '@omnibridge/provider-ebay';
 import { EBAY_SDK_SAMPLE as SAMPLE } from '@omnibridge/provider-ebay/testing';
 import { describe, expect, it } from 'vitest';
 import { buildWebApp } from '../app.ts';
@@ -68,6 +68,31 @@ describe('eBay account deletion endpoint (EBAY-2)', () => {
     });
     expect((await app.inject(notice())).statusCode).toBe(503);
     expect(lines.join('')).toContain('"event":"ebay.public_key_unavailable"');
+    await app.close();
+  });
+
+  it('[EBAY-2][RL-2] a spent eBay budget answers 412 without reading the key (ADR-058)', async () => {
+    const lines: string[] = [];
+    const logger = createLogger({
+      service: 'test',
+      version: '0',
+      destination: { write: (line: string) => lines.push(line) },
+    });
+    const app = buildWebApp({
+      logger,
+      version: '0',
+      checks: { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resolve(true) },
+      ebay: ebayWebhook({
+        verificationToken: TOKEN,
+        endpoint: ENDPOINT,
+        keys: () => Promise.reject(new EbayBudgetExhausted('notification.public_key')),
+        logger,
+      }),
+    });
+    const res = await app.inject(notice());
+    expect(res.statusCode).toBe(412);
+    expect(res.json()).toMatchObject({ code: 'precondition_failed' });
+    expect(lines.join('')).toContain('"event":"ebay.budget_exhausted"');
     await app.close();
   });
 

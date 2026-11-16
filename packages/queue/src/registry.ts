@@ -74,6 +74,17 @@ export const accessReviewJob = defineJob({
 });
 
 /**
+ * Job record retention for one workspace (F-M01-end-05): deletes finished job records and expired
+ * leases older than 30 days. Sent once a day per workspace by the housekeeping sweep.
+ */
+export const jobsRetentionJob = defineJob({
+  type: 'jobs.retention',
+  payload: z.object({}),
+  retry: { limit: 5, delaySeconds: 60, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 300,
+});
+
+/**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
@@ -85,6 +96,7 @@ export const JOBS: readonly JobDefinition[] = [
   authPasswordResetJob,
   authInviteJob,
   accessReviewJob,
+  jobsRetentionJob,
 ];
 
 /**
@@ -105,10 +117,21 @@ export const accessReviewSweepJob = definePlatformJob({
 });
 
 /**
+ * The daily housekeeping sweep (T-0207, 02:45 London): deletes ended sessions and used or expired
+ * reset links (user-level, no workspace), then sends one jobs.retention job per workspace.
+ */
+export const housekeepingSweepJob = definePlatformJob({
+  type: 'housekeeping.daily-sweep',
+  cron: '45 2 * * *',
+  heavy: true,
+});
+
+/**
  * Every platform job with a cron (no workspace). The migrate job creates their queues, and the
  * worker schedules and consumes each one.
  */
 export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [
   auditRetentionSweepJob,
   accessReviewSweepJob,
+  housekeepingSweepJob,
 ];

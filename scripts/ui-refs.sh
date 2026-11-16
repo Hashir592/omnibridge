@@ -29,7 +29,16 @@ if [[ -n "$untracked" ]]; then
   echo "$untracked" | sed 's/^/  /'
 fi
 
-(cd "$root" && git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf -) |
+# Only paths that exist: a tracked file deleted in the working tree is still listed by
+# `git ls-files --cached`, and tar would stop on it.
+existing_files() {
+  local f
+  git ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do
+    if [[ -e "$f" || -L "$f" ]]; then printf '%s\0' "$f"; fi
+  done
+}
+
+(cd "$root" && existing_files | tar --null -T - -cf -) |
   docker_run -i --rm -v "$(docker_src "$out"):/out" -e CI=1 -e GREP="$grep_arg" \
     -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "$PLAYWRIGHT_IMAGE" bash -euo pipefail -c '
       mkdir /w && cd /w && tar -xf -

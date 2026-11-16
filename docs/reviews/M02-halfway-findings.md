@@ -99,7 +99,7 @@ Resolution: fixed in `2e35ffa` (migration 0012). Every request is counted by ema
 Area: 6 Performance and memory  IDs: USR-6, USR-7
 Evidence: `app.sessions` gets a row per sign-in (revoked or expired rows stay), and `app.password_resets` keeps used and expired links; `grep -rn "DELETE FROM app.sessions\|DELETE FROM app.password_resets"` finds nothing outside tests. Only `login_counters` and `ip_counters` clean themselves (inside `auth_record_failure`). Hash-only data, so nothing leaks, but the tables grow for ever.
 Required fix: Put both into T-0207's retention job (delete sessions revoked or expired more than, say, 30 days ago; resets used or expired more than 7 days ago), with an index to delete by, and a test.
-Resolution: deferred to T-0207 (S1).
+Resolution: deferred to T-0207 (S1). Fixed in T-0207: `app.auth_purge()` (0016, worker only, cut-offs inside the function), indexes `sessions_ended` and `password_resets_ended` (0017), run by the daily `housekeeping.daily-sweep`. Test: `packages/db/src/housekeeping.int.test.ts` `[USR-6][USR-7]`.
 
 ## F-M02h-07 — Minor — The documented demo TOTP secret is wrong
 Area: 1 Correctness  IDs: USR-4 (AT-3)

@@ -16,7 +16,8 @@ export function createWorkerBoss(
     ...connection,
     ...overrides,
     schema: QUEUE_SCHEMA,
-    max: 8,
+    // pg-boss's own queries are short: 4 connections, inside ob_worker's cap of 15 (T-0207).
+    max: 4,
     migrate: false,
     createSchema: false,
     reindex: false,
