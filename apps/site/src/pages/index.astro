@@ -6,12 +6,12 @@ const requestAccess = `mailto:${CONTACT.support}?subject=${encodeURIComponent('R
 const channels = [
   { name: 'Amazon', detail: 'Orders, listings, fees' },
   { name: 'eBay', detail: 'Orders, listings, messages' },
-  { name: 'Your website', detail: 'Orders and stock' },
+  { name: 'Evri and DPD', detail: 'Labels and tracking' },
 ];
 const outcomes = [
   { name: 'Stock', detail: 'One figure for every channel' },
   { name: 'Orders', detail: 'One list, with ship-by dates' },
-  { name: 'Labels', detail: 'Evri and DPD, in bulk' },
+  { name: 'Shipping', detail: 'Labels in bulk, tracking sent back' },
   { name: 'Profit and VAT', detail: 'Held to the penny' },
 ];
 // Curves from each channel to the hub and from the hub to each outcome, in a 100 x 100 box that
@@ -29,7 +29,7 @@ const facts = [
   ['No tracking', 'No analytics, advertising or third-party scripts.'],
 ];
 const modules = [
-  ['Stock', 'One stock figure per product across Amazon, eBay and your own website, with low-stock alerts.'],
+  ['Stock', 'One stock figure per product across Amazon and eBay, with low-stock alerts.'],
   ['Orders', 'Every channel’s orders in one list, with clear dispatch deadlines.'],
   ['Shipping', 'Buy Evri and DPD labels in bulk and send tracking back to each channel.'],
   ['Account health', 'Amazon and eBay account health and seller feedback in one place.'],
@@ -40,7 +40,7 @@ const modules = [
 
 <Base
   title="OmniBridge"
-  description="OmniBridge is the back office for UK sellers on Amazon, eBay and their own website: stock, orders, shipping labels, account health, ads, profit and VAT figures."
+  description="OmniBridge is the back office for UK sellers on Amazon and eBay: stock, orders, shipping labels, account health, ads, profit and VAT figures."
 >
   <section class="hero wrap">
     <div class="hero-copy">
@@ -50,7 +50,7 @@ const modules = [
         <span class="accent">marketplace sellers</span>
       </h1>
       <p class="lead">
-        OmniBridge brings your Amazon, eBay and website selling together: multichannel stock, orders,
+        OmniBridge brings your Amazon and eBay selling together: multichannel stock, orders,
         shipping labels, account health, Amazon Ads, profit and the VAT figures for your returns.
       </p>
       <div class="actions">
@@ -69,7 +69,7 @@ const modules = [
       >
         {lines.map((d) => <path d={d} vector-effect="non-scaling-stroke" />)}
       </svg>
-      <ul class="bridge-col bridge-in" aria-label="Where your orders come from">
+      <ul class="bridge-col bridge-in" aria-label="What OmniBridge connects to">
         {
           channels.map((c) => (
             <li>
@@ -94,7 +94,7 @@ const modules = [
         }
       </ul>
       <figcaption class="visually-hidden">
-        Orders and listings from Amazon, eBay and your website come into OmniBridge, where you manage
+        Orders and listings from Amazon and eBay come into OmniBridge, where you manage
         stock, orders, shipping labels, profit and VAT.
       </figcaption>
     </figure>
@@ -118,7 +118,7 @@ const modules = [
       <div class="section-head">
         <h2 id="product">Every channel’s orders in one list</h2>
         <p>
-          Amazon, eBay and website orders side by side, each with its dispatch deadline, so the packing
+          Amazon and eBay orders side by side, each with its dispatch deadline, so the packing
           team knows what goes out first.
         </p>
       </div>
@@ -127,7 +127,7 @@ const modules = [
           src="/screens/orders.webp"
           width="2880"
           height="1800"
-          alt="The OmniBridge orders list, showing orders from the website, Amazon and eBay with their dispatch deadlines"
+          alt="The OmniBridge orders list, showing orders from Amazon and eBay with their dispatch deadlines"
           loading="lazy"
         />
         <figcaption>The orders list, with demonstration data.</figcaption>

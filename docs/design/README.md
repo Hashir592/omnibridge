@@ -30,7 +30,7 @@ The client's seven changes (`docs/plan/client-changes-20261112.md`) on the same 
 ## Public site (M06, S2 with Hashir, 17 Nov 2026)
 
 - `apps/site`: same tokens as the app (petrol accent, graphite for the one dark band), Inter Variable self-hosted from `@fontsource-variable/inter` 5.3.0 (ADR-036, now also a site dependency) with the latin file preloaded. Page width 84rem; prose 42rem.
-- Home: three-line headline with "marketplace sellers" in petrol; the "bridge" figure (channels → OmniBridge mark → stock, orders, labels, profit and VAT) is static HTML + SVG, no animation; orders screenshot at 2x (2880x1800), never taller than the window.
+- Home: three-line headline with "marketplace sellers" in petrol; the "bridge" figure (Amazon, eBay, Evri and DPD → OmniBridge mark → stock, orders, shipping, profit and VAT; no own-website offer, ADR-059) is static HTML + SVG, no animation; orders screenshot at 2x (2880x1800), never taller than the window.
 - Privacy and terms use `layouts/Legal.astro` (contents list built at build time, wording unchanged). New `/amazon` and `/ebay` pages, wording drafted from PRD 3.1–3.3 and 7.3, pending client review.
 - No script, inline style or outside request (WWW-3, CSP in `infra/docker/site-sws.toml`).
 
