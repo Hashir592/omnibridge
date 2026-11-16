@@ -1,51 +1,24 @@
 /**
- * Admin pages for the client preview (T-0305). PROPOSED SHAPE (mock only): users with their tab
- * and company ticks (PERM-1..7, USR-4) and connections (INT-4). Admin-only routes: the handlers
+ * Admin pages for the client preview (T-0305). Users, invites and access reviews follow the real
+ * T-0204 contract (PERM-1..7, USR-1, USR-8, USR-9); connections (INT-4) are still a PROPOSED SHAPE. Admin-only routes: the handlers
  * answer 403 to a child. Synthetic people and example.com addresses only.
  */
+import { HttpResponse, http } from 'msw/http';
+import type { AccessReview, UserAccess, WorkspaceUser } from '../auth/api.ts';
 import { channelAccounts } from './data.ts';
 import { DAY, HOUR, ago } from './random.ts';
-import type { Channel, Tab } from './types.ts';
+import { currentSession } from './session.ts';
+import type { Channel } from './types.ts';
 
-export const TICKABLE_TABS: Array<{ key: Tab; label: string }> = [
-  { key: 'home', label: 'Home' },
-  { key: 'orders', label: 'Orders' },
-  { key: 'shipping', label: 'Shipping' },
-  { key: 'stock', label: 'Stock & Catalogue' },
-  { key: 'customer_service', label: 'Customer Service' },
-  { key: 'account_health', label: 'Account Health' },
-  { key: 'advertising', label: 'Advertising' },
-  { key: 'sales_profit', label: 'Sales & Profit' },
-  { key: 'forecasting', label: 'Forecasting' },
-  { key: 'finance', label: 'Finance' },
-  { key: 'reminders', label: 'Reminders' },
-  { key: 'notes', label: 'Notes' },
-];
-
-export interface WorkspaceUser {
-  id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'child';
-  /** Admins see every tab and company (PERM-2); these lists apply to children only. */
-  tabs: Tab[];
-  companyIds: string[];
-  mfa: boolean;
-  state: 'active' | 'invited' | 'locked';
-  lastSignInAt: string | null;
-  inviteExpiresAt: string | null;
-}
-
-const ALL = TICKABLE_TABS.map((t) => t.key);
-
-export const users: WorkspaceUser[] = [
+/** The demo workspace's users in the contract's shape (T-0204). Admins carry no ticks (PERM-2). */
+const SEED_USERS: WorkspaceUser[] = [
   {
     id: 'usr_1',
     name: 'Sam Admin',
     email: 'sam.admin@example.com',
     role: 'admin',
-    tabs: ALL,
-    companyIds: ['co_1', 'co_2', 'co_3'],
+    tabs: [],
+    companyIds: [],
     mfa: true,
     state: 'active',
     lastSignInAt: ago(0.4 * HOUR),
@@ -68,7 +41,7 @@ export const users: WorkspaceUser[] = [
     name: 'Alex Accounts',
     email: 'alex.accounts@example.com',
     role: 'child',
-    tabs: ['home', 'sales_profit', 'finance'],
+    tabs: ['home', 'sales-profit', 'finance'],
     companyIds: ['co_1', 'co_2', 'co_3'],
     mfa: true,
     state: 'active',
@@ -80,10 +53,10 @@ export const users: WorkspaceUser[] = [
     name: 'Jo Support',
     email: 'jo.support@example.com',
     role: 'child',
-    tabs: ['home', 'orders', 'customer_service', 'reminders', 'notes'],
+    tabs: ['home', 'orders', 'customer-service', 'reminders', 'notes'],
     companyIds: ['co_2'],
     mfa: true,
-    state: 'locked',
+    state: 'active',
     lastSignInAt: ago(4 * DAY),
     inviteExpiresAt: null,
   },
@@ -92,7 +65,7 @@ export const users: WorkspaceUser[] = [
     name: 'Chris Stock',
     email: 'chris.stock@example.com',
     role: 'child',
-    tabs: ['home', 'stock', 'forecasting', 'shipping'],
+    tabs: ['home', 'stock-catalogue', 'forecasting', 'shipping'],
     companyIds: ['co_1', 'co_3'],
     mfa: true,
     state: 'active',
@@ -100,8 +73,8 @@ export const users: WorkspaceUser[] = [
     inviteExpiresAt: null,
   },
   {
-    id: 'usr_6',
-    name: 'Robin New',
+    id: 'inv_1',
+    name: '',
     email: 'robin.new@example.com',
     role: 'child',
     tabs: [],
@@ -111,6 +84,121 @@ export const users: WorkspaceUser[] = [
     lastSignInAt: null,
     inviteExpiresAt: new Date(Date.now() + 52 * HOUR).toISOString(),
   },
+];
+
+const SEED_REVIEWS: AccessReview[] = [
+  {
+    id: 'rev_3',
+    dueAt: new Date(Date.now() + 9 * DAY).toISOString(),
+    createdAt: ago(21 * DAY),
+    completedAt: null,
+  },
+  { id: 'rev_2', dueAt: ago(83 * DAY), createdAt: ago(113 * DAY), completedAt: ago(86 * DAY) },
+  { id: 'rev_1', dueAt: ago(174 * DAY), createdAt: ago(204 * DAY), completedAt: ago(176 * DAY) },
+];
+
+/** Mutable copies, so the mock-ups can invite, edit and remove. */
+export let users: WorkspaceUser[] = SEED_USERS.map((u) => ({ ...u }));
+let reviews: AccessReview[] = SEED_REVIEWS.map((r) => ({ ...r }));
+let inviteSeq = 1;
+
+export function resetUsersMock(): void {
+  users = SEED_USERS.map((u) => ({ ...u }));
+  reviews = SEED_REVIEWS.map((r) => ({ ...r }));
+  inviteSeq = 1;
+}
+
+const problem = (status: number, code: string, detail?: string) =>
+  HttpResponse.json(
+    { type: 'about:blank', title: '', status, code, ...(detail ? { detail } : {}) },
+    { status, headers: { 'content-type': 'application/problem+json' } },
+  );
+const forbidden = () => problem(403, 'forbidden');
+const isAdmin = () => currentSession().user.isAdmin;
+const admins = () => users.filter((u) => u.state === 'active' && u.role === 'admin');
+const lastAdmin = (id: string) => {
+  const a = admins();
+  return a.length === 1 && a[0]?.id === id;
+};
+const PERM7 = 'A workspace must keep at least one admin';
+
+/** T-0204 user routes, admin only (403 to a child), with the server's 409 for PERM-7. */
+export const userHandlers = [
+  http.get('*/users', () => (isAdmin() ? HttpResponse.json(users) : forbidden())),
+
+  http.post('*/users/invites', async ({ request }) => {
+    if (!isAdmin()) return forbidden();
+    const body = (await request.json()) as { email: string } & UserAccess;
+    const email = body.email.trim().toLowerCase();
+    if (users.some((u) => u.email === email && u.state === 'active')) {
+      return problem(409, 'conflict', 'This person is already a member of this workspace');
+    }
+    inviteSeq += 1;
+    const invited: WorkspaceUser = {
+      id: `inv_${String(inviteSeq)}`,
+      name: '',
+      email,
+      role: body.role,
+      tabs: body.role === 'admin' ? [] : body.tabs,
+      companyIds: body.role === 'admin' ? [] : body.companyIds,
+      mfa: false,
+      state: 'invited',
+      lastSignInAt: null,
+      inviteExpiresAt: new Date(Date.now() + 72 * HOUR).toISOString(),
+    };
+    users = [...users, invited];
+    return HttpResponse.json(invited, { status: 201 });
+  }),
+
+  http.post('*/users/invites/:inviteId/revoke', ({ params }) => {
+    if (!isAdmin()) return forbidden();
+    const id = String(params.inviteId);
+    if (!users.some((u) => u.id === id && u.state === 'invited')) return problem(404, 'not_found');
+    users = users.filter((u) => u.id !== id);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.put('*/users/:userId/access', async ({ params, request }) => {
+    if (!isAdmin()) return forbidden();
+    const id = String(params.userId);
+    const u = users.find((x) => x.id === id && x.state === 'active');
+    if (!u) return problem(404, 'not_found');
+    const body = (await request.json()) as UserAccess;
+    if (body.role !== 'admin' && lastAdmin(id)) return problem(409, 'conflict', PERM7);
+    users = users.map((x) =>
+      x.id === id
+        ? {
+            ...x,
+            role: body.role,
+            tabs: body.role === 'admin' ? [] : body.tabs,
+            companyIds: body.role === 'admin' ? [] : body.companyIds,
+          }
+        : x,
+    );
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete('*/users/:userId', ({ params }) => {
+    if (!isAdmin()) return forbidden();
+    const id = String(params.userId);
+    if (!users.some((x) => x.id === id && x.state === 'active')) return problem(404, 'not_found');
+    if (lastAdmin(id)) return problem(409, 'conflict', PERM7);
+    users = users.filter((x) => x.id !== id);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get('*/access-reviews', () => (isAdmin() ? HttpResponse.json(reviews) : forbidden())),
+
+  http.post('*/access-reviews/:reviewId/complete', ({ params }) => {
+    if (!isAdmin()) return forbidden();
+    const id = String(params.reviewId);
+    const r = reviews.find((x) => x.id === id && x.completedAt === null);
+    if (!r) return problem(404, 'not_found');
+    reviews = reviews.map((x) =>
+      x.id === id ? { ...x, completedAt: new Date().toISOString() } : x,
+    );
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];
 
 /* ---------- connections ---------- */

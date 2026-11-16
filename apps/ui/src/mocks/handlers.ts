@@ -12,7 +12,7 @@ import { computeGroups, dismissGroup, removeFromGroup } from './groups.ts';
 import { homeSummary } from './home.ts';
 import { orderPage } from './orderList.ts';
 import { previewHandlers } from './preview-handlers.ts';
-import { currentSession } from './session.ts';
+import { channelOn, currentSession } from './session.ts';
 import type { Channel, OrderRow } from './types.ts';
 
 /** Mock of the ORD-5 audit: every full PII view is recorded (user, order, time). */
@@ -24,6 +24,7 @@ function permitted(companyParam: string | null): OrderRow[] {
   return orders.filter(
     (o) =>
       allowed.has(o.companyId) &&
+      channelOn(o.channel) &&
       (!companyParam || companyParam === 'all' || o.companyId === companyParam),
   );
 }

@@ -4,6 +4,7 @@
  * Every list is limited to the user's permitted companies (invariant 4).
  */
 import { channelAccounts, companies } from './data.ts';
+import { channelOn } from './session.ts';
 import { DAY, ago, rng } from './random.ts';
 
 export type Stagger = 1 | 2 | 3 | 'monthly';
@@ -143,7 +144,7 @@ function vatCompany(companyId: string, index: number): VatCompany {
     const status: VatPeriod['status'] = k === 0 ? 'in_progress' : k === 1 ? 'open' : 'filed';
     const scale = k === 0 ? (now.getUTCDate() + 1) / 92 : 1;
     const lines = vatLines(index * 101 + k * 7 + 3, (1 - index * 0.25) * scale);
-    const accts = channelAccounts.filter((a) => a.companyId === companyId);
+    const accts = channelAccounts.filter((a) => a.companyId === companyId && channelOn(a.channel));
     const weights = accts.map((_, i) => 1 / (i + 1));
     const wsum = weights.reduce((a, b) => a + b, 0) || 1;
     periods.push({
@@ -363,7 +364,9 @@ export function pnl(allowed: Set<string>, p: URLSearchParams): Pnl {
     line('sales_ebay', 'Net sales: eBay', (r, i) =>
       Math.round(r.int(1_700_000, 2_200_000) * share(i)),
     ),
-    line('sales_web', 'Net sales: Website', (r, i) => (i === 1 ? r.int(420_000, 610_000) : 0)),
+    line('sales_web', 'Net sales: Website', (r, i) =>
+      i === 1 && channelOn('website') ? r.int(420_000, 610_000) : 0,
+    ),
     line('refunds', 'Less net refunds', (r, i) => -Math.round(r.int(140_000, 230_000) * share(i))),
     line('ic_income', 'Intercompany recharge income', (r, i) =>
       combined ? 0 : i === 0 ? r.int(80_000, 120_000) : 0,

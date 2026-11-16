@@ -4,6 +4,7 @@
  * user's permitted companies are summed (invariant 4).
  */
 import { channelAccounts, companies } from './data.ts';
+import { channelOn } from './session.ts';
 import { DAY, rng } from './random.ts';
 import { skus } from './stock.ts';
 import type { Channel } from './types.ts';
@@ -182,7 +183,10 @@ export function profitSummary(allowed: Set<string>, p: URLSearchParams): ProfitS
   const compare = (p.get('compare') ?? 'previous') as ProfitCompare;
   const by = (p.get('by') ?? 'company') as ProfitBreakdown;
   const accounts = channelAccounts.filter(
-    (a) => allowed.has(a.companyId) && (!company || company === 'all' || a.companyId === company),
+    (a) =>
+      allowed.has(a.companyId) &&
+      channelOn(a.channel) &&
+      (!company || company === 'all' || a.companyId === company),
   );
 
   const [lo, hi] = range(period);

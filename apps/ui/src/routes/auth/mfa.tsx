@@ -9,11 +9,18 @@ import { CodeField, useEnterApp } from './parts.tsx';
 
 type Failure = 'invalid' | 'locked' | 'error';
 
-/** After MFA, go to the workspace picker or straight into the app. */
+/**
+ * After MFA: accept the terms first if they changed (WWW-7), else the workspace picker or the app.
+ * (`password_change` routing waits for the real change-password route; the screen is a mock-up.)
+ */
 function useAfterMfa() {
   const enter = useEnterApp();
-  return (r: ApiReply<MfaResult>) =>
-    enter((r.body as MfaResult).next === 'workspace_picker' ? '/workspaces' : '/');
+  return (r: ApiReply<MfaResult>) => {
+    const next = (r.body as MfaResult).next;
+    return enter(
+      next === 'terms' ? '/sign-in/terms' : next === 'workspace_picker' ? '/workspaces' : '/',
+    );
+  };
 }
 
 function failureOf(status: number): Failure {

@@ -3,8 +3,7 @@
  * the workspace picker. Every state-changing call carries the CSRF token (SEC-1): the server sets
  * the `ob_csrf` cookie and the SPA echoes it in `x-csrf-token`.
  */
-import { createApiClient } from '@omnibridge/contract/client';
-import type { WorkspaceUser } from '../mocks/admin.ts';
+import { createApiClient, type components } from '@omnibridge/contract/client';
 import type {
   InviteInfo,
   MfaConfirmResult,
@@ -12,6 +11,8 @@ import type {
   MfaResult,
   ResetTokenInfo,
   SignInResult,
+  TermsAccepted,
+  TermsInfo,
   WorkspaceChoice,
 } from './shapes.ts';
 
@@ -63,13 +64,57 @@ async function reply<T>(
   };
 }
 
-/** Users of the workspace (T-0204, admin only): members and open invites. */
+/** A member or an open invite (T-0204). For an invite, `id` is the invite id. */
+export type WorkspaceUser = components['schemas']['WorkspaceUser'];
+/** Role and ticks; an admin's tabs and companies are empty, since admins see everything. */
+export type UserAccess = components['schemas']['UserAccess'];
+export type UserTab = UserAccess['tabs'][number];
+export type AccessReview = components['schemas']['AccessReview'];
+
+/** Users of the workspace (T-0204, admin only): members, open invites and access reviews. */
 export const usersApi = {
   list: async (): Promise<WorkspaceUser[]> => {
     const r = await reply<WorkspaceUser[]>(api.GET('/users'));
     if (!r.ok) throw new Error(String(r.status));
     return r.body as WorkspaceUser[];
   },
+  invite: async (email: string, access: UserAccess) =>
+    reply<WorkspaceUser>(
+      api.POST('/users/invites', { body: { email, ...access }, headers: await csrfHeaders() }),
+    ),
+  revokeInvite: async (inviteId: string) =>
+    reply<never>(
+      api.POST('/users/invites/{inviteId}/revoke', {
+        params: { path: { inviteId } },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** 409 `conflict` when it would demote the last admin (PERM-7). */
+  setAccess: async (userId: string, access: UserAccess) =>
+    reply<never>(
+      api.PUT('/users/{userId}/access', {
+        params: { path: { userId } },
+        body: access,
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** 409 `conflict` when it would remove the last admin (PERM-7). */
+  remove: async (userId: string) =>
+    reply<never>(
+      api.DELETE('/users/{userId}', { params: { path: { userId } }, headers: await csrfHeaders() }),
+    ),
+  accessReviews: async (): Promise<AccessReview[]> => {
+    const r = await reply<AccessReview[]>(api.GET('/access-reviews'));
+    if (!r.ok) throw new Error(String(r.status));
+    return r.body as AccessReview[];
+  },
+  completeReview: async (reviewId: string) =>
+    reply<never>(
+      api.POST('/access-reviews/{reviewId}/complete', {
+        params: { path: { reviewId } },
+        headers: await csrfHeaders(),
+      }),
+    ),
 };
 
 export const authApi = {
@@ -113,6 +158,11 @@ export const authApi = {
         body: { token, name, password },
         headers: await csrfHeaders(),
       }),
+    ),
+  terms: () => reply<TermsInfo>(api.GET('/auth/terms')),
+  acceptTerms: async (version: string) =>
+    reply<TermsAccepted>(
+      api.POST('/auth/terms', { body: { version }, headers: await csrfHeaders() }),
     ),
   chooseWorkspace: async (workspaceId: string) =>
     reply<never>(

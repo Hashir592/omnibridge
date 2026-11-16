@@ -176,6 +176,11 @@ const users = createRoute({
   path: '/users',
   component: lazyRouteComponent(usersFile, 'UsersPage'),
 });
+const accessReviews = createRoute({
+  getParentRoute: () => root,
+  path: '/users/access-reviews',
+  component: lazyRouteComponent(usersFile, 'AccessReviewsPage'),
+});
 const userDetail = createRoute({
   getParentRoute: () => root,
   path: '/users/$userId',
@@ -277,6 +282,7 @@ const preview = [
   finance,
   accountHealth,
   users,
+  accessReviews,
   userDetail,
   connections,
   customerService,
@@ -327,6 +333,10 @@ const auth = [
     lazyRouteComponent(() => import('./routes/auth/password-change.tsx'), 'PasswordChangePage'),
   ),
   authRoute('/workspaces', lazyRouteComponent(inviteFile, 'WorkspacesPage')),
+  authRoute(
+    '/sign-in/terms',
+    lazyRouteComponent(() => import('./routes/auth/terms.tsx'), 'TermsPage'),
+  ),
 ] as const;
 const resetPassword = createRoute({
   getParentRoute: () => root,

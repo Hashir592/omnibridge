@@ -80,6 +80,53 @@ describe('mock orders API', () => {
       expect(extra.every((o) => cutGroup !== undefined && o.group?.id === cutGroup)).toBe(true);
     }
   });
+
+  // C3.3: "Pagination never splits a group: a page may run over 50 rows to keep a group whole."
+  // These hold on any date, unlike the check above, whose cut may or may not land in a group.
+  const walk = async (limit: number) => {
+    const pages: Array<OrderPage['items']> = [];
+    let cursor: number | null = 0;
+    let total = 0;
+    while (cursor !== null) {
+      const body = await page(`/api/mock/orders?limit=${String(limit)}&cursor=${String(cursor)}`);
+      pages.push(body.items);
+      total = body.total;
+      cursor = body.nextCursor;
+    }
+    return { pages, total };
+  };
+
+  it('[NFR-8] paging never splits a same-buyer group and never loses or repeats a row', async () => {
+    for (const limit of [20, 50, 100]) {
+      const { pages, total } = await walk(limit);
+      const ids = pages.flat().map((o) => o.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids).toHaveLength(total);
+      const pageOfGroup = new Map<string, number>();
+      pages.forEach((items, n) => {
+        for (const o of items) {
+          const g = o.group?.id;
+          if (g === undefined) continue;
+          expect({ g, page: pageOfGroup.get(g) ?? n }).toEqual({ g, page: n });
+          pageOfGroup.set(g, n);
+        }
+      });
+    }
+  });
+
+  it('[NFR-8] a page cut inside a same-buyer group runs on to finish it', async () => {
+    const all = (await walk(100)).pages.flat();
+    const k = all.findIndex(
+      (o, i) => i >= 19 && o.group?.id !== undefined && all[i + 1]?.group?.id === o.group.id,
+    );
+    expect(k).toBeGreaterThan(-1);
+    // A 20-row page whose 20th row is all[k]: the cut falls inside that group.
+    const body = await page(`/api/mock/orders?limit=20&cursor=${String(k - 19)}`);
+    const group = all[k]?.group?.id;
+    expect(body.items.length).toBeGreaterThan(20);
+    expect(body.items.slice(20).every((o) => o.group?.id === group)).toBe(true);
+    expect(all[k - 19 + body.items.length]?.group?.id).not.toBe(group);
+  });
 });
 
 describe('mock home summary', () => {

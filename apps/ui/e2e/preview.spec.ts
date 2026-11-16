@@ -282,3 +282,32 @@ test('[PRF-6] order profit: profit inc VAT is profit ex VAT plus net VAT', async
   await expect(profit).toContainText('£2.70');
   await expect(profit).toContainText('£16.13');
 });
+
+test('[ADR-059] with the website connector off, no area shows the Website channel', async ({
+  page,
+}) => {
+  await open(page, '/', 'Needs action');
+  await expect(page.locator('main')).toContainText('Website');
+  await page.getByRole('button', { name: /Sam Admin/ }).click();
+  await page.getByRole('menuitemradio', { name: /Robin Admin/ }).click();
+  // Client-side navigation keeps the persona (a full reload resets the mock to the admin).
+  const go = async (path: string, ready: string) => {
+    await page.evaluate((p) => {
+      history.pushState({}, '', p);
+      dispatchEvent(new PopStateEvent('popstate'));
+    }, path);
+    await expect(page.getByText(ready).first()).toBeVisible();
+    await expect(page.locator('main')).not.toContainText(/website|harbourgoods/i);
+  };
+  await go('/', 'Needs action');
+  await go('/connections', 'Sales channels');
+  await go('/orders', 'Awaiting dispatch');
+  await page.getByRole('button', { name: 'Channel' }).click();
+  await expect(page.getByRole('menuitemcheckbox')).toHaveCount(4);
+  await expect(page.getByRole('menuitemcheckbox', { name: /harbourgoods/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await go('/stock', 'Stock');
+  await go('/sales-profit', 'Sales & Profit');
+  await go('/shipping', 'Shipping');
+  await expect(page.locator('option[value="website"]')).toHaveCount(0);
+});

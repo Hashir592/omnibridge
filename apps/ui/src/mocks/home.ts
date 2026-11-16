@@ -3,6 +3,7 @@
  * same synthetic orders as the list, so the tiles and the lists they link to agree.
  * Items the user's tabs do not cover are removed here, as the server will do (HOME-2, PERM-3).
  */
+import { channelOn } from './session.ts';
 import { daysFromToday } from '../lib/format.ts';
 import type { Channel, OrderRow, Session, Tab } from './types.ts';
 
@@ -159,7 +160,7 @@ export function homeSummary(rows: OrderRow[], session: Session): HomeSummary {
   return {
     asOf: new Date(now - 2 * 60_000).toISOString(),
     todayByChannel: has('orders')
-      ? (['amazon', 'ebay', 'website'] as const).map((c) => ({
+      ? (['amazon', 'ebay', 'website'] as const).filter(channelOn).map((c) => ({
           channel: c,
           orders: today.filter((o) => o.channel === c).length,
         }))
