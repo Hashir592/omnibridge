@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   AuditLog,
+  AuthStore,
   createMainDb,
   JobLeaseRepository,
   JobRecordRepository,
@@ -17,6 +18,7 @@ import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { auditRetentionHandler, sweepAuditRetention } from './audit-retention.ts';
+import { sweepHousekeeping } from './housekeeping.ts';
 import { registerPlatformHandlers } from './platform-jobs.ts';
 import { createWorkerBoss } from './heartbeat.ts';
 
@@ -133,12 +135,43 @@ describe('audit retention job (AUD-3)', () => {
     expect(sent).toEqual(workspaces.map(() => false));
   });
 
+  it('[NFR-3][USR-6] the housekeeping sweep purges as ob_worker and sends one jobs.retention per workspace, keyed by the London day', async () => {
+    const sent: { type: string; workspaceId: string; key: string }[] = [];
+    const count = await sweepHousekeeping({
+      auth: new AuthStore(main.db),
+      directory: new WorkspaceDirectory(platform.db),
+      queue: {
+        send: (def, input) => {
+          sent.push({
+            type: def.type,
+            workspaceId: input.ctx.workspaceId,
+            key: input.idempotencyKey,
+          });
+          return Promise.resolve({ id: randomUUID(), created: true });
+        },
+      },
+      logger,
+      now: new Date('2026-11-16T23:30:00Z'),
+    });
+    expect(count).toBe(workspaces.length);
+    expect(sent).toEqual(
+      expect.arrayContaining(
+        workspaces.map((workspaceId) => ({
+          type: 'jobs.retention',
+          workspaceId,
+          key: 'jobs.retention:2026-11-16',
+        })),
+      ),
+    );
+  });
+
   it('[AUD-3] the worker schedules the sweep at 02:30 London time', async () => {
     await registerPlatformHandlers(
       boss,
       {
         'audit.retention-sweep': () => Promise.resolve(),
         'users.access-review-sweep': () => Promise.resolve(),
+        'housekeeping.daily-sweep': () => Promise.resolve(),
       },
       logger,
     );
@@ -152,6 +185,11 @@ describe('audit retention job (AUD-3)', () => {
         expect.objectContaining({
           name: 'users.access-review-sweep',
           cron: '0 3 * * *',
+          timezone: 'Europe/London',
+        }),
+        expect.objectContaining({
+          name: 'housekeeping.daily-sweep',
+          cron: '45 2 * * *',
           timezone: 'Europe/London',
         }),
       ]),

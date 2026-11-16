@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AuditValueRejected, type TenantContext } from '@omnibridge/core';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
-import pg from 'pg';
+import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AuditLog,
@@ -16,6 +16,7 @@ import {
   type AuditCursor,
   type MainDbHandle,
 } from './index.ts';
+import { createPool } from './pool.ts';
 
 const ROLES = ['ob_owner', 'ob_app', 'ob_worker', 'ob_platform'] as const;
 const SIX_YEARS_AGO_AND_A_DAY = "now() - interval '6 years 1 day'";
@@ -27,10 +28,14 @@ describe('append-only audit log (AUD-1, AUD-3, AUD-4)', () => {
   let audit: AuditLog;
   /** The worker's role, the only one allowed to run the purge (ADR-049). */
   let worker: MainDbHandle;
-  const pools: pg.Pool[] = [];
+  // One pool per role: the roles script caps each role's connections (T-0207).
+  const pools = new Map<string, pg.Pool>();
   const raw = (role: string) => {
-    const pool = new pg.Pool({ ...cluster.connection(role), max: 2 });
-    pools.push(pool);
+    const open = pools.get(role);
+    if (open !== undefined) return open;
+    // createPool listens for errors, so a connection the container ends cannot crash the run.
+    const pool = createPool({ ...cluster.connection(role), max: 2 });
+    pools.set(role, pool);
     return pool;
   };
 
@@ -104,7 +109,7 @@ describe('append-only audit log (AUD-1, AUD-3, AUD-4)', () => {
   });
 
   afterAll(async () => {
-    await Promise.all(pools.map((p) => p.end()));
+    await Promise.all([...pools.values()].map((p) => p.end()));
     await worker.destroy();
     await main.destroy();
     await cluster.container.stop();

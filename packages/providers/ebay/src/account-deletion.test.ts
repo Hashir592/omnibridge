@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   challengeResponse,
+  EbayBudgetExhausted,
   ebayPublicKeyFetcher,
   isVerificationToken,
   PublicKeyCache,
@@ -101,6 +102,7 @@ describe('eBay marketplace account deletion (EBAY-2)', () => {
       apiBase: 'http://provider-mocks:8080/ebay',
       clientId: 'synthetic-client',
       clientSecret: 'synthetic-secret',
+      budget: () => true,
       fetch: fake as typeof fetch,
     });
     expect(await fetchKey(SAMPLE.kid)).toBe(SAMPLE.key);
@@ -110,5 +112,35 @@ describe('eBay marketplace account deletion (EBAY-2)', () => {
       `GET http://provider-mocks:8080/ebay/commerce/notification/v1/public_key/${SAMPLE.kid}`,
       `GET http://provider-mocks:8080/ebay/commerce/notification/v1/public_key/${SAMPLE.kid}`,
     ]);
+  });
+
+  it('[RL-2][EBAY-2] each call is counted before it is sent; a spent budget sends nothing (ADR-058)', async () => {
+    const fake = vi.fn((url: string | URL) =>
+      Promise.resolve(
+        String(url).endsWith('/oauth2/token')
+          ? Response.json({ access_token: 'app-token', expires_in: 7200 })
+          : Response.json({ key: SAMPLE.key }),
+      ),
+    );
+    const counted: string[] = [];
+    let keyReadsLeft = 1;
+    const fetchKey = ebayPublicKeyFetcher({
+      apiBase: 'http://provider-mocks:8080/ebay',
+      clientId: 'synthetic-client',
+      clientSecret: 'synthetic-secret',
+      budget: (api) => {
+        counted.push(api);
+        if (api !== 'notification.public_key') return true;
+        keyReadsLeft -= 1;
+        return keyReadsLeft >= 0;
+      },
+      fetch: fake as typeof fetch,
+    });
+    expect(await fetchKey(SAMPLE.kid)).toBe(SAMPLE.key);
+    expect(counted).toEqual(['identity.app_token', 'notification.public_key']);
+    expect(fake).toHaveBeenCalledTimes(2);
+    await expect(fetchKey(SAMPLE.kid)).rejects.toBeInstanceOf(EbayBudgetExhausted);
+    // Refused before sending: no third request went out.
+    expect(fake).toHaveBeenCalledTimes(2);
   });
 });

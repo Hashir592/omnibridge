@@ -1,16 +1,25 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
+import { Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateMain } from './migrate.ts';
+import { runSqlMigrations } from './sql-migrations.ts';
 
+const OWNER = 'ob_owner';
 const ROLES = ['ob_owner', 'ob_app', 'ob_platform'] as const;
 
 describe('db-main roles and migrations', () => {
   let cluster: RoleCluster;
-  const pools: pg.Pool[] = [];
+  // One pool per role: the roles script caps each role's connections (T-0207).
+  const pools = new Map<string, pg.Pool>();
   const pool = (role: string) => {
+    const open = pools.get(role);
+    if (open !== undefined) return open;
     const p = new pg.Pool({ ...cluster.connection(role), max: 2 });
-    pools.push(p);
+    pools.set(role, p);
     return p;
   };
 
@@ -19,7 +28,7 @@ describe('db-main roles and migrations', () => {
   });
 
   afterAll(async () => {
-    await Promise.all(pools.map((p) => p.end()));
+    await Promise.all([...pools.values()].map((p) => p.end()));
     await cluster.container.stop();
   });
 
@@ -64,6 +73,8 @@ describe('db-main roles and migrations', () => {
       '0013_role_split',
       '0014_terms_acceptances',
       '0015_permissions',
+      '0016_housekeeping',
+      '0017_housekeeping_indexes',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });
@@ -88,5 +99,74 @@ describe('db-main roles and migrations', () => {
          FROM pg_namespace WHERE nspname = 'pgboss'`,
     );
     expect(rows).toEqual([{ owner: 'ob_owner', can_create: false }]);
+  });
+
+  it('[NFR-2] a no-transaction migration runs CONCURRENTLY index statements, a repeat is a no-op, and a failed build is repaired (ADR-047)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ob-migrations-'));
+    const write = (name: string, text: string) => writeFile(join(dir, name), text);
+    await write(
+      '0001_table.sql',
+      `CREATE TABLE public.nt_probe (id int PRIMARY KEY, v int);
+INSERT INTO public.nt_probe VALUES (1, 1), (2, 1);
+`,
+    );
+    await write(
+      '0002_index.sql',
+      `-- migrate: no-transaction
+SET lock_timeout = '1s';
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS nt_probe_v ON public.nt_probe (v);
+`,
+    );
+    await write(
+      '0003_after.sql',
+      `CREATE TABLE public.nt_after (id int PRIMARY KEY);
+`,
+    );
+    const tables = {
+      migrationTableName: 'nt_probe_migration',
+      migrationLockTableName: 'nt_probe_migration_lock',
+    };
+    const valid = async () =>
+      (
+        await pool(OWNER).query<{ indisvalid: boolean }>(
+          `SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+            WHERE c.relname = 'nt_probe_v'`,
+        )
+      ).rows.map((r) => r.indisvalid);
+    const db = new Kysely<unknown>({
+      dialect: new PostgresDialect({ pool: new pg.Pool({ ...cluster.connection(OWNER), max: 1 }) }),
+    });
+    try {
+      // Duplicate values: the build fails and leaves an invalid index; 0001 stays applied.
+      await expect(runSqlMigrations(db, dir, tables)).rejects.toThrow(/0002_index failed/);
+      expect(await valid()).toEqual([false]);
+      await pool(OWNER).query('UPDATE public.nt_probe SET v = 2 WHERE id = 2');
+      // The repeat drops the invalid index and builds it again, then carries on.
+      expect((await runSqlMigrations(db, dir, tables)).applied).toEqual([
+        '0002_index',
+        '0003_after',
+      ]);
+      expect(await valid()).toEqual([true]);
+      expect((await runSqlMigrations(db, dir, tables)).applied).toEqual([]);
+      await write(
+        '0004_drop.sql',
+        `-- migrate: no-transaction
+DROP INDEX CONCURRENTLY IF EXISTS public.nt_probe_v;
+`,
+      );
+      expect((await runSqlMigrations(db, dir, tables)).applied).toEqual(['0004_drop']);
+      expect(await valid()).toEqual([]);
+      // Anything but the allowed statements is refused before it runs.
+      await write(
+        '0005_bad.sql',
+        `-- migrate: no-transaction
+DROP TABLE public.nt_after;
+`,
+      );
+      await expect(runSqlMigrations(db, dir, tables)).rejects.toThrow(/ADR-047/);
+    } finally {
+      await db.destroy();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -4,10 +4,12 @@
 export const PACKAGE_NAME = '@omnibridge/provider-ebay';
 export {
   challengeResponse,
+  EbayBudgetExhausted,
   ebayPublicKeyFetcher,
   isVerificationToken,
   PublicKeyCache,
   verifyNotification,
   type EbayApiOptions,
+  type EbayKeyReadApi,
   type PublicKeySource,
 } from './account-deletion.ts';

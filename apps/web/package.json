@@ -26,6 +26,7 @@
     "@omnibridge/crypto": "workspace:*",
     "@omnibridge/db": "workspace:*",
     "@omnibridge/files": "workspace:*",
+    "@omnibridge/governor-ebay": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/provider-ebay": "workspace:*",
     "@omnibridge/queue": "workspace:*",

@@ -343,6 +343,16 @@ export class AuthStore {
     return Number(rows[0]?.n ?? 0);
   }
 
+  /**
+   * Retention (F-M02h-06), worker only: deletes sessions revoked or expired more than 30 days ago
+   * and reset links used or expired more than 7 days ago. The cut-offs live in the function.
+   */
+  async purgeExpired(): Promise<{ sessions: number; resets: number }> {
+    const { rows } = await sql<{ sessions: string; resets: string }>`
+      SELECT * FROM app.auth_purge()`.execute(this.#db);
+    return { sessions: Number(rows[0]?.sessions ?? 0), resets: Number(rows[0]?.resets ?? 0) };
+  }
+
   async mfa(userId: string): Promise<MfaState | undefined> {
     const { rows } = await sql<{
       secret: Buffer | null;

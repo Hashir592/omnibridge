@@ -81,6 +81,24 @@ describe('compose stack: limits (OPS-10)', () => {
     });
   });
 
+  it('[OPS-10] every login role has a connection cap, and the caps fit under max_connections', () => {
+    const SUPERUSER_SLOTS = 3; // PostgreSQL's default superuser_reserved_connections
+    for (const [cluster, max] of [
+      ['db-main', 40],
+      ['db-pii', 15],
+    ] as const) {
+      const script = readRepoFile(`infra/compose/${cluster}/10-roles.sh`);
+      const logins = [...script.matchAll(/CREATE ROLE (\w+) LOGIN[^;]*;/g)].map((m) => ({
+        role: m[1],
+        cap: /CONNECTION LIMIT (\d+)/.exec(m[0])?.[1],
+      }));
+      expect(logins.length).toBeGreaterThan(1);
+      expect(logins.filter((l) => l.cap === undefined)).toEqual([]);
+      const total = logins.reduce((sum, l) => sum + Number(l.cap), 0);
+      expect({ cluster, fits: total <= max - SUPERUSER_SLOTS }).toEqual({ cluster, fits: true });
+    }
+  });
+
   it('[OPS-10] the KEK re-wrap job is opt-in through the ops profile and exits when done', () => {
     expect(service('rewrap-keys').profiles).toEqual(['ops']);
     expect(service('rewrap-keys').restart).toBe('no');

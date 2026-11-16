@@ -184,6 +184,8 @@ export function buildWebApp({
     return audit;
   }
 
+  // The last /healthz answer, so a degraded state is logged when it starts, not on every poll.
+  let lastHealthy = true;
   const handlers: Handlers<typeof contractRoutes> = {
     ...authHandlers(auth),
     ...ebayHandlers(ebay),
@@ -197,7 +199,19 @@ export function buildWebApp({
         db_pii: dbPii,
         version,
       };
-      return healthy ? { status: 200, body } : { status: 503, body };
+      const changed = healthy !== lastHealthy;
+      lastHealthy = healthy;
+      if (healthy || !changed) return healthy ? { status: 200, body } : { status: 503, body };
+      // R2-01: say which dependency failed, once per change (healthz is polled every few
+      // seconds). Names only: no error text, host or credential.
+      const failing = Object.entries({ db_main: dbMain, db_pii: dbPii })
+        .filter(([, state]) => state !== 'ok')
+        .map(([name]) => name);
+      logger.warn(
+        { event: 'health.degraded', statusCode: 503, db_main: dbMain, db_pii: dbPii },
+        `healthz 503: ${failing.join(', ')} failing`,
+      );
+      return { status: 503, body };
     },
     getJob: async ({ params, tenant }) => {
       if (jobs === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });

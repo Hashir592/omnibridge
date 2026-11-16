@@ -115,11 +115,30 @@ export class PublicKeyCache {
   };
 }
 
+/** The eBay calls a key read makes, as the governor counts them. */
+export type EbayKeyReadApi = 'identity.app_token' | 'notification.public_key';
+
+/** The eBay budget for this call is spent today: it was not sent (RL-2, ADR-058). */
+export class EbayBudgetExhausted extends Error {
+  readonly api: EbayKeyReadApi;
+
+  constructor(api: EbayKeyReadApi) {
+    super(`eBay daily budget spent: ${api}`);
+    this.name = 'EbayBudgetExhausted';
+    this.api = api;
+  }
+}
+
 export interface EbayApiOptions {
   /** https://api.ebay.com in production; the provider mocks in dev and CI (ADR-011). */
   apiBase: string;
   clientId: string;
   clientSecret: string;
+  /**
+   * The eBay governor's count-before-send check (ADR-058): called before each call, which is sent
+   * only if it returns true.
+   */
+  budget: (api: EbayKeyReadApi) => boolean;
   fetch?: typeof fetch;
 }
 
@@ -131,9 +150,13 @@ export function ebayPublicKeyFetcher(options: EbayApiOptions): PublicKeySource {
   const call = options.fetch ?? fetch;
   let token: { value: string; until: number } | undefined;
   const signal = () => AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  const counted = (api: EbayKeyReadApi) => {
+    if (!options.budget(api)) throw new EbayBudgetExhausted(api);
+  };
 
   async function appToken(): Promise<string> {
     if (token !== undefined && token.until > Date.now()) return token.value;
+    counted('identity.app_token');
     const basic = Buffer.from(`${options.clientId}:${options.clientSecret}`).toString('base64');
     const res = await call(`${options.apiBase}/identity/v1/oauth2/token`, {
       method: 'POST',
@@ -153,9 +176,11 @@ export function ebayPublicKeyFetcher(options: EbayApiOptions): PublicKeySource {
   }
 
   return async (kid) => {
+    const bearer = await appToken();
+    counted('notification.public_key');
     const res = await call(
       `${options.apiBase}/commerce/notification/v1/public_key/${encodeURIComponent(kid)}`,
-      { headers: { authorization: `Bearer ${await appToken()}` }, signal: signal() },
+      { headers: { authorization: `Bearer ${bearer}` }, signal: signal() },
     );
     if (!res.ok) throw new Error(`eBay public key: HTTP ${String(res.status)}`);
     const body = (await res.json()) as { key?: unknown };

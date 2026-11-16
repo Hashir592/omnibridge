@@ -3,6 +3,8 @@
 # volume, as the image's bootstrap superuser. Only pii-vault ever connects to this cluster.
 #   vault_owner  owns the database and every object; runs migrations only
 #   vault_app    pii-vault; DML only; NOBYPASSRLS
+# Connection caps (T-0207): vault_owner 4 (migrate 2) + vault_app 8 (pii-vault 4, room to grow) =
+# 12, within the 15 of max_connections less the 3 superuser slots.
 # Passwords are read inside psql from Docker secret files (SEC-5), so they never appear in argv.
 set -eu
 
@@ -12,7 +14,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
 \set app_pw `cat /run/secrets/vault_app_password`
 
 CREATE ROLE vault_owner LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
-  PASSWORD :'owner_pw';
+  CONNECTION LIMIT 4 PASSWORD :'owner_pw';
 CREATE ROLE vault_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT
   CONNECTION LIMIT 8 PASSWORD :'app_pw';
 

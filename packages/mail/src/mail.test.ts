@@ -18,6 +18,9 @@ describe('system email templates (MAIL-2)', () => {
     expect(email.text).toContain('https://app.omnibridge.co.uk/invite/abc123');
     expect(email.html).toContain('href="https://app.omnibridge.co.uk/invite/abc123"');
     expect(email.html).toContain('OmniBridge');
+    // The petrol brand-700 header (ADR-041), not the old navy.
+    expect(email.html).toContain('background:#0F6B66;color:#ffffff;padding:16px 24px');
+    expect(email.html).not.toContain('#1B2A6B');
     expect(() => {
       lintEmail(email);
     }).not.toThrow();

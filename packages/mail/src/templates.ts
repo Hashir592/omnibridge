@@ -51,7 +51,7 @@ function baseTemplate(title: string, bodyHtml: string): string {
     '<body style="margin:0;background:#f4f5f7;font-family:Inter,Arial,sans-serif;color:#121519">',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px">',
     '<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px">',
-    '<tr><td style="background:#1B2A6B;color:#ffffff;padding:16px 24px;font-weight:600;border-radius:8px 8px 0 0">OmniBridge</td></tr>',
+    '<tr><td style="background:#0F6B66;color:#ffffff;padding:16px 24px;font-weight:600;border-radius:8px 8px 0 0">OmniBridge</td></tr>',
     `<tr><td style="padding:24px;font-size:15px;line-height:1.5">${bodyHtml}</td></tr>`,
     '<tr><td style="padding:16px 24px;font-size:12px;color:#5c6370">Sent by OmniBridge. You get this email because of your account.</td></tr>',
     '</table></td></tr></table></body></html>',
@@ -99,7 +99,7 @@ export function renderInvite(values: {
     subject,
     [
       `<p>${escapeHtml(values.inviterName)} invited you to join <strong>${escapeHtml(values.workspaceName)}</strong> on OmniBridge.</p>`,
-      `<p><a href="${escapeHtml(acceptUrl)}" style="background:#1B2A6B;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Accept the invitation</a></p>`,
+      `<p><a href="${escapeHtml(acceptUrl)}" style="background:#0F6B66;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Accept the invitation</a></p>`,
       '<p>The link works for 7 days. If you did not expect this email, you can ignore it.</p>',
     ].join(''),
   );
@@ -162,7 +162,7 @@ export function renderPasswordReset(values: {
     subject,
     [
       `<p>Hello ${escapeHtml(values.recipientName)},</p>`,
-      `<p><a href="${escapeHtml(resetUrl)}" style="background:#1B2A6B;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Reset your password</a></p>`,
+      `<p><a href="${escapeHtml(resetUrl)}" style="background:#0F6B66;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Reset your password</a></p>`,
       `<p>The link works once, until ${escapeHtml(values.expiresAt)} (UK time). You will still need your authenticator app to sign in.</p>`,
       '<p>If you did not ask for this, you can ignore this email: your password stays as it is.</p>',
     ].join(''),

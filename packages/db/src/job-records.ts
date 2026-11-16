@@ -86,6 +86,31 @@ export class JobRecordRepository implements JobRecordStore {
     );
   }
 
+  /**
+   * Retention (F-M01-end-05): deletes this workspace's finished records (completed or failed)
+   * last updated before `olderThan`, and its leases that expired before it. Queued, active and
+   * retrying records and live leases stay. After this, an old idempotency key may be used again.
+   */
+  purge(ctx: TenantContext, olderThan: Date): Promise<{ records: number; leases: number }> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const records = await trx
+        .deleteFrom('app.job_records')
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('state', 'in', ['completed', 'failed'])
+        .where('updated_at', '<', olderThan)
+        .executeTakeFirst();
+      const leases = await trx
+        .deleteFrom('app.job_leases')
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('expires_at', '<', olderThan)
+        .executeTakeFirst();
+      return {
+        records: Number(records.numDeletedRows),
+        leases: Number(leases.numDeletedRows),
+      };
+    });
+  }
+
   /** One job's progress, or undefined when it does not exist in this workspace. */
   async get(ctx: TenantContext, id: string): Promise<JobProgress | undefined> {
     const row = await withTenantTransaction(this.#db, ctx, (trx) =>

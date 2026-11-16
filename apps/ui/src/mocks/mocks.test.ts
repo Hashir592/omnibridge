@@ -72,7 +72,12 @@ describe('mock orders API', () => {
       ['', 50],
     ] as const) {
       const body = await page(`/api/mock/orders?limit=${limit}`);
-      expect(body.items).toHaveLength(want);
+      // A page runs past the limit only to finish the same-buyer group its limit row is in (C3).
+      // The mock data moves with today's date, so whether a group straddles the cut varies.
+      const cutGroup = body.items[want - 1]?.group?.id;
+      const extra = body.items.slice(want);
+      expect(body.items.length).toBeGreaterThanOrEqual(want);
+      expect(extra.every((o) => cutGroup !== undefined && o.group?.id === cutGroup)).toBe(true);
     }
   });
 });
