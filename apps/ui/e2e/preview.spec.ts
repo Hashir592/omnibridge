@@ -307,6 +307,7 @@ test('[ADR-059] with the website connector off, no area shows the Website channe
   await expect(page.getByRole('menuitemcheckbox', { name: /harbourgoods/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await go('/stock', 'Stock');
+  await go('/stock?view=unmapped', 'Unmapped listings');
   await go('/sales-profit', 'Sales & Profit');
   await go('/shipping', 'Shipping');
   await expect(page.locator('option[value="website"]')).toHaveCount(0);

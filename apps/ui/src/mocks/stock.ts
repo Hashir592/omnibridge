@@ -447,7 +447,7 @@ function stockCounts(rows: SkuRow[], companies: Set<string>): SkuCounts {
     oversold: rows.filter((s) => s.state === 'oversold').length,
     sync: rows.filter((s) => s.state === 'sync_failed').length,
     bundles: rows.filter((s) => s.bundle).length,
-    unmapped: UNMAPPED.filter((u) => companies.has(u.companyId)).length,
+    unmapped: UNMAPPED.filter((u) => companies.has(u.companyId) && channelOn(u.channel)).length,
   };
 }
 
@@ -466,6 +466,7 @@ export function skuPage(allowed: Set<string>, p: URLSearchParams): SkuPage | Unm
     const items = UNMAPPED.filter(
       (u) =>
         companies.has(u.companyId) &&
+        channelOn(u.channel) &&
         (!q || u.externalSku.toLowerCase().includes(q) || u.title.toLowerCase().includes(q)) &&
         (channel.length === 0 || channel.includes(u.channelAccountId)),
     );

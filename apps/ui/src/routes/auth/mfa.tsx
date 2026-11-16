@@ -10,15 +10,21 @@ import { CodeField, useEnterApp } from './parts.tsx';
 type Failure = 'invalid' | 'locked' | 'error';
 
 /**
- * After MFA: accept the terms first if they changed (WWW-7), else the workspace picker or the app.
- * (`password_change` routing waits for the real change-password route; the screen is a mock-up.)
+ * After MFA: a password over a year old must be changed first (USR-3); then the terms if they
+ * changed (WWW-7); else the workspace picker or the app.
  */
 function useAfterMfa() {
   const enter = useEnterApp();
   return (r: ApiReply<MfaResult>) => {
     const next = (r.body as MfaResult).next;
     return enter(
-      next === 'terms' ? '/sign-in/terms' : next === 'workspace_picker' ? '/workspaces' : '/',
+      next === 'password_change'
+        ? '/sign-in/password-change'
+        : next === 'terms'
+          ? '/sign-in/terms'
+          : next === 'workspace_picker'
+            ? '/workspaces'
+            : '/',
     );
   };
 }

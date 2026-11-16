@@ -103,7 +103,7 @@ export function TermsPage() {
                   <span className="sr-only">the {label.toLowerCase()} (opens in a new tab)</span>
                 </a>
               ) : (
-                <span className="h-4 w-12 animate-pulse rounded bg-surface" aria-hidden />
+                <span className="h-4 w-12" aria-hidden />
               )}
             </li>
           ))}

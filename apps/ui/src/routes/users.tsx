@@ -125,6 +125,9 @@ function UsersList() {
       }
       await qc.invalidateQueries({ queryKey: ['users'] });
     },
+    onError: () => {
+      setError('The invite could not be revoked. Try again.');
+    },
   });
 
   return (
@@ -536,7 +539,16 @@ function InviteDialog({
     >
       <div className="flex flex-col gap-5">
         <Field label="Email" required error={serverError.email ?? (tried ? localError : undefined)}>
-          <Input value={email} onChange={setEmail} type="email" autoComplete="off" autoFocus />
+          <Input
+            value={email}
+            onChange={(v) => {
+              setEmail(v);
+              setServerError({});
+            }}
+            type="email"
+            autoComplete="off"
+            autoFocus
+          />
         </Field>
         <fieldset className="flex flex-col gap-3">
           <legend className="mb-2 text-13 font-medium">Role</legend>

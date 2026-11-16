@@ -125,6 +125,9 @@ test('[USR-4] a new user cannot get past MFA set-up without saving 10 recovery c
   await page.getByLabel('I have saved these codes somewhere safe').check();
   await expect(next).toBeEnabled();
   await expectNoSeriousA11yIssues(page);
+  // WWW-7: a new account accepts the terms next, before anything in the app opens.
+  await next.click();
+  await expect(page.getByRole('heading', { name: 'Accept the terms' })).toBeVisible();
 });
 
 test('[USR-3] [TEN-7] accepting an invite checks the password rules', async ({ page }) => {
