@@ -348,7 +348,7 @@ This section is based on **\[Third-party source\]** evidence. Build it behind th
 
 OmniBridge and JeezMart keep **separate databases**. JeezMart tells OmniBridge about orders through signed API calls, and OmniBridge sends JeezMart stock and tracking through signed calls to JeezMart. The contract is generic, so other custom websites can use it later.
 
-- **WEB-1** Setup: the admin creates a Website channel account under a company and gets a connection ID, an inbound API key (shown once) and a signing secret. The admin enters the website's base URL and the website's API key for outbound calls.
+- **WEB-1** Setup: the admin creates a Website channel account under a company and gets a connection ID, an inbound API key (shown once) and a signing secret. The admin enters the website's base URL and the website's API key for outbound calls. **The website connector is a per-workspace module toggle `website_connector` (PLAT-2), off by default; at launch it is switched on only for the client's workspace (in seed data and the platform console, never by name in code). With it off, no website screens, menu items, channel filters or routes are available (routes answer 404), and the public site does not offer it (v1.4, Hashir 17 Nov 2026).**
 - **WEB-2** Signing (both directions):
   - Headers `Authorization: Bearer {apiKey}`, `X-OB-Timestamp` (Unix seconds), `X-OB-Signature` = hex HMAC-SHA256 of `timestamp + "." + rawBody`, and `Idempotency-Key`.
   - Reject timestamps more than 5 minutes off.
@@ -1372,3 +1372,5 @@ Nothing below blocks coding. Open items are built as settings, or behind adapter
 **v1.3, 18 Oct 2026:** local-first delivery plan (P-012, Hashir). Section 12.1 now builds and tests every phase on local Docker with mocks. The servers, the public site going live and the provider applications move to a new phase 8 (Deploy), before hardening. An optional early mini-deploy of the public site and eBay endpoint stays available.
 
 **v1.4, 12 Nov 2026:** client review of the preview (P-014, Hashir). Added HOME-3, INV-10, ORD-9, SHP-9, CS-6, HLT-6, HLT-7 (SHOULD), PRF-6, AT-26 to AT-28. Amended ORD-1 (SKU column), INV-2 and INV-7 (target per mode), CAT-4 (COGS ex VAT), SHP-7 (label cost ex VAT plus rate), §1.3 and §1.4 (Amazon buyer messages through the email relay). Designs: `docs/plan/client-changes-20261112.md`.
+
+**v1.4 addendum, 17 Nov 2026:** WEB-1: the website connector is a per-workspace module toggle, off by default and on only for the client's workspace at launch; the public site does not advertise it (ADR-059).
