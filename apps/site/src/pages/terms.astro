@@ -1,25 +1,15 @@
 ---
 // Terms of service (WWW-6). Drafted by the dev team; the client reviews it.
-import Base from '../layouts/Base.astro';
-import { CONTACT, LEGAL_VERSION, readSettings } from '../settings.ts';
+import Legal from '../layouts/Legal.astro';
+import { CONTACT, readSettings } from '../settings.ts';
 
 const s = readSettings(process.env);
-const updated = new Date(`${LEGAL_VERSION}T00:00:00Z`).toLocaleDateString('en-GB', {
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-  timeZone: 'UTC',
-});
 ---
 
-<Base
+<Legal
   title="Terms of service"
   description="The terms for using OmniBridge: accounts, acceptable use, your channel accounts, data processing, eBay and Amazon terms, liability and English law."
 >
-  <div class="prose">
-    <h1>Terms of service</h1>
-    <p class="updated">Last updated: {updated} (version {LEGAL_VERSION})</p>
-
     <h2>1. The service</h2>
     <p>
       OmniBridge is a back-office service for sellers on Amazon, eBay and their own websites,
@@ -109,5 +99,4 @@ const updated = new Date(`${LEGAL_VERSION}T00:00:00Z`).toLocaleDateString('en-GB
         >{CONTACT.support}</a
       >.
     </p>
-  </div>
-</Base>
+</Legal>

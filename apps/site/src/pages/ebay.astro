@@ -1,0 +1,100 @@
+---
+// For eBay sellers (Hashir, 17 Nov 2026): what OmniBridge reads and writes through the eBay APIs,
+// how a seller connects and disconnects, account deletion notices and eBay's data rules (PRD 3.3,
+// 7.3). Wording drafted by S2 from the PRD; the client reviews it.
+import Base from '../layouts/Base.astro';
+import { CONTACT } from '../settings.ts';
+
+const uses = [
+  ['Orders, with the buyer’s name and delivery address', 'To dispatch orders and print shipping labels'],
+  ['Tracking numbers (written to eBay)', 'So eBay and your buyer see the order as dispatched'],
+  ['Stock quantity on your listings (written to eBay)', 'To keep one stock figure across eBay, Amazon and your website'],
+  ['Your active listings', 'To match your eBay listings to your products'],
+  ['Transactions and payouts', 'To show profit per order and the VAT figures for your returns'],
+  ['Buyer messages (read and sent)', 'So your team can answer buyers from one inbox'],
+  ['Seller feedback (read and replied to)', 'To see and answer feedback'],
+  ['Seller standards', 'To show your eBay account health'],
+];
+---
+
+<Base
+  title="For eBay sellers"
+  description="How OmniBridge connects to your eBay seller account: what it reads and writes, how you connect and disconnect, account deletion and eBay's data rules."
+>
+  <div class="wrap">
+    <header class="page-head">
+      <h1>OmniBridge for eBay sellers</h1>
+      <p class="lead">
+        How OmniBridge works with your eBay seller account: what it reads and writes, how you connect
+        and disconnect, and how eBay data is protected.
+      </p>
+    </header>
+    <div class="prose section-tail">
+      <h2>What OmniBridge uses, and why</h2>
+      <p>
+        OmniBridge uses eBay’s APIs with your permission. It reads and writes only what the features
+        below need.
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Data</th><th>Why</th></tr>
+          </thead>
+          <tbody>
+            {uses.map(([data, why]) => (
+              <tr><td>{data}</td><td>{why}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Connecting your account</h2>
+      <ul>
+        <li>A workspace admin chooses the company and selects <strong>Connect eBay</strong>.</li>
+        <li>
+          You sign in on eBay’s own consent page and approve access there. OmniBridge never asks for,
+          sees or stores your eBay password.
+        </li>
+        <li>If you decline on eBay’s page, nothing is connected and you can try again at any time.</li>
+      </ul>
+
+      <h2>Disconnecting</h2>
+      <p>
+        You can disconnect in OmniBridge or remove the app’s access in your eBay account settings.
+        Changing your eBay password also ends OmniBridge’s access, and the account then shows as
+        needing re-authorisation.
+      </p>
+
+      <h2>When an eBay account is closed</h2>
+      <p>
+        OmniBridge is subscribed to eBay’s account deletion notices. When eBay tells us a user has
+        asked for their account to be deleted, we delete that user’s data from OmniBridge within 30
+        days. The deletion cannot be undone.
+      </p>
+
+      <h2>eBay’s data rules</h2>
+      <ul>
+        <li>eBay data is never used to train or run machine learning or AI.</li>
+        <li>OmniBridge does not compare your eBay performance with other channels.</li>
+        <li>eBay data is never sent to any website.</li>
+        <li>
+          Buyers’ usernames and delivery details are kept only in a separate encrypted database in
+          Germany, and deleted within 30 days of delivery.
+        </li>
+        <li>If eBay ends our API access, all eBay data is destroyed within 10 days.</li>
+        <li>
+          Every user of a workspace agrees to eBay’s terms for “Your Users” in our <a href="/terms"
+            >terms of service</a
+          >.
+        </li>
+      </ul>
+
+      <h2>Questions</h2>
+      <p>
+        Email <a href={`mailto:${CONTACT.support}`}>{CONTACT.support}</a>, or
+        <a href={`mailto:${CONTACT.privacy}`}>{CONTACT.privacy}</a> for data requests. Full details are
+        in our <a href="/privacy">privacy policy</a>.
+      </p>
+    </div>
+  </div>
+</Base>

@@ -1,25 +1,15 @@
 ---
 // Privacy policy (WWW-5, DP-1 to DP-3). Drafted by the dev team; the client reviews it.
-import Base from '../layouts/Base.astro';
-import { CONTACT, LEGAL_VERSION, readSettings } from '../settings.ts';
+import Legal from '../layouts/Legal.astro';
+import { CONTACT, readSettings } from '../settings.ts';
 
 const s = readSettings(process.env);
-const updated = new Date(`${LEGAL_VERSION}T00:00:00Z`).toLocaleDateString('en-GB', {
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-  timeZone: 'UTC',
-});
 ---
 
-<Base
+<Legal
   title="Privacy policy"
   description="How OmniBridge processes personal data: who we are, what we process and why, retention, sub-processors, transfers, security and your rights."
 >
-  <div class="prose">
-    <h1>Privacy policy</h1>
-    <p class="updated">Last updated: {updated} (version {LEGAL_VERSION})</p>
-
     <h2>1. Who we are</h2>
     <p>
       OmniBridge is a back-office service for UK sellers, operated by {s.operatorLegalName}, company
@@ -141,5 +131,4 @@ const updated = new Date(`${LEGAL_VERSION}T00:00:00Z`).toLocaleDateString('en-GB
       When we change this policy we update the date above. Users of OmniBridge are asked to accept a
       materially changed policy at their next sign-in.
     </p>
-  </div>
-</Base>
+</Legal>

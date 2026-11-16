@@ -1,0 +1,103 @@
+---
+// For Amazon sellers (Hashir, 17 Nov 2026): what OmniBridge reads and writes through the Selling
+// Partner API and the Amazon Ads API, how a seller connects and disconnects, and how the data is
+// kept (PRD 3.1, 3.2, 7.3). Wording drafted by S2 from the PRD; the client reviews it.
+import Base from '../layouts/Base.astro';
+import { CONTACT } from '../settings.ts';
+
+const uses = [
+  ['New and changed orders, with the delivery name, address and phone', 'To dispatch orders and print shipping labels'],
+  ['Shipment confirmation and tracking numbers (written to Amazon)', 'So Amazon and your buyer see the order as dispatched'],
+  ['Stock quantity on merchant-fulfilled listings (written to Amazon)', 'To keep one stock figure across Amazon, eBay and your website'],
+  ['Your listings report', 'To match your Amazon listings to your products'],
+  ['Fees, transactions and settlements', 'To show profit per order and the VAT figures for your returns'],
+  ['Account health, seller feedback and returns reports', 'To show account health and returns in one place'],
+  ['Review requests (sent through Amazon)', 'To ask buyers for a review at the time Amazon allows'],
+];
+---
+
+<Base
+  title="For Amazon sellers"
+  description="How OmniBridge connects to your Amazon seller account: what it reads and writes, how you connect and disconnect, and how buyer data is protected and deleted."
+>
+  <div class="wrap">
+    <header class="page-head">
+      <h1>OmniBridge for Amazon sellers</h1>
+      <p class="lead">
+        How OmniBridge works with your Amazon seller account: what it reads and writes, how you connect
+        and disconnect, and how your buyers’ data is protected.
+      </p>
+    </header>
+    <div class="prose section-tail">
+      <h2>What OmniBridge uses, and why</h2>
+      <p>
+        OmniBridge uses Amazon’s Selling Partner API with your permission. It reads and writes only what
+        the features below need.
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Data</th><th>Why</th></tr>
+          </thead>
+          <tbody>
+            {uses.map(([data, why]) => (
+              <tr><td>{data}</td><td>{why}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Fulfilled by Amazon (FBA) listings and orders are shown read-only. OmniBridge never changes FBA
+        stock.
+      </p>
+
+      <h2>Connecting your account</h2>
+      <ul>
+        <li>A workspace admin chooses the company and selects <strong>Connect Amazon</strong>.</li>
+        <li>
+          You sign in on Amazon’s own consent page and approve access there. OmniBridge never asks for,
+          sees or stores your Amazon password.
+        </li>
+        <li>One Amazon seller account can be connected to only one OmniBridge workspace.</li>
+      </ul>
+
+      <h2>Disconnecting</h2>
+      <p>
+        You can disconnect in OmniBridge or remove the app’s access in Seller Central. All data from
+        that Amazon account is then deleted within 30 days. The only exception is the finance records
+        UK law requires us to keep, which contain no personal details.
+      </p>
+
+      <h2>How buyer data is protected</h2>
+      <ul>
+        <li>Buyers’ delivery details are used only to dispatch their orders and answer them.</li>
+        <li>They are kept in a separate encrypted database in Germany, with a key for each workspace.</li>
+        <li>They are deleted from every copy, including backups, within 30 days of delivery.</li>
+        <li>Every view of a buyer’s full details is logged.</li>
+        <li>
+          Buyer data is never sold, used for advertising, exported, or shared with another workspace.
+        </li>
+        <li>
+          Every user of a workspace agrees to Amazon’s data rules in our <a href="/terms"
+            >terms of service</a
+          >.
+        </li>
+      </ul>
+
+      <h2>Amazon Ads</h2>
+      <p>
+        Connecting Amazon Ads is optional and uses its own consent page. OmniBridge reads campaign
+        reports as daily totals by campaign, ad group, keyword and product. It never reads data about
+        individual shoppers. Ads data is used only inside your workspace, is visible only to the users
+        you allow for that company, and is deleted within 30 days of disconnecting.
+      </p>
+
+      <h2>Questions</h2>
+      <p>
+        Email <a href={`mailto:${CONTACT.support}`}>{CONTACT.support}</a>, or
+        <a href={`mailto:${CONTACT.privacy}`}>{CONTACT.privacy}</a> for data requests. Full details are
+        in our <a href="/privacy">privacy policy</a>.
+      </p>
+    </div>
+  </div>
+</Base>

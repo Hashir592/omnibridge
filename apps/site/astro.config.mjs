@@ -4,6 +4,8 @@ import { defineConfig } from 'astro/config';
 // disabled with ASTRO_TELEMETRY_DISABLED=1 wherever it builds (OPS-11).
 export default defineConfig({
   output: 'static',
+  // No dev toolbar script while iterating locally; the production build never has one.
+  devToolbar: { enabled: false },
   site: 'https://omnibridge.co.uk',
   build: {
     // Styles always as files of our own, so the Content-Security-Policy needs no inline styles.

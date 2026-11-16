@@ -27,6 +27,13 @@ Mock-ups on MSW synthetic data for every other tab, built from the kit only: Sto
 
 The client's seven changes (`docs/plan/client-changes-20261112.md`) on the same mock data: the Home quick view per channel (C1), the Orders SKU column (C2), same-buyer groups on Orders, the shipping desk and order detail with Ship together and Not the same buyer (C3), the order Profit table with Ex VAT, VAT and Inc VAT (C4), Amazon seller feedback and recovery estimates on Account Health (C5), Amazon buyer messages and the Buyer messages setup on Connections (C6), and manual stock allocation on the SKU detail (C7). Shared pieces: `components/sameBuyer.tsx` (rail, chip, notes, dialogs), `components/channelLogos.tsx` and the kit table's `rowAccent` and `rowTone` hooks. Tests: `apps/ui/e2e/preview.spec.ts` and `apps/ui/src/mocks/groups.test.ts`. The PNG set is in `client-preview/20261112/`.
 
+## Public site (M06, S2 with Hashir, 17 Nov 2026)
+
+- `apps/site`: same tokens as the app (petrol accent, graphite for the one dark band), Inter Variable self-hosted from `@fontsource-variable/inter` 5.3.0 (ADR-036, now also a site dependency) with the latin file preloaded. Page width 84rem; prose 42rem.
+- Home: three-line headline with "marketplace sellers" in petrol; the "bridge" figure (channels → OmniBridge mark → stock, orders, labels, profit and VAT) is static HTML + SVG, no animation; orders screenshot at 2x (2880x1800), never taller than the window.
+- Privacy and terms use `layouts/Legal.astro` (contents list built at build time, wording unchanged). New `/amazon` and `/ebay` pages, wording drafted from PRD 3.1–3.3 and 7.3, pending client review.
+- No script, inline style or outside request (WWW-3, CSP in `infra/docker/site-sws.toml`).
+
 ## Colour tokens
 
 Tailwind 4 `@theme` tokens; use them as `bg-<token>`, `text-<token>` and so on. Contrast ratios are against white unless stated.

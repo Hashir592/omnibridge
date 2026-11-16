@@ -2,7 +2,17 @@ import { expect, test } from '@playwright/test';
 
 // The public site (T-0601, PRD §10.2) through the HTTPS edge, as Amazon and eBay reviewers see it.
 const siteUrl = process.env.OB_SITE_URL ?? 'https://localhost:8444';
-const PAGES = ['/', '/features', '/security', '/privacy', '/terms', '/cookies', '/contact'];
+const PAGES = [
+  '/',
+  '/features',
+  '/amazon',
+  '/ebay',
+  '/security',
+  '/privacy',
+  '/terms',
+  '/cookies',
+  '/contact',
+];
 
 test('[WWW-4] every page loads with no login wall and no "under construction" text', async ({
   page,
