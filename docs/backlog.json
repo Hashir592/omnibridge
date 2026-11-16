@@ -815,6 +815,41 @@
       "status": "todo"
     },
     {
+      "id": "T-0209",
+      "module": "M02",
+      "session": "S3",
+      "title": "API under /api and SPA fallback (ADR-060)",
+      "goal": "A reload or typed address on any app page shows the page, never JSON.",
+      "prd_ids": [],
+      "supports": [
+        "NFR-1",
+        "SEC-3"
+      ],
+      "scope": [
+        "Serve every contract route under /api, set once (Fastify prefix, OpenAPI servers, typed-client baseUrl); route files keep their paths",
+        "web serves the built SPA: index.html (Cache-Control no-cache) for any GET not under /api, /webhooks, /connect, /healthz or /assets; /assets/ immutable caching",
+        "Unknown /api/** answers the JSON 404 envelope",
+        "Keep /healthz, /webhooks/ebay/account-deletion, /connect/**/callback and /declined where the PRD fixes them",
+        "Move the MSW mock handlers and any UI fetch paths to /api in the same PR; route walker, OpenAPI diff gate and CSRF/rate-limit/WAF path rules updated to match"
+      ],
+      "out_of_scope": [
+        "Changing any route's own path, auth or permissions",
+        "Header sniffing (Sec-Fetch-Dest / Accept)"
+      ],
+      "depends_on": [
+        "T-0207"
+      ],
+      "acceptance": [
+        "Test: GET /users with Accept text/html returns index.html; GET /api/users returns the JSON list; GET /api/nope returns the JSON 404",
+        "Test: /healthz and the eBay webhook path still answer as before",
+        "Route walker passes on the /api paths",
+        "OpenAPI diff shows only the server prefix change",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
       "id": "T-0307",
       "module": "M03",
       "session": "S2",
