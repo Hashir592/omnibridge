@@ -1,7 +1,10 @@
 ---
 // Every public page (WWW-1 to WWW-4): logo, navigation, the Operator footer from settings and no
-// script of any kind (WWW-3). Styles are a file of our own, so the CSP needs no inline styles.
-import { APP_URL, readSettings } from '../settings.ts';
+// script of any kind (WWW-3). Styles and the self-hosted Inter font are files of our own, so the
+// CSP needs no inline styles and makes no outside request.
+import '@fontsource-variable/inter';
+import interLatin from '@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url';
+import { APP_URL, CONTACT, readSettings } from '../settings.ts';
 import '../styles/site.css';
 
 interface Props {
@@ -11,10 +14,46 @@ interface Props {
 
 const { title, description } = Astro.props;
 const settings = readSettings(process.env);
+const here = Astro.url.pathname.replace(/\/$/, '') || '/';
 const nav = [
   { href: '/features', label: 'Features' },
-  { href: '/security', label: 'Security & data' },
+  { href: '/amazon', label: 'Amazon' },
+  { href: '/ebay', label: 'eBay' },
+  { href: '/security', label: 'Security' },
   { href: '/contact', label: 'Contact' },
+];
+const footer = [
+  {
+    heading: 'Product',
+    links: [
+      { href: '/features', label: 'Features' },
+      { href: '/security', label: 'Security and data' },
+      { href: `${APP_URL}/login`, label: 'Sign in' },
+    ],
+  },
+  {
+    heading: 'Marketplaces',
+    links: [
+      { href: '/amazon', label: 'For Amazon sellers' },
+      { href: '/ebay', label: 'For eBay sellers' },
+    ],
+  },
+  {
+    heading: 'Legal',
+    links: [
+      { href: '/privacy', label: 'Privacy policy' },
+      { href: '/terms', label: 'Terms of service' },
+      { href: '/cookies', label: 'Cookies' },
+    ],
+  },
+  {
+    heading: 'Contact',
+    links: [
+      { href: '/contact', label: 'Contact us' },
+      { href: `mailto:${CONTACT.support}`, label: CONTACT.support },
+      { href: `mailto:${CONTACT.privacy}`, label: CONTACT.privacy },
+    ],
+  },
 ];
 const pageTitle = title === 'OmniBridge' ? title : `${title} | OmniBridge`;
 ---
@@ -26,6 +65,9 @@ const pageTitle = title === 'OmniBridge' ? title : `${title} | OmniBridge`;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
     <meta name="description" content={description} />
+    <meta name="theme-color" content="#ffffff" />
+    <!-- Load the font before first paint, so text does not change width while a page opens. -->
+    <link rel="preload" href={interLatin} as="font" type="font/woff2" crossorigin />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/brand/favicon-32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
@@ -35,30 +77,54 @@ const pageTitle = title === 'OmniBridge' ? title : `${title} | OmniBridge`;
     <meta property="og:type" content="website" />
   </head>
   <body>
+    <a class="skip" href="#content">Skip to content</a>
     <header class="site-header">
-      <a href="/" class="brand" aria-label="OmniBridge home">
-        <img src="/brand/logo.webp" alt="OmniBridge" width="163" height="48" />
-      </a>
-      <nav aria-label="Main">
-        {nav.map((item) => <a href={item.href}>{item.label}</a>)}
-        <a class="button secondary" href={`${APP_URL}/login`}>Sign in</a>
-      </nav>
+      <div class="wrap">
+        <a href="/" class="brand" aria-label="OmniBridge home">
+          <img src="/brand/logo.webp" alt="OmniBridge" width="136" height="40" />
+        </a>
+        <nav aria-label="Main">
+          {
+            nav.map((item) => (
+              <a href={item.href} aria-current={here === item.href ? 'page' : undefined}>
+                {item.label}
+              </a>
+            ))
+          }
+        </nav>
+        <a class="button small signin" href={`${APP_URL}/login`}>Sign in</a>
+      </div>
     </header>
-    <main>
+    <main id="content">
       <slot />
     </main>
     <footer class="site-footer">
-      <p>
-        OmniBridge is operated by {settings.operatorLegalName}, company number {
-          settings.operatorCompanyNumber
-        }, registered office {settings.operatorRegisteredAddress}.
-      </p>
-      <p class="footer-links">
-        <a href="/privacy">Privacy policy</a>
-        <a href="/terms">Terms of service</a>
-        <a href="/cookies">Cookies</a>
-        <a href="/contact">Contact</a>
-      </p>
+      <div class="wrap">
+        <div class="footer-grid">
+          <div class="brand-col">
+            <img src="/brand/logo.webp" alt="" width="109" height="32" />
+          </div>
+          {
+            footer.map((col) => (
+              <nav aria-label={col.heading}>
+                <h2>{col.heading}</h2>
+                <ul>
+                  {col.links.map((link) => (
+                    <li>
+                      <a href={link.href}>{link.label}</a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            ))
+          }
+        </div>
+        <p class="operator">
+          OmniBridge is operated by {settings.operatorLegalName}, company number {
+            settings.operatorCompanyNumber
+          }, registered office {settings.operatorRegisteredAddress}.
+        </p>
+      </div>
     </footer>
   </body>
 </html>

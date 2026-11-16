@@ -5,29 +5,43 @@ import Base from '../layouts/Base.astro';
 import { CONTACT, readSettings } from '../settings.ts';
 
 const s = readSettings(process.env);
+const addresses = [
+  { label: 'Support and access requests', email: CONTACT.support },
+  { label: 'Privacy and data requests', email: CONTACT.privacy },
+  { label: 'Security issues', email: CONTACT.security },
+];
 ---
 
 <Base
   title="Contact"
   description="Contact OmniBridge: support, privacy and security email addresses and our registered office."
 >
-  <div class="prose">
-    <h1>Contact</h1>
-    <div class="grid">
-      <section class="card">
-        <h2>Support and access requests</h2>
-        <p><a href={`mailto:${CONTACT.support}`}>{CONTACT.support}</a></p>
-      </section>
-      <section class="card">
-        <h2>Privacy and data requests</h2>
-        <p><a href={`mailto:${CONTACT.privacy}`}>{CONTACT.privacy}</a></p>
-      </section>
-      <section class="card">
-        <h2>Security issues</h2>
-        <p><a href={`mailto:${CONTACT.security}`}>{CONTACT.security}</a></p>
-      </section>
+  <div class="wrap">
+    <header class="page-head">
+      <h1>Contact</h1>
+      <p class="lead">Email the address that fits your question.</p>
+    </header>
+    <div class="section-tail">
+      <dl class="pairs">
+        {
+          addresses.map((item) => (
+            <div>
+              <dt>{item.label}</dt>
+              <dd>
+                <a href={`mailto:${item.email}`}>{item.email}</a>
+              </dd>
+            </div>
+          ))
+        }
+        <div>
+          <dt>Registered office</dt>
+          <dd>
+            {s.operatorLegalName}<br />{s.operatorRegisteredAddress}<br />Company number {
+              s.operatorCompanyNumber
+            }
+          </dd>
+        </div>
+      </dl>
     </div>
-    <h2>Registered office</h2>
-    <p>{s.operatorLegalName}<br />{s.operatorRegisteredAddress}<br />Company number {s.operatorCompanyNumber}</p>
   </div>
 </Base>

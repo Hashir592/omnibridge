@@ -1,8 +1,33 @@
 ---
 import Base from '../layouts/Base.astro';
-import { CONTACT } from '../settings.ts';
+import { APP_URL, CONTACT } from '../settings.ts';
 
 const requestAccess = `mailto:${CONTACT.support}?subject=${encodeURIComponent('Request access to OmniBridge')}`;
+const channels = [
+  { name: 'Amazon', detail: 'Orders, listings, fees' },
+  { name: 'eBay', detail: 'Orders, listings, messages' },
+  { name: 'Your website', detail: 'Orders and stock' },
+];
+const outcomes = [
+  { name: 'Stock', detail: 'One figure for every channel' },
+  { name: 'Orders', detail: 'One list, with ship-by dates' },
+  { name: 'Labels', detail: 'Evri and DPD, in bulk' },
+  { name: 'Profit and VAT', detail: 'Held to the penny' },
+];
+// Curves from each channel to the hub and from the hub to each outcome, in a 100 x 100 box that
+// matches the figure's grid (columns 34% / 32% / 34%; rows spaced evenly).
+const inY = channels.map((_, i) => ((2 * i + 1) / (2 * channels.length)) * 100);
+const outY = outcomes.map((_, i) => ((2 * i + 1) / (2 * outcomes.length)) * 100);
+const lines = [
+  ...inY.map((y) => `M34 ${y} C43 ${y} 41 50 50 50`),
+  ...outY.map((y) => `M50 50 C59 50 57 ${y} 66 ${y}`),
+];
+const facts = [
+  ['Hosted in Germany', 'Your data stays on servers in the EU.'],
+  ['Two-step sign-in', 'Every user, every time. No shared logins.'],
+  ['Buyer details deleted', 'Gone from every copy within 30 days of delivery.'],
+  ['No tracking', 'No analytics, advertising or third-party scripts.'],
+];
 const modules = [
   ['Stock', 'One stock figure per product across Amazon, eBay and your own website, with low-stock alerts.'],
   ['Orders', 'Every channel’s orders in one list, with clear dispatch deadlines.'],
@@ -17,50 +42,375 @@ const modules = [
   title="OmniBridge"
   description="OmniBridge is the back office for UK sellers on Amazon, eBay and their own website: stock, orders, shipping labels, account health, ads, profit and VAT figures."
 >
-  <h1>One back office for UK marketplace sellers</h1>
-  <p class="lead">
-    OmniBridge brings your Amazon, eBay and website selling together: multichannel stock, orders,
-    shipping labels, account health, Amazon Ads, profit and the VAT figures for your returns.
-  </p>
-  <p><a class="button" href={requestAccess}>Request access</a></p>
+  <section class="hero wrap">
+    <div class="hero-copy">
+      <h1>
+        <span>One back office</span>
+        <span>for UK</span>
+        <span class="accent">marketplace sellers</span>
+      </h1>
+      <p class="lead">
+        OmniBridge brings your Amazon, eBay and website selling together: multichannel stock, orders,
+        shipping labels, account health, Amazon Ads, profit and the VAT figures for your returns.
+      </p>
+      <div class="actions">
+        <a class="button" href={requestAccess}>Request access</a>
+        <a class="button secondary" href="/features">See the features</a>
+      </div>
+    </div>
 
-  <div class="grid">
-    {
-      modules.map(([name, text]) => (
-        <section class="card">
-          <h2>{name}</h2>
-          <p>{text}</p>
-        </section>
-      ))
-    }
+    <figure class="bridge">
+      <svg
+        class="bridge-lines"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {lines.map((d) => <path d={d} vector-effect="non-scaling-stroke" />)}
+      </svg>
+      <ul class="bridge-col bridge-in" aria-label="Where your orders come from">
+        {
+          channels.map((c) => (
+            <li>
+              <strong>{c.name}</strong>
+              <span>{c.detail}</span>
+            </li>
+          ))
+        }
+      </ul>
+      <div class="bridge-hub">
+        <img src="/brand/mark.webp" alt="" width="72" height="72" />
+        <span>OmniBridge</span>
+      </div>
+      <ul class="bridge-col bridge-out" aria-label="What you manage in OmniBridge">
+        {
+          outcomes.map((o) => (
+            <li>
+              <strong>{o.name}</strong>
+              <span>{o.detail}</span>
+            </li>
+          ))
+        }
+      </ul>
+      <figcaption class="visually-hidden">
+        Orders and listings from Amazon, eBay and your website come into OmniBridge, where you manage
+        stock, orders, shipping labels, profit and VAT.
+      </figcaption>
+    </figure>
+  </section>
+
+  <div class="wrap">
+    <ul class="facts" aria-label="How OmniBridge handles data">
+      {
+        facts.map(([title, text]) => (
+          <li>
+            <strong>{title}</strong>
+            <span>{text}</span>
+          </li>
+        ))
+      }
+    </ul>
   </div>
 
-  <figure>
-    <img
-      src="/screens/orders.webp"
-      width="1200"
-      height="750"
-      alt="The OmniBridge orders list, showing orders from the website, Amazon and eBay with their dispatch deadlines"
-      loading="lazy"
-    />
-    <figcaption class="updated">The orders list, with demonstration data.</figcaption>
-  </figure>
+  <section class="section band" aria-labelledby="product">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="product">Every channel’s orders in one list</h2>
+        <p>
+          Amazon, eBay and website orders side by side, each with its dispatch deadline, so the packing
+          team knows what goes out first.
+        </p>
+      </div>
+      <figure class="shot">
+        <img
+          src="/screens/orders.webp"
+          width="2880"
+          height="1800"
+          alt="The OmniBridge orders list, showing orders from the website, Amazon and eBay with their dispatch deadlines"
+          loading="lazy"
+        />
+        <figcaption>The orders list, with demonstration data.</figcaption>
+      </figure>
+    </div>
+  </section>
 
-  <h2>Built for how you sell</h2>
-  <p>
-    Hosted in the EU (Germany), with two-step sign-in for every user, and your customers’ details
-    deleted within 30 days of delivery. Read more about <a href="/security">security and data</a>.
-  </p>
+  <section class="section" aria-labelledby="covers">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="covers">What it covers</h2>
+        <p><a href="/features">All features</a></p>
+      </div>
+      <ul class="module-list">
+        {
+          modules.map(([name, text]) => (
+            <li>
+              <h3>{name}</h3>
+              <p>{text}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="section rule" aria-labelledby="rules">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="rules">Built to the marketplaces’ rules</h2>
+      </div>
+      <ul class="module-list">
+        <li>
+          <h3><a href="/amazon">For Amazon sellers</a></h3>
+          <p>What OmniBridge reads and writes on Amazon, how you connect and disconnect, and how the data is kept.</p>
+        </li>
+        <li>
+          <h3><a href="/ebay">For eBay sellers</a></h3>
+          <p>The same for eBay, including how account deletion requests from eBay are handled.</p>
+        </li>
+        <li>
+          <h3><a href="/security">Security and data</a></h3>
+          <p>
+            Hosted in the EU (Germany), with two-step sign-in for every user, and your customers’
+            details deleted within 30 days of delivery.
+          </p>
+        </li>
+      </ul>
+      <div class="actions">
+        <a class="button" href={requestAccess}>Request access</a>
+        <a class="button secondary" href={`${APP_URL}/login`}>Sign in</a>
+      </div>
+    </div>
+  </section>
 </Base>
 
 <style>
-  figure {
-    margin: 2rem 0;
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3rem;
+    align-items: center;
+    padding-block: clamp(2.5rem, 7vw, 5.5rem) clamp(2.5rem, 5vw, 4rem);
   }
-  figure img {
+
+  .hero h1 span {
+    display: block;
+  }
+
+  .hero h1 .accent {
+    color: var(--brand-700);
+  }
+
+  @media (min-width: 64rem) {
+    .hero h1 {
+      font-size: clamp(2.75rem, 1.2rem + 2.6vw, 3.5rem);
+    }
+
+    .hero h1 .accent {
+      white-space: nowrap;
+    }
+  }
+
+  @media (min-width: 64rem) {
+    .hero {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 4rem;
+    }
+  }
+
+  /* The bridge: channels on the left join the hub, outcomes fan out on the right. */
+  .bridge {
+    position: relative;
+    margin: 0;
+    display: grid;
+    grid-template-columns: 34% 32% 34%;
+    aspect-ratio: 3 / 2;
+    max-width: 42rem;
     width: 100%;
-    height: auto;
-    border: 1px solid var(--line);
-    border-radius: 0.75rem;
+    justify-self: center;
+  }
+
+  .bridge-lines {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .bridge-lines path {
+    fill: none;
+    stroke: #b8c0cc;
+    stroke-width: 1.25;
+  }
+
+  .bridge-col {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+  }
+
+  .bridge-col li {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 3.75rem;
+    padding: 0 0.875rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    line-height: 1.3;
+  }
+
+  .bridge-col strong {
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+
+  .bridge-col span {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
+  .bridge-in li {
+    border-color: var(--ink);
+  }
+
+  .bridge-out li {
+    height: 3.375rem;
+    background: var(--brand-50);
+    border-color: #c3dcd9;
+  }
+
+  .bridge-hub {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+
+  .bridge-hub img {
+    width: 6rem;
+    height: 6rem;
+    padding: 0.75rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+  }
+
+  .bridge-hub span {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    background: var(--card);
+    padding: 0 0.375rem;
+  }
+
+  /* Phones: a vertical stack, channels above the hub and outcomes below. */
+  @media (max-width: 40rem) {
+    .bridge {
+      grid-template-columns: minmax(0, 1fr);
+      aspect-ratio: auto;
+      gap: 1.25rem;
+    }
+
+    .bridge-lines {
+      display: none;
+    }
+
+    .bridge-col {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .bridge-in {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .bridge-out {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .bridge-col li,
+    .bridge-out li {
+      height: auto;
+      padding: 0.625rem 0.75rem;
+    }
+
+    .bridge-in span {
+      display: none;
+    }
+
+    .bridge-hub {
+      flex-direction: row;
+    }
+
+    .bridge-hub img {
+      width: 3.5rem;
+      height: 3.5rem;
+      padding: 0.4rem;
+    }
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /* The one dark band: the product itself, framed like the app's graphite sidebar. */
+  .band {
+    background: var(--side);
+    color: #fff;
+    margin-top: clamp(3rem, 7vw, 5rem);
+  }
+
+  .band h2 {
+    color: #fff;
+  }
+
+  .band .section-head p {
+    color: var(--side-muted);
+  }
+
+  .shot {
+    margin: 0;
+  }
+
+  /* The whole screenshot fits in one screen: as wide as the page allows, never taller than the
+     window below the section heading. */
+  .shot img {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    max-height: calc(100vh - 6rem);
+    margin-inline: auto;
+    border-radius: var(--radius-lg);
+    border: 1px solid #2c313a;
+  }
+
+  .shot figcaption {
+    text-align: center;
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    color: var(--side-muted);
+  }
+
+  .module-list h3 a {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--border);
+  }
+
+  .module-list h3 a:hover {
+    text-decoration-color: var(--brand-700);
   }
 </style>

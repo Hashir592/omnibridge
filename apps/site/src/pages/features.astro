@@ -43,22 +43,49 @@ const blocks = [
     text: 'Named users only, each with two-step sign-in. Choose which tabs and which of your companies each person can see. Every change is in the audit log.',
   },
 ];
+
+// Grouped by what a seller does with them; the module text above is unchanged.
+const groups = [
+  { name: 'Selling', modules: ['Stock and catalogue', 'Orders', 'Shipping'] },
+  { name: 'Customers and marketplaces', modules: ['Customer service', 'Account health', 'Advertising'] },
+  { name: 'Money', modules: ['Sales and profit', 'Finance and VAT figures'] },
+  { name: 'Team', modules: ['Forecasting, reminders and notes', 'Users and companies'] },
+].map((group) => ({
+  ...group,
+  blocks: group.modules.map((name) => blocks.find((block) => block.name === name)!),
+}));
+const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 ---
 
 <Base
   title="Features"
   description="What OmniBridge does: stock, orders, shipping labels, customer service, account health, Amazon Ads, profit and VAT figures."
 >
-  <h1>Features</h1>
-  <p class="lead">Everything a UK seller on Amazon, eBay and their own website needs, in one place.</p>
-  <div class="grid">
-    {
-      blocks.map((block) => (
-        <section class="card">
-          <h2>{block.name}</h2>
-          <p>{block.text}</p>
-        </section>
-      ))
-    }
+  <div class="wrap">
+    <header class="page-head">
+      <h1>Features</h1>
+      <p class="lead">Everything a UK seller on Amazon, eBay and their own website needs, in one place.</p>
+    </header>
+    <div class="section-tail">
+      {
+        groups.map((group) => (
+          <section class="feature-group" aria-labelledby={slug(group.name)}>
+            <h2 id={slug(group.name)}>{group.name}</h2>
+            <ul class="module-list">
+              {group.blocks.map((block) => (
+                <li id={slug(block.name)}>
+                  <h3>{block.name}</h3>
+                  <p>{block.text}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
+      }
+      <p class="muted feature-foot">
+        How each marketplace is connected: <a href="/amazon">Amazon</a> and <a href="/ebay">eBay</a>.
+        How data is protected: <a href="/security">security and data</a>.
+      </p>
+    </div>
   </div>
 </Base>

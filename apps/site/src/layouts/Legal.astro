@@ -1,0 +1,59 @@
+---
+// Long legal pages (privacy, terms; WWW-5, WWW-6). Layout only: the page's own wording is rendered
+// unchanged, and a contents list is built at build time from its h2 headings (no script, WWW-3).
+import Base from './Base.astro';
+import { LEGAL_VERSION } from '../settings.ts';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const updated = new Date(`${LEGAL_VERSION}T00:00:00Z`).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+const raw = await Astro.slots.render('default');
+const toc: { id: string; label: string }[] = [];
+const used = new Set<string>();
+const body = raw.replace(/<h2>([\s\S]*?)<\/h2>/g, (_match, inner: string) => {
+  const label = inner.replace(/<[^>]+>/g, '').trim();
+  let id = label
+    .toLowerCase()
+    .replace(/^\d+\.\s*/, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  while (used.has(id)) id += '-x';
+  used.add(id);
+  toc.push({ id, label });
+  return `<h2 id="${id}">${inner}</h2>`;
+});
+---
+
+<Base title={title} description={description}>
+  <div class="wrap">
+    <header class="page-head">
+      <h1>{title}</h1>
+      <p class="updated">Last updated: {updated} (version {LEGAL_VERSION})</p>
+    </header>
+    <div class="with-toc">
+      <nav class="toc" aria-label="On this page">
+        <p>On this page</p>
+        <ol>
+          {
+            toc.map((item) => (
+              <li>
+                <a href={`#${item.id}`}>{item.label}</a>
+              </li>
+            ))
+          }
+        </ol>
+      </nav>
+      <article class="prose" set:html={body} />
+    </div>
+  </div>
+</Base>

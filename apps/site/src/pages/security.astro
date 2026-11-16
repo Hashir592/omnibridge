@@ -7,9 +7,12 @@ import { CONTACT } from '../settings.ts';
   title="Security & data"
   description="How OmniBridge protects your data: EU hosting in Germany, encryption, deletion of customer details within 30 days, two-step sign-in."
 >
-  <div class="prose">
-    <h1>Security and data</h1>
-    <p class="lead">A plain-English summary of how we look after your data and your customers’ data.</p>
+  <div class="wrap">
+    <header class="page-head">
+      <h1>Security and data</h1>
+      <p class="lead">A plain-English summary of how we look after your data and your customers’ data.</p>
+    </header>
+    <div class="prose section-tail">
 
     <h2>Hosted in the EU</h2>
     <p>OmniBridge runs on servers in Germany. Your data does not leave the EU for hosting.</p>
@@ -51,5 +54,6 @@ import { CONTACT } from '../settings.ts';
         >{CONTACT.security}</a
       >. Privacy questions go to <a href={`mailto:${CONTACT.privacy}`}>{CONTACT.privacy}</a>.
     </p>
+    </div>
   </div>
 </Base>
