@@ -3,6 +3,7 @@
  * matches the real contract route. Lists page at 50 rows, as the server will (DIRECTION §5).
  */
 import type { Health } from '@omnibridge/contract/client';
+import { passthrough } from 'msw';
 import { HttpResponse, http } from 'msw/http';
 import { daysFromToday } from '../lib/format.ts';
 import { authHandlers } from './auth.ts';
@@ -35,6 +36,14 @@ const hasOrdersTab = () => {
 };
 
 export const handlers = [
+  // A page load (the browser asking for a document) is never an API call: Vite serves the SPA.
+  // Without this, typing /users or /users/access-reviews into the address bar would get the
+  // mock's JSON for GET /users or GET /access-reviews once the service worker is in control.
+  http.all('*', ({ request }) =>
+    request.mode === 'navigate' || (request.headers.get('accept') ?? '').includes('text/html')
+      ? passthrough()
+      : undefined,
+  ),
   ...authHandlers,
   ...previewHandlers,
 

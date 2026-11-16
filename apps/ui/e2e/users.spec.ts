@@ -143,3 +143,18 @@ test('[USR-9] completing the quarterly access review', async ({ page }) => {
     4,
   );
 });
+
+test('[NFR-8] typing a users address into the browser opens the page, not mock JSON', async ({
+  page,
+}) => {
+  await open(page, '/users', 'Users');
+  // Wait until the mock service worker controls the tab, as it does for anyone clicking around.
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+  for (const [path, heading] of [
+    ['/users', 'Users'],
+    ['/users/access-reviews', 'Access reviews'],
+  ] as const) {
+    await page.goto(path);
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+  }
+});
