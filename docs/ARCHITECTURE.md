@@ -6,7 +6,7 @@ Status: Phase A, revision 2. Owner: S1. This document records only decided items
 
 OmniBridge is a multi-tenant back office for UK multichannel sellers. One TypeScript codebase produces four processes:
 
-- **web**: Fastify API, which also serves the React SPA build
+- **web**: Fastify API under `/api` (ADR-060), which also serves the React SPA build (`index.html` for any other GET, except `/healthz`, `/webhooks/**` and `/connect/**`)
 - **worker**: queue consumers and schedulers
 - **pii-vault**: the only door to buyer PII
 - **site**: the static public website
