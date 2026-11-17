@@ -76,6 +76,8 @@ export interface WorkspaceChoiceRow {
   name: string;
   role: 'admin' | 'member';
   companies: number;
+  /** Module toggles (PLAT-2, ADR-059): a module the workspace has no setting for is off. */
+  modules: { website_connector: boolean };
 }
 
 export interface PlatformKeyRow {
@@ -482,12 +484,14 @@ export class AuthStore {
       name: string;
       role: 'admin' | 'member';
       companies: string;
+      modules: Readonly<Record<string, unknown>>;
     }>`SELECT * FROM app.auth_user_workspaces(${userId}::uuid)`.execute(this.#db);
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
       role: r.role,
       companies: Number(r.companies),
+      modules: { website_connector: r.modules.website_connector === true },
     }));
   }
 

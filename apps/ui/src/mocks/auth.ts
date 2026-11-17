@@ -291,8 +291,20 @@ export const authHandlers = [
 
   http.get('*/api/auth/workspaces', () =>
     HttpResponse.json<WorkspaceChoice[]>([
-      { id: 'ws_1', name: 'Demo workspace', role: 'admin', companies: 3 },
-      { id: 'ws_2', name: 'Second demo workspace', role: 'member', companies: 1 },
+      {
+        id: 'ws_1',
+        name: 'Demo workspace',
+        role: 'admin',
+        companies: 3,
+        modules: { website_connector: true },
+      },
+      {
+        id: 'ws_2',
+        name: 'Second demo workspace',
+        role: 'member',
+        companies: 1,
+        modules: { website_connector: false },
+      },
     ]),
   ),
 

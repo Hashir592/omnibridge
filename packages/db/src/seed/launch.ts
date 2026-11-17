@@ -1,5 +1,6 @@
 import type { Kysely } from 'kysely';
 import {
+  setWorkspaceModule,
   ChannelAccountRepository,
   CompanyRepository,
   Tenancy,
@@ -71,6 +72,22 @@ const ACCOUNTS = [
     displayName: 'JeezMart',
   },
 ];
+
+/**
+ * The launch workspace is the only one with the website connector on (WEB-1, ADR-059): set here,
+ * in seed data, never by name in code.
+ */
+const LAUNCH_MODULES = { website_connector: true } as const;
+
+/**
+ * Switches the launch workspace's modules on. A separate step because only platform tooling may
+ * set modules: the dev seed runs it as ob_ops (ADR-051).
+ */
+export async function seedLaunchModules(db: Kysely<MainDb>): Promise<void> {
+  for (const [module, on] of Object.entries(LAUNCH_MODULES)) {
+    await setWorkspaceModule(db, LAUNCH_WORKSPACE_ID, module as keyof typeof LAUNCH_MODULES, on);
+  }
+}
 
 export interface SeedResult {
   workspaceId: string;

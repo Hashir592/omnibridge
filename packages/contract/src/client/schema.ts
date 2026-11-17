@@ -995,6 +995,7 @@ export interface components {
       companies: number;
       /** Format: uuid */
       id: string;
+      modules: components['schemas']['WorkspaceModules'];
       name: string;
       /** @enum {string} */
       role: 'admin' | 'member';
@@ -1003,9 +1004,16 @@ export interface components {
       companies: number;
       /** Format: uuid */
       id: string;
+      modules: components['schemas']['WorkspaceModulesInput'];
       name: string;
       /** @enum {string} */
       role: 'admin' | 'member';
+    };
+    WorkspaceModules: {
+      website_connector: boolean;
+    };
+    WorkspaceModulesInput: {
+      website_connector: boolean;
     };
     WorkspaceUser: {
       companyIds: string[];
@@ -1395,7 +1403,7 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': {
-          name: string;
+          name?: string;
           password: string;
           token: string;
         };

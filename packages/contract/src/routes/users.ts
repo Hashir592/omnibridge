@@ -169,7 +169,7 @@ export const getInvite = defineRoute({
 
 /**
  * Accepts an invite. A new person sets their name and first password (USR-3 rules); someone who
- * already has a sign-in confirms with their password. Either way the session starts at MFA:
+ * already has a sign-in confirms with their password and sends no name (PS-024). Either way the session starts at MFA:
  * `mfa_setup` for a new person, `mfa_code` otherwise (USR-4).
  */
 export const acceptInvite = defineRoute({
@@ -179,7 +179,8 @@ export const acceptInvite = defineRoute({
   summary: 'Accept an invite',
   body: z.object({
     token: z.string().min(16).max(128),
-    name: z.string().trim().min(1).max(200),
+    /** Required for a new person (422 without it); ignored for an existing sign-in. */
+    name: z.string().trim().min(1).max(200).optional(),
     password: z.string().min(1).max(1024),
   }),
   responses: { 200: z.object({ next: z.enum(['mfa_code', 'mfa_setup']) }) },

@@ -1,5 +1,5 @@
 import type { TenantContext } from '@omnibridge/core';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { MainDb } from './schema.ts';
 import { withTenantTransaction } from './tenant.ts';
 
@@ -23,6 +23,25 @@ export interface Workspace {
   /** Fixed and read-only (TEN-6, section 7.3). */
   piiRetentionDays: number;
   createdAt: Date;
+}
+
+/** The module toggles a workspace can have (PLAT-2, ADR-059). */
+export type WorkspaceModule = 'website_connector';
+
+/**
+ * Turns a module of a workspace on or off. Platform tooling only (the dev seed as ob_ops, the
+ * console in M05): web's role has no grant, so a workspace admin cannot switch a module on.
+ * False when there is no such workspace.
+ */
+export async function setWorkspaceModule(
+  db: Kysely<MainDb>,
+  workspaceId: string,
+  module: WorkspaceModule,
+  on: boolean,
+): Promise<boolean> {
+  const { rows } = await sql<{ ok: boolean }>`
+    SELECT app.workspace_set_module(${workspaceId}::uuid, ${module}, ${on}) AS ok`.execute(db);
+  return rows[0]?.ok === true;
 }
 
 const numberOrNull = (value: string | null) => (value === null ? null : Number(value));
