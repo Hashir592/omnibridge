@@ -78,6 +78,8 @@ export interface WorkspaceChoice {
   name: string;
   role: 'admin' | 'member';
   companies: number;
+  /** Module toggles of the workspace (PLAT-2, ADR-059); off unless the platform turned it on. */
+  modules: { website_connector: boolean };
 }
 
 /** USR-3 rules, checked live in the UI; the server checks them again plus breach and history. */

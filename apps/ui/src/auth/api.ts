@@ -153,10 +153,10 @@ export const authApi = {
   workspaces: () => reply<WorkspaceChoice[]>(api.GET('/auth/workspaces')),
   invite: (token: string) =>
     reply<InviteInfo>(api.GET('/auth/invites/{token}', { params: { path: { token } } })),
-  acceptInvite: async (token: string, name: string, password: string) =>
+  acceptInvite: async (token: string, name: string | undefined, password: string) =>
     reply<SignInResult>(
       api.POST('/auth/invites/accept', {
-        body: { token, name, password },
+        body: { token, password, ...(name === undefined ? {} : { name }) },
         headers: await csrfHeaders(),
       }),
     ),

@@ -179,6 +179,11 @@
         },
         "required": ["emailMasked", "expiresAt"]
       },
+      "WorkspaceModulesInput": {
+        "type": "object",
+        "properties": { "website_connector": { "type": "boolean" } },
+        "required": ["website_connector"]
+      },
       "WorkspaceChoiceInput": {
         "type": "object",
         "properties": {
@@ -189,9 +194,10 @@
           },
           "name": { "type": "string" },
           "role": { "type": "string", "enum": ["admin", "member"] },
-          "companies": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+          "companies": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "modules": { "$ref": "#/components/schemas/WorkspaceModulesInput" }
         },
-        "required": ["id", "name", "role", "companies"]
+        "required": ["id", "name", "role", "companies", "modules"]
       },
       "TermsInput": {
         "type": "object",
@@ -683,6 +689,12 @@
         "required": ["emailMasked", "expiresAt"],
         "additionalProperties": false
       },
+      "WorkspaceModules": {
+        "type": "object",
+        "properties": { "website_connector": { "type": "boolean" } },
+        "required": ["website_connector"],
+        "additionalProperties": false
+      },
       "WorkspaceChoice": {
         "type": "object",
         "properties": {
@@ -693,9 +705,10 @@
           },
           "name": { "type": "string" },
           "role": { "type": "string", "enum": ["admin", "member"] },
-          "companies": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+          "companies": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "modules": { "$ref": "#/components/schemas/WorkspaceModules" }
         },
-        "required": ["id", "name", "role", "companies"],
+        "required": ["id", "name", "role", "companies", "modules"],
         "additionalProperties": false
       },
       "Terms": {
@@ -2783,7 +2796,7 @@
                   "name": { "type": "string", "minLength": 1, "maxLength": 200 },
                   "password": { "type": "string", "minLength": 1, "maxLength": 1024 }
                 },
-                "required": ["token", "name", "password"]
+                "required": ["token", "password"]
               }
             }
           }

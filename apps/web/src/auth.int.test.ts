@@ -838,6 +838,26 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await server.close();
   });
 
+  it('[USR-1][PLAT-2] a new person must give a name to accept an invite', async () => {
+    const server = app();
+    const token = await inviteLink(`new-${randomUUID().slice(0, 8)}@example.test`);
+    const b = await new Browser(server, '192.0.2.82').start();
+    const res = await b.send('POST', '/api/auth/invites/accept', {
+      token,
+      password: 'granite willow orbit 73',
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ code: 'validation_failed' });
+    // The link still works with a name.
+    const ok = await b.send('POST', '/api/auth/invites/accept', {
+      token,
+      name: 'Jordan New',
+      password: 'granite willow orbit 73',
+    });
+    expect(ok.json()).toEqual({ next: 'mfa_setup' });
+    await server.close();
+  });
+
   it('[USR-1][USR-5] someone who already has a sign-in confirms the invite with their password', async () => {
     const server = app();
     const user = await makeUser({ workspaces: [B] });
@@ -853,12 +873,10 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     });
     expect(wrong.statusCode).toBe(401);
     expect((await authEvents(user.id)).map((e) => e.action)).toContain('auth.login_failed');
-    const right = await b.send('POST', '/api/auth/invites/accept', {
-      token,
-      name: 'Anything',
-      password: PASSWORD,
-    });
+    // No name: an existing sign-in keeps its own (PS-024).
+    const right = await b.send('POST', '/api/auth/invites/accept', { token, password: PASSWORD });
     expect(right.json()).toEqual({ next: 'mfa_code' });
+    expect((await store.user(user.id))?.name).toBe(user.name);
     expect((await store.userWorkspaces(user.id)).map((w) => w.id).sort()).toEqual([A, B].sort());
     await server.close();
   });
@@ -932,8 +950,20 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
     const list = await b.send('GET', '/api/auth/workspaces');
     expect(list.json()).toEqual([
-      { id: A, name: 'Workspace A', role: 'admin', companies: 1 },
-      { id: B, name: 'Workspace B', role: 'admin', companies: 0 },
+      {
+        id: A,
+        name: 'Workspace A',
+        role: 'admin',
+        companies: 1,
+        modules: { website_connector: false },
+      },
+      {
+        id: B,
+        name: 'Workspace B',
+        role: 'admin',
+        companies: 0,
+        modules: { website_connector: false },
+      },
     ]);
     expect(
       (await b.send('POST', '/api/auth/workspace', { workspaceId: randomUUID() })).statusCode,

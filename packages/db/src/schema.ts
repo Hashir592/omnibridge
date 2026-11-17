@@ -90,6 +90,8 @@ export interface WorkspacesTable {
   default_vat_rate_bp: ColumnType<string, number | undefined, number>;
   /** Fixed at 25 and never written (TEN-6). */
   pii_retention_days: ColumnType<string, never, never>;
+  /** Module toggles (0019): written only by app.workspace_set_module. */
+  modules: ColumnType<Readonly<Record<string, unknown>>, never, never>;
   created_at: Generated<Date>;
 }
 

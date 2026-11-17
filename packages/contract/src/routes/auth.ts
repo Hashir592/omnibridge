@@ -54,12 +54,21 @@ export const ResetTokenInfoSchema = z
   .object({ emailMasked: z.string(), expiresAt: z.iso.datetime() })
   .meta({ id: 'ResetTokenInfo' });
 
+/**
+ * The module toggles of one workspace (PLAT-2, ADR-059, PS-024). Off unless the platform turned
+ * the module on; more modules join here later.
+ */
+export const WorkspaceModulesSchema = z
+  .object({ website_connector: z.boolean() })
+  .meta({ id: 'WorkspaceModules' });
+
 export const WorkspaceChoiceSchema = z
   .object({
     id: z.uuid(),
     name: z.string(),
     role: z.enum(['admin', 'member']),
     companies: z.number().int().min(0),
+    modules: WorkspaceModulesSchema,
   })
   .meta({ id: 'WorkspaceChoice' });
 

@@ -1,7 +1,7 @@
 import { readSecretFile } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import { createMainDb, mainDbConfig } from '@omnibridge/db';
-import { LAUNCH_WORKSPACE_ID, seedLaunch } from '@omnibridge/db/seed';
+import { LAUNCH_WORKSPACE_ID, seedLaunch, seedLaunchModules } from '@omnibridge/db/seed';
 import { refuseOutsideDev, seedDemoUser } from './auth/dev-seed.ts';
 import { Passwords } from './auth/passwords.ts';
 
@@ -17,6 +17,7 @@ const main = createMainDb(mainDbConfig('omnibridge-seed', 2), (err) => {
 });
 try {
   const launch = await seedLaunch(main.db);
+  await seedLaunchModules(main.db);
   const demo = await seedDemoUser({
     db: main.db,
     workspaceId: LAUNCH_WORKSPACE_ID,

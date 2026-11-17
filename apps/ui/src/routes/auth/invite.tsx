@@ -12,12 +12,6 @@ import { LinkUnusable } from './password.tsx';
 import { PasswordRules, passwordLocallyValid, personalParts, useEnterApp } from './parts.tsx';
 
 /**
- * The name sent for someone who already has a sign-in. The contract requires a name, but the
- * server keeps the existing account's own name and ignores this one (invite_accept, T-0204).
- */
-const EXISTING_USER_NAME = 'existing account';
-
-/**
  * Accept an invite (TEN-7: invite-only, link valid 72 hours). A new person sets their name and a
  * password (USR-3), then goes to MFA set-up (USR-4). Someone who already has an OmniBridge sign-in
  * confirms with that password and then enters their usual code (T-0204).
@@ -72,11 +66,8 @@ export function AcceptInvitePage() {
     setBusy(true);
     setResult(undefined);
     try {
-      const r = await authApi.acceptInvite(
-        token,
-        existing ? EXISTING_USER_NAME : name.trim(),
-        password,
-      );
+      // An existing sign-in keeps its name: none is sent (PS-024).
+      const r = await authApi.acceptInvite(token, existing ? undefined : name.trim(), password);
       if (r.ok) {
         // Either way the session continues at MFA (USR-4).
         const toCode = (r.body as SignInResult).next === 'mfa_code';

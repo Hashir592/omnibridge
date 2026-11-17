@@ -443,7 +443,7 @@ export class AuthService {
    * then starts at MFA, so an invite never skips it (USR-4).
    */
   async acceptInvite(
-    input: { token: string; name: string; password: string },
+    input: { token: string; name?: string | undefined; password: string },
     ip: string,
   ): Promise<WithCookies<{ next: 'mfa_code' | 'mfa_setup' }>> {
     const now = this.#now();
@@ -458,10 +458,11 @@ export class AuthService {
       if (!ok || account === undefined) return this.#failed(key, ip, now, account, 'password');
       await this.#refuseIfLockedMeanwhile(key, ip, now);
       await this.#o.store.clearFailures(key);
+      // An existing sign-in keeps its own name (PS-024); passed only for the function's shape.
       const joined = await this.#o.store.acceptInvite(
         tokenHash,
         randomUUID(),
-        input.name,
+        account.name,
         now,
         false,
       );
@@ -472,12 +473,21 @@ export class AuthService {
         cookies: await this.#preMfaSession(account.userId, now),
       };
     }
-    const rules = passwordProblems(input.password, { name: input.name, email: invite.email });
+    const name = input.name;
+    if (name === undefined) {
+      throw new ApiError({
+        status: 422,
+        code: 'validation_failed',
+        detail: 'Enter your name',
+        errors: [{ location: 'body', path: 'name', message: 'required' }],
+      });
+    }
+    const rules = passwordProblems(input.password, { name, email: invite.email });
     if (rules.length > 0) throw passwordRejected(rules);
     const hash = await this.#o.passwords.hash(input.password);
     // newOnly: no password was checked, so this may never join (or set the password of) an
     // account that appeared for this email meanwhile.
-    const joined = await this.#o.store.acceptInvite(tokenHash, randomUUID(), input.name, now, true);
+    const joined = await this.#o.store.acceptInvite(tokenHash, randomUUID(), name, now, true);
     if (joined === undefined) throw notFound();
     await this.#o.store.setPassword(joined.userId, hash, now);
     await this.#auditJoined(joined.workspaceId, joined.userId, invite.role, ip);

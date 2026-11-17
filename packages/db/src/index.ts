@@ -29,7 +29,13 @@ export { Tenancy, withTenantTransaction } from './tenant.ts';
 export { JobLeaseRepository } from './job-leases.ts';
 export { FileRepository } from './files.ts';
 export { ChannelAccountCompanyLocked, LastAdmin, WorkspaceLimitReached } from './errors.ts';
-export { WorkspaceRepository, type NewWorkspace, type Workspace } from './workspaces.ts';
+export {
+  setWorkspaceModule,
+  WorkspaceRepository,
+  type NewWorkspace,
+  type Workspace,
+  type WorkspaceModule,
+} from './workspaces.ts';
 export {
   CompanyRepository,
   type Company,

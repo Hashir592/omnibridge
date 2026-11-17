@@ -8,6 +8,7 @@ import {
   createMainDb,
   MembershipRepository,
   migrateMain,
+  setWorkspaceModule,
   Tenancy,
   UserRepository,
   WorkspaceRepository,
@@ -420,10 +421,51 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
   it('[USR-2] the picker lists every workspace of the user with role and companies', async () => {
     const list = await store.userWorkspaces(user);
     expect(list).toEqual([
-      { id: A, name: 'Workspace A', role: 'admin', companies: 1 },
-      { id: B, name: 'Workspace B', role: 'member', companies: 0 },
+      {
+        id: A,
+        name: 'Workspace A',
+        role: 'admin',
+        companies: 1,
+        modules: { website_connector: false },
+      },
+      {
+        id: B,
+        name: 'Workspace B',
+        role: 'member',
+        companies: 0,
+        modules: { website_connector: false },
+      },
     ]);
     expect(await store.userWorkspaces(randomUUID())).toEqual([]);
+  });
+
+  it('[PLAT-2][WEB-1] a workspace with no module setting reads off; only platform tooling switches one on', async () => {
+    // A workspace no one has set reads website_connector false (above).
+    const denied = /permission denied for function/;
+    await expect(
+      app.query('SELECT app.workspace_set_module($1, $2, $3)', [A, 'website_connector', true]),
+    ).rejects.toThrow(denied);
+    await expect(
+      worker.query('SELECT app.workspace_set_module($1, $2, $3)', [A, 'website_connector', true]),
+    ).rejects.toThrow(denied);
+    const opsDb = createMainDb({ ...cluster.connection('ob_ops'), max: 1 });
+    try {
+      expect(await setWorkspaceModule(opsDb.db, A, 'website_connector', true)).toBe(true);
+      expect(await setWorkspaceModule(opsDb.db, randomUUID(), 'website_connector', true)).toBe(
+        false,
+      );
+      await expect(
+        ops.query('SELECT app.workspace_set_module($1, $2, $3)', [A, 'advertising', true]),
+      ).rejects.toThrow(/unknown module/);
+      expect((await store.userWorkspaces(user)).map((w) => [w.id, w.modules])).toEqual([
+        [A, { website_connector: true }],
+        [B, { website_connector: false }],
+      ]);
+      expect(await setWorkspaceModule(opsDb.db, A, 'website_connector', false)).toBe(true);
+      expect((await store.userWorkspaces(user))[0]?.modules).toEqual({ website_connector: false });
+    } finally {
+      await opsDb.destroy();
+    }
   });
   it('[USR-3][USR-7] setting a password marks the open reset links used', async () => {
     const link = sha('reset-before-change');
