@@ -114,6 +114,8 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - platform console: workspaces, feature flags, jobs and dead-letter queue, usage, credential calendar
   - security alerts: unusual logins, mass exports, mass PII views, canary access
   - daily health digest
+  - SEC-12 login alerts read `auth.login_failed` and `auth.locked` (ADR-061)
+  - demoting a platform admin re-checks `platform_admin` per request or revokes their sessions (ADR-061)
 - **Owns:** NTF-1, NTF-2, NTF-3, NTF-4, NTF-5, PLAT-1, PLAT-2, PLAT-3, PLAT-4, SEC-12, OPS-6, MAIL-3
 - **Depends on:** M04.
 - **External gate:** none.

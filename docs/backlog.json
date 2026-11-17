@@ -850,6 +850,76 @@
       "status": "done"
     },
     {
+      "id": "T-0210",
+      "module": "M02",
+      "session": "S3",
+      "title": "Fixes from the T-0206 security audit (ADR-061)",
+      "goal": "No one can block password resets for everyone, and sign-in timing and lock notices reveal and spam nothing.",
+      "prd_ids": [
+        "USR-3",
+        "USR-5",
+        "USR-7"
+      ],
+      "supports": [
+        "SEC-1",
+        "SEC-3"
+      ],
+      "scope": [
+        "S5-20261117-01: only reset mails actually sent count toward the platform-wide cap; per-email and per-address caps still count every request; warn-log auth.reset_capped when hit",
+        "S5-20261117-02: write the failed-login audit row inside auth_record_failure so real and unknown emails make the same DB calls",
+        "S5-20261117-03: one lock notice per user per 24 h, plus a platform daily cap",
+        "IPv6 addresses key the per-address counters by /64",
+        "__Host- prefix on ob_session and ob_csrf (and the SPA's cookie read)",
+        "Changing a password marks open reset links used",
+        "The 1-day minimum age does not apply to a reset by email link (USR-3 as amended)",
+        "Any path whose first segment is api, any case, answers the JSON 404",
+        "One line in the support runbook: a targeted lockout means wait 15 minutes or reset"
+      ],
+      "out_of_scope": [
+        "SEC-12 alerting (M05)",
+        "Platform-admin demotion (M05)",
+        "CSP inline styles (S2)"
+      ],
+      "depends_on": [
+        "T-0206"
+      ],
+      "acceptance": [
+        "Tests first, each citing its ID: 100 unknown-email requests leave a real reset mail sendable; equal DB call count for real and unknown failed sign-ins; second lock notice in 24 h not sent; two addresses in one /64 share a counter",
+        "S5 re-checks the three findings in the PR (one comment)",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0211",
+      "module": "M02",
+      "session": "S3",
+      "title": "Module toggles in the session payload (PS-024)",
+      "goal": "The SPA reads the real per-workspace module toggles.",
+      "prd_ids": [],
+      "supports": [
+        "PLAT-2",
+        "WEB-1"
+      ],
+      "scope": [
+        "Session/workspace response gains modules: { website_connector: boolean } from the workspace's module settings (off by default)",
+        "Dev seed turns it on for the launch workspace only (seed data, never a name in code)",
+        "POST /auth/invites/accept takes name as optional for an existing sign-in; the SPA drops its placeholder"
+      ],
+      "out_of_scope": [
+        "Server-side 404s on website routes (M11)",
+        "Platform console switch (M05)"
+      ],
+      "depends_on": [],
+      "acceptance": [
+        "Contract test for the new field; a workspace with no setting reads false",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
       "id": "T-0307",
       "module": "M03",
       "session": "S2",
