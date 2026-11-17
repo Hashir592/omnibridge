@@ -24,6 +24,7 @@
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/mail": "workspace:*",
     "@omnibridge/queue": "workspace:*",
+    "@omnibridge/vault-client": "workspace:*",
     "kysely": "0.29.7",
     "pg": "8.23.1",
     "pg-boss": "12.38.0",

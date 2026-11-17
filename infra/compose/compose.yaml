@@ -197,10 +197,12 @@ services:
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-uniquelocal}
       FILES_DIR: /data/files
       PII_VAULT_URL: http://pii-vault:8080
+      # Web's vault token: ingest, read-full (order detail, inbox), mask, search, match (T-0402).
+      VAULT_TOKEN_FILE: /run/secrets/vault_token_web
       PORT: '8080'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=288
-    secrets: [ob_app_password, secrets_kek, file_link_hmac_key, auth_hmac_key]
+    secrets: [ob_app_password, secrets_kek, file_link_hmac_key, auth_hmac_key, vault_token_web]
     # Encrypted files (T-0105, ADR-012): the only writable path in the read-only container.
     volumes:
       - files_data:/data/files
@@ -241,6 +243,11 @@ services:
       WORKER_HEALTH_FILE: /tmp/worker-heartbeat
       # Most jobs at once across all queues; /metrics on an unpublished port (T-0104).
       FILES_DIR: /data/files
+      # pii-vault over ob_app (T-0402): the worker token for ingest, labels and the inbox; the
+      # deletion token only for the deletion jobs (DEL-1).
+      PII_VAULT_URL: http://pii-vault:8080
+      VAULT_TOKEN_FILE: /run/secrets/vault_token_worker
+      VAULT_DELETION_TOKEN_FILE: /run/secrets/vault_token_deletion
       CLAMD_HOST: clamd
       CLAMD_PORT: '3310'
       # Auth mail (T-0203): links point at the app's origin. Dev defaults send to Mailpit in plain
@@ -253,13 +260,21 @@ services:
       METRICS_PORT: '9464'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=384
-    secrets: [ob_worker_password, ob_platform_password, secrets_kek]
+    secrets:
+      [
+        ob_worker_password,
+        ob_platform_password,
+        secrets_kek,
+        vault_token_worker,
+        vault_token_deletion,
+      ]
     # The worker only reads files (to scan them); it never writes the volume.
     volumes:
       - files_data:/data/files:ro
     networks: [ob_app, ob_db, scan_ob]
     depends_on:
       migrate-main: { condition: service_completed_successfully }
+      pii-vault: { condition: service_healthy }
     stop_grace_period: 30s
     mem_limit: 512m
     cpus: 1.0
@@ -317,10 +332,15 @@ services:
       DB_PII_USER: vault_app
       DB_PII_PASSWORD_FILE: /run/secrets/vault_app_password
       PII_KEK_FILE: /run/secrets/pii_kek
+      # One token per caller (invariant 8); the vault holds all three to tell callers apart.
+      VAULT_TOKEN_WEB_FILE: /run/secrets/vault_token_web
+      VAULT_TOKEN_WORKER_FILE: /run/secrets/vault_token_worker
+      VAULT_TOKEN_DELETION_FILE: /run/secrets/vault_token_deletion
       PORT: '8080'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=64
-    secrets: [vault_app_password, pii_kek]
+    secrets:
+      [vault_app_password, pii_kek, vault_token_web, vault_token_worker, vault_token_deletion]
     networks: [ob_app, ob_pii]
     depends_on:
       migrate-pii: { condition: service_completed_successfully }
@@ -404,5 +424,11 @@ secrets:
     file: ./.secrets/secrets_kek
   pii_kek:
     file: ./.secrets/pii_kek
+  vault_token_web:
+    file: ./.secrets/vault_token_web
+  vault_token_worker:
+    file: ./.secrets/vault_token_worker
+  vault_token_deletion:
+    file: ./.secrets/vault_token_deletion
   file_link_hmac_key:
     file: ./.secrets/file_link_hmac_key

@@ -12,5 +12,6 @@ export {
   unwrapDataKey,
   type WrappedDataKey,
 } from './data-key.ts';
+export { generateIndexKey, IndexKey, unwrapIndexKey, type WrappedIndexKey } from './index-key.ts';
 export { generateKekLine, Keyring, loadKeyring, parseKeyring, type KeyPurpose } from './keyring.ts';
 export { Secret } from './secret.ts';

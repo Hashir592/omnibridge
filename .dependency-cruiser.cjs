@@ -63,6 +63,24 @@ module.exports = {
       to: { path: '^packages/db/' },
     },
     {
+      name: 'vault-client-holds-no-keys',
+      comment:
+        'Invariant 8 (T-0402): the vault client is what web and worker hold, so it carries no db, db-pii or key code.',
+      severity: 'error',
+      from: { path: '^packages/vault-client/' },
+      to: { path: '^(apps/|packages/(db|pii-db|crypto)/)' },
+    },
+    {
+      name: 'vault-reached-over-http-only',
+      comment:
+        'Web and worker reach pii-vault only through @omnibridge/vault-client; only tests may start one in-process.',
+      severity: 'error',
+      from: {
+        pathNot: ['^apps/pii-vault/', '\\.(test|int\\.test|contract\\.test)\\.ts$'],
+      },
+      to: { path: '^apps/pii-vault/' },
+    },
+    {
       name: 'ui-uses-contract-client-only',
       comment:
         'ADR-004: the SPA talks to the API only through the generated typed client ' +
