@@ -24,8 +24,10 @@ function sources(dir: string): string[] {
 /** The argument count of each `app.<name>(…)` call in `text`, by top-level commas. */
 function callArities(text: string, name: string): number[] {
   const arities: number[] = [];
-  const re = new RegExp(String.raw`app\.${name}\(`, 'g');
+  // One literal pattern for every `app.<fn>(` call, filtered by name (no regex built at run time).
+  const re = /app\.(\w+)\(/g;
   for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+    if (m[1] !== name) continue;
     let depth = 1;
     let commas = 0;
     let empty = true;
