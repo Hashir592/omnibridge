@@ -106,7 +106,7 @@ describe('GET /files/:id signed links (NFR-5)', () => {
       await store.signedUrl(ws, cleanId, 'session-a', () => Promise.resolve(false)),
     ).toBeUndefined();
     const issued = await store.signedUrl(ws, cleanId, 'session-a', () => Promise.resolve(true));
-    expect(issued?.url).toMatch(/^\/files\/[0-9a-f-]{36}\?exp=\d+&sig=[\w-]+$/);
+    expect(issued?.url).toMatch(/^\/api\/files\/[0-9a-f-]{36}\?exp=\d+&sig=[\w-]+$/);
     const server = app();
     const res = await server.inject({
       method: 'GET',
@@ -130,28 +130,28 @@ describe('GET /files/:id signed links (NFR-5)', () => {
       linkKey,
     );
     expect(
-      (await get(`/files/${cleanId}?exp=${String(expired.exp)}&sig=${expired.sig}`)).statusCode,
+      (await get(`/api/files/${cleanId}?exp=${String(expired.exp)}&sig=${expired.sig}`)).statusCode,
     ).toBe(403);
 
     const good = signFileLink({ fileId: cleanId, sessionId: 'session-a' }, linkKey);
     // A middle character: always different bytes (the last one partly holds unused bits).
     const tamperedSig = `${good.sig.slice(0, 10)}${good.sig[10] === 'A' ? 'B' : 'A'}${good.sig.slice(11)}`;
     expect(
-      (await get(`/files/${cleanId}?exp=${String(good.exp)}&sig=${tamperedSig}`)).statusCode,
+      (await get(`/api/files/${cleanId}?exp=${String(good.exp)}&sig=${tamperedSig}`)).statusCode,
     ).toBe(403);
     expect(
-      (await get(`/files/${cleanId}?exp=${String(good.exp + 600)}&sig=${good.sig}`)).statusCode,
+      (await get(`/api/files/${cleanId}?exp=${String(good.exp + 600)}&sig=${good.sig}`)).statusCode,
     ).toBe(403);
     // Bound to the session: another signed-in session cannot reuse it.
     const stolen = await get(
-      `/files/${cleanId}?exp=${String(good.exp)}&sig=${good.sig}`,
+      `/api/files/${cleanId}?exp=${String(good.exp)}&sig=${good.sig}`,
       'session-b',
     );
     expect(stolen.statusCode).toBe(403);
     expect(stolen.json()).toMatchObject({ code: 'forbidden' });
     // Bound to the file: the same signature does not open another file.
     expect(
-      (await get(`/files/${scanningId}?exp=${String(good.exp)}&sig=${good.sig}`)).statusCode,
+      (await get(`/api/files/${scanningId}?exp=${String(good.exp)}&sig=${good.sig}`)).statusCode,
     ).toBe(403);
     await server.close();
   });
@@ -161,13 +161,13 @@ describe('GET /files/:id signed links (NFR-5)', () => {
     const link = signFileLink({ fileId: scanningId, sessionId: 'session-a' }, linkKey);
     const res = await server.inject({
       method: 'GET',
-      url: `/files/${scanningId}?exp=${String(link.exp)}&sig=${link.sig}`,
+      url: `/api/files/${scanningId}?exp=${String(link.exp)}&sig=${link.sig}`,
       headers: { 'x-test-session': 'session-a' },
     });
     expect(res.statusCode).toBe(404);
     // No session at all: 401 before anything else.
     expect(
-      (await server.inject({ method: 'GET', url: `/files/${cleanId}?exp=1&sig=x` })).statusCode,
+      (await server.inject({ method: 'GET', url: `/api/files/${cleanId}?exp=1&sig=x` })).statusCode,
     ).toBe(401);
     await server.close();
   });

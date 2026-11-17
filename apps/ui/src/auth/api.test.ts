@@ -43,12 +43,14 @@ describe('SPA auth client (SEC-1, ADR-048)', () => {
     const { authApi, sent } = await loadWith(() => json(200, { next: 'mfa_code' }));
     const r = await authApi.signIn('sam@example.test', 'a long passphrase');
     expect(r).toMatchObject({ ok: true, status: 200, body: { next: 'mfa_code' } });
-    expect(sent).toEqual([{ method: 'POST', path: '/auth/sign-in', csrf: 'token-from-cookie' }]);
+    expect(sent).toEqual([
+      { method: 'POST', path: '/api/auth/sign-in', csrf: 'token-from-cookie' },
+    ]);
   });
 
   it('[SEC-1] without the cookie it asks for one first; reads send no token', async () => {
     const { authApi, sent } = await loadWith((req) => {
-      if (new URL(req.url).pathname === '/auth/csrf') {
+      if (new URL(req.url).pathname === '/api/auth/csrf') {
         document.cookie = 'ob_csrf=fresh-token';
         return new Response(null, { status: 204 });
       }
@@ -57,9 +59,9 @@ describe('SPA auth client (SEC-1, ADR-048)', () => {
     await authApi.verifyCode('123456');
     await authApi.workspaces();
     expect(sent).toEqual([
-      { method: 'GET', path: '/auth/csrf', csrf: null },
-      { method: 'POST', path: '/auth/mfa/verify', csrf: 'fresh-token' },
-      { method: 'GET', path: '/auth/workspaces', csrf: null },
+      { method: 'GET', path: '/api/auth/csrf', csrf: null },
+      { method: 'POST', path: '/api/auth/mfa/verify', csrf: 'fresh-token' },
+      { method: 'GET', path: '/api/auth/workspaces', csrf: null },
     ]);
   });
 

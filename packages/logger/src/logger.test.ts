@@ -61,6 +61,18 @@ describe('logger', () => {
     expect(text).toContain('"url":"/auth/password/reset/[REDACTED]"');
   });
 
+  it('[SEC-5][USR-7][USR-1] the SPA invite and reset page tokens are never logged', () => {
+    const { logger, output } = capture();
+    logger.info({ req: { method: 'GET', url: '/invite/TOKENMARK-4' } }, 'in');
+    logger.info({ req: { method: 'GET', url: '/reset-password?token=TOKENMARK-5&x=1' } }, 'in');
+    logger.warn('failed for /reset-password?token=TOKENMARK-7&x=1');
+    logger.info({ req: { method: 'GET', url: '/api/auth/invites/TOKENMARK-6' } }, 'in');
+    const text = output();
+    expect(text).not.toContain('TOKENMARK');
+    expect(text).toContain('"url":"/invite/[REDACTED]"');
+    expect(text).toContain('/reset-password?token=[REDACTED]&x=1');
+  });
+
   it('[DP-8] scrubString leaves ordinary text alone', () => {
     expect(scrubString('heartbeat ok')).toBe('heartbeat ok');
   });

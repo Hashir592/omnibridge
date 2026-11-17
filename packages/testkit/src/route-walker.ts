@@ -1,4 +1,9 @@
-import { routeMetadataProblems, type AnyRoute, type RouteMetadata } from '@omnibridge/contract';
+import {
+  mountedPath,
+  routeMetadataProblems,
+  type AnyRoute,
+  type RouteMetadata,
+} from '@omnibridge/contract';
 
 /**
  * Route walker (ARCHITECTURE.md §5 invariant 4, ADR-006, AT-1).
@@ -84,8 +89,9 @@ export interface WalkOutcome {
   ok: boolean;
 }
 
+/** The URL the server answers on: under /api unless the PRD fixes the path (ADR-060). */
 function urlOf(route: AnyRoute, call: WalkCall): string {
-  const path = route.path.replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
+  const path = mountedPath(route.path).replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
     const value = call.params?.[name];
     if (value === undefined) throw new Error(`${route.id}: no value for path parameter ${name}`);
     return encodeURIComponent(value);

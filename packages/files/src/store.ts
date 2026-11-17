@@ -211,7 +211,8 @@ export class EncryptedLocalFileStore implements FileStore {
     const meta = await this.#meta.get(ctx, id);
     if (meta?.state !== 'clean' || !(await allowed())) return undefined;
     const link = signFileLink({ fileId: id, sessionId }, this.#linkKey);
-    return { url: `/files/${id}?exp=${String(link.exp)}&sig=${link.sig}`, link };
+    // GET /files/:id is served under /api like every contract route (ADR-060).
+    return { url: `/api/files/${id}?exp=${String(link.exp)}&sig=${link.sig}`, link };
   }
 
   #path(ctx: TenantContext, id: string): string {

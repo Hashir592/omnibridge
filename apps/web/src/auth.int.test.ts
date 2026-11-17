@@ -85,12 +85,12 @@ class Browser {
   }
 
   async start() {
-    await this.send('GET', '/auth/csrf');
+    await this.send('GET', '/api/auth/csrf');
     return this;
   }
 
   signIn(email: string, password: string) {
-    return this.send('POST', '/auth/sign-in', { email, password });
+    return this.send('POST', '/api/auth/sign-in', { email, password });
   }
 }
 
@@ -235,7 +235,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const b = await new Browser(server).start();
     expect((await b.signIn(user.email, PASSWORD)).statusCode).toBe(200);
     later(30_000); // a fresh TOTP step every time
-    const v = await b.send('POST', '/auth/mfa/verify', { code: code(user.secret) });
+    const v = await b.send('POST', '/api/auth/mfa/verify', { code: code(user.secret) });
     expect(v.statusCode).toBe(200);
     return { b, next: v.json<{ next: string }>().next };
   }
@@ -280,29 +280,29 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const first = await b.signIn(user.email, PASSWORD);
     expect(first.json()).toEqual({ next: 'mfa_code' });
     expect(first.headers['cache-control']).toBe('no-store');
-    for (const url of ['/companies', '/auth/workspaces', '/audit-events']) {
+    for (const url of ['/api/companies', '/api/auth/workspaces', '/api/audit-events']) {
       expect({ url, status: (await b.send('GET', url)).statusCode }).toEqual({ url, status: 401 });
     }
     later(30_000);
-    const wrong = await b.send('POST', '/auth/mfa/verify', { code: '000000' });
+    const wrong = await b.send('POST', '/api/auth/mfa/verify', { code: '000000' });
     expect(wrong.statusCode).toBe(401);
-    const ok = await b.send('POST', '/auth/mfa/verify', { code: code(user.secret) });
+    const ok = await b.send('POST', '/api/auth/mfa/verify', { code: code(user.secret) });
     expect(ok.json()).toEqual({ next: 'app' });
-    expect((await b.send('GET', '/companies')).statusCode).toBe(200);
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(200);
     // The same code cannot be used twice (no replay).
     const again = await new Browser(server).start();
     await again.signIn(user.email, PASSWORD);
     expect(
-      (await again.send('POST', '/auth/mfa/verify', { code: code(user.secret) })).statusCode,
+      (await again.send('POST', '/api/auth/mfa/verify', { code: code(user.secret) })).statusCode,
     ).toBe(401);
 
     // MFA not set up: sign-in leads to enrolment, and still nothing else opens.
     const fresh = await makeUser({ mfa: false });
     const c = await new Browser(server).start();
     expect((await c.signIn(fresh.email, PASSWORD)).json()).toEqual({ next: 'mfa_setup' });
-    expect((await c.send('GET', '/companies')).statusCode).toBe(401);
-    expect((await c.send('POST', '/auth/mfa/verify', { code: '123456' })).statusCode).toBe(403);
-    const enrol = await c.send('POST', '/auth/mfa/enrolment');
+    expect((await c.send('GET', '/api/companies')).statusCode).toBe(401);
+    expect((await c.send('POST', '/api/auth/mfa/verify', { code: '123456' })).statusCode).toBe(403);
+    const enrol = await c.send('POST', '/api/auth/mfa/enrolment');
     expect(enrol.statusCode).toBe(200);
     expect(enrol.headers['cache-control']).toBe('no-store');
     const view = enrol.json<{ secret: string; label: string; qr: string[] }>();
@@ -310,16 +310,16 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(view.qr.length).toBeGreaterThan(20);
     const secret = Buffer.from(base32Decode(view.secret.replaceAll(' ', '')));
     later(30_000);
-    const confirm = await c.send('POST', '/auth/mfa/enrolment/confirm', { code: code(secret) });
+    const confirm = await c.send('POST', '/api/auth/mfa/enrolment/confirm', { code: code(secret) });
     expect(confirm.statusCode).toBe(200);
     const { recoveryCodes } = confirm.json<{ recoveryCodes: string[] }>();
     expect(recoveryCodes).toHaveLength(10);
     for (const r of recoveryCodes) expect(r).toMatch(/^[A-Z2-7]{4}(-[A-Z2-7]{4}){3}$/);
-    expect((await c.send('GET', '/companies')).statusCode).toBe(200);
+    expect((await c.send('GET', '/api/companies')).statusCode).toBe(200);
     // Enrolment cannot be restarted once confirmed.
     const d = await new Browser(server).start();
     await d.signIn(fresh.email, PASSWORD);
-    expect((await d.send('POST', '/auth/mfa/enrolment')).statusCode).toBe(403);
+    expect((await d.send('POST', '/api/auth/mfa/enrolment')).statusCode).toBe(403);
     await server.close();
   });
 
@@ -328,13 +328,15 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const user = await makeUser();
     const b = await new Browser(server).start();
     await b.signIn(user.email, PASSWORD);
-    const used = await b.send('POST', '/auth/mfa/recovery', { code: user.recovery.toLowerCase() });
+    const used = await b.send('POST', '/api/auth/mfa/recovery', {
+      code: user.recovery.toLowerCase(),
+    });
     expect(used.json()).toEqual({ next: 'app', recoveryCodesLeft: 9 });
     const c = await new Browser(server).start();
     await c.signIn(user.email, PASSWORD);
-    expect((await c.send('POST', '/auth/mfa/recovery', { code: user.recovery })).statusCode).toBe(
-      401,
-    );
+    expect(
+      (await c.send('POST', '/api/auth/mfa/recovery', { code: user.recovery })).statusCode,
+    ).toBe(401);
     await server.close();
   });
 
@@ -456,7 +458,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     later(31_000);
     await viaEdge.send(
       'POST',
-      '/auth/sign-in',
+      '/api/auth/sign-in',
       { email: user.email, password: 'wrong one' },
       { headers: { 'x-forwarded-for': '203.0.113.99' } },
     );
@@ -464,7 +466,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     later(31_000);
     await direct.send(
       'POST',
-      '/auth/sign-in',
+      '/api/auth/sign-in',
       { email: user.email, password: 'wrong two' },
       { headers: { 'x-forwarded-for': '203.0.113.98' } },
     );
@@ -492,7 +494,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const user = await makeUser({ name: 'Morgan Quayle' });
     const { b } = await signedIn(server, user);
     const change = (password: string, currentPassword = PASSWORD) =>
-      b.send('POST', '/auth/password/change', { currentPassword, password });
+      b.send('POST', '/api/auth/password/change', { currentPassword, password });
     const rules = async (password: string) => {
       const res = await change(password);
       expect(res.statusCode).toBe(422);
@@ -513,7 +515,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     });
     // A good one is accepted; every session then ends.
     expect((await change('copper meadow violin 83')).statusCode).toBe(204);
-    expect((await b.send('GET', '/companies')).statusCode).toBe(401);
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
     // Minimum age: not again within a day.
     const again = await signedIn(server, { email: user.email, secret: user.secret }).catch(
       () => undefined,
@@ -522,8 +524,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const c = await new Browser(server).start();
     expect((await c.signIn(user.email, 'copper meadow violin 83')).statusCode).toBe(200);
     later(30_000);
-    await c.send('POST', '/auth/mfa/verify', { code: code(user.secret) });
-    const tooSoon = await c.send('POST', '/auth/password/change', {
+    await c.send('POST', '/api/auth/mfa/verify', { code: code(user.secret) });
+    const tooSoon = await c.send('POST', '/api/auth/password/change', {
       currentPassword: 'copper meadow violin 83',
       password: 'another fine passphrase 11',
     });
@@ -540,12 +542,12 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       expect((await b.signIn(user.email, PASSWORD)).statusCode).toBe(200);
       later(30_000);
       expect(
-        (await b.send('POST', '/auth/mfa/verify', { code: code(user.secret) })).statusCode,
+        (await b.send('POST', '/api/auth/mfa/verify', { code: code(user.secret) })).statusCode,
       ).toBe(200);
       return b;
     };
     const change = (b: Browser, currentPassword: string) =>
-      b.send('POST', '/auth/password/change', {
+      b.send('POST', '/api/auth/password/change', {
         currentPassword,
         password: 'harbour lantern quartz 52',
       });
@@ -586,9 +588,9 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const user = await makeUser({ passwordAgeMs: 366 * DAY });
     const { b, next } = await signedIn(server, user);
     expect(next).toBe('password_change');
-    expect((await b.send('GET', '/auth/workspaces')).statusCode).toBe(403);
-    expect((await b.send('GET', '/companies')).statusCode).toBe(401);
-    const res = await b.send('POST', '/auth/password/change', {
+    expect((await b.send('GET', '/api/auth/workspaces')).statusCode).toBe(403);
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
+    const res = await b.send('POST', '/api/auth/password/change', {
       currentPassword: PASSWORD,
       password: 'saffron glacier pebble 64',
     });
@@ -601,20 +603,20 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const user = await makeUser();
     const { b } = await signedIn(server, user);
     later(29 * MIN);
-    expect((await b.send('GET', '/companies')).statusCode).toBe(200);
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(200);
     later(29 * MIN);
-    expect((await b.send('GET', '/companies')).statusCode).toBe(200);
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(200);
     later(30 * MIN);
-    expect((await b.send('GET', '/companies')).statusCode).toBe(401);
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
 
     // Active all the time, it still ends 12 hours after sign-in.
     const { b: busy } = await signedIn(server, user);
     for (let elapsed = 0; elapsed < 12 * HOUR - 25 * MIN; elapsed += 25 * MIN) {
       later(25 * MIN);
-      expect((await busy.send('GET', '/companies')).statusCode).toBe(200);
+      expect((await busy.send('GET', '/api/companies')).statusCode).toBe(200);
     }
     later(25 * MIN);
-    expect((await busy.send('GET', '/companies')).statusCode).toBe(401);
+    expect((await busy.send('GET', '/api/companies')).statusCode).toBe(401);
     await server.close();
   });
 
@@ -623,15 +625,15 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const user = await makeUser();
     const { b: laptop } = await signedIn(server, user);
     const { b: phone } = await signedIn(server, user);
-    expect((await laptop.send('POST', '/auth/sign-out-all')).statusCode).toBe(204);
-    expect((await phone.send('GET', '/companies')).statusCode).toBe(401);
-    expect((await laptop.send('GET', '/companies')).statusCode).toBe(401);
+    expect((await laptop.send('POST', '/api/auth/sign-out-all')).statusCode).toBe(204);
+    expect((await phone.send('GET', '/api/companies')).statusCode).toBe(401);
+    expect((await laptop.send('GET', '/api/companies')).statusCode).toBe(401);
     // Plain sign-out ends only this browser's session.
     const { b: one } = await signedIn(server, user);
     const { b: two } = await signedIn(server, user);
-    expect((await one.send('POST', '/auth/sign-out')).statusCode).toBe(204);
-    expect((await one.send('GET', '/companies')).statusCode).toBe(401);
-    expect((await two.send('GET', '/companies')).statusCode).toBe(200);
+    expect((await one.send('POST', '/api/auth/sign-out')).statusCode).toBe(204);
+    expect((await one.send('GET', '/api/companies')).statusCode).toBe(401);
+    expect((await two.send('GET', '/api/companies')).statusCode).toBe(200);
     await server.close();
   });
 
@@ -642,10 +644,10 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const anon = await new Browser(server).start();
     const before = notified.reset.length;
     expect(
-      (await anon.send('POST', '/auth/password/forgot', { email: user.email })).statusCode,
+      (await anon.send('POST', '/api/auth/password/forgot', { email: user.email })).statusCode,
     ).toBe(202);
     expect(
-      (await anon.send('POST', '/auth/password/forgot', { email: 'nobody@example.test' }))
+      (await anon.send('POST', '/api/auth/password/forgot', { email: 'nobody@example.test' }))
         .statusCode,
     ).toBe(202);
     await auth.idle();
@@ -653,45 +655,47 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(notified.reset.slice(before)).toEqual([{ userId: user.id, workspaceId: A }]);
 
     const stale = await issuePasswordReset(store, user.id, clock);
-    const info = await anon.send('GET', `/auth/password/reset/${stale.token}`);
+    const info = await anon.send('GET', `/api/auth/password/reset/${stale.token}`);
     expect(info.json()).toEqual({
       emailMasked: `u***@example.test`,
       expiresAt: stale.expiresAt.toISOString(),
     });
     later(30 * MIN);
-    expect((await anon.send('GET', `/auth/password/reset/${stale.token}`)).statusCode).toBe(404);
+    expect((await anon.send('GET', `/api/auth/password/reset/${stale.token}`)).statusCode).toBe(
+      404,
+    );
     expect(
-      (await anon.send('POST', '/auth/password/reset', { token: stale.token, password: 'x' }))
+      (await anon.send('POST', '/api/auth/password/reset', { token: stale.token, password: 'x' }))
         .statusCode,
     ).toBe(404);
 
     const { b: oldSession } = await signedIn(server, user);
     const link = await issuePasswordReset(store, user.id, clock);
-    const weak = await anon.send('POST', '/auth/password/reset', {
+    const weak = await anon.send('POST', '/api/auth/password/reset', {
       token: link.token,
       password: 'password',
     });
     expect(weak.statusCode).toBe(422);
-    const done = await anon.send('POST', '/auth/password/reset', {
+    const done = await anon.send('POST', '/api/auth/password/reset', {
       token: link.token,
       password: 'lavender canyon whistle 29',
     });
     expect(done.statusCode).toBe(204);
     expect(
       (
-        await anon.send('POST', '/auth/password/reset', {
+        await anon.send('POST', '/api/auth/password/reset', {
           token: link.token,
           password: 'another one entirely 55',
         })
       ).statusCode,
     ).toBe(404);
     // Every session ended, and signing in again still needs MFA.
-    expect((await oldSession.send('GET', '/companies')).statusCode).toBe(401);
+    expect((await oldSession.send('GET', '/api/companies')).statusCode).toBe(401);
     const b = await new Browser(server).start();
     expect((await b.signIn(user.email, 'lavender canyon whistle 29')).json()).toEqual({
       next: 'mfa_code',
     });
-    expect((await b.send('GET', '/companies')).statusCode).toBe(401);
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
     await server.close();
   });
 
@@ -704,10 +708,10 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     });
     const web = await app(service(), undefined, captured);
     const marker = `TOKENMARK${randomUUID().replaceAll('-', '')}`;
-    const res = await web.inject({ method: 'GET', url: `/auth/password/reset/${marker}` });
+    const res = await web.inject({ method: 'GET', url: `/api/auth/password/reset/${marker}` });
     expect(res.statusCode).toBe(404);
     const text = lines.join('');
-    expect(text).toContain('/auth/password/reset/[REDACTED]');
+    expect(text).toContain('/api/auth/password/reset/[REDACTED]');
     expect(text).not.toContain(marker);
     await web.close();
   });
@@ -724,7 +728,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const server = app(auth);
     const user = await makeUser();
     const anon = await new Browser(server).start();
-    const res = await anon.send('POST', '/auth/password/forgot', { email: user.email });
+    const res = await anon.send('POST', '/api/auth/password/forgot', { email: user.email });
     expect(res.statusCode).toBe(202);
     await server.close();
   });
@@ -737,14 +741,14 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const before = notified.reset.length;
     for (let i = 0; i < 5; i += 1) {
       later(61_000); // past the one-a-minute job key, so only the cap can stop a mail
-      const res = await anon.send('POST', '/auth/password/forgot', { email: user.email });
+      const res = await anon.send('POST', '/api/auth/password/forgot', { email: user.email });
       expect(res.statusCode).toBe(202);
       await auth.idle();
     }
     expect(notified.reset.slice(before)).toHaveLength(3);
     // An hour after the first, one more is allowed.
     later(60 * MIN);
-    await anon.send('POST', '/auth/password/forgot', { email: user.email });
+    await anon.send('POST', '/api/auth/password/forgot', { email: user.email });
     await auth.idle();
     expect(notified.reset.slice(before)).toHaveLength(4);
     await server.close();
@@ -756,18 +760,18 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const server = app();
     const first = await signedIn(server, one);
     expect(first.next).toBe('terms');
-    expect((await first.b.send('GET', '/companies')).statusCode).toBe(401);
-    expect((await first.b.send('POST', '/auth/workspace', { workspaceId: A })).statusCode).toBe(
+    expect((await first.b.send('GET', '/api/companies')).statusCode).toBe(401);
+    expect((await first.b.send('POST', '/api/auth/workspace', { workspaceId: A })).statusCode).toBe(
       403,
     );
-    const terms = await first.b.send('GET', '/auth/terms');
+    const terms = await first.b.send('GET', '/api/auth/terms');
     expect(terms.json()).toMatchObject({ version: TERMS });
-    expect((await first.b.send('POST', '/auth/terms', { version: '2025-01-01' })).statusCode).toBe(
-      422,
-    );
-    const accepted = await first.b.send('POST', '/auth/terms', { version: TERMS });
+    expect(
+      (await first.b.send('POST', '/api/auth/terms', { version: '2025-01-01' })).statusCode,
+    ).toBe(422);
+    const accepted = await first.b.send('POST', '/api/auth/terms', { version: TERMS });
     expect(accepted.json()).toEqual({ next: 'app' });
-    expect((await first.b.send('GET', '/companies')).statusCode).toBe(200);
+    expect((await first.b.send('GET', '/api/companies')).statusCode).toBe(200);
     // Next sign-in: accepted, straight in.
     expect((await signedIn(server, one)).next).toBe('app');
 
@@ -776,7 +780,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const v2 = app(new AuthService({ ...serviceOptions(), termsVersion: NEW }));
     const again = await signedIn(v2, one);
     expect(again.next).toBe('terms');
-    expect((await again.b.send('POST', '/auth/terms', { version: NEW })).statusCode).toBe(200);
+    expect((await again.b.send('POST', '/api/auth/terms', { version: NEW })).statusCode).toBe(200);
 
     // The log: each version with its time and address, and it cannot be changed.
     const rows = await owner.query<{ version: string; ip: string }>(
@@ -796,17 +800,17 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const email = `new-${randomUUID().slice(0, 8)}@example.test`;
     const token = await inviteLink(email);
     const anon = await new Browser(server).start();
-    const info = await anon.send('GET', `/auth/invites/${token}`);
+    const info = await anon.send('GET', `/api/auth/invites/${token}`);
     expect(info.statusCode).toBe(200);
     expect(info.json()).toMatchObject({ email: 'n***@example.test', existingUser: false });
     // USR-3 rules apply to the first password.
-    const weak = await anon.send('POST', '/auth/invites/accept', {
+    const weak = await anon.send('POST', '/api/auth/invites/accept', {
       token,
       name: 'Nova Newcomer',
       password: 'password123',
     });
     expect(weak.statusCode).toBe(422);
-    const ok = await anon.send('POST', '/auth/invites/accept', {
+    const ok = await anon.send('POST', '/api/auth/invites/accept', {
       token,
       name: 'Nova Newcomer',
       password: 'lantern orchard copper 17',
@@ -814,12 +818,12 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toEqual({ next: 'mfa_setup' });
     // The new session is pre-MFA: no workspace route yet (USR-4).
-    expect((await anon.send('GET', '/companies')).statusCode).toBe(401);
+    expect((await anon.send('GET', '/api/companies')).statusCode).toBe(401);
     // Used once.
-    expect((await anon.send('GET', `/auth/invites/${token}`)).statusCode).toBe(404);
+    expect((await anon.send('GET', `/api/auth/invites/${token}`)).statusCode).toBe(404);
     expect(
       (
-        await anon.send('POST', '/auth/invites/accept', {
+        await anon.send('POST', '/api/auth/invites/accept', {
           token,
           name: 'Nova Newcomer',
           password: 'lantern orchard copper 17',
@@ -839,17 +843,17 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const user = await makeUser({ workspaces: [B] });
     const token = await inviteLink(user.email);
     const b = await new Browser(server, '192.0.2.81').start();
-    expect((await b.send('GET', `/auth/invites/${token}`)).json()).toMatchObject({
+    expect((await b.send('GET', `/api/auth/invites/${token}`)).json()).toMatchObject({
       existingUser: true,
     });
-    const wrong = await b.send('POST', '/auth/invites/accept', {
+    const wrong = await b.send('POST', '/api/auth/invites/accept', {
       token,
       name: 'Anything',
       password: 'not their password',
     });
     expect(wrong.statusCode).toBe(401);
     expect((await authEvents(user.id)).map((e) => e.action)).toContain('auth.login_failed');
-    const right = await b.send('POST', '/auth/invites/accept', {
+    const right = await b.send('POST', '/api/auth/invites/accept', {
       token,
       name: 'Anything',
       password: PASSWORD,
@@ -865,28 +869,28 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const b = await new Browser(server).start();
     const noToken = await b.send(
       'POST',
-      '/auth/sign-in',
+      '/api/auth/sign-in',
       { email: user.email, password: PASSWORD },
       { csrf: null },
     );
     expect(noToken.statusCode).toBe(403);
     const wrongToken = await b.send(
       'POST',
-      '/auth/sign-in',
+      '/api/auth/sign-in',
       { email: user.email, password: PASSWORD },
       { csrf: 'not-the-cookie' },
     );
     expect(wrongToken.statusCode).toBe(403);
     const otherSite = await b.send(
       'POST',
-      '/auth/sign-in',
+      '/api/auth/sign-in',
       { email: user.email, password: PASSWORD },
       { origin: 'https://evil.example' },
     );
     expect(otherSite.statusCode).toBe(403);
     const noOrigin = await b.send(
       'POST',
-      '/auth/sign-in',
+      '/api/auth/sign-in',
       { email: user.email, password: PASSWORD },
       { origin: null },
     );
@@ -896,9 +900,9 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const { b: inside } = await signedIn(server, user);
     const forged = 'forged-token-value';
     inside.cookies.set('ob_csrf', forged);
-    expect((await inside.send('POST', '/auth/sign-out-all')).statusCode).toBe(403);
+    expect((await inside.send('POST', '/api/auth/sign-out-all')).statusCode).toBe(403);
     // Reads need no token.
-    expect((await inside.send('GET', '/companies', undefined, { csrf: null })).statusCode).toBe(
+    expect((await inside.send('GET', '/api/companies', undefined, { csrf: null })).statusCode).toBe(
       200,
     );
     // The cookies are Secure, SameSite=Strict, and the session one HttpOnly.
@@ -918,21 +922,21 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const user = await makeUser({ workspaces: [A, B] });
     const { b, next } = await signedIn(server, user);
     expect(next).toBe('workspace_picker');
-    expect((await b.send('GET', '/companies')).statusCode).toBe(401);
-    const list = await b.send('GET', '/auth/workspaces');
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
+    const list = await b.send('GET', '/api/auth/workspaces');
     expect(list.json()).toEqual([
       { id: A, name: 'Workspace A', role: 'admin', companies: 1 },
       { id: B, name: 'Workspace B', role: 'admin', companies: 0 },
     ]);
     expect(
-      (await b.send('POST', '/auth/workspace', { workspaceId: randomUUID() })).statusCode,
+      (await b.send('POST', '/api/auth/workspace', { workspaceId: randomUUID() })).statusCode,
     ).toBe(403);
-    expect((await b.send('POST', '/auth/workspace', { workspaceId: A })).statusCode).toBe(204);
-    const companies = await b.send('GET', '/companies');
+    expect((await b.send('POST', '/api/auth/workspace', { workspaceId: A })).statusCode).toBe(204);
+    const companies = await b.send('GET', '/api/companies');
     expect(companies.json()).toEqual({ items: [expect.objectContaining({ id: companyA.id })] });
     // Switch: the picker stays open while in a workspace.
-    expect((await b.send('POST', '/auth/workspace', { workspaceId: B })).statusCode).toBe(204);
-    expect((await b.send('GET', '/companies')).json()).toEqual({ items: [] });
+    expect((await b.send('POST', '/api/auth/workspace', { workspaceId: B })).statusCode).toBe(204);
+    expect((await b.send('GET', '/api/companies')).json()).toEqual({ items: [] });
     await server.close();
   });
 
@@ -949,14 +953,16 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(made.rowCount).toBe(1);
     const member = await makeUser();
     const { b } = await signedIn(server, operator);
-    expect((await b.send('POST', '/auth/platform')).statusCode).toBe(204);
-    const created = await b.send('POST', '/platform/workspaces', { name: 'Made by the console' });
+    expect((await b.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const created = await b.send('POST', '/api/platform/workspaces', {
+      name: 'Made by the console',
+    });
     expect(created.statusCode).toBe(201);
     const { b: notOperator } = await signedIn(server, member);
-    expect((await notOperator.send('POST', '/auth/platform')).statusCode).toBe(403);
+    expect((await notOperator.send('POST', '/api/auth/platform')).statusCode).toBe(403);
     const pre = await new Browser(server).start();
     await pre.signIn(operator.email, PASSWORD);
-    expect((await pre.send('POST', '/auth/platform')).statusCode).toBe(401);
+    expect((await pre.send('POST', '/api/auth/platform')).statusCode).toBe(401);
     await server.close();
   });
 

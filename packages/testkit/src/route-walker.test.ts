@@ -109,6 +109,28 @@ describe('isolation walk (TEN-1, AT-1)', () => {
     ]);
   });
 
+  it('[SEC-3] calls each route at its served URL: under /api, /healthz at the root', async () => {
+    const health = defineRoute({
+      ...meta,
+      auth: 'public',
+      id: 'health',
+      method: 'GET',
+      path: '/healthz',
+      responses: { 200: z.object({}) },
+    });
+    const urls: string[] = [];
+    await walkIsolation({
+      ...base,
+      routes: [getThing, health],
+      againstB: { getThing: { params: { id: 'b1' } }, health: {} },
+      inject: (req) => {
+        urls.push(req.url);
+        return Promise.resolve({ statusCode: 401, body: '{}' });
+      },
+    });
+    expect([...new Set(urls)]).toEqual(['/api/things/b1', '/healthz']);
+  });
+
   it('[TEN-1] fails a route that has no walker call', async () => {
     await expect(
       walkIsolation({
@@ -130,7 +152,7 @@ describe('isolation walk (TEN-1, AT-1)', () => {
           return Promise.resolve({ statusCode: 401, body: '{}' });
         }
         return Promise.resolve(
-          req.url === '/things/b1'
+          req.url === '/api/things/b1'
             ? { statusCode: 200, body: '{"id":"b1"}' }
             : { statusCode: 200, body: '{"items":["B-MARKER"]}' },
         );
