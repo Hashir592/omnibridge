@@ -6,8 +6,12 @@
  */
 export const PACKAGE_NAME = '@omnibridge/testkit';
 
-/** Prefix for every PII-like synthetic value, so the marker scan can find leaks (invariant 7). */
-export const PII_MARKER = 'PIIMARK-';
+export {
+  PII_MARKER,
+  scanDatabaseForMarkers,
+  scanTextForMarkers,
+  type MarkerHit,
+} from './marker-scan.ts';
 
 export { POSTGRES_IMAGE, startRoleCluster, type RoleCluster } from './postgres.ts';
 export {

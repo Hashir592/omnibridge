@@ -4,6 +4,8 @@ export { piiDbConfig } from './config.ts';
 export { migratePii, PII_MIGRATIONS_DIR } from './migrate.ts';
 
 export type Pool = pg.Pool;
+export type PoolClient = pg.PoolClient;
+export type PoolConfig = pg.PoolConfig;
 
 export function createPiiPool(config: pg.PoolConfig): pg.Pool {
   return new pg.Pool(config);

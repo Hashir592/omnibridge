@@ -81,6 +81,26 @@ describe('secrets handling (SEC-5)', () => {
     expect(holders('secrets_kek')).toEqual(['rewrap-keys', 'seed', 'web', 'worker']);
     expect(service('seed').environment?.OB_ENV).toBe('dev');
     expect(holders('pii_kek')).toEqual(['pii-vault']);
+    // T-0402 (invariant 8): one vault token per caller. The vault holds all three; web holds its
+    // own; the worker holds its own and the deletion token (DEL-1 jobs only).
+    expect(holders('vault_token_web')).toEqual(['pii-vault', 'web']);
+    expect(holders('vault_token_worker')).toEqual(['pii-vault', 'worker']);
+    expect(holders('vault_token_deletion')).toEqual(['pii-vault', 'worker']);
+    // DP-4: only the vault (and its migration job) holds a db-pii credential or joins ob_pii.
+    for (const secret of [
+      'vault_owner_password',
+      'vault_app_password',
+      'db_pii_superuser_password',
+    ]) {
+      expect(
+        holders(secret).filter((h) => !['db-pii', 'migrate-pii', 'pii-vault'].includes(h)),
+      ).toEqual([]);
+    }
+    const onPiiNetwork = Object.entries(model.services)
+      .filter(([, svc]) => JSON.stringify(svc.networks ?? []).includes('ob_pii'))
+      .map(([name]) => name)
+      .sort();
+    expect(onPiiNetwork).toEqual(['db-pii', 'migrate-pii', 'pii-vault']);
     // ob_platform reads workspace ids only: the scheduled fan-out (worker) and the re-wrap job.
     expect(holders('ob_platform_password')).toEqual(['db-main', 'rewrap-keys', 'worker']);
     // Only the worker may run the audit purge (ADR-049): its own role, held by nobody else.

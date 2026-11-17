@@ -197,6 +197,7 @@ describe('compose stack: secrets (SEC-5)', () => {
       'file_link_hmac_key',
       'ob_app_password',
       'secrets_kek',
+      'vault_token_web',
     ]);
     // The worker lists workspace ids as ob_platform for the scheduled fan-out (T-0202).
     // The worker logs in as ob_worker (ADR-049), never as ob_app.
@@ -204,8 +205,16 @@ describe('compose stack: secrets (SEC-5)', () => {
       'ob_platform_password',
       'ob_worker_password',
       'secrets_kek',
+      'vault_token_deletion',
+      'vault_token_worker',
     ]);
-    expect(secretsOf('pii-vault')).toEqual(['pii_kek', 'vault_app_password']);
+    expect(secretsOf('pii-vault')).toEqual([
+      'pii_kek',
+      'vault_app_password',
+      'vault_token_deletion',
+      'vault_token_web',
+      'vault_token_worker',
+    ]);
     expect(secretsOf('migrate-main')).toEqual(['ob_owner_password']);
     // Besides the worker, only the one-off KEK re-wrap job holds ob_platform (T-0201).
     // It logs in as ob_ops (ADR-051): platform keys and tenant rows, never sessions.

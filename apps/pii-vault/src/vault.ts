@@ -1,0 +1,368 @@
+import {
+  DataKey,
+  generateDataKey,
+  generateIndexKey,
+  IndexKey,
+  unwrapDataKey,
+  unwrapIndexKey,
+  type Keyring,
+} from '@omnibridge/crypto';
+import type { Pool, PoolClient } from '@omnibridge/pii-db';
+import {
+  PURPOSE_KINDS,
+  type ExpiryRequest,
+  type IngestRequest,
+  type MaskResponse,
+  type MatchResponse,
+  type ReadFullResponse,
+  type RecordKind,
+  type ReadPurpose,
+  type SearchResponse,
+} from '@omnibridge/vault-client/schemas';
+import { indexValues, maskFields, queryValues } from './normalise.ts';
+
+/** The caller a service token stands for (invariant 8). */
+export type Caller = 'web' | 'worker' | 'deletion';
+
+/** Who reads, for the access log (DP-7): the service, and the signed-in user when there is one. */
+export interface Actor {
+  caller: Caller;
+  userId?: string | undefined;
+}
+
+/** A pii_ref that is not in this workspace, as far as the caller can tell (404). */
+export class NotFound extends Error {}
+
+/** The purpose does not cover this kind of record (DP-7): 403, and nothing is read or logged. */
+export class PurposeRefused extends Error {}
+
+const KEY_VERSION = 1;
+/** PRD 7.3: PII of an order never dispatched goes at most 90 days after it arrived. */
+export const HARD_LIMIT_MS = 90 * 24 * 60 * 60 * 1000;
+/** Search answers at most this many matches; `truncated` says when there were more. */
+const SEARCH_LIMIT = 5000;
+const FIELD_TABLE = 'record_fields';
+
+/**
+ * The PII store (T-0402). Every statement runs in a short transaction with app.workspace_id set,
+ * so row-level security keeps each workspace's records apart (invariant 1 on db-pii). Values are
+ * encrypted per field with the workspace's data key; nothing here ever logs or returns a value
+ * except read-full, and every read-full, search and match writes an access-log row without one.
+ */
+export class Vault {
+  readonly #pool: Pool;
+  readonly #keyring: Keyring;
+  readonly #now: () => Date;
+  readonly #keys = new Map<string, Promise<{ data: DataKey; index: IndexKey }>>();
+
+  constructor(options: { pool: Pool; keyring: Keyring; now?: () => Date }) {
+    this.#pool = options.pool;
+    this.#keyring = options.keyring;
+    this.#now = options.now ?? (() => new Date());
+  }
+
+  async ingest(req: IngestRequest): Promise<{ pii_ref: string }> {
+    const keys = await this.#keysFor(req.workspace_id);
+    const index = indexValues(req.fields);
+    return this.#tx(req.workspace_id, async (c) => {
+      // pii_ref defaults to uuidv7() (PostgreSQL 18): time-ordered, so the key index stays compact.
+      const inserted = await c.query<{ pii_ref: string }>(
+        `INSERT INTO vault.records (workspace_id, kind, channel_account_id, subject_type,
+                                    subject_id, data_key_version, delete_after, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING pii_ref`,
+        [
+          req.workspace_id,
+          req.kind,
+          req.channel_account_id ?? null,
+          req.subject_type,
+          req.subject_id,
+          keys.data.version,
+          // A backstop until the caller sets the real expiry at dispatch or delivery (DEL-1).
+          req.delete_after ?? new Date(this.#now().getTime() + HARD_LIMIT_MS),
+          this.#now(),
+        ],
+      );
+      const piiRef = inserted.rows[0]?.pii_ref ?? '';
+      const aad = (field: string) => ({
+        workspaceId: req.workspace_id,
+        table: FIELD_TABLE,
+        column: field,
+        rowId: piiRef,
+      });
+      for (const [field, value] of Object.entries(req.fields)) {
+        await c.query(
+          `INSERT INTO vault.record_fields (workspace_id, pii_ref, field, ciphertext) VALUES ($1, $2, $3, $4)`,
+          [req.workspace_id, piiRef, field, keys.data.encrypt(value, aad(field))],
+        );
+      }
+      for (const [field, value] of Object.entries(index)) {
+        await c.query(
+          `INSERT INTO vault.blind_index (workspace_id, pii_ref, field, mac, key_version) VALUES ($1, $2, $3, $4, $5)`,
+          [req.workspace_id, piiRef, field, keys.index.mac(field, value), keys.index.version],
+        );
+      }
+      return { pii_ref: piiRef };
+    });
+  }
+
+  /** DEL-1: the caller sets delete_after once dispatch or delivery is known. */
+  async setExpiry(req: ExpiryRequest): Promise<{ updated: number }> {
+    return this.#tx(req.workspace_id, async (c) => {
+      const res = await c.query(
+        `UPDATE vault.records SET delete_after = $3 WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[])`,
+        [req.workspace_id, req.pii_refs, req.delete_after],
+      );
+      return { updated: res.rowCount ?? 0 };
+    });
+  }
+
+  async readFull(
+    workspaceId: string,
+    piiRef: string,
+    purpose: ReadPurpose,
+    actor: Actor,
+  ): Promise<ReadFullResponse> {
+    const keys = await this.#keysFor(workspaceId);
+    return this.#tx(workspaceId, async (c) => {
+      const record = await this.#record(c, workspaceId, piiRef);
+      if (!PURPOSE_KINDS[purpose].includes(record.kind)) throw new PurposeRefused();
+      const fields = await this.#decryptFields(c, keys.data, workspaceId, piiRef);
+      await this.#log(c, workspaceId, actor, 'read_full', purpose, piiRef, 1);
+      return {
+        pii_ref: piiRef,
+        kind: record.kind,
+        subject_type: record.subject_type,
+        subject_id: record.subject_id,
+        fields,
+      };
+    });
+  }
+
+  /** ORD-5: masked strings, computed now and never stored. Unknown refs are left out. */
+  async mask(workspaceId: string, piiRefs: readonly string[]): Promise<MaskResponse> {
+    const keys = await this.#keysFor(workspaceId);
+    return this.#tx(workspaceId, async (c) => {
+      const res = await c.query<{ pii_ref: string; field: string; ciphertext: Buffer }>(
+        `SELECT pii_ref, field, ciphertext FROM vault.record_fields
+          WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[]) ORDER BY pii_ref, field`,
+        [workspaceId, piiRefs],
+      );
+      const byRef = new Map<string, Record<string, string>>();
+      for (const row of res.rows) {
+        const fields = byRef.get(row.pii_ref) ?? {};
+        fields[row.field] = keys.data
+          .decrypt(row.ciphertext, {
+            workspaceId,
+            table: FIELD_TABLE,
+            column: row.field,
+            rowId: row.pii_ref,
+          })
+          .toString('utf8');
+        byRef.set(row.pii_ref, fields);
+      }
+      const records: MaskResponse['records'] = [...byRef].map(([piiRef, fields]) => ({
+        pii_ref: piiRef,
+        fields: maskFields(fields),
+      }));
+      return { records };
+    });
+  }
+
+  /** Blind-index search: every identifier given must match (AND). Logged with the count only. */
+  async search(
+    workspaceId: string,
+    query: Parameters<typeof queryValues>[0],
+    purpose: string,
+    actor: Actor,
+  ): Promise<SearchResponse> {
+    const keys = await this.#keysFor(workspaceId);
+    const values = queryValues(query);
+    return this.#tx(workspaceId, async (c) => {
+      const entries = Object.entries(values);
+      let matches: SearchResponse['matches'] = [];
+      let truncated = false;
+      if (entries.length > 0) {
+        const fields = entries.map(([f]) => f);
+        const macs = entries.map(([f, v]) => keys.index.mac(f, v));
+        // Driven by the blind-index lookup (workspace, field, mac), never a scan of the records.
+        const res = await c.query<SearchResponse['matches'][number]>(
+          `SELECT r.pii_ref, r.kind, r.subject_type, r.subject_id, r.channel_account_id
+             FROM (SELECT b.pii_ref
+                     FROM vault.blind_index b
+                     JOIN unnest($2::text[], $3::bytea[]) AS q(field, mac)
+                       ON b.field = q.field AND b.mac = q.mac
+                    WHERE b.workspace_id = $1
+                    GROUP BY b.pii_ref
+                   HAVING count(*) = $4) hit
+             JOIN vault.records r ON r.workspace_id = $1 AND r.pii_ref = hit.pii_ref
+            ORDER BY r.pii_ref
+            LIMIT $5`,
+          [workspaceId, fields, macs, entries.length, SEARCH_LIMIT + 1],
+        );
+        truncated = res.rows.length > SEARCH_LIMIT;
+        matches = res.rows.slice(0, SEARCH_LIMIT);
+      }
+      await this.#log(c, workspaceId, actor, 'search', purpose, null, matches.length);
+      return { matches, truncated };
+    });
+  }
+
+  /**
+   * ORD-9, ADR-055: the subject IDs of other records with the same buyer and delivery address on
+   * the same channel account. Never a value, never another channel account's record.
+   */
+  async match(workspaceId: string, piiRef: string, actor: Actor): Promise<MatchResponse> {
+    return this.#tx(workspaceId, async (c) => {
+      await this.#record(c, workspaceId, piiRef);
+      const res = await c.query<{ subject_id: string }>(
+        `SELECT DISTINCT o.subject_id
+           FROM vault.records r
+           JOIN vault.blind_index rb ON rb.workspace_id = r.workspace_id AND rb.pii_ref = r.pii_ref
+                                    AND rb.field = 'match'
+           JOIN vault.blind_index ob ON ob.workspace_id = r.workspace_id AND ob.field = 'match'
+                                    AND ob.mac = rb.mac AND ob.pii_ref <> r.pii_ref
+           JOIN vault.records o ON o.workspace_id = ob.workspace_id AND o.pii_ref = ob.pii_ref
+          WHERE r.workspace_id = $1 AND r.pii_ref = $2
+            AND o.kind = r.kind AND o.subject_type = r.subject_type
+            AND o.channel_account_id IS NOT DISTINCT FROM r.channel_account_id
+            AND r.channel_account_id IS NOT NULL
+          ORDER BY o.subject_id`,
+        [workspaceId, piiRef],
+      );
+      await this.#log(c, workspaceId, actor, 'match', 'same_buyer', piiRef, res.rowCount ?? 0);
+      return { subject_ids: res.rows.map((r) => r.subject_id) };
+    });
+  }
+
+  async #record(
+    c: PoolClient,
+    workspaceId: string,
+    piiRef: string,
+  ): Promise<{ kind: RecordKind; subject_type: string; subject_id: string }> {
+    const res = await c.query<{ kind: RecordKind; subject_type: string; subject_id: string }>(
+      `SELECT kind, subject_type, subject_id FROM vault.records WHERE workspace_id = $1 AND pii_ref = $2`,
+      [workspaceId, piiRef],
+    );
+    const row = res.rows[0];
+    if (row === undefined) throw new NotFound();
+    return row;
+  }
+
+  async #decryptFields(
+    c: PoolClient,
+    dataKey: DataKey,
+    workspaceId: string,
+    piiRef: string,
+  ): Promise<Record<string, string>> {
+    const res = await c.query<{ field: string; ciphertext: Buffer }>(
+      `SELECT field, ciphertext FROM vault.record_fields WHERE workspace_id = $1 AND pii_ref = $2 ORDER BY field`,
+      [workspaceId, piiRef],
+    );
+    const out: Record<string, string> = {};
+    for (const row of res.rows) {
+      out[row.field] = dataKey
+        .decrypt(row.ciphertext, {
+          workspaceId,
+          table: FIELD_TABLE,
+          column: row.field,
+          rowId: piiRef,
+        })
+        .toString('utf8');
+    }
+    return out;
+  }
+
+  async #log(
+    c: PoolClient,
+    workspaceId: string,
+    actor: Actor,
+    capability: string,
+    purpose: string,
+    piiRef: string | null,
+    count: number,
+  ): Promise<void> {
+    await c.query(
+      `INSERT INTO vault.access_log (workspace_id, at, caller, capability, purpose, actor_user_id, pii_ref, result_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        workspaceId,
+        this.#now(),
+        actor.caller,
+        capability,
+        purpose,
+        actor.userId ?? null,
+        piiRef,
+        count,
+      ],
+    );
+  }
+
+  /** The workspace's keys, made on first use; concurrent first uses agree on one stored pair. */
+  #keysFor(workspaceId: string): Promise<{ data: DataKey; index: IndexKey }> {
+    let keys = this.#keys.get(workspaceId);
+    if (keys === undefined) {
+      keys = this.#loadOrCreateKeys(workspaceId);
+      keys.catch(() => this.#keys.delete(workspaceId));
+      this.#keys.set(workspaceId, keys);
+    }
+    return keys;
+  }
+
+  async #loadOrCreateKeys(workspaceId: string): Promise<{ data: DataKey; index: IndexKey }> {
+    return this.#tx(workspaceId, async (c) => {
+      const data = generateDataKey(this.#keyring, workspaceId, KEY_VERSION).wrapped;
+      const index = generateIndexKey(this.#keyring, workspaceId, KEY_VERSION).wrapped;
+      for (const [kind, w] of [
+        ['data', data],
+        ['index', index],
+      ] as const) {
+        await c.query(
+          `INSERT INTO vault.workspace_keys (workspace_id, kind, version, kek_version, wrapped, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+          [workspaceId, kind, w.version, w.kekVersion, w.wrapped, this.#now()],
+        );
+      }
+      const res = await c.query<{
+        kind: 'data' | 'index';
+        version: number;
+        kek_version: number;
+        wrapped: Buffer;
+      }>(
+        `SELECT kind, version, kek_version, wrapped FROM vault.workspace_keys
+          WHERE workspace_id = $1 AND version = $2`,
+        [workspaceId, KEY_VERSION],
+      );
+      const stored = (kind: 'data' | 'index') => {
+        const row = res.rows.find((r) => r.kind === kind);
+        if (row === undefined) throw new Error(`missing ${kind} key`);
+        return {
+          workspaceId,
+          version: row.version,
+          kekVersion: row.kek_version,
+          wrapped: row.wrapped,
+        };
+      };
+      return {
+        data: unwrapDataKey(this.#keyring, stored('data')),
+        index: unwrapIndexKey(this.#keyring, stored('index')),
+      };
+    });
+  }
+
+  async #tx<T>(workspaceId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
+    const c = await this.#pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [workspaceId]);
+      const out = await fn(c);
+      await c.query('COMMIT');
+      return out;
+    } catch (err) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+}

@@ -32,6 +32,9 @@ Production dates are set when each secret is first created in M22. "Next rotatio
 | `secrets_kek` | Secrets master key: wraps the data keys of `app.credentials` in db-main and the file keys on the files volume | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web, worker, rewrap-keys (ops job) | 12 months | set in M22 |
 | `file_link_hmac_key` | HMAC key for 5-minute signed download links (NFR-5, T-0105) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web | 12 months | set in M22 |
 | `pii_kek` | PII master key: wraps the per-workspace PII data keys (used from M04) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | pii-vault | 12 months | set in M22 |
+| `vault_token_web` | pii-vault service token for web: ingest, read-full (order detail, inbox), mask, search, match (T-0402, invariant 8) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | web, pii-vault | 12 months | set in M22 |
+| `vault_token_worker` | pii-vault service token for the worker: ingest, read-full (label, inbox), mask, match (T-0402) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | worker, pii-vault | 12 months | set in M22 |
+| `vault_token_deletion` | pii-vault service token for the deletion jobs only: delete (T-0402, DEL-1) | Hashir | `dev.sops.yaml` | ops repo → tmpfs | worker (deletion jobs), pii-vault | 12 months | set in M22 |
 
 The master keys are never in a database, an image or a backup (SEC-6, invariant 9). The main backups hold only wrapped data keys, so a backup alone cannot decrypt anything.
 
