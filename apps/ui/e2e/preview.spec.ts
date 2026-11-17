@@ -283,7 +283,7 @@ test('[PRF-6] order profit: profit inc VAT is profit ex VAT plus net VAT', async
   await expect(profit).toContainText('£16.13');
 });
 
-test('[ADR-059] with the website connector off, no area shows the Website channel', async ({
+test('[WEB-1] with the website connector off, no area shows the Website channel', async ({
   page,
 }) => {
   await open(page, '/', 'Needs action');

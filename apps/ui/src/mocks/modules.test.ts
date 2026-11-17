@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe('website_connector off (ADR-059)', () => {
-  it('[ADR-059] the session says the module is off and lists no website account', async () => {
+  it('[WEB-1] the session says the module is off and lists no website account', async () => {
     setPersona('starter');
     const s = JSON.parse(await json('/api/mock/session')) as Session;
     expect(s.modules.website_connector).toBe(false);
@@ -41,29 +41,29 @@ describe('website_connector off (ADR-059)', () => {
     );
   });
 
-  it('[ADR-059] Orders: no website orders in the list', async () => {
+  it('[WEB-1] Orders: no website orders in the list', async () => {
     expect(await onThenOff('/api/mock/orders?limit=100')).toEqual({ on: true, off: false });
   });
 
-  it('[ADR-059] Home: no Website row in orders today', async () => {
+  it('[WEB-1] Home: no Website row in orders today', async () => {
     expect(await onThenOff('/api/mock/home')).toEqual({ on: true, off: false });
   });
 
-  it('[ADR-059] Connections: no Website card', async () => {
+  it('[WEB-1] Connections: no Website card', async () => {
     expect(await onThenOff('/api/mock/connections')).toEqual({ on: true, off: false });
   });
 
-  it('[ADR-059] Stock: no website listing rows', async () => {
+  it('[WEB-1] Stock: no website listing rows', async () => {
     expect(await onThenOff('/api/mock/stock/skus?limit=100')).toEqual({ on: true, off: false });
   });
 
-  it('[ADR-059] Sales & Profit: no website account or cluster in the breakdowns', async () => {
+  it('[WEB-1] Sales & Profit: no website account or cluster in the breakdowns', async () => {
     for (const by of ['account', 'cluster']) {
       expect(await onThenOff(`/api/mock/sales-profit?by=${by}`)).toEqual({ on: true, off: false });
     }
   });
 
-  it('[ADR-059] Finance: no website sales line in the P&L', async () => {
+  it('[WEB-1] Finance: no website sales line in the P&L', async () => {
     expect(await onThenOff('/api/mock/finance/pnl?company=co_2')).toEqual({ on: true, off: false });
   });
 });
