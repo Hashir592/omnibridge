@@ -2,6 +2,7 @@
 // "a release with critical findings is blocked"; the task sets the bar at high).
 // Lower findings are listed but do not fail the gate.
 import { readFileSync } from 'node:fs';
+import { activeException, loadExceptions } from './audit-exceptions.mjs';
 
 const input = readFileSync(0, 'utf8').trim();
 if (input === '') {
@@ -21,6 +22,7 @@ for (const result of report.results ?? []) {
       const score = Number.parseFloat(group.max_severity ?? '');
       findings.push({
         pkg: `${pkg.package?.name ?? '?'}@${pkg.package?.version ?? '?'}`,
+        idList: group.ids ?? [],
         ids: (group.ids ?? []).join(', '),
         score: Number.isNaN(score) ? null : score,
       });
@@ -29,9 +31,18 @@ for (const result of report.results ?? []) {
 }
 
 // An advisory without a CVSS score cannot be ranked, so it is treated as high until triaged.
-const blocking = findings.filter((f) => f.score === null || f.score >= 7.0);
+// A time-boxed exception (PS-026) lets one named advisory through until it expires.
+const exceptions = loadExceptions();
+const blocking = findings.filter(
+  (f) => (f.score === null || f.score >= 7.0) && !activeException(exceptions, f.idList),
+);
 for (const f of findings) {
-  const level = blocking.includes(f) ? 'BLOCK' : 'note';
+  const excepted = activeException(exceptions, f.idList);
+  const level = blocking.includes(f)
+    ? 'BLOCK'
+    : excepted
+      ? `excepted until ${excepted.expires}`
+      : 'note';
   console.log(`osv: ${level} ${f.pkg} ${f.ids} (CVSS ${f.score ?? 'unknown'})`);
 }
 console.log(`osv: ${findings.length} finding(s), ${blocking.length} high or critical`);

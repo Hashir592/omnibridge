@@ -1,0 +1,12 @@
+{
+  "_comment": "Each entry lets one advisory through the audit gate until `expires` (YYYY-MM-DD, UTC). After that date the gate fails again. Only for an advisory with no fixed release; ADR or PS entry required.",
+  "exceptions": [
+    {
+      "ids": ["GHSA-fc5q-39xc-vjpf", "CVE-2026-112366"],
+      "package": "picomatch",
+      "expires": "2026-12-01",
+      "ref": "PS-026",
+      "reason": "No fixed picomatch release exists (4.0.7 is latest; upstream PR micromatch/picomatch#246 open). Build-time only: vite, vitest, dependency-cruiser and the static Astro site match our own globs, never an untrusted one."
+    }
+  ]
+}
