@@ -1,7 +1,11 @@
-/** The session cookie (USR-6, SEC-1): the 256-bit token, never readable by page script. */
-export const SESSION_COOKIE = 'ob_session';
+/**
+ * The session cookie (USR-6, SEC-1): the 256-bit token, never readable by page script. The
+ * __Host- prefix makes the browser refuse it unless Secure, Path=/ and host-only, so a sibling
+ * host such as the public site can never plant one on the app (S5-20261117 hardening 1).
+ */
+export const SESSION_COOKIE = '__Host-ob_session';
 /** The CSRF cookie the SPA echoes in `x-csrf-token` (double submit, SEC-1). */
-export const CSRF_COOKIE = 'ob_csrf';
+export const CSRF_COOKIE = '__Host-ob_csrf';
 export const CSRF_HEADER = 'x-csrf-token';
 
 type Headers = Readonly<Record<string, string | string[] | undefined>>;

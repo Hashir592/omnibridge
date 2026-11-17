@@ -205,6 +205,23 @@ describe('housekeeping: job records, leases, sessions and reset links (T-0207)',
     expect(await new AuthStore(worker.db).purgeExpired()).toEqual({ sessions: 0, resets: 0 });
   });
 
+  it('[USR-5] auth_purge drops lock-notice rows older than 24 hours (T-0210)', async () => {
+    const owner = raw('ob_owner');
+    const old = randomUUID();
+    const fresh = randomUUID();
+    await owner.query(
+      `INSERT INTO app.lock_notices (user_id, sent_at)
+         VALUES ($1, now() - interval '25 hours'), ($2, now() - interval '1 hour')`,
+      [old, fresh],
+    );
+    await new AuthStore(worker.db).purgeExpired();
+    const { rows } = await owner.query<{ user_id: string }>(
+      'SELECT user_id FROM app.lock_notices WHERE user_id = ANY($1::uuid[])',
+      [[old, fresh]],
+    );
+    expect(rows.map((r) => r.user_id)).toEqual([fresh]);
+  });
+
   it('[NFR-2] the housekeeping indexes exist and are valid, and the old credential purge index is gone', async () => {
     const { rows } = await raw('ob_owner').query<{ name: string; valid: boolean }>(
       `SELECT c.relname AS name, i.indisvalid AS valid

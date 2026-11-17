@@ -51,6 +51,15 @@ function underAny(path: string, prefixes: readonly string[]): boolean {
 const NOT_PAGES = [API_PREFIX, '/webhooks', '/connect', '/healthz'] as const;
 
 /**
+ * `/API/x`, `//api/x` or `/api;/x`: never a page either, so API-looking paths stay out of the
+ * SPA and its cache rules (S5 hardening 7). Only the exact segment `api`, in any case.
+ */
+function firstSegmentIsApi(path: string): boolean {
+  const first = path.replace(/^\/+/, '').split(/[/;]/, 1)[0] ?? '';
+  return first.toLowerCase() === API_PREFIX.slice(1);
+}
+
+/**
  * Answers a GET for a page or an asset. Returns false when the path is not the SPA's, so the
  * caller sends the JSON 404. No header sniffing (ADR-060): the path alone decides.
  */
@@ -63,7 +72,7 @@ export function sendSpa(spa: SpaFiles, request: FastifyRequest, reply: FastifyRe
   } catch {
     return false;
   }
-  if (underAny(path, NOT_PAGES)) return false;
+  if (underAny(path, NOT_PAGES) || firstSegmentIsApi(path)) return false;
   if (underAny(path, ['/assets'])) {
     const asset = spa.assets.get(path);
     if (asset === undefined) return false;

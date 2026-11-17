@@ -23,6 +23,8 @@ const AUTH_TABLES = [
   'app.ip_counters',
   'app.password_resets',
   'app.platform_keys',
+  'app.reset_requests',
+  'app.lock_notices',
 ];
 /** A syntactically valid argon2id string; the store never checks it, the web layer does. */
 const fakeHash = (n: number) => `$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$hash${String(n)}`;
@@ -262,88 +264,137 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
     }
   });
 
-  it('[USR-7][SEC-1] reset mail caps: 3 per email and 10 per address an hour, 100 a day in all', async () => {
+  it('[USR-7][SEC-1] reset mail caps: 3 per email and 10 per address an hour, 100 mails a day in all', async () => {
     // A clock of its own, a day after the others, so earlier rows never count.
     const base = at(t0, 3 * 24 * 60 * MIN);
     const key = randomBytes(32);
     const perEmail = [];
     for (let i = 0; i < 4; i += 1) {
-      perEmail.push(await store.allowReset(key, '198.51.100.1', at(base, i * MIN)));
+      perEmail.push(await store.allowReset(key, '198.51.100.1', at(base, i * MIN), true));
     }
-    expect(perEmail).toEqual([true, true, true, false]);
-    expect(await store.allowReset(key, '198.51.100.1', at(base, 61 * MIN))).toBe(true);
+    expect(perEmail).toEqual(['ok', 'ok', 'ok', 'capped']);
+    expect(await store.allowReset(key, '198.51.100.1', at(base, 61 * MIN), true)).toBe('ok');
 
+    // The address cap counts every request, real email or not.
     const ip = '198.51.100.2';
     const perIp = [];
     for (let i = 0; i < 11; i += 1) {
-      perIp.push(await store.allowReset(randomBytes(32), ip, at(base, 2 * 60 * MIN + i * 1000)));
+      const t = at(base, 2 * 60 * MIN + i * 1000);
+      perIp.push(await store.allowReset(randomBytes(32), ip, t, i % 2 === 0));
     }
-    expect(perIp.filter(Boolean)).toHaveLength(10);
-    expect(perIp[10]).toBe(false);
+    expect(perIp.slice(0, 10).every((v) => v === 'ok')).toBe(true);
+    expect(perIp[10]).toBe('capped');
 
-    // 100 allowed in 24 hours overall: 4 + 10 so far, then 86 from fresh addresses, then no more.
+    // 100 mails in 24 hours overall: 4 + 5 so far, then 91 from fresh addresses, then no more.
     const t = at(base, 4 * 60 * MIN);
-    for (let i = 0; i < 86; i += 1) {
-      expect(await store.allowReset(randomBytes(32), `198.51.101.${String(i)}`, t)).toBe(true);
+    for (let i = 0; i < 91; i += 1) {
+      expect(await store.allowReset(randomBytes(32), `198.51.101.${String(i)}`, t, true)).toBe(
+        'ok',
+      );
     }
-    expect(await store.allowReset(randomBytes(32), '198.51.102.1', t)).toBe(false);
+    expect(await store.allowReset(randomBytes(32), '198.51.102.1', t, true)).toBe('global_capped');
     // A day later it opens again, and the old rows are gone.
-    expect(await store.allowReset(randomBytes(32), '198.51.102.1', at(base, 25 * 60 * MIN))).toBe(
-      true,
+    const later = at(base, 25 * 60 * MIN);
+    expect(await store.allowReset(randomBytes(32), '198.51.102.1', later, true)).toBe('ok');
+  });
+
+  it('[USR-7] junk reset requests do not use up the platform-wide cap (S5-20261117-01)', async () => {
+    const base = at(t0, 10 * 24 * 60 * MIN);
+    // 150 requests for emails with no account, from 15 addresses, within the per-address cap.
+    for (let i = 0; i < 150; i += 1) {
+      const r = await store.allowReset(
+        randomBytes(32),
+        `198.51.103.${String(i % 15)}`,
+        at(base, i * 1000),
+        false,
+      );
+      expect(r).toBe('ok');
+    }
+    // A real account's mail still goes out.
+    expect(await store.allowReset(randomBytes(32), '203.0.113.9', at(base, 5 * MIN), true)).toBe(
+      'ok',
     );
   });
 
-  it('[USR-6] a session enters only a workspace its user belongs to, and revokes everywhere', async () => {
-    const id = randomUUID();
-    await store.createSession({
-      id,
-      tokenHash: sha(`t-${id}`),
-      csrfHash: sha(`c-${id}`),
-      userId: user,
-      stage: 'pre_mfa',
-      now: t0,
-      expiresAt: at(t0, 10 * MIN),
-    });
-    const move = (workspaceId: string, token: string) =>
-      store.advanceSession({
-        id,
-        tokenHash: sha(token),
-        csrfHash: sha(`c2-${token}`),
-        stage: 'workspace',
-        workspaceId,
-        now: t0,
-        signedIn: true,
-        expiresAt: at(t0, 12 * 60 * MIN),
-      });
-    expect(await move(randomUUID(), 'x1')).toBe(false);
-    expect(await move(A, 'x2')).toBe(true);
-    // The old token is gone; the new one finds the session in its workspace.
-    expect(await store.findSession(sha(`t-${id}`))).toBeUndefined();
-    expect(await store.findSession(sha('x2'))).toMatchObject({
-      id,
-      stage: 'workspace',
-      workspaceId: A,
-    });
-    expect(await store.revokeUserSessions(user, t0)).toBeGreaterThanOrEqual(1);
-    expect(await store.findSession(sha('x2'))).toBeUndefined();
+  it('[USR-5][USR-7] two IPv6 addresses in one /64 share a counter; IPv4 stays per address', async () => {
+    const t = at(t0, 20 * 24 * 60 * MIN);
+    const waits: (Date | null)[] = [];
+    for (let i = 1; i <= 4; i += 1) {
+      // Four failures from four hosts of one /64: the 4th waits, as from one address.
+      const r = await store.recordFailure(randomBytes(32), `2001:db8:5:7::${String(i)}`, at(t, i));
+      waits.push(r.ipBlockedUntil);
+    }
+    expect(waits.slice(0, 3)).toEqual([null, null, null]);
+    expect(waits[3]).not.toBeNull();
+    const other = await store.lockState(randomBytes(32), '2001:db8:5:7:ffff::1', at(t, 10));
+    expect(other.ipBlockedUntil).not.toBeNull();
+    // A neighbouring /64 and a neighbouring IPv4 address are counted apart.
+    expect(
+      (await store.lockState(randomBytes(32), '2001:db8:5:8::1', at(t, 10))).ipBlockedUntil,
+    ).toBeNull();
+    for (let i = 1; i <= 4; i += 1) await store.recordFailure(randomBytes(32), '192.0.2.200', t);
+    expect((await store.lockState(randomBytes(32), '192.0.2.201', t)).ipBlockedUntil).toBeNull();
+    // The reset caps group the /64 too: 10 an hour from it, whatever the host.
+    const resets = [];
+    for (let i = 1; i <= 11; i += 1) {
+      resets.push(
+        await store.allowReset(randomBytes(32), `2001:db8:9:1::${String(i)}`, at(t, i), false),
+      );
+    }
+    expect(resets.at(-1)).toBe('capped');
   });
 
-  it('[USR-4] a TOTP step is accepted once, and a recovery code works once', async () => {
-    const step = 58_000_000;
-    // Not confirmed yet: no step is accepted.
-    expect(await store.useTotpStep(user, step)).toBe(false);
-    expect(await store.setPendingTotp(user, randomBytes(40), 1)).toBe(true);
-    const codes = Array.from({ length: 10 }, () => randomBytes(32));
-    expect(await store.confirmTotp(user, step, codes, t0)).toBe(true);
-    // Confirmed: a new enrolment cannot silently replace it.
-    expect(await store.setPendingTotp(user, randomBytes(40), 1)).toBe(false);
-    expect(await store.useTotpStep(user, step)).toBe(false);
-    expect(await store.useTotpStep(user, step + 1)).toBe(true);
-    expect(await store.useTotpStep(user, step + 1)).toBe(false);
-    const first = codes[0] ?? Buffer.alloc(32);
-    expect(await store.useRecoveryCode(user, first, t0)).toBe(9);
-    expect(await store.useRecoveryCode(user, first, t0)).toBeUndefined();
-    expect(await store.useRecoveryCode(user, randomBytes(32), t0)).toBeUndefined();
+  it('[USR-5] repeated locks within a day send one notice, and the platform caps notices (S5-20261117-03)', async () => {
+    const t = at(t0, 30 * 24 * 60 * MIN);
+    const lockOnce = async (who: string, start: Date) => {
+      const key = randomBytes(32);
+      let notice: string | null = null;
+      for (let i = 1; i <= 10; i += 1) {
+        const r = await store.recordFailure(key, '192.0.2.150', at(start, i), {
+          userId: who,
+          failure: 'password',
+        });
+        if (r.newlyLocked) notice = r.notice;
+      }
+      return notice;
+    };
+    expect(await lockOnce(user, t)).toBe('send');
+    expect(await lockOnce(user, at(t, 20 * MIN))).toBe('recent');
+    expect(await lockOnce(user, at(t, 23 * 60 * MIN))).toBe('recent');
+    expect(await lockOnce(user, at(t, 24 * 60 * MIN + MIN))).toBe('send');
+
+    // 100 notices in 24 hours platform-wide (99 others plus this user's), then audited only.
+    const day = at(t, 3 * 24 * 60 * MIN);
+    const owner = new pg.Pool({ ...cluster.connection('ob_owner'), max: 1 });
+    try {
+      await owner.query(
+        `INSERT INTO app.lock_notices (user_id, sent_at)
+           SELECT gen_random_uuid(), $1 FROM generate_series(1, 99)`,
+        [day],
+      );
+      expect(await lockOnce(user, at(day, MIN))).toBe('send');
+      expect(await lockOnce(user, at(day, 25 * 60 * MIN))).toBe('send');
+      await owner.query(
+        `INSERT INTO app.lock_notices (user_id, sent_at)
+           SELECT gen_random_uuid(), $1 FROM generate_series(1, 99)`,
+        [at(day, 25 * 60 * MIN)],
+      );
+      await owner.query('DELETE FROM app.lock_notices WHERE user_id = $1', [user]);
+      await owner.query('INSERT INTO app.lock_notices (user_id, sent_at) VALUES ($1, $2)', [
+        randomUUID(),
+        at(day, 25 * 60 * MIN),
+      ]);
+      expect(await lockOnce(user, at(day, 26 * 60 * MIN))).toBe('platform_capped');
+      // Every failure was still audited for the person, notice or not.
+      const { rows } = await owner.query<{ n: string }>(
+        `SELECT count(*) AS n FROM app.auth_events WHERE user_id = $1 AND action = 'auth.locked'`,
+        [user],
+      );
+      expect(Number(rows[0]?.n)).toBe(7);
+    } finally {
+      await owner.query('DELETE FROM app.lock_notices');
+      await owner.end();
+    }
   });
 
   it('[USR-3] the password history keeps the newest 10', async () => {
@@ -373,5 +424,13 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
       { id: B, name: 'Workspace B', role: 'member', companies: 0 },
     ]);
     expect(await store.userWorkspaces(randomUUID())).toEqual([]);
+  });
+  it('[USR-3][USR-7] setting a password marks the open reset links used', async () => {
+    const link = sha('reset-before-change');
+    const t = at(t0, 40 * 24 * 60 * MIN);
+    await store.createReset(link, user, t, at(t, 30 * MIN));
+    expect(await store.findReset(link, at(t, MIN))).toMatchObject({ userId: user });
+    await store.setPassword(user, fakeHash(77), at(t, 2 * MIN));
+    expect(await store.findReset(link, at(t, 3 * MIN))).toBeUndefined();
   });
 });

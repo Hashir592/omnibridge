@@ -55,7 +55,7 @@ class Browser {
     payload?: object,
     opts: { csrf?: string | null; origin?: string | null; headers?: Record<string, string> } = {},
   ) {
-    const csrf = opts.csrf === undefined ? this.cookies.get('ob_csrf') : opts.csrf;
+    const csrf = opts.csrf === undefined ? this.cookies.get('__Host-ob_csrf') : opts.csrf;
     const origin = opts.origin === undefined ? ORIGIN : opts.origin;
     const res = await this.server.inject({
       method,
@@ -447,7 +447,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const b = await new Browser(server, '192.0.2.60').start();
     const res = await b.signIn(user.email, PASSWORD);
     expect(res.statusCode).toBe(429);
-    expect(b.cookies.has('ob_session')).toBe(false);
+    expect(b.cookies.has('__Host-ob_session')).toBe(false);
     await server.close();
   });
 
@@ -899,7 +899,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     // Signed in: the token must also be this session's own, not any double-submitted value.
     const { b: inside } = await signedIn(server, user);
     const forged = 'forged-token-value';
-    inside.cookies.set('ob_csrf', forged);
+    inside.cookies.set('__Host-ob_csrf', forged);
     expect((await inside.send('POST', '/api/auth/sign-out-all')).statusCode).toBe(403);
     // Reads need no token.
     expect((await inside.send('GET', '/api/companies', undefined, { csrf: null })).statusCode).toBe(
@@ -909,11 +909,18 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     const c = await new Browser(server).start();
     const res = await c.signIn(user.email, PASSWORD);
     const cookies = ([] as string[]).concat(res.headers['set-cookie'] ?? []);
-    const session = cookies.find((x) => x.startsWith('ob_session='));
+    const session = cookies.find((x) => x.startsWith('__Host-ob_session='));
     expect(session).toMatch(/HttpOnly/);
     expect(session).toMatch(/Secure/);
     expect(session).toMatch(/SameSite=Strict/);
-    expect(cookies.find((x) => x.startsWith('ob_csrf='))).not.toMatch(/HttpOnly/);
+    // __Host-: Secure, Path=/ and no Domain, so a sibling host cannot plant one (hardening 1).
+    for (const cookie of cookies) {
+      expect(cookie).toMatch(/^__Host-/);
+      expect(cookie).toMatch(/; Path=\/(;|$)/);
+      expect(cookie).toMatch(/Secure/);
+      expect(cookie).not.toMatch(/Domain=/i);
+    }
+    expect(cookies.find((x) => x.startsWith('__Host-ob_csrf='))).not.toMatch(/HttpOnly/);
     await server.close();
   });
 
@@ -981,6 +988,157 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(results.every((s) => s === 401 || s === 429)).toBe(true);
     // 4 hashes of 19 MiB each; the web container allows 384 MB in all.
     expect(process.memoryUsage().rss - rssBefore).toBeLessThan(150 * 1024 * 1024);
+    await server.close();
+  });
+  it('[USR-7] 100 unknown-email reset requests leave a real reset mail sendable (S5-20261117-01)', async () => {
+    const auth = service();
+    const user = await makeUser();
+    const before = notified.reset.length;
+    // 100 junk requests from 10 addresses, inside the per-address cap of 10 an hour.
+    for (let i = 0; i < 100; i += 1) {
+      later(1000);
+      auth.forgotPassword(
+        `junk-${randomUUID().slice(0, 8)}@example.test`,
+        `198.51.100.${String(150 + (i % 10))}`,
+      );
+      if (i % 10 === 9) await auth.idle();
+    }
+    await auth.idle();
+    expect(notified.reset.length).toBe(before);
+    later(1000);
+    auth.forgotPassword(user.email, '203.0.113.150');
+    await auth.idle();
+    expect(notified.reset.slice(before)).toEqual([{ userId: user.id, workspaceId: A }]);
+  });
+
+  it('[USR-5][USR-7] a hit platform-wide cap is logged at warn, for reset mail and lock notices', async () => {
+    const lines: string[] = [];
+    const captured = createLogger({
+      service: 'test',
+      version: '0',
+      destination: { write: (line: string) => lines.push(line) },
+    });
+    const capped = new Proxy(store, {
+      get: (target, prop, receiver) => {
+        if (prop === 'allowReset') return () => Promise.resolve('global_capped');
+        if (prop === 'recordFailure') {
+          return () =>
+            Promise.resolve({
+              lockedUntil: new Date(clock.getTime() + 15 * MIN),
+              newlyLocked: true,
+              ipBlockedUntil: null,
+              notice: 'platform_capped',
+            });
+        }
+        const value = Reflect.get(target, prop, receiver) as unknown;
+        // Private fields need the real store as `this`.
+        return typeof value === 'function' ? (value as () => unknown).bind(target) : value;
+      },
+    });
+    const auth = new AuthService({ ...serviceOptions(), store: capped, logger: captured });
+    const user = await makeUser();
+    const beforeReset = notified.reset.length;
+    const beforeLocked = notified.locked.length;
+    auth.forgotPassword(user.email, '203.0.113.151');
+    await auth.idle();
+    const server = app(auth);
+    const b = await new Browser(server, '203.0.113.152').start();
+    expect((await b.signIn(user.email, 'wrong password')).statusCode).toBe(429);
+    await server.close();
+    expect(notified.reset.length).toBe(beforeReset);
+    expect(notified.locked.length).toBe(beforeLocked);
+    const warns = lines
+      .map((l) => JSON.parse(l) as { level: string | number; event?: string })
+      .filter((l) => l.level === 'warn' || l.level === 40)
+      .map((l) => l.event);
+    expect(warns).toEqual(
+      expect.arrayContaining(['auth.reset_capped', 'auth.lock_notices_capped']),
+    );
+  });
+
+  it('[USR-5] a failed sign-in makes the same database calls for a real and an unknown email (S5-20261117-02)', async () => {
+    const calls: string[] = [];
+    const counting = new Proxy(store, {
+      get: (target, prop, receiver) => {
+        const value = Reflect.get(target, prop, receiver) as unknown;
+        if (typeof value !== 'function') return value;
+        return (...args: unknown[]) => {
+          calls.push(String(prop));
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    const server = app(new AuthService({ ...serviceOptions(), store: counting }));
+    const real = await makeUser();
+    const unknown = `nobody-${randomUUID().slice(0, 8)}@example.test`;
+    const seen: string[][] = [];
+    for (const [k, email] of [real.email, unknown].entries()) {
+      const b = await new Browser(server, `192.0.2.${String(160 + k)}`).start();
+      later(31_000);
+      calls.length = 0;
+      expect((await b.signIn(email, 'not the password')).statusCode).toBe(401);
+      seen.push([...calls]);
+    }
+    expect(seen[0]).toEqual(['lockState', 'loginLookup', 'recordFailure']);
+    expect(seen[1]).toEqual(seen[0]);
+    // The real account's failure is still audited, per person (ADR-052).
+    expect((await authEvents(real.id)).map((e) => e.action)).toEqual(['auth.login_failed']);
+    await server.close();
+  });
+
+  it('[USR-5] repeated locks within a day send one notice (S5-20261117-03)', async () => {
+    const server = app();
+    const user = await makeUser();
+    const before = notified.locked.length;
+    for (let round = 0; round < 3; round += 1) {
+      const b = await new Browser(server, `192.0.2.${String(170 + round)}`).start();
+      for (let i = 1; i <= 10; i += 1) {
+        later(31_000);
+        await b.signIn(user.email, `wrong ${String(round)}-${String(i)}`);
+      }
+      later(16 * MIN); // the lock runs out; the next round locks again
+    }
+    expect(notified.locked.slice(before).map((n) => n.userId)).toEqual([user.id]);
+    const locks = (await authEvents(user.id)).filter((e) => e.action === 'auth.locked');
+    expect(locks).toHaveLength(3);
+    await server.close();
+  });
+
+  it('[USR-3] a reset by email link is not held back by the 1-day minimum age (ADR-061)', async () => {
+    const server = app();
+    const user = await makeUser({ passwordAgeMs: HOUR });
+    const anon = await new Browser(server).start();
+    // A change in the app still waits a day.
+    const { b } = await signedIn(server, user);
+    const change = await b.send('POST', '/api/auth/password/change', {
+      currentPassword: PASSWORD,
+      password: 'meadow copper falcon 31',
+    });
+    expect(change.statusCode).toBe(422);
+    expect(JSON.stringify(change.json())).toContain('min_age');
+    // The emailed link does not.
+    const link = await issuePasswordReset(store, user.id, clock);
+    const reset = await anon.send('POST', '/api/auth/password/reset', {
+      token: link.token,
+      password: 'meadow copper falcon 31',
+    });
+    expect(reset.statusCode).toBe(204);
+    await server.close();
+  });
+
+  it('[USR-7][USR-3] changing the password marks open reset links used', async () => {
+    const server = app();
+    const user = await makeUser();
+    const anon = await new Browser(server).start();
+    const link = await issuePasswordReset(store, user.id, clock);
+    expect((await anon.send('GET', `/api/auth/password/reset/${link.token}`)).statusCode).toBe(200);
+    const { b } = await signedIn(server, user);
+    const change = await b.send('POST', '/api/auth/password/change', {
+      currentPassword: PASSWORD,
+      password: 'orchid basalt meadow 18',
+    });
+    expect(change.statusCode).toBe(204);
+    expect((await anon.send('GET', `/api/auth/password/reset/${link.token}`)).statusCode).toBe(404);
     await server.close();
   });
 });

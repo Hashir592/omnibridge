@@ -300,7 +300,12 @@ export class AuthService {
     throw unauthorized(failure === 'password' ? 'invalid_credentials' : 'invalid_code');
   }
 
-  /** Records one failure (audit, lock notice); returns when the email is locked until, if it is. */
+  /**
+   * Records one failure; returns when the email is locked until, if it is. The audit row of a
+   * real account is written inside that one call, so a real and an unknown email make the same
+   * database calls (S5-20261117-02). After a lock, both answer 429 alike, so the notice may take
+   * more calls: at most one per user a day, and 100 a day in all (S5-20261117-03).
+   */
   async #countFailure(
     key: Buffer,
     ip: string,
@@ -308,30 +313,25 @@ export class AuthService {
     user: { userId: string } | undefined,
     failure: 'password' | 'code' | 'recovery_code' | 'current_password',
   ): Promise<Date | null> {
-    const result = await this.#o.store.recordFailure(key, ip, now);
-    if (user !== undefined) {
-      // No workspace is chosen yet: failures are kept per person, never in a workspace (ADR-052).
-      await this.#o.store.recordAuthEvent({
-        userId: user.userId,
-        action: 'auth.login_failed',
-        ip,
-        detail: { failure },
-        now,
-      });
-      if (result.newlyLocked && result.lockedUntil !== null) {
-        await this.#o.store.recordAuthEvent({
-          userId: user.userId,
-          action: 'auth.locked',
-          ip,
-          detail: { locked_until: result.lockedUntil.toISOString() },
-          now,
-        });
+    const result = await this.#o.store.recordFailure(
+      key,
+      ip,
+      now,
+      user === undefined ? undefined : { userId: user.userId, failure },
+    );
+    if (user !== undefined && result.newlyLocked && result.lockedUntil !== null) {
+      if (result.notice === 'send') {
         const workspaceIds = (await this.#o.store.userWorkspaces(user.userId)).map((w) => w.id);
         await this.#o.notifier.locked({
           userId: user.userId,
           workspaceIds,
           lockedUntil: result.lockedUntil,
         });
+      } else if (result.notice === 'platform_capped') {
+        this.#o.logger.warn(
+          { event: 'auth.lock_notices_capped' },
+          'lock notices over the platform daily cap: not sent',
+        );
       }
     }
     return result.lockedUntil;
@@ -674,14 +674,30 @@ export class AuthService {
   }
 
   async #forgotPassword(email: string, ip: string, now: Date): Promise<void> {
-    // Every request counts toward the caps, real email or not (F-M02h-05).
-    if (!(await this.#o.store.allowReset(this.emailKey(email), ip, now))) {
+    // The lookup comes first: the 202 has already gone, so it costs no answer time, and only a
+    // mail that goes out may use the platform-wide cap (S5-20261117-01).
+    const account = await this.#o.store.loginLookup(email);
+    const first =
+      account === undefined ? undefined : (await this.#o.store.userWorkspaces(account.userId))[0];
+    // Every request counts toward the per-email and per-address caps, real email or not.
+    const verdict = await this.#o.store.allowReset(
+      this.emailKey(email),
+      ip,
+      now,
+      first !== undefined,
+    );
+    if (verdict === 'global_capped') {
+      this.#o.logger.warn(
+        { event: 'auth.reset_capped', cap: 'platform' },
+        'password reset over the platform daily cap: not sent',
+      );
+      return;
+    }
+    if (verdict === 'capped') {
       this.#o.logger.info({ event: 'auth.reset_capped' }, 'password reset over a cap: not sent');
       return;
     }
-    const account = await this.#o.store.loginLookup(email);
     if (account === undefined) return;
-    const [first] = await this.#o.store.userWorkspaces(account.userId);
     if (first === undefined) {
       // Every mail job carries a workspace (invariant 12); an operator with none is told in M05.
       this.#o.logger.warn(
@@ -708,16 +724,30 @@ export class AuthService {
     const reset = await this.#o.store.findReset(tokenHash, now);
     if (reset === undefined) throw notFound();
     const user = await this.#user(reset.userId);
-    await this.#checkNewPassword(user, password, now);
+    // No minimum age here: whoever forgot a password set today can still reset it (USR-3 as
+    // amended, ADR-061).
+    await this.#checkNewPassword(user, password, now, { minAge: false });
     const hash = await this.#o.passwords.hash(password);
     // Every session ends with it; signing in again still needs MFA (USR-7).
     if ((await this.#o.store.resetPassword(tokenHash, now, hash)) === undefined) throw notFound();
   }
 
-  /** USR-3 for a new password: the rules, the last 10, and a day since the last change. */
-  async #checkNewPassword(user: AuthUser, password: string, now: Date): Promise<void> {
+  /**
+   * USR-3 for a new password: the rules, the last 10, and (in the app, not by an emailed reset
+   * link) a day since the last change.
+   */
+  async #checkNewPassword(
+    user: AuthUser,
+    password: string,
+    now: Date,
+    { minAge = true }: { minAge?: boolean } = {},
+  ): Promise<void> {
     const rules: PasswordRule[] = passwordProblems(password, user);
-    if (user.passwordSetAt !== null && now.getTime() - user.passwordSetAt.getTime() < MIN_AGE_MS) {
+    if (
+      minAge &&
+      user.passwordSetAt !== null &&
+      now.getTime() - user.passwordSetAt.getTime() < MIN_AGE_MS
+    ) {
       rules.push('min_age');
     }
     if (rules.length === 0) {
@@ -754,6 +784,7 @@ export class AuthService {
     await this.#refuseIfLockedMeanwhile(key, request.ip, now);
     await this.#o.store.clearFailures(key);
     await this.#checkNewPassword(user, input.password, now);
+    // Setting it also marks open reset links used, so an older mail cannot undo it.
     await this.#o.store.setPassword(user.userId, await this.#o.passwords.hash(input.password), now);
     // Every session ends, this one included: sign in again with the new password and MFA.
     await this.#o.store.revokeUserSessions(user.userId, now);

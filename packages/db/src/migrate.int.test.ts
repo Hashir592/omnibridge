@@ -75,6 +75,7 @@ describe('db-main roles and migrations', () => {
       '0015_permissions',
       '0016_housekeeping',
       '0017_housekeeping_indexes',
+      '0018_auth_audit_fixes',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

@@ -70,6 +70,12 @@ describe('web serves the SPA beside the API (ADR-060)', () => {
       { method: 'GET', url: '/api' },
       { method: 'GET', url: '/api/healthz' },
       { method: 'GET', url: '/%61pi/nope' },
+      // Any first segment `api`, in any case or after extra slashes (S5 hardening 7).
+      { method: 'GET', url: '/API/users' },
+      { method: 'GET', url: '/Api/users' },
+      { method: 'GET', url: '/aPI' },
+      { method: 'GET', url: '//api/users' },
+      { method: 'GET', url: '/api;/users' },
       { method: 'GET', url: '/assets/missing.js' },
       { method: 'GET', url: '/assets/..%2F..%2Fpackage.json' },
       { method: 'GET', url: '/webhooks/unknown' },
@@ -86,6 +92,12 @@ describe('web serves the SPA beside the API (ADR-060)', () => {
         type: 'application/problem+json; charset=utf-8',
       });
       expect(res.json()).toMatchObject({ status: 404, code: 'not_found' });
+    }
+  });
+
+  it('[NFR-1] a page whose first segment only starts with api is still a page', async () => {
+    for (const url of ['/apis', '/apiary/x', '/x/api']) {
+      expect({ url, status: (await get(url)).statusCode }).toEqual({ url, status: 200 });
     }
   });
 
