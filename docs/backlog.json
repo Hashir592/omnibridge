@@ -920,6 +920,39 @@
       "status": "todo"
     },
     {
+      "id": "T-0212",
+      "module": "M02",
+      "session": "S3",
+      "title": "GET /auth/session and drop the rollout functions (ADR-062)",
+      "goal": "After a reload the app knows the user, the current workspace and its toggles from one call.",
+      "prd_ids": [
+        "USR-2"
+      ],
+      "supports": [
+        "PLAT-2",
+        "WEB-1"
+      ],
+      "scope": [
+        "GET /auth/session: user (id, name, email), next, platform, current workspace (id, name, role) or null, modules of that workspace; auth session at any stage, not workspace-scoped",
+        "SPA reads it on load and after each sign-in step or workspace switch (S2 wires the screens; S3 adds the client call and the MSW handler shape)",
+        "Forward-only migration dropping the old auth functions kept for the T-0210/T-0211 rollout, with a test that no app code names them"
+      ],
+      "out_of_scope": [
+        "Changing GET /auth/workspaces",
+        "Platform console"
+      ],
+      "depends_on": [
+        "T-0211"
+      ],
+      "acceptance": [
+        "Contract and route-walker tests for /auth/session at each stage (pre-MFA, signed in, platform)",
+        "After switching workspace, /auth/session returns the new workspace and its modules",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
       "id": "T-0307",
       "module": "M03",
       "session": "S2",
