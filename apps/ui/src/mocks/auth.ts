@@ -19,7 +19,7 @@
  * - invite link: /invite/demo-invite; expired link: /invite/expired. Same for /reset-password?token=
  */
 import { HttpResponse, http } from 'msw/http';
-import { personaSessionInfo } from './session.ts';
+import { personaSessionInfo, setSignedInModules } from './session.ts';
 import type {
   InviteInfo,
   MfaConfirmResult,
@@ -97,6 +97,15 @@ const MOCK_WORKSPACES: WorkspaceChoice[] = [
     modules: { website_connector: false },
   },
 ];
+
+// The mock data (orders, stock, connections...) hides the Website channel by the workspace this
+// sign-in entered, the same answer GET /auth/session gives (WEB-1).
+setSignedInModules(() => {
+  if (current === undefined || !mfaDone) return undefined;
+  const account = ACCOUNTS[current];
+  const id = currentWorkspace ?? (account?.workspaces === 1 ? 'ws_1' : undefined);
+  return MOCK_WORKSPACES.find((w) => w.id === id)?.modules;
+});
 
 /** Clears failure counts and the signed-in email (tests). */
 export function resetAuthMock(): void {
