@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 17 Nov 2026 by S3.
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 17 Nov 2026 by S3 (T-0212).
 
 ## Now
 
@@ -9,11 +9,11 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M06 (site first):** T-0601 site + T-0603 terms acceptance merged (PR #49). T-0602 eBay deletion endpoint: PR #50. T-0604 early deploy pack: `infra/early-deploy/` and `docs/ops/runbooks/early-deploy.md`, dry run passes (`bash infra/early-deploy/dry-run.sh`). Waiting on the client: Operator legal details and the legal text review. S2: the SPA screen for `next: 'terms'`.
 - **M03:** T-0305 (PR #40), T-0306 client changes (PR #41) and the M03 end fixes (PR #42) merged. M03 end round 2: APPROVED (S4, 14 Nov). Next S2 task: T-0307 (generic Website mark, light).
 - **Client changes:** designs in `docs/plan/client-changes-20261112.md` (ADR-055, ADR-057). Real logic lands in M09, M10, M12 (Release 1) and M18, M20 (Release 3).
-- **Order now (one session at a time):** done: M02 halfway fixes #47, T-0208 #48, M06 #49–#51, T-0204 #52, T-0207 #55, S2 screens #60, worker test cap fix #63. **T-0209 (ADR-060) merged (#62):** every contract route under `/api` (one rule: `packages/contract/src/mount.ts`; `/healthz`, `/webhooks/**`, `/connect/**/callback|declined` stay at the root), web serves the built SPA (`index.html` no-cache, `/assets/` immutable, unknown `/api/**` JSON 404), MSW handlers and signed file links on `/api`. S5 T-0206 audit done (#65); rulings ADR-061. **T-0210 audit fixes merged (#67)**: migration 0018 (only sent reset mails use the platform cap; one failure call writes the audit row; lock notices 1/user/24 h + 100/day; IPv6 per /64; a password change voids reset links), `__Host-` cookies, no minimum age on an emailed reset, any `/api` segment in any case gets the JSON 404, `docs/ops/runbooks/support.md`. Finding → test table in PR #67; S5 to re-check -01 to -03 there. **T-0211 module toggles: PR #68 on auto-merge**: `GET /auth/workspaces` entries carry `modules.website_connector` (migration 0019, `app.workspaces.modules`, set only by `app.workspace_set_module` as ob_ops; seed turns it on for the launch workspace), invite accept `name` optional. **Next: S4 M02 end.** S2 next batch: CSP inline styles to classes (ADR-061 note 6).
+- **Order now (one session at a time):** done: M02 halfway fixes #47, T-0208 #48, M06 #49–#51, T-0204 #52, T-0207 #55, S2 screens #60, worker test cap fix #63. **T-0209 (ADR-060) merged (#62):** every contract route under `/api` (one rule: `packages/contract/src/mount.ts`; `/healthz`, `/webhooks/**`, `/connect/**/callback|declined` stay at the root), web serves the built SPA (`index.html` no-cache, `/assets/` immutable, unknown `/api/**` JSON 404), MSW handlers and signed file links on `/api`. S5 T-0206 audit done (#65); rulings ADR-061. **T-0210 audit fixes merged (#67)**: migration 0018 (only sent reset mails use the platform cap; one failure call writes the audit row; lock notices 1/user/24 h + 100/day; IPv6 per /64; a password change voids reset links), `__Host-` cookies, no minimum age on an emailed reset, any `/api` segment in any case gets the JSON 404, `docs/ops/runbooks/support.md`. S5 re-check: -01 to -03 fixed (#71). **T-0211 module toggles merged (#68)**: `GET /auth/workspaces` entries carry `modules.website_connector` (migration 0019, `app.workspaces.modules`, set only by `app.workspace_set_module` as ob_ops; seed turns it on for the launch workspace; read through `auth_user_workspaces_modules`), invite accept `name` optional. **T-0212 (ADR-062): PR #72 on auto-merge**: `GET /api/auth/session` (new auth kind `any-session`: any live stage, no tenant) returns user, `next`, `platform`, current workspace or null, and its `modules`; `authApi.session()` and the MSW handler are ready for S2. Migration 0020 revokes EXECUTE on the rollout functions (not a DROP: squawk `ban-drop-function` has no ADR-045 waiver, **PS-025 open for S1**). **Next: S4 M02 end.** S2 next batch: CSP inline styles to classes (ADR-061 note 6).
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; quiet output; short sessions; batches up to 5.
 - **Process (ADR-053, ADR-054, ADR-056):** sessions merge their own green PRs. CI is the only full gate; locally `--quick` (plus a task's integration tests for high risk). Halfway checkpoints only for M02, M04, M10, M12, M17, M18. Reviews do not block the next module.
 - **Hashir:** GitHub CLI must stay on the Hashir592 account (`gh auth switch -u Hashir592`). Dev machine to 16 GB in 1 to 2 weeks.
-- **Open questions:** none.
+- **Open questions:** PS-025 (S1): waiver for `DROP FUNCTION` on a contract step, or accept revoke-only.
 
 ## What T-0203 delivered
 
@@ -34,8 +34,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Follow-ups noted
 
-- T-0211 (S1): `WorkspaceChoice` does not mark the session's active workspace and there is no real session route; the SPA needs one (or a `current` flag) to read the right modules after a reload. M05: audit event when the console switches a module.
-- T-0210: a later contract migration drops the 0011/0012 three-argument `auth_record_failure` / `auth_reset_allow` (kept for the previous app version). Browsers holding old `ob_session`/`ob_csrf` cookies just sign in again.
+- M05: audit event when the console switches a module (T-0211).
+- T-0212: the retired rollout functions are revoked, not dropped; DROP after PS-025. Browsers holding old `ob_session`/`ob_csrf` cookies just sign in again.
 
 - T-0209: web's CSP (`style-src 'self'`) blocks the SPA's inline `style=` attributes now that web serves the SPA; S1/S2 to pick nonce/hash, `style-src-attr`, or no inline styles. Route paths may not start with `/api` (the server adds it): WEB-3's `/api/v1/website/**` is declared as `/v1/website/**`.
 
@@ -53,9 +53,10 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. If PR #68 is red, S3 fixes it (auto-merge stays on).
-2. S5 re-checks S5-20261117-01 to -03 against the table in PR #67 (one comment).
-3. S4 M02 end checkpoint.
+1. If PR #72 is red, S3 fixes it (auto-merge stays on).
+2. S1 rules on PS-025.
+3. S2 wires the screens to `GET /auth/session` (on load, after each sign-in step and workspace switch).
+4. S4 M02 end checkpoint.
 
 ## Prerequisites outstanding (Hashir)
 
