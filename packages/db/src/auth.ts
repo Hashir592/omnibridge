@@ -485,7 +485,7 @@ export class AuthStore {
       role: 'admin' | 'member';
       companies: string;
       modules: Readonly<Record<string, unknown>>;
-    }>`SELECT * FROM app.auth_user_workspaces(${userId}::uuid)`.execute(this.#db);
+    }>`SELECT * FROM app.auth_user_workspaces_modules(${userId}::uuid)`.execute(this.#db);
     return rows.map((r) => ({
       id: r.id,
       name: r.name,

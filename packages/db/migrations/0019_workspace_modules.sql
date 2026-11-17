@@ -14,10 +14,10 @@ ALTER TABLE app.workspaces
   ADD COLUMN modules jsonb NOT NULL DEFAULT '{}'::jsonb
     CHECK (jsonb_typeof(modules) = 'object');
 
--- The workspace picker (USR-2) now says which modules each workspace has on. Same body as 0011,
--- one more column; the previous app version reads the columns it knows by name.
-DROP FUNCTION app.auth_user_workspaces(uuid);
-CREATE FUNCTION app.auth_user_workspaces(p_user uuid)
+-- The workspace picker (USR-2) with the modules each workspace has on: the 0011 body plus one
+-- column, under a new name. auth_user_workspaces stays as it is for the previous app version
+-- (expand only); a later contract step may drop it.
+CREATE FUNCTION app.auth_user_workspaces_modules(p_user uuid)
   RETURNS TABLE (id uuid, name text, role text, companies bigint, modules jsonb)
   LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
@@ -42,8 +42,8 @@ BEGIN
   PERFORM set_config('app.auth_user_id', '', true);
 END
 $$;
-REVOKE ALL ON FUNCTION app.auth_user_workspaces(uuid) FROM PUBLIC, ob_tenant_rw;
-GRANT EXECUTE ON FUNCTION app.auth_user_workspaces(uuid) TO ob_auth;
+REVOKE ALL ON FUNCTION app.auth_user_workspaces_modules(uuid) FROM PUBLIC, ob_tenant_rw;
+GRANT EXECUTE ON FUNCTION app.auth_user_workspaces_modules(uuid) TO ob_auth;
 
 -- Turns one known module of one workspace on or off. Platform tooling only: the dev seed (ob_ops)
 -- today, the platform console later (M05).
