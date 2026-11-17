@@ -55,7 +55,7 @@ services:
       - -c
       - maintenance_work_mem=96MB
       - -c
-      - max_connections=40
+      - max_connections=45
       - -c
       - random_page_cost=1.1
       - -c

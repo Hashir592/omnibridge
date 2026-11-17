@@ -1,14 +1,16 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { EmailLintError, lintEmail, renderInvite } from './templates.ts';
+import { EmailLintError, lifetimeText, lintEmail, renderInvite } from './templates.ts';
 
 const APP = 'https://app.omnibridge.co.uk';
+const HOURS_72 = 72 * 3_600_000;
 const invite = () =>
   renderInvite({
     inviterName: 'Synthetic Admin',
     workspaceName: 'Synthetic Workspace',
     acceptUrl: 'https://app.omnibridge.co.uk/invite/abc123',
     appOrigin: APP,
+    validForMs: HOURS_72,
   });
 
 describe('system email templates (MAIL-2)', () => {
@@ -26,12 +28,22 @@ describe('system email templates (MAIL-2)', () => {
     }).not.toThrow();
   });
 
+  it('[TEN-7] the invite states its lifetime from the value passed, in hours', () => {
+    const email = invite();
+    expect(email.text).toContain('The link works for 72 hours.');
+    expect(email.html).toContain('The link works for 72 hours.');
+    expect(email.text).not.toContain('7 days');
+    expect(lifetimeText(3_600_000)).toBe('1 hour');
+    expect(() => lifetimeText(0)).toThrow(EmailLintError);
+  });
+
   it('[MAIL-2] values are HTML-escaped', () => {
     const email = renderInvite({
       inviterName: '<script>alert(1)</script>',
       workspaceName: 'A & B',
       acceptUrl: 'https://app.omnibridge.co.uk/invite/x"onmouseover="y',
       appOrigin: APP,
+      validForMs: HOURS_72,
     });
     expect(email.html).not.toContain('<script>');
     expect(email.html).toContain('&lt;script&gt;');
@@ -40,7 +52,7 @@ describe('system email templates (MAIL-2)', () => {
   });
 
   it('[MAIL-2] the invite link must be https on the app origin', () => {
-    const values = { inviterName: 'A', workspaceName: 'W', appOrigin: APP };
+    const values = { inviterName: 'A', workspaceName: 'W', appOrigin: APP, validForMs: HOURS_72 };
     for (const acceptUrl of [
       'javascript:alert(1)',
       'https://evil.example/invite/x',
@@ -52,6 +64,7 @@ describe('system email templates (MAIL-2)', () => {
     const dev = renderInvite({
       ...values,
       appOrigin: 'http://localhost:5173',
+      validForMs: HOURS_72,
       acceptUrl: 'http://localhost:5173/invite/x',
     });
     expect(dev.text).toContain('http://localhost:5173/invite/x');
@@ -70,6 +83,7 @@ describe('system email templates (MAIL-2)', () => {
         ...values,
         acceptUrl: 'https://app.omnibridge.co.uk/invite/x',
         appOrigin: APP,
+        validForMs: HOURS_72,
       });
       expect(() => {
         lintEmail(email);

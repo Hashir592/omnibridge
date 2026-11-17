@@ -1037,7 +1037,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     );
     expect(gate.peak).toBeLessThanOrEqual(4);
     expect(results.filter((s) => s === 429).length).toBeGreaterThan(0);
-    expect(results.every((s) => s === 401 || s === 429)).toBe(true);
+    expect(results.filter((s) => s !== 401 && s !== 429)).toEqual([]);
     // 4 hashes of 19 MiB each; the web container allows 384 MB in all.
     expect(process.memoryUsage().rss - rssBefore).toBeLessThan(150 * 1024 * 1024);
     await server.close();
@@ -1156,7 +1156,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await server.close();
   });
 
-  it('[USR-3] a reset by email link is not held back by the 1-day minimum age (ADR-061)', async () => {
+  // ADR-061
+  it('[USR-3] a reset by email link is not held back by the 1-day minimum age', async () => {
     const server = app();
     const user = await makeUser({ passwordAgeMs: HOUR });
     const anon = await new Browser(server).start();
@@ -1193,7 +1194,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect((await anon.send('GET', `/api/auth/password/reset/${link.token}`)).statusCode).toBe(404);
     await server.close();
   });
-  it('[USR-2][PLAT-2] GET /auth/session says where the session is at every stage (ADR-062)', async () => {
+  // ADR-062
+  it('[USR-2][PLAT-2] GET /auth/session says where the session is at every stage', async () => {
     const server = app();
     const anon = await new Browser(server).start();
     expect((await anon.send('GET', '/api/auth/session')).statusCode).toBe(401);

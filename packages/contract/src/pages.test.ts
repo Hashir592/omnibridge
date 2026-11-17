@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { pagedOf, PAGE_MAX, pageQuery, pageResult, PAGE_LIMITS, TOTAL_COUNT_CAP } from './pages.ts';
 
-describe('numbered-page lists (CAP-7, ADR-040)', () => {
+// ADR-040
+describe('numbered-page lists [CAP-7]', () => {
   it('[CAP-7] page-based list: limit 20/50/100 accepted, 201 rejected, default 50', () => {
     expect(PAGE_LIMITS).toEqual([20, 50, 100]);
     expect(pageQuery.parse({})).toEqual({ page: 1, limit: 50 });

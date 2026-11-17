@@ -56,7 +56,8 @@ describe('db-pii roles and migrations', () => {
     );
   });
 
-  it('[NFR-2] a no-transaction migration runs CONCURRENTLY index statements, a repeat is a no-op, and a failed build is repaired (ADR-047)', async () => {
+  // ADR-047
+  it('[NFR-2] a no-transaction migration runs CONCURRENTLY index statements, a repeat is a no-op, and a failed build is repaired', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ob-migrations-'));
     const write = (name: string, text: string) => writeFile(join(dir, name), text);
     await write(

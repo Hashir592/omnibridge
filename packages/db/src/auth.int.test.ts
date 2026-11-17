@@ -111,7 +111,8 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
     }
   });
 
-  it('[USR-6][SEC-3] ob_worker reaches only the reset-link definer, never sessions or hashes (ADR-051)', async () => {
+  // ADR-051
+  it('[USR-6][SEC-3] ob_worker reaches only the reset-link definer, never sessions or hashes', async () => {
     const tok = () => randomBytes(32);
     const denied = /permission denied for function/;
     await expect(worker.query('SELECT * FROM app.auth_login_lookup($1)', [email])).rejects.toThrow(
@@ -157,7 +158,8 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
     await expect(ops.query('SELECT * FROM app.platform_key_get(NULL)')).resolves.toBeDefined();
   });
 
-  it('[USR-6][SEC-3] a session starts at pre_mfa, and platform needs the platform_admin flag (ADR-051)', async () => {
+  // ADR-051
+  it('[USR-6][SEC-3] a session starts at pre_mfa, and platform needs the platform_admin flag', async () => {
     const tok = () => randomBytes(32);
     await expect(
       app.query('SELECT app.session_create($1, $2, $3, $4, $5, $6, $7)', [
@@ -476,23 +478,22 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
     expect(await store.findReset(link, at(t, 3 * MIN))).toBeUndefined();
   });
 
-  it('[USR-2][USR-5] no role but the owner may execute the retired rollout functions (0020)', async () => {
+  it('[USR-2][USR-5] the rollout functions 0020 retired are gone (0023)', async () => {
+    // ADR-063: revoked from every role in 0020, then dropped in 0023.
     const retired = [
       'app.auth_record_failure(bytea, inet, timestamptz)',
       'app.auth_reset_allow(bytea, inet, timestamptz)',
       'app.auth_user_workspaces(uuid)',
     ];
-    for (const role of ['ob_app', 'ob_worker', 'ob_ops']) {
-      for (const fn of retired) {
-        const { rows } = await app.query<{ ok: boolean }>(
-          'SELECT has_function_privilege($1, $2, $3) AS ok',
-          [role, fn, 'EXECUTE'],
-        );
-        expect({ role, fn, ok: rows[0]?.ok }).toEqual({ role, fn, ok: false });
-      }
+    for (const fn of retired) {
+      const { rows } = await app.query<{ oid: string | null }>(
+        'SELECT to_regprocedure($1) AS oid',
+        [fn],
+      );
+      expect({ fn, oid: rows[0]?.oid }).toEqual({ fn, oid: null });
     }
     await expect(
       app.query('SELECT * FROM app.auth_user_workspaces($1)', [randomUUID()]),
-    ).rejects.toThrow(/permission denied/);
+    ).rejects.toThrow(/does not exist/);
   });
 });

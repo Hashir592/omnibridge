@@ -12,8 +12,8 @@
 #                 definers (ADR-051); NOBYPASSRLS
 #   ob_platform   scheduler fan-out; reads the workspace list only
 # Grants are given by the migrations (0013 for the groups); this script only makes the roles.
-# Connection caps (T-0207) cover each role's pools and add up to 37, the 40 of max_connections less
-# the 3 superuser slots, so no role can starve another:
+# Connection caps (T-0207) cover each role's pools and add up to 37, at most the 45 of max_connections
+# less 5 (FA-22, ADR-064: superuser slots plus deploy overlap), so no role can starve another:
 #   ob_owner 4 (migrate 2, room for a test's own pool) | ob_app 13 (web 10 + queue 2) | ob_worker 15 (jobs 8 + bookkeeping 2
 #   + pg-boss 4) | ob_ops 3 (seed 2, rewrap-keys 1) | ob_platform 2 (fan-out 1, rewrap-keys 1)
 # tests/config/compose.test.ts checks the sum. A cap changes on a live cluster with ALTER ROLE.

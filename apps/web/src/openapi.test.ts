@@ -41,7 +41,8 @@ describe('OpenAPI document', () => {
     }
   });
 
-  it('[SEC-3] serves the API under /api; only the PRD-fixed paths override it (ADR-060)', async () => {
+  // ADR-060
+  it('[SEC-3] serves the API under /api; only the PRD-fixed paths override it', async () => {
     const doc = await document();
     expect(doc.servers).toEqual([{ url: '/api' }]);
     const atRoot = Object.entries(doc.paths).flatMap(([path, ops]) =>

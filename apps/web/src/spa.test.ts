@@ -21,7 +21,8 @@ function builtUi(): string {
   return dir;
 }
 
-describe('web serves the SPA beside the API (ADR-060)', () => {
+// ADR-060
+describe('web serves the SPA beside the API', () => {
   const app = buildWebApp({ logger, version: '1', checks, spa: loadSpa(builtUi()) });
   beforeAll(() => app.ready());
   afterAll(() => app.close());

@@ -14,7 +14,8 @@ import {
 
 const secret = Buffer.from('12345678901234567890'); // the RFC 6238 test key
 
-describe('TOTP and recovery codes (USR-4, ADR-050)', () => {
+// ADR-050
+describe('TOTP and recovery codes [USR-4]', () => {
   it('[USR-4] codes match the RFC 6238 SHA-1 test vectors', () => {
     // RFC 6238 Appendix B, 8-digit values; their last 6 digits are the 6-digit codes.
     expect(totpCode(secret, totpStep(new Date(59_000)))).toBe('287082');
@@ -31,7 +32,8 @@ describe('TOTP and recovery codes (USR-4, ADR-050)', () => {
     expect(matchTotp(secret, 'abcdef', now)).toBeUndefined();
   });
 
-  it('[USR-4] the QR matrix encodes exactly the otpauth URI (ADR-050)', () => {
+  // ADR-050
+  it('[USR-4] the QR matrix encodes exactly the otpauth URI', () => {
     const view = enrolmentView(secret, 'sam.admin@example.test');
     expect(view.uri).toMatch(/^otpauth:\/\/totp\/OmniBridge:sam\.admin%40example\.test\?/);
     expect(view.uri).toContain(`secret=${base32(secret)}`);

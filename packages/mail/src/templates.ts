@@ -79,28 +79,42 @@ function checkAppUrl(value: string, appOrigin: string): string {
   return url.href;
 }
 
-/** Invitation to join a workspace. `appOrigin` is the app's configured origin. */
+/** "72 hours": how long a link lasts, in whole hours, rounded down so it never promises more (TEN-7). */
+export function lifetimeText(ms: number): string {
+  const hours = Math.floor(ms / 3_600_000);
+  if (!Number.isFinite(hours) || hours < 1) {
+    throw new EmailLintError('A link lifetime must be at least an hour');
+  }
+  return hours === 1 ? '1 hour' : `${String(hours)} hours`;
+}
+
+/**
+ * Invitation to join a workspace. `appOrigin` is the app's configured origin; `validForMs` is the
+ * invite's real lifetime (INVITE_LIFETIME_MS), so the mail never promises longer than the link.
+ */
 export function renderInvite(values: {
   inviterName: string;
   workspaceName: string;
   acceptUrl: string;
   appOrigin: string;
+  validForMs: number;
 }): Email {
   const acceptUrl = checkAppUrl(values.acceptUrl, values.appOrigin);
+  const validFor = lifetimeText(values.validForMs);
   const subject = `${values.inviterName} invited you to ${values.workspaceName} on OmniBridge`;
   const text = [
     `${values.inviterName} invited you to join ${values.workspaceName} on OmniBridge.`,
     '',
     `Accept the invitation: ${acceptUrl}`,
     '',
-    'The link works for 7 days. If you did not expect this email, you can ignore it.',
+    `The link works for ${validFor}. If you did not expect this email, you can ignore it.`,
   ].join('\n');
   const html = baseTemplate(
     subject,
     [
       `<p>${escapeHtml(values.inviterName)} invited you to join <strong>${escapeHtml(values.workspaceName)}</strong> on OmniBridge.</p>`,
       `<p><a href="${escapeHtml(acceptUrl)}" style="background:#0F6B66;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Accept the invitation</a></p>`,
-      '<p>The link works for 7 days. If you did not expect this email, you can ignore it.</p>',
+      `<p>The link works for ${validFor}. If you did not expect this email, you can ignore it.</p>`,
     ].join(''),
   );
   return { subject, text, html };

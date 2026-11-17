@@ -3,7 +3,8 @@ import { commonPasswords, HashGate, isBreached, Passwords, passwordProblems } fr
 
 const person = { name: 'Sam Admin', email: 'sam.admin@example.test' };
 
-describe('password rules and hashing (USR-3, ADR-050)', () => {
+// ADR-050
+describe('password rules and hashing [USR-3]', () => {
   it('[USR-3] the committed list holds a few hundred common passwords', () => {
     const list = commonPasswords();
     expect(list.size).toBeGreaterThanOrEqual(300);
@@ -34,7 +35,8 @@ describe('password rules and hashing (USR-3, ADR-050)', () => {
     );
   });
 
-  it('[USR-3] hashes are argon2id with the ADR-050 parameters and check both ways', async () => {
+  // ADR-050
+  it('[USR-3] hashes are argon2id with the agreed parameters (19 MiB, t=2, p=1) and check both ways', async () => {
     const passwords = new Passwords();
     const h = await passwords.hash('tangerine harbour lantern 47');
     expect(h.startsWith('$argon2id$v=19$m=19456,t=2,p=1$')).toBe(true);

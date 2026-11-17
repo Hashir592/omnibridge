@@ -14,6 +14,7 @@ export {
 export {
   EmailLintError,
   escapeHtml,
+  lifetimeText,
   lintEmail,
   renderInvite,
   renderLockNotice,

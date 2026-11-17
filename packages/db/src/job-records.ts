@@ -30,7 +30,8 @@ export class JobRecordRepository implements JobRecordStore {
 
   createAndEnqueue(
     ctx: TenantContext,
-    record: { id: string; type: string; idempotencyKey: string },
+    /** companyId: the one company the job belongs to, if any; web then shows it only in scope. */
+    record: { id: string; type: string; idempotencyKey: string; companyId?: string | undefined },
     enqueue: (db: Db) => Promise<void>,
   ): Promise<{ id: string; created: boolean }> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
@@ -41,6 +42,7 @@ export class JobRecordRepository implements JobRecordStore {
           workspace_id: ctx.workspaceId,
           type: record.type,
           idempotency_key: record.idempotencyKey,
+          company_id: record.companyId ?? null,
         })
         .onConflict((oc) => oc.constraint('job_records_idempotency').doNothing())
         .returning('id')

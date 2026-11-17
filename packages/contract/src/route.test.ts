@@ -40,7 +40,8 @@ describe('route metadata (invariant 4)', () => {
     expect(problems).toContain('tab');
   });
 
-  it('[SEC-3] a route path never carries the /api prefix the server adds (ADR-060)', () => {
+  // ADR-060
+  it('[SEC-3] a route path never carries the /api prefix the server adds', () => {
     expect(routeMetadataProblems({ ...base, path: '/api/v1/x' }).join('\n')).toMatch(/ADR-060/);
   });
 

@@ -43,6 +43,7 @@ describe('SMTP adapter against Mailpit (MAIL-2)', () => {
       workspaceName: 'Synthetic Workspace',
       acceptUrl: 'https://app.omnibridge.co.uk/invite/abc123',
       appOrigin: APP,
+      validForMs: 72 * 3_600_000,
     });
     await mailer.send('new.user@example.test', email);
 
@@ -62,6 +63,7 @@ describe('SMTP adapter against Mailpit (MAIL-2)', () => {
       workspaceName: 'W',
       acceptUrl: 'https://app.omnibridge.co.uk/invite/x',
       appOrigin: APP,
+      validForMs: 72 * 3_600_000,
     });
     await expect(mailer.send('new.user@example.test', email)).rejects.toThrow(EmailLintError);
     const after = ((await (await fetch(api('/messages'))).json()) as MailpitList).messages.length;
