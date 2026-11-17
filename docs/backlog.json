@@ -953,6 +953,253 @@
       "status": "review"
     },
     {
+      "id": "T-0401",
+      "module": "M04",
+      "session": "S3",
+      "title": "M02 carry-overs before the vault (ADR-063, ADR-064)",
+      "goal": "M02's leftovers are closed before M04 adds anything.",
+      "prd_ids": [],
+      "supports": [],
+      "scope": [
+        "db-main max_connections 40 to 45; a test that the sum of role caps is at most max_connections minus 5 (FA-22)",
+        "F-M02e-01: admin-only writes enforced in the database as well as the route (S4 M02 end file)",
+        "Forward-only migration dropping the functions migration 0020 revoked, with -- squawk-ignore ban-drop-function and a -- waiver: line (ADR-063)",
+        "The two integration tests that failed under load on S4's machine: reproduce; fix, or quarantine with a task the same day; never delete",
+        "The other Minors in docs/reviews/M02-end.md"
+      ],
+      "out_of_scope": [
+        "Anything for the vault"
+      ],
+      "depends_on": [
+        "T-0212"
+      ],
+      "acceptance": [
+        "Each M02 end finding ID listed in the PR with the test or change that closes it",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0402",
+      "module": "M04",
+      "session": "S3",
+      "title": "PII store and vault core",
+      "goal": "Buyer PII can be stored, read for a logged purpose, masked and searched, and nothing outside the vault ever holds it.",
+      "prd_ids": [
+        "DP-4",
+        "DP-5",
+        "DP-6",
+        "DP-7"
+      ],
+      "supports": [
+        "DP-8",
+        "ORD-2",
+        "ORD-9"
+      ],
+      "scope": [
+        "packages/pii-db migrations: PII records keyed by pii_ref (uuidv7) and workspace_id, with kind (DP-5 list only), channel_account_id, subject refs (order or conversation ID), buyer key, delete_after, created_at; blind-index table; tombstones table; access log (who, capability, purpose, pii_ref, time; never values)",
+        "Field encryption AES-256-GCM with a per-workspace data key wrapped by the PII master key (pii-vault's Docker secret only); reuse packages/crypto; a separate per-workspace index key for blind indexes (HMAC-SHA256 of normalised postcode, email, phone, name)",
+        "Capability service tokens per caller (web, worker): ingest, read-full (purpose required: label, order_detail, inbox; logged), mask, search, match (same-buyer order IDs only, ADR-055), delete (deletion service only); a caller without the capability gets 403",
+        "Every request carries the workspace; the vault refuses a pii_ref from another workspace (404)",
+        "Masked values computed on request, never stored (ORD-5 shape)",
+        "Typed vault client in packages, used by web and worker; web and worker never get db-pii credentials (dependency-cruiser rule)",
+        "Memory and pool limits as in ARCHITECTURE (vault 4 connections)"
+      ],
+      "out_of_scope": [
+        "Deletion runs (T-0403)",
+        "Order ingestion itself (M10)",
+        "Labels (M12)"
+      ],
+      "depends_on": [
+        "T-0401"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: ciphertext only in db-pii (a raw SQL read shows no plaintext marker); wrong capability 403; cross-workspace pii_ref 404; every read-full and search writes an access-log row with no value; a blind-index search finds a normalised match",
+        "PII marker scan (AT-9 harness) finds no marker in db-main, logs or job tables after an ingest and read cycle",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0403",
+      "module": "M04",
+      "session": "S3",
+      "title": "Deletion service with every trigger",
+      "goal": "One service deletes PII for good on every trigger, leaves tombstones in three places and logs counts and IDs only.",
+      "prd_ids": [
+        "DEL-1",
+        "DEL-2",
+        "DEL-3",
+        "AT-8"
+      ],
+      "supports": [
+        "DP-8",
+        "EBAY-2"
+      ],
+      "scope": [
+        "One deletion service in the vault (delete capability) with entry points for all seven DEL-1 triggers; triggers whose modules do not exist yet (orders, channel accounts, Amazon) get the entry point and a test through it, and are wired when their module lands",
+        "Hourly expiry job (worker, ID-only payload) deleting records past delete_after; the caller sets delete_after at ingest or update (delivery or dispatch + pii_expiry_days, default 25)",
+        "Hard DELETE then VACUUM; tombstones in db-pii, in db-main (IDs only) and in an off-site journal file (a local directory standing in for B2)",
+        "Run log (time, trigger, scope counts and IDs, result; never values) and a deletion certificate per channel account (admin download)",
+        "User deletion also hard-deletes that user's app.terms_acceptances rows (ADR-058b)",
+        "Hook for label files (deleted at the earlier of 30 days or PII expiry); labels arrive in M12",
+        "Idempotent: a re-run deletes nothing twice and logs zero"
+      ],
+      "out_of_scope": [
+        "Backups and restore (T-0405)",
+        "Erasure and access request screens (T-0404, T-0308)"
+      ],
+      "depends_on": [
+        "T-0402"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: each trigger deletes only its scope; after deletion even the db-pii owner role finds no row; tombstones written in all three places; the run log holds no value (marker scan); expiry deletes at day 25 and not at day 24",
+        "Halfway checkpoint (S4) after this task",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0404",
+      "module": "M04",
+      "session": "S3",
+      "title": "Erasure and access requests; eBay deletion wired",
+      "goal": "An admin can erase or export everything held about one buyer, and an eBay deletion notice deletes that user's data.",
+      "prd_ids": [
+        "DEL-4",
+        "DEL-5",
+        "AT-10"
+      ],
+      "supports": [
+        "EBAY-2",
+        "AUD-1"
+      ],
+      "scope": [
+        "Contract first (PROPOSED SHAPE for S2): admin-only routes to start an erasure request with buyer identifiers, see matches as masked values, confirm, and get a confirmation; each request has a due date one month out and shows when overdue",
+        "Subject access export: vault search plus linked order records, streamed as one file to the admin and never stored; every read logged (the one export DP-8 allows, because the buyer asked for it)",
+        "eBay MARKETPLACE_ACCOUNT_DELETION: the webhook matches the eBay user in the vault and queues a deletion job only on a hit (FA-14); the receipt stays ID-only",
+        "Canary records: one synthetic PII record per workspace that no feature reads; any read-full of it writes a canary event for M05's alerts",
+        "Audit events for every request, confirmation and export (no values)"
+      ],
+      "out_of_scope": [
+        "The screens (T-0308)",
+        "Alert delivery (M05)"
+      ],
+      "depends_on": [
+        "T-0403"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: erasure deletes every match and keeps finance rows with no PII; the access export holds the buyer's records and nothing of another buyer; [AT-10] an eBay deletion POST deletes that user's PII and the challenge GET still returns the right hash; a canary read writes an event",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0405",
+      "module": "M04",
+      "session": "S3",
+      "title": "PII backups, restore drill and the marker scan",
+      "goal": "Backups never bring deleted PII back, and a scan proves no PII leaks anywhere.",
+      "prd_ids": [
+        "DP-8",
+        "AT-9"
+      ],
+      "supports": [
+        "DEL-2",
+        "AT-8",
+        "OPS-4",
+        "SEC-11",
+        "CAP-10"
+      ],
+      "scope": [
+        "Backup scripts (from M01b): nightly pg_dump of each cluster to restic; separate main and PII repositories and passwords; a local repository stands in for B2; B2 buckets, hide-only keys and lifecycle (main 14 days, PII 1 day) written as config for M22",
+        "PII keeps 3 daily snapshots; label files and the vault volume are never backed up",
+        "Restore drill script: restores both clusters, applies every tombstone from the off-site journal before the app starts, then runs the marker scan",
+        "The AT-9 marker scan covers the db-main dump, logs, job tables and results, idempotency records, webhook inboxes, emails in Mailpit and exports",
+        "Runbook docs/ops/runbooks/restore.md"
+      ],
+      "out_of_scope": [
+        "Production B2 and the server (M22, devops)",
+        "Observability (M22)"
+      ],
+      "depends_on": [
+        "T-0403"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [AT-8] restoring a backup taken before a deletion, then applying tombstones, shows the deleted records gone; [AT-9] the marker scan passes on a full seeded run and fails on a planted marker",
+        "The drill script runs end to end locally in under 10 minutes",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0308",
+      "module": "M03",
+      "session": "S2",
+      "title": "Erasure and access request screens",
+      "goal": "Admins can run an erasure or access request and download a deletion certificate.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-3",
+        "DEL-4",
+        "DEL-5"
+      ],
+      "scope": [
+        "Screens from T-0404's PROPOSED SHAPE (MSW first): start a request with buyer identifiers, see masked matches, confirm, see the due date and overdue state, download the access export; deletion certificate download per channel account",
+        "Admin only; a non-admin never sees the menu item",
+        "Masked values only on screen; nothing stored in the browser"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-0404"
+      ],
+      "acceptance": [
+        "Tests citing DEL-4 and DEL-5: the admin flow works; a non-admin has no access",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0406",
+      "module": "M04",
+      "session": "S5",
+      "title": "Security audit of the PII boundary",
+      "goal": "An independent check that buyer PII cannot leak or survive deletion.",
+      "prd_ids": [],
+      "supports": [
+        "DP-4",
+        "DP-6",
+        "DP-7",
+        "DP-8",
+        "DEL-1",
+        "DEL-2",
+        "AT-9"
+      ],
+      "scope": [
+        "Audit T-0402 to T-0405: capabilities, cross-workspace access, key handling, access log, deletion completeness, tombstones, restore, marker-scan coverage, the access export"
+      ],
+      "out_of_scope": [
+        "Fixing (S3 does it)"
+      ],
+      "depends_on": [
+        "T-0405",
+        "T-0308"
+      ],
+      "acceptance": [
+        "Findings file in docs/reviews/security/; every Blocker and Major fixed before the M04 end review"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
       "id": "T-0307",
       "module": "M03",
       "session": "S2",

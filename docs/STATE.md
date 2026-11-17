@@ -32,6 +32,11 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Dev seed:** a one-off `seed` service (compose.dev.yaml) loads the launch workspace and the DEV ONLY demo sign-in, and refuses unless OB_ENV is dev or test. Playwright `[AT-3] login with TOTP` signs in through the edge.
 - **Secrets:** new dev secrets `auth_hmac_key` (web and seed) and `ob_worker_password`. After pulling, run `scripts/dev-secrets.sh`; recreate the db-main volume once if it predates `ob_worker`.
 
+## M04 plan (S1, 17 Nov)
+
+- Batch 1 (S3, high): T-0401 M02 carry-overs, T-0402 vault core, T-0403 deletion service, then the S4 halfway checkpoint.
+- Batch 2: T-0404 erasure/access requests and eBay deletion (S3, high), T-0405 backups, restore drill and marker scan (S3, high), T-0308 screens (S2), then T-0406 S5 audit, then the S4 M04 end review.
+
 ## Follow-ups noted
 
 - **M02 closed** (S4 M02 end APPROVED, 17 Nov; ADR-064). M04 first task carries: max_connections 45, F-M02e-01, the ADR-063 drop, the two load-failing integration tests, the other Minors in S4's M02 end file.
