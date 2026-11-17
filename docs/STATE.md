@@ -34,6 +34,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Follow-ups noted
 
+- ADR-063: the next task that adds a migration (M04's first) drops the functions migration 0020 revoked, with the ban-drop-function waiver; before the first app deploy.
+
 - M05: audit event when the console switches a module (T-0211).
 - T-0212: the retired rollout functions are revoked, not dropped; DROP after PS-025. Browsers holding old `ob_session`/`ob_csrf` cookies just sign in again.
 
