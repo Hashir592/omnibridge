@@ -18,7 +18,8 @@ export interface SignInResult {
 
 /** POST /auth/mfa/verify and /auth/mfa/recovery → 200. Full session cookie is set now. */
 export interface MfaResult {
-  next: 'workspace_picker' | 'app';
+  /** `terms`: the current terms and privacy policy must be accepted first (WWW-7, T-0603). */
+  next: 'workspace_picker' | 'app' | 'password_change' | 'terms';
   /** Recovery-code sign in only: how many unused codes are left. */
   recoveryCodesLeft?: number;
 }
@@ -55,7 +56,20 @@ export interface InviteInfo {
   email: string;
   expiresAt: string;
   /** The email already has an OmniBridge sign-in: they confirm with its password (T-0204). */
-  existingUser?: boolean;
+  existingUser: boolean;
+}
+
+/** GET /auth/terms → 200 (signed in): the version to accept and where to read it (WWW-7). */
+export interface TermsInfo {
+  /** The date the terms and privacy policy last changed, YYYY-MM-DD. */
+  version: string;
+  termsUrl: string;
+  privacyUrl: string;
+}
+
+/** POST /auth/terms {version} → 200: where to go next once accepted. */
+export interface TermsAccepted {
+  next: 'workspace_picker' | 'app';
 }
 
 /** GET /auth/workspaces → 200 (only after MFA). */

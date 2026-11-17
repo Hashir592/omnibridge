@@ -144,11 +144,12 @@ function Sidebar({ className, onNavigate }: { className?: string; onNavigate?: (
   return (
     <aside className={cn('w-[224px] shrink-0 flex-col bg-side text-white', className)}>
       <div className="flex h-14 shrink-0 items-center gap-2.5 px-4">
+        {/* The logo mark on a white tile: its black petal would vanish on the graphite sidebar. */}
         <span
           aria-hidden
-          className="grid size-7 place-items-center rounded-[8px] bg-white text-[11px] font-semibold tracking-[0.02em] text-side"
+          className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-white"
         >
-          OB
+          <img src="/brand/mark.webp" alt="" width={24} height={24} className="size-6" />
         </span>
         <span className="min-w-0">
           <span className="block text-[15px] leading-5 font-semibold tracking-[-0.01em]">
@@ -232,6 +233,7 @@ function PersonaMenu() {
                 [
                   ['admin', 'Sam Admin', 'All tabs and companies'],
                   ['packer', 'Pat Packer', 'Orders and Shipping, 2 companies'],
+                  ['starter', 'Robin Admin', 'Second workspace, website connector off'],
                 ] as const
               ).map(([v, name, sub]) => (
                 <Menu.RadioItem key={v} value={v} className={cn(menuItem, 'h-auto py-1.5')}>

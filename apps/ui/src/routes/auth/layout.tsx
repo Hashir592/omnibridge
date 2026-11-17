@@ -19,15 +19,7 @@ const FACTS = [
 
 function Logo() {
   return (
-    <div className="flex items-center gap-2.5">
-      <span
-        aria-hidden
-        className="grid size-8 place-items-center rounded-[9px] bg-side text-xs font-semibold tracking-[0.02em] text-white"
-      >
-        OB
-      </span>
-      <span className="text-[17px] font-semibold tracking-[-0.01em]">OmniBridge</span>
-    </div>
+    <img src="/brand/logo.webp" alt="OmniBridge" width={109} height={32} className="h-8 w-auto" />
   );
 }
 
@@ -70,15 +62,14 @@ export function AuthFrame({
         </main>
         <footer className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-muted">
           <span>© {new Date().getFullYear()} OmniBridge</span>
-          {/* The public site pages arrive in M06 (apps/site). */}
           <a href="https://omnibridge.co.uk/privacy" className={footerLink}>
             Privacy
           </a>
           <a href="https://omnibridge.co.uk/terms" className={footerLink}>
             Terms
           </a>
-          <a href="https://omnibridge.co.uk/help" className={footerLink}>
-            Help
+          <a href="https://omnibridge.co.uk/contact" className={footerLink}>
+            Contact
           </a>
         </footer>
       </div>

@@ -211,7 +211,7 @@ export function ShippingPage() {
                   <option value="">All channels</option>
                   <option value="amazon">Amazon</option>
                   <option value="ebay">eBay</option>
-                  <option value="website">Website</option>
+                  {session?.modules.website_connector && <option value="website">Website</option>}
                 </select>
               </label>
             </div>

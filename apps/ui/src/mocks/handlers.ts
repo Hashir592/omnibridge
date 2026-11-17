@@ -3,6 +3,7 @@
  * matches the real contract route. Lists page at 50 rows, as the server will (DIRECTION §5).
  */
 import type { Health } from '@omnibridge/contract/client';
+import { passthrough } from 'msw';
 import { HttpResponse, http } from 'msw/http';
 import { daysFromToday } from '../lib/format.ts';
 import { authHandlers } from './auth.ts';
@@ -12,7 +13,7 @@ import { computeGroups, dismissGroup, removeFromGroup } from './groups.ts';
 import { homeSummary } from './home.ts';
 import { orderPage } from './orderList.ts';
 import { previewHandlers } from './preview-handlers.ts';
-import { currentSession } from './session.ts';
+import { channelOn, currentSession } from './session.ts';
 import type { Channel, OrderRow } from './types.ts';
 
 /** Mock of the ORD-5 audit: every full PII view is recorded (user, order, time). */
@@ -24,6 +25,7 @@ function permitted(companyParam: string | null): OrderRow[] {
   return orders.filter(
     (o) =>
       allowed.has(o.companyId) &&
+      channelOn(o.channel) &&
       (!companyParam || companyParam === 'all' || o.companyId === companyParam),
   );
 }
@@ -34,6 +36,14 @@ const hasOrdersTab = () => {
 };
 
 export const handlers = [
+  // A page load (the browser asking for a document) is never an API call: Vite serves the SPA.
+  // Without this, typing /users or /users/access-reviews into the address bar would get the
+  // mock's JSON for GET /users or GET /access-reviews once the service worker is in control.
+  http.all('*', ({ request }) =>
+    request.mode === 'navigate' || (request.headers.get('accept') ?? '').includes('text/html')
+      ? passthrough()
+      : undefined,
+  ),
   ...authHandlers,
   ...previewHandlers,
 

@@ -26,17 +26,36 @@ import type {
   MfaResult,
   ResetTokenInfo,
   SignInResult,
+  TermsAccepted,
+  TermsInfo,
   WorkspaceChoice,
 } from '../auth/shapes.ts';
 
 export const DEMO_PASSWORD = 'synthetic demo only';
 export const DEMO_TOTP = '123456';
+/** Demo invite link for someone who already has a sign-in (T-0204). */
+export const EXISTING_INVITE = 'existing-user-invite';
 
-const ACCOUNTS: Record<string, { name: string; mfa: boolean; workspaces: number }> = {
+/** The terms version the mock asks for (WWW-7); matches the public site's LEGAL_VERSION. */
+export const TERMS_VERSION = '2026-11-15';
+
+const ACCOUNTS: Record<
+  string,
+  { name: string; mfa: boolean; workspaces: number; termsAccepted?: boolean }
+> = {
   'sam.admin@example.test': { name: 'Sam Admin', mfa: true, workspaces: 2 },
   'pat.packer@example.test': { name: 'Pat Packer', mfa: true, workspaces: 1 },
   'new.user@example.test': { name: 'New User', mfa: false, workspaces: 1 },
+  // Has not accepted the current terms yet: MFA answers next: 'terms'.
+  'kim.terms@example.test': { name: 'Kim Terms', mfa: true, workspaces: 1, termsAccepted: false },
 };
+
+/** After MFA: the terms first if this account has not accepted the current version. */
+function nextAfterMfa(): MfaResult['next'] {
+  const account = current ? ACCOUNTS[current] : undefined;
+  if (account?.termsAccepted === false) return 'terms';
+  return (account?.workspaces ?? 1) > 1 ? 'workspace_picker' : 'app';
+}
 
 const LOCK_AFTER = 10;
 const WINDOW_MS = 15 * 60_000;
@@ -50,7 +69,10 @@ export function resetAuthMock(): void {
   failures.clear();
   lockedUntil.clear();
   current = undefined;
-  for (const a of Object.values(ACCOUNTS)) a.mfa = a.name !== 'New User';
+  for (const a of Object.values(ACCOUNTS)) {
+    a.mfa = a.name !== 'New User';
+    if (a.termsAccepted !== undefined) a.termsAccepted = false;
+  }
 }
 
 function problem(status: number, code: string, detail: string, headers?: Record<string, string>) {
@@ -159,8 +181,7 @@ export const authHandlers = [
   http.post('*/auth/mfa/verify', async ({ request }) => {
     const { code } = (await request.json()) as { code?: string };
     if (code !== DEMO_TOTP) return problem(401, 'unauthorized', 'invalid_code');
-    const ws = current ? (ACCOUNTS[current]?.workspaces ?? 1) : 1;
-    return HttpResponse.json<MfaResult>({ next: ws > 1 ? 'workspace_picker' : 'app' });
+    return HttpResponse.json<MfaResult>({ next: nextAfterMfa() });
   }),
 
   http.post('*/auth/mfa/recovery', async ({ request }) => {
@@ -168,11 +189,7 @@ export const authHandlers = [
     if (!/^[a-z0-9]{5}-[a-z0-9]{5}$/i.test((code ?? '').trim())) {
       return problem(401, 'unauthorized', 'invalid_code');
     }
-    const ws = current ? (ACCOUNTS[current]?.workspaces ?? 1) : 1;
-    return HttpResponse.json<MfaResult>({
-      next: ws > 1 ? 'workspace_picker' : 'app',
-      recoveryCodesLeft: 9,
-    });
+    return HttpResponse.json<MfaResult>({ next: nextAfterMfa(), recoveryCodesLeft: 9 });
   }),
 
   http.post('*/auth/mfa/enrolment', () =>
@@ -219,8 +236,10 @@ export const authHandlers = [
       ? HttpResponse.json<InviteInfo>({
           workspaceName: 'Demo workspace',
           invitedBy: 'Sam Admin',
-          email: 'new.user@example.test',
+          email: params.token === EXISTING_INVITE ? 'p***@example.test' : 'n***@example.test',
           expiresAt: new Date(Date.now() + 72 * 3_600_000).toISOString(),
+          // The demo link /invite/existing-user-invite is for someone who already has a sign-in (T-0204).
+          existingUser: params.token === EXISTING_INVITE,
         })
       : problem(404, 'not_found', 'link_unusable'),
   ),
@@ -228,9 +247,44 @@ export const authHandlers = [
   http.post('*/auth/invites/accept', async ({ request }) => {
     const { token, password } = (await request.json()) as { token?: string; password?: string };
     if (!usable(token)) return problem(404, 'not_found', 'link_unusable');
+    if (token === EXISTING_INVITE) {
+      if (password !== DEMO_PASSWORD) return problem(401, 'unauthorized', 'invalid_credentials');
+      current = 'pat.packer@example.test';
+      return HttpResponse.json<SignInResult>({ next: 'mfa_code' });
+    }
     if ((password ?? '').toLowerCase().includes('password')) return breached();
     current = 'new.user@example.test';
     return HttpResponse.json<SignInResult>({ next: 'mfa_setup' });
+  }),
+
+  http.get('*/auth/terms', () =>
+    HttpResponse.json<TermsInfo>({
+      version: TERMS_VERSION,
+      termsUrl: 'https://omnibridge.co.uk/terms',
+      privacyUrl: 'https://omnibridge.co.uk/privacy',
+    }),
+  ),
+
+  http.post('*/auth/terms', async ({ request }) => {
+    const { version } = (await request.json()) as { version?: string };
+    // A stale version (the terms changed while the screen was open) is refused, as the server does.
+    if (version !== TERMS_VERSION) {
+      return HttpResponse.json(
+        {
+          type: 'about:blank',
+          title: '',
+          status: 422,
+          code: 'validation_failed',
+          errors: [{ location: 'body', path: 'version', message: 'stale' }],
+        },
+        { status: 422, headers: { 'content-type': 'application/problem+json' } },
+      );
+    }
+    const account = current ? ACCOUNTS[current] : undefined;
+    if (account) account.termsAccepted = true;
+    return HttpResponse.json<TermsAccepted>({
+      next: (account?.workspaces ?? 1) > 1 ? 'workspace_picker' : 'app',
+    });
   }),
 
   http.get('*/auth/workspaces', () =>

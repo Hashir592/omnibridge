@@ -46,6 +46,8 @@ const screens = [
   { path: '/invite/demo-invite', heading: 'Join Demo workspace' },
   { path: '/invite/expired', heading: 'This link no longer works' },
   { path: '/workspaces', heading: 'Choose a workspace' },
+  { path: '/sign-in/terms', heading: 'Accept the terms' },
+  { path: '/invite/existing-user-invite', heading: 'Join Demo workspace' },
 ] as const;
 
 for (const s of screens) {
@@ -123,6 +125,9 @@ test('[USR-4] a new user cannot get past MFA set-up without saving 10 recovery c
   await page.getByLabel('I have saved these codes somewhere safe').check();
   await expect(next).toBeEnabled();
   await expectNoSeriousA11yIssues(page);
+  // WWW-7: a new account accepts the terms next, before anything in the app opens.
+  await next.click();
+  await expect(page.getByRole('heading', { name: 'Accept the terms' })).toBeVisible();
 });
 
 test('[USR-3] [TEN-7] accepting an invite checks the password rules', async ({ page }) => {
@@ -158,4 +163,46 @@ test('[USR-7] a reset keeps MFA in place', async ({ page }) => {
   await page.getByRole('button', { name: 'Save new password' }).click();
   await expect(page.getByRole('heading', { name: 'Password changed' })).toBeVisible();
   await expect(page.getByText('You will still need the code')).toBeVisible();
+});
+
+test('[WWW-7] after MFA, nothing opens until the current terms are accepted, by keyboard alone', async ({
+  page,
+}) => {
+  await open(page, '/sign-in', 'Sign in');
+  await signIn(page, 'kim.terms@example.test', DEMO_PASSWORD);
+  await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
+  await page.keyboard.type(DEMO_TOTP);
+  await expect(page.getByRole('heading', { name: 'Accept the terms' })).toBeVisible();
+  await expect(page.getByText('Version of 15/11/2026.')).toBeVisible();
+  const accept = page.getByRole('button', { name: 'Accept and continue' });
+  await expect(accept).toBeDisabled();
+  await expect(page.getByRole('link', { name: /terms of service/ })).toHaveAttribute(
+    'href',
+    'https://omnibridge.co.uk/terms',
+  );
+  // Keyboard only: Tab to the tick box, tick it with Space, Tab to the button, Enter.
+  const box = page.getByLabel('I have read and accept the terms of service and the privacy policy');
+  for (let i = 0; i < 8 && !(await box.evaluate((el) => el === document.activeElement)); i++) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(box).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(accept).toBeEnabled();
+  await page.keyboard.press('Tab');
+  await expect(accept).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test('[TEN-7] an invite for someone who already has a sign-in asks only for their password', async ({
+  page,
+}) => {
+  await open(page, '/invite/existing-user-invite', 'Join Demo workspace');
+  await expect(page.getByLabel('Full name')).toHaveCount(0);
+  await page.getByLabel('Your OmniBridge password').fill('not it');
+  await page.getByRole('button', { name: 'Join Demo workspace' }).click();
+  await expect(page.getByText('That is not the password for this email')).toBeVisible();
+  await page.getByLabel('Your OmniBridge password').fill(DEMO_PASSWORD);
+  await page.getByRole('button', { name: 'Join Demo workspace' }).click();
+  await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
 });

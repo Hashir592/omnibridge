@@ -223,7 +223,9 @@ function RecoveryCodes({ codes }: { codes: string[] }) {
         size="lg"
         disabled={!saved}
         className="mt-4 w-full"
-        onClick={() => void enter('/')}
+        // A new account has not accepted the terms yet: that comes next, before anything opens
+        // (WWW-7). The terms screen then goes on to the app or the workspace picker.
+        onClick={() => void enter('/sign-in/terms')}
       >
         Continue to OmniBridge
       </Button>

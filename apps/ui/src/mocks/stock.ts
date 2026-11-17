@@ -5,6 +5,7 @@
  * (invariant 4), so a child never sees another company's listings.
  */
 import { channelAccounts, orders } from './data.ts';
+import { channelOn } from './session.ts';
 import { DAY, HOUR, ago, rng } from './random.ts';
 import type { Channel, ChannelAccount } from './types.ts';
 
@@ -152,7 +153,8 @@ const THINGS: Array<[string, string, VatType]> = [
 ];
 const SIZES = ['small', 'medium', 'large'];
 
-const permittedAccount = (allowed: Set<string>) => (a: ChannelAccount) => allowed.has(a.companyId);
+const permittedAccount = (allowed: Set<string>) => (a: ChannelAccount) =>
+  allowed.has(a.companyId) && channelOn(a.channel);
 
 function makeSkus(n: number): { rows: SkuRow[]; listings: Map<string, Listing[]> } {
   const rows: SkuRow[] = [];
@@ -422,7 +424,7 @@ const UNMAPPED: UnmappedListing[] = Array.from({ length: 23 }, (_, i) => {
 });
 
 function visible(allowed: Set<string>, id: string): Listing[] {
-  return (LISTINGS.get(id) ?? []).filter((l) => allowed.has(l.companyId));
+  return (LISTINGS.get(id) ?? []).filter((l) => allowed.has(l.companyId) && channelOn(l.channel));
 }
 
 function scoped(allowed: Set<string>, company: string | null): Set<string> {
@@ -445,7 +447,7 @@ function stockCounts(rows: SkuRow[], companies: Set<string>): SkuCounts {
     oversold: rows.filter((s) => s.state === 'oversold').length,
     sync: rows.filter((s) => s.state === 'sync_failed').length,
     bundles: rows.filter((s) => s.bundle).length,
-    unmapped: UNMAPPED.filter((u) => companies.has(u.companyId)).length,
+    unmapped: UNMAPPED.filter((u) => companies.has(u.companyId) && channelOn(u.channel)).length,
   };
 }
 
@@ -464,6 +466,7 @@ export function skuPage(allowed: Set<string>, p: URLSearchParams): SkuPage | Unm
     const items = UNMAPPED.filter(
       (u) =>
         companies.has(u.companyId) &&
+        channelOn(u.channel) &&
         (!q || u.externalSku.toLowerCase().includes(q) || u.title.toLowerCase().includes(q)) &&
         (channel.length === 0 || channel.includes(u.channelAccountId)),
     );

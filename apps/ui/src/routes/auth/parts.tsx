@@ -118,7 +118,7 @@ export function personalParts(name: string, email: string): string[] {
 export function useEnterApp() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  return async (to: '/' | '/workspaces') => {
+  return async (to: '/' | '/workspaces' | '/sign-in/terms' | '/sign-in/password-change') => {
     qc.removeQueries();
     await navigate({ to });
   };

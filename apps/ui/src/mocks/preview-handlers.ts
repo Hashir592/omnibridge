@@ -5,7 +5,7 @@
  */
 import { HttpResponse, http } from 'msw/http';
 import { adsOverview } from './ads.ts';
-import { connections, users } from './admin.ts';
+import { connections, userHandlers } from './admin.ts';
 import { auditPage } from './audit.ts';
 import { expensePage, pnl, vatFor } from './finance.ts';
 import { forecastPage } from './forecast.ts';
@@ -23,7 +23,7 @@ import {
 } from './inbox.ts';
 import { notificationsFor } from './notifications.ts';
 import { profitSummary } from './profit.ts';
-import { currentSession } from './session.ts';
+import { channelOn, currentSession } from './session.ts';
 import { skuDetail, skuPage } from './stock.ts';
 import { notes, reminders } from './tools.ts';
 import type { Tab } from './types.ts';
@@ -170,8 +170,10 @@ export const previewHandlers = [
   ),
 
   // The real route since T-0204 (GET /users); the mock answers it for the preview.
-  http.get('*/users', () => (gate('admin') ? HttpResponse.json(users) : forbidden())),
+  ...userHandlers,
   http.get('*/api/mock/connections', () =>
-    gate('admin') ? HttpResponse.json(connections) : forbidden(),
+    gate('admin')
+      ? HttpResponse.json(connections.filter((c) => !c.channel || channelOn(c.channel)))
+      : forbidden(),
   ),
 ];
