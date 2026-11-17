@@ -11,7 +11,8 @@ interface BakeTarget {
 
 const TARGETS = ['web', 'worker', 'pii-vault', 'site', 'provider-mocks'];
 
-describe('CI image build with buildx bake (ADR-043)', () => {
+// ADR-043
+describe('CI image build with buildx bake', () => {
   let targets: Record<string, BakeTarget> = {};
 
   // The same bake call as verify.sh build_images, printed instead of built: from infra/compose,

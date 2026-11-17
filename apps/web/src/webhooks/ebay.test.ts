@@ -71,7 +71,8 @@ describe('eBay account deletion endpoint (EBAY-2)', () => {
     await app.close();
   });
 
-  it('[EBAY-2][RL-2] a spent eBay budget answers 412 without reading the key (ADR-058)', async () => {
+  // ADR-058
+  it('[EBAY-2][RL-2] a spent eBay budget answers 412 without reading the key', async () => {
     const lines: string[] = [];
     const logger = createLogger({
       service: 'test',

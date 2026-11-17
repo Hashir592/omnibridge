@@ -10,7 +10,8 @@ import { Passwords } from './auth/passwords.ts';
 
 const seedScript = fileURLToPath(new URL('./seed-dev.ts', import.meta.url));
 
-describe('DEV ONLY seed (USR-4, ADR-050)', () => {
+// ADR-050
+describe('DEV ONLY seed [USR-4]', () => {
   let cluster: RoleCluster;
   let main: MainDbHandle;
   let web: MainDbHandle;

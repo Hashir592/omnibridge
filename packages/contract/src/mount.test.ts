@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { API_PREFIX, isRootPath, mountedPath } from './mount.ts';
 
-describe('route mounting (ADR-060)', () => {
+// ADR-060
+describe('route mounting', () => {
   it('[SEC-3] serves contract routes under /api, keeping their own paths', () => {
     expect(API_PREFIX).toBe('/api');
     expect(mountedPath('/users')).toBe('/api/users');

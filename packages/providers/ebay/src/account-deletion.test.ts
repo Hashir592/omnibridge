@@ -114,7 +114,8 @@ describe('eBay marketplace account deletion (EBAY-2)', () => {
     ]);
   });
 
-  it('[RL-2][EBAY-2] each call is counted before it is sent; a spent budget sends nothing (ADR-058)', async () => {
+  // ADR-058
+  it('[RL-2][EBAY-2] each call is counted before it is sent; a spent budget sends nothing', async () => {
     const fake = vi.fn((url: string | URL) =>
       Promise.resolve(
         String(url).endsWith('/oauth2/token')

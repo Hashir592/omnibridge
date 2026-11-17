@@ -51,7 +51,8 @@ function callArities(text: string, name: string): number[] {
   return arities;
 }
 
-describe('retired rollout functions (T-0212, ADR-062)', () => {
+// ADR-062
+describe('retired rollout functions', () => {
   const files = ['apps', 'packages', 'mocks'].flatMap((d) => sources(join(ROOT, d)));
   const text = files.map((f) => readFileSync(f, 'utf8')).join('\n');
 
