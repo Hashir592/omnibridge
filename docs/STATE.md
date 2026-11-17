@@ -34,6 +34,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Follow-ups noted
 
+- **M02 closed** (S4 M02 end APPROVED, 17 Nov; ADR-064). M04 first task carries: max_connections 45, F-M02e-01, the ADR-063 drop, the two load-failing integration tests, the other Minors in S4's M02 end file.
+
 - ADR-063: the next task that adds a migration (M04's first) drops the functions migration 0020 revoked, with the ban-drop-function waiver; before the first app deploy.
 
 - M05: audit event when the console switches a module (T-0211).

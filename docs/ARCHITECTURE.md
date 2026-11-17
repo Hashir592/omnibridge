@@ -259,7 +259,7 @@ The rest of the RAM is page cache. Swap is a 2 GB file with `vm.swappiness=10`, 
 | effective_cache_size | 1 GB | 1.75 GB | 160 MB |
 | work_mem | 8 MB | 12 MB | 4 MB |
 | maintenance_work_mem | 96 MB | 128 MB | 32 MB |
-| max_connections | 40 | 60 | 15 |
+| max_connections | 45 (ADR-064) | 60 | 15 |
 
 Pool sizes: web 10, worker 8, vault 4. Every cluster also uses `random_page_cost=1.1`, `effective_io_concurrency=200` and `max_wal_size=1GB`.
 
