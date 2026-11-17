@@ -267,6 +267,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         forgotPassword: { body: { email: `${userB}@example.test` } },
         getPasswordReset: { params: { token: MARKER } },
         resetPassword: { body: { token: MARKER, password: 'a long enough password 1' } },
+        getSession: {},
         listMyWorkspaces: {},
         chooseWorkspace: { body: { workspaceId: B } },
         enterPlatform: {},

@@ -187,6 +187,18 @@ export class AuthService {
     return { workspaceId: s.workspaceId, userId: s.userId, sessionId: s.id };
   };
 
+  /** Any live session, whatever its stage (ADR-062): GET /auth/session only. */
+  resolveAnySession = async (request: FastifyRequest, route: AnyRoute) => {
+    const s = await this.#resolve(request, route, [
+      'pre_mfa',
+      'signed_in',
+      'password_change',
+      'workspace',
+      'platform',
+    ]);
+    return s === undefined ? undefined : this.#account(s);
+  };
+
   resolvePlatform = async (
     request: FastifyRequest,
     route: AnyRoute,
@@ -799,6 +811,48 @@ export class AuthService {
     // Every session ends, this one included: sign in again with the new password and MFA.
     await this.#o.store.revokeUserSessions(user.userId, now);
     return this.#cleared();
+  }
+
+  // ---- the current session (ADR-062) ----
+
+  /**
+   * Where the request's session is: the user, the sign-in step still to do, the workspace it is
+   * in with that workspace's modules, or the console. The SPA's one source for the toggles.
+   */
+  async currentSession(request: FastifyRequest): Promise<{
+    user: { id: string; name: string; email: string };
+    next: 'mfa_code' | 'mfa_setup' | 'password_change' | 'terms' | 'workspace_picker' | null;
+    platform: boolean;
+    workspace: { id: string; name: string; role: 'admin' | 'member' } | null;
+    modules: { website_connector: boolean };
+  }> {
+    const session = this.#sessionOf(request);
+    const user = await this.#user(session.userId);
+    let next: 'mfa_code' | 'mfa_setup' | 'password_change' | 'terms' | 'workspace_picker' | null =
+      null;
+    if (session.stage === 'pre_mfa') next = user.mfaConfirmed ? 'mfa_code' : 'mfa_setup';
+    else if (session.stage === 'password_change') next = 'password_change';
+    else if (session.stage === 'signed_in') {
+      const accepted = await this.#o.store.termsAccepted(user.userId, this.#o.termsVersion);
+      next = accepted ? 'workspace_picker' : 'terms';
+    }
+    // Read through the membership list, so a workspace the user has left never shows.
+    const current =
+      session.stage === 'workspace' && session.workspaceId !== null
+        ? (await this.#o.store.userWorkspaces(user.userId)).find(
+            (w) => w.id === session.workspaceId,
+          )
+        : undefined;
+    // A workspace session whose workspace is gone (left meanwhile) is sent back to the picker.
+    if (session.stage === 'workspace' && current === undefined) next = 'workspace_picker';
+    return {
+      user: { id: user.userId, name: user.name, email: user.email },
+      next,
+      platform: session.stage === 'platform',
+      workspace:
+        current === undefined ? null : { id: current.id, name: current.name, role: current.role },
+      modules: current?.modules ?? { website_connector: false },
+    };
   }
 
   // ---- (9) workspace picker, platform console ----

@@ -64,7 +64,7 @@ export type AuthInput<T extends AnyRoute> = T['auth'] extends 'session'
   ? { session: SessionActor; tenant: TenantContext; access: MemberAccess }
   : T['auth'] extends 'platform'
     ? { platform: PlatformActor }
-    : T['auth'] extends 'pre-mfa' | 'signed-in'
+    : T['auth'] extends 'pre-mfa' | 'signed-in' | 'any-session'
       ? { account: AccountActor }
       : unknown;
 
@@ -88,6 +88,8 @@ export interface AuthOptions {
   resolvePreMfa?: Resolver<AccountActor>;
   /** A `signed-in` caller: MFA done, no workspace needed (USR-2). */
   resolveSignedIn?: Resolver<AccountActor>;
+  /** An `any-session` caller: a live session at any stage (ADR-062). */
+  resolveAnySession?: Resolver<AccountActor>;
   /**
    * Runs first on every request to a state-changing route (SEC-1): the Origin check and the CSRF
    * token. Throws an ApiError to refuse.
@@ -167,8 +169,14 @@ async function authenticate(
       return { kind: 'platform', platform };
     }
     case 'pre-mfa':
-    case 'signed-in': {
-      const resolve = route.auth === 'pre-mfa' ? auth.resolvePreMfa : auth.resolveSignedIn;
+    case 'signed-in':
+    case 'any-session': {
+      const resolve =
+        route.auth === 'pre-mfa'
+          ? auth.resolvePreMfa
+          : route.auth === 'signed-in'
+            ? auth.resolveSignedIn
+            : auth.resolveAnySession;
       const account = await resolve?.(request, route);
       if (account === undefined) throw unauthorized();
       return { kind: 'account', account };

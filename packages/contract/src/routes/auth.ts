@@ -178,6 +178,39 @@ export const resetPassword = defineRoute({
   ...outsideTabs,
 });
 
+/**
+ * Where the session is (ADR-062): the one call the SPA makes on load and after every sign-in
+ * step or workspace switch.
+ */
+export const SessionInfoSchema = z
+  .object({
+    user: z.object({ id: z.uuid(), name: z.string(), email: z.string() }),
+    /** The sign-in step still to do; null once in a workspace or the console. */
+    next: z
+      .enum(['mfa_code', 'mfa_setup', 'password_change', 'terms', 'workspace_picker'])
+      .nullable(),
+    /** True when the session is in the platform console. */
+    platform: z.boolean(),
+    /** The workspace the session is in, or null (picker, console, before MFA). */
+    workspace: z
+      .object({ id: z.uuid(), name: z.string(), role: z.enum(['admin', 'member']) })
+      .nullable(),
+    /** That workspace's module toggles; all off when there is no workspace (PLAT-2, WEB-1). */
+    modules: WorkspaceModulesSchema,
+  })
+  .meta({ id: 'SessionInfo' });
+
+/** The current session at any stage (ADR-062, USR-2). 401 without a live session. */
+export const getSession = defineRoute({
+  id: 'getSession',
+  method: 'GET',
+  path: '/auth/session',
+  summary: 'The current session: user, step, workspace and its modules',
+  responses: { 200: SessionInfoSchema },
+  auth: 'any-session',
+  ...outsideTabs,
+});
+
 /** (9) The user's workspaces, after MFA (USR-2). */
 export const listMyWorkspaces = defineRoute({
   id: 'listMyWorkspaces',
@@ -292,6 +325,7 @@ export const authRoutes = [
   forgotPassword,
   getPasswordReset,
   resetPassword,
+  getSession,
   listMyWorkspaces,
   chooseWorkspace,
   enterPlatform,

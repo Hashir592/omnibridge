@@ -272,6 +272,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/auth/session': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The current session: user, step, workspace and its modules */
+    get: operations['getSession'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/auth/sign-in': {
     parameters: {
       query?: never;
@@ -922,6 +939,42 @@ export interface components {
       emailMasked: string;
       /** Format: date-time */
       expiresAt: string;
+    };
+    SessionInfo: {
+      modules: components['schemas']['WorkspaceModules'];
+      next: ('mfa_code' | 'mfa_setup' | 'password_change' | 'terms' | 'workspace_picker') | null;
+      platform: boolean;
+      user: {
+        email: string;
+        /** Format: uuid */
+        id: string;
+        name: string;
+      };
+      workspace: {
+        /** Format: uuid */
+        id: string;
+        name: string;
+        /** @enum {string} */
+        role: 'admin' | 'member';
+      } | null;
+    };
+    SessionInfoInput: {
+      modules: components['schemas']['WorkspaceModulesInput'];
+      next: ('mfa_code' | 'mfa_setup' | 'password_change' | 'terms' | 'workspace_picker') | null;
+      platform: boolean;
+      user: {
+        email: string;
+        /** Format: uuid */
+        id: string;
+        name: string;
+      };
+      workspace: {
+        /** Format: uuid */
+        id: string;
+        name: string;
+        /** @enum {string} */
+        role: 'admin' | 'member';
+      } | null;
     };
     SignInResult: {
       /** @enum {string} */
@@ -1813,6 +1866,44 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  getSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SessionInfo'];
+        };
       };
     };
   };

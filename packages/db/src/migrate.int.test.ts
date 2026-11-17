@@ -77,6 +77,7 @@ describe('db-main roles and migrations', () => {
       '0017_housekeeping_indexes',
       '0018_auth_audit_fixes',
       '0019_workspace_modules',
+      '0020_retire_rollout_functions',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

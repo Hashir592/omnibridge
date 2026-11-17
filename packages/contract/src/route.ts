@@ -54,7 +54,7 @@ export function routeMetadataProblems(route: AnyRoute): string[] {
     problems.push(`adminOnly: tab "${tab}" is admin-only (PERM-4), so adminOnly must be true`);
   }
   if (
-    (auth === 'public' || auth === 'pre-mfa' || auth === 'signed-in') &&
+    (auth === 'public' || auth === 'pre-mfa' || auth === 'signed-in' || auth === 'any-session') &&
     (tab !== 'none' || companyScoped || adminOnly)
   ) {
     problems.push(

@@ -199,6 +199,54 @@
         },
         "required": ["id", "name", "role", "companies", "modules"]
       },
+      "SessionInfoInput": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "name": { "type": "string" },
+              "email": { "type": "string" }
+            },
+            "required": ["id", "name", "email"]
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["mfa_code", "mfa_setup", "password_change", "terms", "workspace_picker"]
+              },
+              { "type": "null" }
+            ]
+          },
+          "platform": { "type": "boolean" },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "name": { "type": "string" },
+                  "role": { "type": "string", "enum": ["admin", "member"] }
+                },
+                "required": ["id", "name", "role"]
+              },
+              { "type": "null" }
+            ]
+          },
+          "modules": { "$ref": "#/components/schemas/WorkspaceModulesInput" }
+        },
+        "required": ["user", "next", "platform", "workspace", "modules"]
+      },
       "TermsInput": {
         "type": "object",
         "properties": {
@@ -709,6 +757,57 @@
           "modules": { "$ref": "#/components/schemas/WorkspaceModules" }
         },
         "required": ["id", "name", "role", "companies", "modules"],
+        "additionalProperties": false
+      },
+      "SessionInfo": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "name": { "type": "string" },
+              "email": { "type": "string" }
+            },
+            "required": ["id", "name", "email"],
+            "additionalProperties": false
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["mfa_code", "mfa_setup", "password_change", "terms", "workspace_picker"]
+              },
+              { "type": "null" }
+            ]
+          },
+          "platform": { "type": "boolean" },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "name": { "type": "string" },
+                  "role": { "type": "string", "enum": ["admin", "member"] }
+                },
+                "required": ["id", "name", "role"],
+                "additionalProperties": false
+              },
+              { "type": "null" }
+            ]
+          },
+          "modules": { "$ref": "#/components/schemas/WorkspaceModules" }
+        },
+        "required": ["user", "next", "platform", "workspace", "modules"],
         "additionalProperties": false
       },
       "Terms": {
@@ -1974,6 +2073,38 @@
         },
         "responses": {
           "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "operationId": "getSession",
+        "summary": "The current session: user, step, workspace and its modules",
+        "x-permissions": {
+          "auth": "any-session",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SessionInfo" } }
+            }
+          },
           "4XX": {
             "description": "Client error (RFC 9457 problem)",
             "content": {
