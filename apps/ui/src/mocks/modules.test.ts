@@ -1,5 +1,7 @@
 import { getResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { SessionInfo } from '../auth/shapes.ts';
+import { enableDemoSession, resetAuthMock } from './auth.ts';
 import { handlers } from './handlers.ts';
 import { setPersona } from './session.ts';
 import type { Session } from './types.ts';
@@ -27,18 +29,20 @@ async function onThenOff(path: string): Promise<{ on: boolean; off: boolean }> {
 
 afterEach(() => {
   setPersona('admin');
+  resetAuthMock();
 });
 
-describe('website_connector off (ADR-059)', () => {
+describe('website_connector off (WEB-1)', () => {
   it('[WEB-1] the session says the module is off and lists no website account', async () => {
+    enableDemoSession();
     setPersona('starter');
+    const info = JSON.parse(await json('/api/auth/session')) as SessionInfo;
+    expect(info.modules.website_connector).toBe(false);
     const s = JSON.parse(await json('/api/mock/session')) as Session;
-    expect(s.modules.website_connector).toBe(false);
     expect(s.channelAccounts.some((a) => a.channel === 'website')).toBe(false);
     setPersona('admin');
-    expect((JSON.parse(await json('/api/mock/session')) as Session).modules.website_connector).toBe(
-      true,
-    );
+    const on = JSON.parse(await json('/api/auth/session')) as SessionInfo;
+    expect(on.modules.website_connector).toBe(true);
   });
 
   it('[WEB-1] Orders: no website orders in the list', async () => {

@@ -32,7 +32,7 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
     headers: { 'content-type': 'application/json', ...headers },
   });
 
-describe('SPA auth client (SEC-1, ADR-048)', () => {
+describe('SPA auth client (SEC-1)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     document.cookie = '__Host-ob_csrf=; Path=/; Secure; max-age=0';

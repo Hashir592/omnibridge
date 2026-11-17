@@ -208,7 +208,7 @@ describe('Pager', () => {
     expect(onPage).toHaveBeenCalledWith(2);
   });
 
-  it('[NFR-8] offers 20, 50 or 100 rows per page (ADR-040)', () => {
+  it('[NFR-8] offers 20, 50 or 100 rows per page', () => {
     const onSize = vi.fn();
     render(<Pager page={2} size={50} total={500} noun="orders" onPage={vi.fn()} onSize={onSize} />);
     const select = screen.getByRole<HTMLSelectElement>('combobox', { name: /Rows per page/ });

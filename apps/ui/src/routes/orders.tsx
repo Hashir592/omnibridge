@@ -183,10 +183,7 @@ function orderColumns(
         ) : o.flags.length === 0 ? (
           <EmptyCell label="No flags" />
         ) : (
-          <span
-            className="flex min-w-0 flex-wrap gap-x-2.5 overflow-hidden"
-            style={{ maxHeight: 18 }}
-          >
+          <span className="flex max-h-[18px] min-w-0 flex-wrap gap-x-2.5 overflow-hidden">
             {o.flags.map((x) => (
               <FlagMark key={x} flag={x} />
             ))}

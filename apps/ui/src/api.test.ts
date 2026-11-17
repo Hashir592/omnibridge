@@ -21,7 +21,7 @@ describe('typed client usage from apps/ui', () => {
     expect(calls).toEqual(['GET https://app.test/healthz']);
   });
 
-  it('[SEC-3] sends every other route under /api, so page paths stay the SPA’s (ADR-060)', async () => {
+  it('[SEC-3] sends every other route under /api, so page paths stay the SPA’s', async () => {
     const { api, calls } = stubFetch(200, []);
     await api.GET('/users');
     await api.GET('/auth/workspaces');
