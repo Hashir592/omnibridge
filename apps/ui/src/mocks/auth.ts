@@ -19,6 +19,7 @@
  * - invite link: /invite/demo-invite; expired link: /invite/expired. Same for /reset-password?token=
  */
 import { HttpResponse, http } from 'msw/http';
+import { personaSessionInfo } from './session.ts';
 import type {
   InviteInfo,
   MfaConfirmResult,
@@ -65,6 +66,16 @@ const failures = new Map<string, number[]>();
 /** Email -> time the lock ends: 15 minutes after the 10th failure, not a sliding window (USR-5). */
 const lockedUntil = new Map<string, number>();
 let current: string | undefined;
+/**
+ * In the browser mock-ups (not in unit tests), a page opened without signing in gets the demo
+ * persona's session, as if already signed in; a sign-in started in the page takes over from there.
+ */
+let demoSession = false;
+
+export function enableDemoSession(): void {
+  demoSession = true;
+}
+
 /** False between the password and the code: /auth/session then answers the MFA step. */
 let mfaDone = false;
 /** The workspace the mock session is in, once chosen (or the only one). */
@@ -330,6 +341,7 @@ export const authHandlers = [
   http.get('*/api/auth/session', () => {
     const account = current ? ACCOUNTS[current] : undefined;
     if (current === undefined || account === undefined) {
+      if (demoSession) return HttpResponse.json<SessionInfo>(personaSessionInfo());
       return problem(401, 'unauthorized', 'no_session');
     }
     if (!mfaDone) {

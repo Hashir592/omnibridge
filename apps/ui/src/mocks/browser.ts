@@ -1,5 +1,6 @@
 import { getResponse } from 'msw';
 import { setupWorker } from 'msw/browser';
+import { enableDemoSession } from './auth.ts';
 import { handlers } from './handlers.ts';
 
 /**
@@ -7,6 +8,7 @@ import { handlers } from './handlers.ts';
  * refuse service workers, so we fall back to answering mocked routes inside the page.
  */
 export async function startMocks(): Promise<void> {
+  enableDemoSession();
   try {
     await setupWorker(...handlers).start({ onUnhandledFrame: 'bypass', quiet: true });
   } catch {

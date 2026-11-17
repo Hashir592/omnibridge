@@ -119,11 +119,6 @@ export interface Session {
   tabs: Tab[];
   companies: Company[];
   channelAccounts: ChannelAccount[];
-  /**
-   * PROPOSED SHAPE (PS-024, ADR-059): per-workspace module toggles from the session payload.
-   * website_connector off hides the Website channel everywhere in the UI.
-   */
-  modules: { website_connector: boolean };
 }
 
 export interface OrderLine {

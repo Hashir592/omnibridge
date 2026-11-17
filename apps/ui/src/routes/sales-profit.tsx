@@ -322,19 +322,11 @@ function ProfitChart({ d, compareName }: { d: ProfitSummary; compareName: string
         <>
           <span className="hidden items-center gap-3 text-xs text-ink-muted sm:flex">
             <span className="inline-flex items-center gap-1.5">
-              <span
-                aria-hidden
-                className="size-2.5 rounded-[3px]"
-                style={{ background: CURRENT }}
-              />
+              <span aria-hidden className="size-2.5 rounded-[3px] bg-[#0F766E]" />
               This period
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span
-                aria-hidden
-                className="h-0 w-4 border-t-2 border-dashed"
-                style={{ borderColor: COMPARE_INK }}
-              />
+              <span aria-hidden className="h-0 w-4 border-t-2 border-dashed border-[#8C939E]" />
               {capital(compareName)}
             </span>
           </span>

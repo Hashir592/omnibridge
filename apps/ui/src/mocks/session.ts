@@ -6,6 +6,7 @@
  * The handlers read the same persona, so lists and counts shrink with it, as the server would.
  */
 import { channelAccounts, companies } from './data.ts';
+import type { SessionInfo } from '../auth/shapes.ts';
 import type { Channel, Session, Tab } from './types.ts';
 
 export type Persona = 'admin' | 'packer' | 'starter';
@@ -45,8 +46,31 @@ export function channelOn(channel: Channel): boolean {
   return channel !== 'website' || websiteConnector();
 }
 
+/**
+ * What GET /auth/session answers for the demo persona (ADR-062), so the mock-ups open straight into
+ * the app without signing in. The demo admin's workspace has the website connector on; the starter
+ * workspace has it off (WEB-1).
+ */
+export function personaSessionInfo(): SessionInfo {
+  const s = currentSession();
+  const workspace =
+    persona === 'starter'
+      ? { id: 'ws_3', name: s.workspace, role: 'admin' as const }
+      : {
+          id: 'ws_1',
+          name: s.workspace,
+          role: persona === 'admin' ? ('admin' as const) : ('member' as const),
+        };
+  return {
+    user: { id: `usr_${persona}`, name: s.user.name, email: s.user.email },
+    next: null,
+    platform: false,
+    workspace,
+    modules: { website_connector: websiteConnector() },
+  };
+}
+
 export function currentSession(): Session {
-  const modules = { website_connector: websiteConnector() };
   if (persona === 'starter') {
     return {
       user: {
@@ -59,7 +83,6 @@ export function currentSession(): Session {
       tabs: ALL_TABS,
       companies,
       channelAccounts: channelAccounts.filter((a) => channelOn(a.channel)),
-      modules,
     };
   }
   if (persona === 'admin') {
@@ -69,7 +92,6 @@ export function currentSession(): Session {
       tabs: ALL_TABS,
       companies,
       channelAccounts,
-      modules,
     };
   }
   const allowed = new Set(['co_1', 'co_2']);
@@ -79,6 +101,5 @@ export function currentSession(): Session {
     tabs: ['home', 'orders', 'shipping'],
     companies: companies.filter((c) => allowed.has(c.id)),
     channelAccounts: channelAccounts.filter((a) => allowed.has(a.companyId)),
-    modules,
   };
 }
