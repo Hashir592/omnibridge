@@ -119,9 +119,11 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
     ]);
     // createMainDb's pool handles a dropped connection, so stopping the container cannot raise
     // an unhandled 57P01 from an idle client.
-    bookkeeping = createMainDb({ ...cluster.connection('ob_app'), max: 6 });
+    // ob_app may hold 13 connections (T-0207): bookkeeping 3 + handlers 4 + one pg-boss 4, and 2
+    // spare for the stuck-job test's own pool. Every concurrency check is a cap of 4 or less.
+    bookkeeping = createMainDb({ ...cluster.connection('ob_app'), max: 3 });
     db = bookkeeping.db;
-    handlers = createMainDb({ ...cluster.connection('ob_app'), max: 6 });
+    handlers = createMainDb({ ...cluster.connection('ob_app'), max: 4 });
     await new Tenancy(handlers.db).run(ws, (ctx) =>
       new WorkspaceRepository(handlers.db).create(ctx, { name: 'Worker test' }),
     );
