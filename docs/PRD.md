@@ -131,7 +131,7 @@ The hierarchy is Platform → Workspace → Company → Channel account. Inside 
 
 - **USR-1** One named login per person, identified by email. Shared logins are prohibited and the UI says so on the invite screen.
 - **USR-2** A person may belong to more than one workspace and picks one after login.
-- **USR-3** Passwords: minimum 12 characters, must not contain the user's name or email local part, checked against a breached-password list, last 10 passwords cannot be reused, maximum age 365 days, minimum age 1 day.
+- **USR-3** Passwords: minimum 12 characters, must not contain the user's name or email local part, checked against a breached-password list, last 10 passwords cannot be reused, maximum age 365 days, minimum age 1 day (not applied to a reset by email link, ADR-061).
 - **USR-4** MFA is mandatory for every user (TOTP authenticator app; 10 single-use recovery codes). Login is impossible without completing MFA setup.
 - **USR-5** Lockout after 10 failed attempts within 15 minutes; locked for 15 minutes; admins and the user are notified **\[Claude default for the duration\]**.
 - **USR-6** Sessions: idle timeout 30 minutes, absolute lifetime 12 hours, sign out on all devices from the profile page **\[Claude default\]**.
