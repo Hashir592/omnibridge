@@ -1,7 +1,7 @@
 /**
  * The auth routes (T-0203, ADR-048) through the typed client: sign in, MFA, password reset and
  * the workspace picker. Every state-changing call carries the CSRF token (SEC-1): the server sets
- * the `ob_csrf` cookie and the SPA echoes it in `x-csrf-token`.
+ * the `__Host-ob_csrf` cookie and the SPA echoes it in `x-csrf-token`.
  */
 import { createApiClient, type components } from '@omnibridge/contract/client';
 import type {
@@ -34,7 +34,8 @@ export interface ApiProblem {
 // browser (component tests).
 const api = createApiClient({ baseUrl: globalThis.location.origin });
 
-const CSRF_COOKIE = 'ob_csrf';
+// __Host-: Secure, Path=/ and host-only, so a sibling host cannot plant it (S5 hardening 1).
+const CSRF_COOKIE = '__Host-ob_csrf';
 
 function csrfToken(): string | undefined {
   for (const part of document.cookie.split(';')) {

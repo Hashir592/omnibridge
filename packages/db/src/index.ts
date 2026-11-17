@@ -70,6 +70,8 @@ export {
   RESET_LINK_MS,
   type AuthUser,
   type FailureResult,
+  type LockNotice,
+  type ResetVerdict,
   type LoginAccount,
   type MfaState,
   type PlatformKeyRow,

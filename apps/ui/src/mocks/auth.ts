@@ -152,7 +152,9 @@ export const authHandlers = [
     () =>
       new HttpResponse(null, {
         status: 204,
-        headers: { 'set-cookie': 'ob_csrf=mock-csrf-token; Path=/; SameSite=Strict' },
+        headers: {
+          'set-cookie': '__Host-ob_csrf=mock-csrf-token; Path=/; Secure; SameSite=Strict',
+        },
       }),
   ),
 

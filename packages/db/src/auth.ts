@@ -53,11 +53,22 @@ export interface MfaState {
   pendingKeyVersion: number | null;
 }
 
+/**
+ * On a new lock of a known user: send the notice, or not, because one went to them in the last
+ * 24 hours or the platform sent 100 today (S5-20261117-03).
+ */
+export type LockNotice = 'send' | 'recent' | 'platform_capped';
+
+/** A reset request: a mail may go, an email or address cap, or the platform-wide cap. */
+export type ResetVerdict = 'ok' | 'capped' | 'global_capped';
+
 export interface FailureResult {
   lockedUntil: Date | null;
-  /** True only on the failure that started the lock: notify once (USR-5). */
+  /** True only on the failure that started the lock (USR-5). */
   newlyLocked: boolean;
   ipBlockedUntil: Date | null;
+  /** Set only when newly locked with a known user. */
+  notice: LockNotice | null;
 }
 
 export interface WorkspaceChoiceRow {
@@ -141,23 +152,32 @@ export class AuthStore {
     };
   }
 
-  async recordFailure(key: Buffer, ip: string, now: Date): Promise<FailureResult> {
+  /**
+   * Records one failed sign-in (USR-5). With `who` (the email has an account) the
+   * auth.login_failed row, and on a new lock auth.locked and the notice decision, are written in
+   * the same call, so a real and an unknown email make the same database calls (S5-20261117-02).
+   */
+  async recordFailure(
+    key: Buffer,
+    ip: string,
+    now: Date,
+    who?: { userId: string; failure: string },
+  ): Promise<FailureResult> {
     const { rows } = await sql<{
       locked_until: Date | null;
       newly_locked: boolean;
       ip_blocked_until: Date | null;
-    }>`SELECT * FROM app.auth_record_failure(${key}, ${ip}::inet, ${now})`.execute(this.#db);
+      notice: LockNotice | null;
+    }>`SELECT * FROM app.auth_record_failure(${key}, ${ip}::inet, ${now},
+         ${who?.userId ?? null}::uuid, ${who?.failure ?? null}::text)`.execute(this.#db);
     return {
       lockedUntil: rows[0]?.locked_until ?? null,
       newlyLocked: rows[0]?.newly_locked ?? false,
       ipBlockedUntil: rows[0]?.ip_blocked_until ?? null,
+      notice: rows[0]?.notice ?? null,
     };
   }
 
-  /**
-   * Counts one password reset request and says whether a mail may go out for it: 3 per email
-   * and 10 per address an hour, 100 a day in all (F-M02h-05).
-   */
   /** An open invite by its token hash, for the accept page (USR-1, TEN-7). */
   async findInvite(
     tokenHash: Buffer,
@@ -260,10 +280,15 @@ export class AuthStore {
       ${ip}::inet)`.execute(this.#db);
   }
 
-  async allowReset(key: Buffer, ip: string, now: Date): Promise<boolean> {
-    const { rows } = await sql<{ ok: boolean }>`SELECT app.auth_reset_allow(${key}, ${ip}::inet,
-      ${now}) AS ok`.execute(this.#db);
-    return rows[0]?.ok ?? false;
+  /**
+   * Counts one password reset request (F-M02h-05, S5-20261117-01): 3 per email and 10 per
+   * address an hour, counting every request. `mail` says the email has an account a mail would
+   * go to; only those use the platform-wide 100 mails a day.
+   */
+  async allowReset(key: Buffer, ip: string, now: Date, mail: boolean): Promise<ResetVerdict> {
+    const { rows } = await sql<{ verdict: ResetVerdict }>`SELECT app.auth_reset_allow(${key},
+      ${ip}::inet, ${now}, ${mail}) AS verdict`.execute(this.#db);
+    return rows[0]?.verdict ?? 'capped';
   }
 
   async clearFailures(key: Buffer): Promise<void> {

@@ -35,11 +35,11 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 describe('SPA auth client (SEC-1, ADR-048)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    document.cookie = 'ob_csrf=; max-age=0';
+    document.cookie = '__Host-ob_csrf=; Path=/; Secure; max-age=0';
   });
 
-  it('[SEC-1] state-changing calls echo the ob_csrf cookie in x-csrf-token', async () => {
-    document.cookie = 'ob_csrf=token-from-cookie';
+  it('[SEC-1] state-changing calls echo the __Host-ob_csrf cookie in x-csrf-token', async () => {
+    document.cookie = '__Host-ob_csrf=token-from-cookie; Path=/; Secure';
     const { authApi, sent } = await loadWith(() => json(200, { next: 'mfa_code' }));
     const r = await authApi.signIn('sam@example.test', 'a long passphrase');
     expect(r).toMatchObject({ ok: true, status: 200, body: { next: 'mfa_code' } });
@@ -51,7 +51,7 @@ describe('SPA auth client (SEC-1, ADR-048)', () => {
   it('[SEC-1] without the cookie it asks for one first; reads send no token', async () => {
     const { authApi, sent } = await loadWith((req) => {
       if (new URL(req.url).pathname === '/api/auth/csrf') {
-        document.cookie = 'ob_csrf=fresh-token';
+        document.cookie = '__Host-ob_csrf=fresh-token; Path=/; Secure';
         return new Response(null, { status: 204 });
       }
       return json(200, []);
@@ -66,7 +66,7 @@ describe('SPA auth client (SEC-1, ADR-048)', () => {
   });
 
   it('[USR-5] a lock answer keeps its problem body and Retry-After for the screen', async () => {
-    document.cookie = 'ob_csrf=t';
+    document.cookie = '__Host-ob_csrf=t; Path=/; Secure';
     const { authApi } = await loadWith(() =>
       json(429, { code: 'rate_limited', detail: 'locked' }, { 'retry-after': '900' }),
     );

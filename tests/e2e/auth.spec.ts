@@ -24,8 +24,8 @@ function totp(secret: Buffer, step: number): string {
 const step = () => Math.floor(Date.now() / 30_000);
 
 async function csrf(request: APIRequestContext): Promise<string> {
-  const cookie = (await request.storageState()).cookies.find((c) => c.name === 'ob_csrf');
-  if (cookie === undefined) throw new Error('no ob_csrf cookie');
+  const cookie = (await request.storageState()).cookies.find((c) => c.name === '__Host-ob_csrf');
+  if (cookie === undefined) throw new Error('no __Host-ob_csrf cookie');
   return cookie.value;
 }
 

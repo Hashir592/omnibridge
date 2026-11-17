@@ -63,7 +63,7 @@ export const WorkspaceChoiceSchema = z
   })
   .meta({ id: 'WorkspaceChoice' });
 
-/** Sets the `ob_csrf` cookie the SPA echoes in `x-csrf-token` (SEC-1). */
+/** Sets the `__Host-ob_csrf` cookie the SPA echoes in `x-csrf-token` (SEC-1). */
 export const getCsrf = defineRoute({
   id: 'getCsrf',
   method: 'GET',
