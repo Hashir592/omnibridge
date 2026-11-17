@@ -67,7 +67,7 @@ describe('compose stack: limits (OPS-10)', () => {
       effective_cache_size: '1GB',
       work_mem: '8MB',
       maintenance_work_mem: '96MB',
-      max_connections: '40',
+      max_connections: '45',
       random_page_cost: '1.1',
       effective_io_concurrency: '200',
       max_wal_size: '1GB',
@@ -81,12 +81,15 @@ describe('compose stack: limits (OPS-10)', () => {
     });
   });
 
-  it('[OPS-10] every login role has a connection cap, and the caps fit under max_connections', () => {
-    const SUPERUSER_SLOTS = 3; // PostgreSQL's default superuser_reserved_connections
-    for (const [cluster, max] of [
-      ['db-main', 40],
-      ['db-pii', 15],
-    ] as const) {
+  it('[OPS-10] every login role has a connection cap, and the caps sum to at most max_connections minus 5', () => {
+    // FA-22, ADR-064: 3 superuser slots plus room for the deploy overlap, the exporter and backups.
+    const HEADROOM = 5;
+    for (const cluster of ['db-main', 'db-pii'] as const) {
+      const maxArg = (service(cluster).command ?? []).find((arg) =>
+        arg.startsWith('max_connections='),
+      );
+      const max = Number(maxArg?.split('=')[1]);
+      expect(max).toBeGreaterThan(HEADROOM);
       const script = readRepoFile(`infra/compose/${cluster}/10-roles.sh`);
       const logins = [...script.matchAll(/CREATE ROLE (\w+) LOGIN[^;]*;/g)].map((m) => ({
         role: m[1],
@@ -95,7 +98,11 @@ describe('compose stack: limits (OPS-10)', () => {
       expect(logins.length).toBeGreaterThan(1);
       expect(logins.filter((l) => l.cap === undefined)).toEqual([]);
       const total = logins.reduce((sum, l) => sum + Number(l.cap), 0);
-      expect({ cluster, fits: total <= max - SUPERUSER_SLOTS }).toEqual({ cluster, fits: true });
+      expect({ cluster, total, fits: total <= max - HEADROOM }).toEqual({
+        cluster,
+        total,
+        fits: true,
+      });
     }
   });
 

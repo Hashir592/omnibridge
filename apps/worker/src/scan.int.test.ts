@@ -72,16 +72,27 @@ describe('upload scanning against clamd (SEC-2, NFR-5)', () => {
   const root = mkdtempSync(join(tmpdir(), 'ob-files-'));
   const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
   const ws: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
+  // Each resource registers its own teardown once it has started (F-M02e load failure): when
+  // setup times out on a busy machine, afterAll stops only what exists and the setup error stays
+  // the one reported, instead of a second "boss is undefined".
+  const teardown: (() => Promise<unknown>)[] = [];
 
   beforeAll(async () => {
     [cluster, clamd] = await Promise.all([
-      startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_app', 'ob_platform']),
+      startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_app', 'ob_platform']).then((c) => {
+        teardown.push(() => c.container.stop());
+        return c;
+      }),
       new GenericContainer(CLAMD_IMAGE)
         .withEnvironment({ CLAMAV_NO_FRESHCLAMD: 'true', CLAMAV_NO_MILTERD: 'true' })
         .withExposedPorts(3310)
         .withWaitStrategy(Wait.forLogMessage(/socket found, clamd started/i))
         .withStartupTimeout(280_000)
-        .start(),
+        .start()
+        .then((c) => {
+          teardown.push(() => c.stop());
+          return c;
+        }),
     ]);
     await migrateMain(cluster.connection('ob_owner'));
     await createQueues(cluster.connection('ob_owner'), [filesScanJob]);
@@ -90,6 +101,8 @@ describe('upload scanning against clamd (SEC-2, NFR-5)', () => {
         pool: new pg.Pool({ ...cluster.connection('ob_app'), max: 4 }),
       }),
     });
+    const started = db;
+    teardown.push(() => started.destroy());
     await new Tenancy(db).run(ws, (ctx) =>
       new WorkspaceRepository(db).create(ctx, { name: 'Scan test' }),
     );
@@ -102,6 +115,8 @@ describe('upload scanning against clamd (SEC-2, NFR-5)', () => {
     boss = createWorkerBoss(cluster.connection('ob_app'), { monitorIntervalSeconds: 1 });
     boss.on('error', () => undefined);
     await boss.start();
+    const runningBoss = boss;
+    teardown.push(() => runningBoss.stop({ graceful: false, close: true }));
     queue = new JobQueue({
       boss,
       records: new JobRecordRepository(db),
@@ -120,10 +135,9 @@ describe('upload scanning against clamd (SEC-2, NFR-5)', () => {
   }, 300_000);
 
   afterAll(async () => {
-    await boss.stop({ graceful: false, close: true });
-    await db.destroy();
-    await Promise.all([cluster.container.stop(), clamd.stop()]);
-  });
+    // Newest first: the queue, then the pool, then the containers.
+    for (const stop of teardown.reverse()) await stop().catch(() => undefined);
+  }, 120_000);
 
   const stateOf = async (id: string) => (await new FileRepository(db).get(ws, id))?.state;
 

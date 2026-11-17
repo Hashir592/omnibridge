@@ -4,6 +4,7 @@ import {
   AccessReviewRepository,
   AuthStore,
   createMainDb,
+  INVITE_LIFETIME_MS,
   InviteRepository,
   MembershipRepository,
   migrateMain,
@@ -13,7 +14,7 @@ import {
   type MainDbHandle,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
-import type { Email } from '@omnibridge/mail';
+import { lifetimeText, type Email } from '@omnibridge/mail';
 import type { RunningJob } from '@omnibridge/queue';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import pg from 'pg';
@@ -24,7 +25,8 @@ import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
 const APP = 'https://app.omnibridge.test';
 
-describe('auth mail jobs (USR-5, USR-7, ADR-050)', () => {
+// ADR-050
+describe('auth mail jobs [USR-5][USR-7]', () => {
   let cluster: RoleCluster;
   let main: MainDbHandle;
   let web: MainDbHandle;
@@ -182,6 +184,10 @@ describe('auth mail jobs (USR-5, USR-7, ADR-050)', () => {
     expect(await run(handler, { invite_id: invite.id })).toEqual({ sent: 1 });
     expect(sent[0]?.to).toBe('invitee@example.test');
     expect(sent[0]?.email.subject).toBe('Admin Person invited you to Mail test on OmniBridge');
+    // F-M02e-02: the mail states the invite's real lifetime (INVITE_LIFETIME_MS, 72 hours).
+    expect(sent[0]?.email.text).toContain(`works for ${lifetimeText(INVITE_LIFETIME_MS)}.`);
+    expect(sent[0]?.email.text).toContain('works for 72 hours.');
+    expect(sent[0]?.email.text).not.toContain('7 days');
     const token = /https:\/\/app\.omnibridge\.test\/invite\/([A-Za-z0-9_-]{43})/.exec(
       sent[0]?.email.text ?? '',
     )?.[1];

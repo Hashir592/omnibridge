@@ -78,6 +78,9 @@ describe('db-main roles and migrations', () => {
       '0018_auth_audit_fixes',
       '0019_workspace_modules',
       '0020_retire_rollout_functions',
+      '0021_m02_end_fixes',
+      '0022_validate_job_company',
+      '0023_drop_retired_functions',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });
@@ -104,7 +107,8 @@ describe('db-main roles and migrations', () => {
     expect(rows).toEqual([{ owner: 'ob_owner', can_create: false }]);
   });
 
-  it('[NFR-2] a no-transaction migration runs CONCURRENTLY index statements, a repeat is a no-op, and a failed build is repaired (ADR-047)', async () => {
+  // ADR-047
+  it('[NFR-2] a no-transaction migration runs CONCURRENTLY index statements, a repeat is a no-op, and a failed build is repaired', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ob-migrations-'));
     const write = (name: string, text: string) => writeFile(join(dir, name), text);
     await write(

@@ -26,7 +26,7 @@ export interface JobRecordStore {
    */
   createAndEnqueue(
     ctx: TenantContext,
-    record: { id: string; type: string; idempotencyKey: string },
+    record: { id: string; type: string; idempotencyKey: string; companyId?: string | undefined },
     enqueue: (db: Db) => Promise<void>,
   ): Promise<{ id: string; created: boolean }>;
   update(
@@ -86,6 +86,8 @@ const SLOT_POLL_MS = 100;
 export interface SendInput<T> {
   ctx: TenantContext;
   channelAccountId?: string;
+  /** The one company the job belongs to, if any: web shows it only with that company in scope. */
+  companyId?: string;
   idempotencyKey: string;
   payload: T;
 }
@@ -159,6 +161,14 @@ export class JobQueue {
     def: JobDefinition<P>,
     input: SendInput<z.infer<P>>,
   ): Promise<{ id: string; created: boolean }> {
+    // A request can tie a job only to a company in its own scope (F-M02e-03); web could not show it.
+    if (
+      input.companyId !== undefined &&
+      input.ctx.userId !== undefined &&
+      !input.ctx.companyIds.includes(input.companyId)
+    ) {
+      throw new Error(`Job type ${def.type}: company is outside the caller's scope`);
+    }
     if ((def.serialPerAccount || def.perAccountCap !== undefined) && !input.channelAccountId) {
       throw new Error(`Job type ${def.type} needs a channel account`);
     }
@@ -173,7 +183,7 @@ export class JobQueue {
     const id = randomUUID();
     const result = await this.#records.createAndEnqueue(
       input.ctx,
-      { id, type: def.type, idempotencyKey: input.idempotencyKey },
+      { id, type: def.type, idempotencyKey: input.idempotencyKey, companyId: input.companyId },
       async (db) => {
         const options: SendOptions = { id, db };
         if (def.serialPerAccount && input.channelAccountId) {

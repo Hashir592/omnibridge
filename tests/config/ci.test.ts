@@ -33,7 +33,8 @@ describe('CI workflow and gate', () => {
     expect(workflow).not.toMatch(/verify\.sh --quick/);
   });
 
-  it('[SEC-4] the parallel CI jobs together run exactly the full gate (ADR-043)', () => {
+  // ADR-043
+  it('[SEC-4] the parallel CI jobs together run exactly the full gate', () => {
     const fullSteps = (/FULL_STEPS=\(([^)]*)\)/.exec(verify)?.[1] ?? '')
       .split(/\s+/)
       .filter(Boolean);
@@ -61,7 +62,8 @@ describe('CI workflow and gate', () => {
     expect(workflow).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
   });
 
-  it('[SEC-4] only apps/ui/** changes take the ui lane; unsure means full (ADR-056)', () => {
+  // ADR-056
+  it('[SEC-4] only apps/ui/** changes take the ui lane; unsure means full', () => {
     expect(laneOf(['apps/ui/src/routes/orders.tsx', 'apps/ui/e2e/kit.spec.ts'])).toBe('ui');
     expect(laneOf(['apps/ui/src/a.tsx', 'docs/design/reference/orders-linux.png'])).toBe('ui');
     expect(laneOf(['apps/ui/src/a.tsx', 'docs/STATE.md'])).toBe('ui');
@@ -75,7 +77,8 @@ describe('CI workflow and gate', () => {
     expect(laneOf([])).toBe('full');
   });
 
-  it('[SEC-4] the ui lane runs static checks, unit tests, the ui project and gitleaks (ADR-056)', () => {
+  // ADR-056
+  it('[SEC-4] the ui lane runs static checks, unit tests, the ui project and gitleaks', () => {
     const ui = /if \[\[ "\$mode" == ui \]\]; then\n\s+for name in ([\w -]+); do/.exec(verify)?.[1];
     expect(ui?.split(' ')).toEqual([
       'install',
@@ -157,7 +160,7 @@ describe('CI workflow and gate', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 30_000); // F-M02e-05: six git subprocesses; 5 s is too short on a busy machine.
 
   it('[SEC-4] CI runs Semgrep CE on pull requests from a digest-pinned image', () => {
     expect(workflow).toMatch(/image: semgrep\/semgrep:[\d.]+@sha256:[0-9a-f]{64}/);

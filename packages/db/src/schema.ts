@@ -35,6 +35,8 @@ export interface CredentialsTable {
 export interface JobRecordsTable {
   id: string;
   workspace_id: string;
+  /** The one company a job belongs to (F-M02e-03); null for workspace-wide jobs. */
+  company_id: ColumnType<string | null, string | null | undefined, never>;
   type: string;
   idempotency_key: string;
   state: ColumnType<

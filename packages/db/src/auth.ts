@@ -435,6 +435,27 @@ export class AuthStore {
     return left < 0 ? undefined : left;
   }
 
+  /**
+   * A brand-new person accepts an invite and gets their first password in one definer call
+   * (F-M02e-04), so the invite is never used up without the password being set. Undefined, and
+   * nothing changed, when the link is not usable or the email already has a sign-in.
+   */
+  async acceptInviteNewUser(
+    tokenHash: Buffer,
+    newUserId: string,
+    name: string,
+    now: Date,
+    passwordHash: string,
+  ): Promise<{ userId: string; workspaceId: string } | undefined> {
+    const { rows } = await sql<{ user_id: string; workspace_id: string }>`
+      SELECT user_id, workspace_id
+        FROM app.invite_accept_new_user(${tokenHash}, ${newUserId}::uuid, ${name}, ${now}, ${passwordHash})`.execute(
+      this.#db,
+    );
+    const r = rows[0];
+    return r === undefined ? undefined : { userId: r.user_id, workspaceId: r.workspace_id };
+  }
+
   async passwordHashes(userId: string): Promise<string[]> {
     const { rows } = await sql<{ h: string }>`
       SELECT h FROM app.auth_password_hashes(${userId}::uuid) AS h`.execute(this.#db);

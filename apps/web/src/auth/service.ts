@@ -497,11 +497,16 @@ export class AuthService {
     const rules = passwordProblems(input.password, { name, email: invite.email });
     if (rules.length > 0) throw passwordRejected(rules);
     const hash = await this.#o.passwords.hash(input.password);
-    // newOnly: no password was checked, so this may never join (or set the password of) an
-    // account that appeared for this email meanwhile.
-    const joined = await this.#o.store.acceptInvite(tokenHash, randomUUID(), name, now, true);
+    // One definer call joins and sets the first password (F-M02e-04). Like newOnly, it may never
+    // join (or set the password of) an account that appeared for this email meanwhile.
+    const joined = await this.#o.store.acceptInviteNewUser(
+      tokenHash,
+      randomUUID(),
+      name,
+      now,
+      hash,
+    );
     if (joined === undefined) throw notFound();
-    await this.#o.store.setPassword(joined.userId, hash, now);
     await this.#auditJoined(joined.workspaceId, joined.userId, invite.role, ip);
     return { body: { next: 'mfa_setup' }, cookies: await this.#preMfaSession(joined.userId, now) };
   }

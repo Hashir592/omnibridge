@@ -1,5 +1,5 @@
 import type { TenantContext } from '@omnibridge/core';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { mapTenancyErrors } from './errors.ts';
 import type { MainDb, MembershipRole } from './schema.ts';
 import { withTenantTransaction } from './tenant.ts';
@@ -58,15 +58,26 @@ export class MembershipRepository {
     this.#db = db;
   }
 
-  /** Throws WorkspaceLimitReached when max_users is set and reached (TEN-10). */
+  /**
+   * A system write (the dev seed, platform tooling, tests): it never acts as `ctx.userId`, so the
+   * database's admin-only rule for member writes (F-M02e-01, migration 0021) treats it like the
+   * worker. No web route calls it: people join only through an invite (app.invite_accept).
+   * Throws WorkspaceLimitReached when max_users is set and reached (TEN-10).
+   */
   async add(ctx: TenantContext, member: { userId: string; role: MembershipRole }): Promise<void> {
     await mapTenancyErrors(() =>
-      withTenantTransaction(this.#db, ctx, (trx) =>
-        trx
+      withTenantTransaction(this.#db, ctx, async (trx) => {
+        // Not as ctx.userId: the user setting is cleared for this one insert, then put back, so the
+        // rest of a surrounding transaction still runs as its user.
+        const { rows } = await sql<{ user_id: string }>`
+          SELECT current_setting('app.user_id', true) AS user_id`.execute(trx);
+        await sql`SELECT set_config('app.user_id', '', true)`.execute(trx);
+        await trx
           .insertInto('app.memberships')
           .values({ workspace_id: ctx.workspaceId, user_id: member.userId, role: member.role })
-          .execute(),
-      ),
+          .execute();
+        await sql`SELECT set_config('app.user_id', ${rows[0]?.user_id ?? ''}, true)`.execute(trx);
+      }),
     );
   }
 

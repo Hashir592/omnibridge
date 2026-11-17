@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { NotAMember, type TenantContext } from '@omnibridge/core';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuthStore } from './auth.ts';
 import { LastAdmin } from './errors.ts';
@@ -11,6 +12,7 @@ import {
   InviteRepository,
   MemberAccessRepository,
 } from './permissions.ts';
+import { JobRecordRepository } from './job-records.ts';
 import { createMainDb, type MainDbHandle } from './pool.ts';
 import { CompanyRepository } from './companies.ts';
 import { WorkspaceRepository } from './workspaces.ts';
@@ -219,5 +221,128 @@ describe('roles, ticks and invites (T-0204)', () => {
     ).toBeDefined();
     expect(await asAdmin((c) => reviews.complete(c, first?.id ?? '', admin, t0))).toBe(true);
     expect(await asAdmin((c) => reviews.complete(c, first?.id ?? '', admin, t0))).toBe(false);
+  });
+
+  /** Runs `fn` as raw ob_app in one rolled-back transaction, in `userId`'s request context. */
+  async function asRawRequest<T>(
+    userId: string,
+    companyIds: string[],
+    fn: (c: pg.PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const pool = new pg.Pool({ ...cluster.connection('ob_app'), max: 1 });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `SELECT set_config('app.workspace_id', $1, true), set_config('app.user_id', $2, true),
+                set_config('app.company_ids', $3, true)`,
+        [ws, userId, `{${companyIds.join(',')}}`],
+      );
+      return await fn(client);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+      await pool.end();
+    }
+  }
+
+  it('[PERM-3][PERM-5] a child cannot make itself admin, tick itself a tab or invite, even by raw SQL', async () => {
+    // F-M02e-01: the database refuses what only app code refused before.
+    const token = await invite({ email: 'raw.child@example.test', role: 'member' });
+    const child =
+      (await store.acceptInvite(token, randomUUID(), 'Rae Raw', t0, true))?.userId ?? '';
+    const rlsError = /row-level security/;
+    await asRawRequest(child, [], async (c) => {
+      const promoted = await c.query(
+        `UPDATE app.memberships SET role = 'admin' WHERE workspace_id = $1 AND user_id = $2`,
+        [ws, child],
+      );
+      expect(promoted.rowCount).toBe(0);
+    });
+    await expect(
+      asRawRequest(child, [], (c) =>
+        c.query(
+          `INSERT INTO app.membership_tabs (workspace_id, user_id, tab) VALUES ($1, $2, 'finance')`,
+          [ws, child],
+        ),
+      ),
+    ).rejects.toThrow(rlsError);
+    await expect(
+      asRawRequest(child, [companies[0] ?? ''], (c) =>
+        c.query(
+          `INSERT INTO app.membership_companies (workspace_id, user_id, company_id) VALUES ($1, $2, $3)`,
+          [ws, child, companies[0]],
+        ),
+      ),
+    ).rejects.toThrow(rlsError);
+    await expect(
+      asRawRequest(child, [], (c) =>
+        c.query(
+          `INSERT INTO app.invites (workspace_id, id, email, role, tabs, company_ids, invited_by, created_at, expires_at)
+           VALUES ($1, $2, 'evil@example.test', 'admin', '{}', '{}', $3, now(), now() + interval '1 hour')`,
+          [ws, randomUUID(), child],
+        ),
+      ),
+    ).rejects.toThrow(rlsError);
+    await asRawRequest(child, [], async (c) => {
+      const removed = await c.query(
+        `DELETE FROM app.memberships WHERE workspace_id = $1 AND user_id = $2`,
+        [ws, admin],
+      );
+      expect(removed.rowCount).toBe(0);
+    });
+    // The same raw write as an admin goes through (then rolls back).
+    await asRawRequest(admin, [], async (c) => {
+      const res = await c.query(
+        `INSERT INTO app.membership_tabs (workspace_id, user_id, tab) VALUES ($1, $2, 'finance')`,
+        [ws, child],
+      );
+      expect(res.rowCount).toBe(1);
+    });
+    expect((await scopeOf(child)).access).toEqual({ role: 'member', tabs: [] });
+  });
+
+  it('[PERM-3] a job tied to a company is shown only with that company in scope', async () => {
+    // F-M02e-03: GET /jobs/:id is tab none, so the row itself carries the company scope.
+    const token = await invite({
+      email: 'jobs.child@example.test',
+      role: 'member',
+      companyIds: [companies[1] ?? ''],
+    });
+    const child =
+      (await store.acceptInvite(token, randomUUID(), 'Jo Jobs', t0, true))?.userId ?? '';
+    const jobs = new JobRecordRepository(main.db);
+    const id = randomUUID();
+    await tenancy.runMember({ workspaceId: ws, userId: admin }, (c) =>
+      jobs.createAndEnqueue(
+        c,
+        { id, type: 'test.company_job', idempotencyKey: id, companyId: companies[0] ?? '' },
+        () => Promise.resolve(),
+      ),
+    );
+    const asChild = await tenancy.runMember({ workspaceId: ws, userId: child }, (c) =>
+      jobs.get(c, id),
+    );
+    expect(asChild).toBeUndefined();
+    const asAdmin = await tenancy.runMember({ workspaceId: ws, userId: admin }, (c) =>
+      jobs.get(c, id),
+    );
+    expect(asAdmin?.id).toBe(id);
+  });
+
+  it('[USR-1][USR-3] a new person joins and gets a password in one call, or neither happens', async () => {
+    // F-M02e-04: a failing password write leaves the invite unused.
+    const token = await invite({ email: 'atomic@example.test', role: 'member' });
+    await expect(
+      store.acceptInviteNewUser(token, randomUUID(), 'Ati Atomic', t0, 'not-argon2'),
+    ).rejects.toThrow();
+    expect(await store.findInvite(token, t0)).toMatchObject({ email: 'atomic@example.test' });
+    const hash = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$atomic';
+    const joined = await store.acceptInviteNewUser(token, randomUUID(), 'Ati Atomic', t0, hash);
+    expect(joined).toBeDefined();
+    expect((await store.loginLookup('atomic@example.test'))?.passwordHash).toBe(hash);
+    expect(
+      await store.acceptInviteNewUser(token, randomUUID(), 'Ati Atomic', t0, hash),
+    ).toBeUndefined();
   });
 });

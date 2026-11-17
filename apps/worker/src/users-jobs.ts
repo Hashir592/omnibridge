@@ -1,10 +1,11 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { londonDate } from '@omnibridge/core';
-import type {
-  AccessReviewRepository,
-  InviteRepository,
-  UserRepository,
-  WorkspaceRepository,
+import {
+  INVITE_LIFETIME_MS,
+  type AccessReviewRepository,
+  type InviteRepository,
+  type UserRepository,
+  type WorkspaceRepository,
 } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { isPlainAddress, renderInvite } from '@omnibridge/mail';
@@ -56,6 +57,7 @@ export function inviteHandler(deps: {
         workspaceName: workspace?.name ?? 'OmniBridge',
         acceptUrl: new URL(`/invite/${token}`, deps.appOrigin).href,
         appOrigin: deps.appOrigin,
+        validForMs: INVITE_LIFETIME_MS,
       }),
     );
     deps.logger.info(
