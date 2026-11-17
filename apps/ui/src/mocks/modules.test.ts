@@ -1,7 +1,7 @@
 import { getResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SessionInfo } from '../auth/shapes.ts';
-import { enableDemoSession } from './auth.ts';
+import { enableDemoSession, resetAuthMock } from './auth.ts';
 import { handlers } from './handlers.ts';
 import { setPersona } from './session.ts';
 import type { Session } from './types.ts';
@@ -29,6 +29,7 @@ async function onThenOff(path: string): Promise<{ on: boolean; off: boolean }> {
 
 afterEach(() => {
   setPersona('admin');
+  resetAuthMock();
 });
 
 describe('website_connector off (WEB-1)', () => {

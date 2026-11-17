@@ -59,6 +59,7 @@ const COMPARE = [
 ];
 
 /** Chart colours: petrol for this period, a recessive dashed grey for the comparison. */
+/** The --color-brand-600 token; the legend swatch uses the same token as a class. */
 const CURRENT = '#0F766E';
 const COMPARE_INK = '#8C939E';
 
@@ -322,7 +323,7 @@ function ProfitChart({ d, compareName }: { d: ProfitSummary; compareName: string
         <>
           <span className="hidden items-center gap-3 text-xs text-ink-muted sm:flex">
             <span className="inline-flex items-center gap-1.5">
-              <span aria-hidden className="size-2.5 rounded-[3px] bg-[#0F766E]" />
+              <span aria-hidden className="size-2.5 rounded-[3px] bg-brand-600" />
               This period
             </span>
             <span className="inline-flex items-center gap-1.5">

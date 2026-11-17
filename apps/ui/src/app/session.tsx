@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { authApi } from '../auth/api.ts';
+import { Button, buttonClass } from '../kit/Button.tsx';
 import type { SessionInfo } from '../auth/shapes.ts';
 import { mockApi } from '../mocks/api.ts';
 import { getPersona, setPersona as setMockPersona, type Persona } from '../mocks/session.ts';
@@ -103,6 +104,47 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }),
     [session, persona, companyId, qc],
   );
+
+  // Nothing to show and nowhere to send them: say so plainly, with a way out (no blank app).
+  const stuck = auth.isError
+    ? 'error'
+    : auth.data && !auth.data.ok && auth.data.status !== 401
+      ? 'error'
+      : info && !info.next && !info.workspace
+        ? 'no_workspace'
+        : undefined;
+  if (stuck) {
+    return (
+      <main className="grid min-h-dvh place-items-center bg-surface p-6">
+        <div className="max-w-sm text-center">
+          <h1 className="text-lg font-semibold">
+            {stuck === 'error' ? 'OmniBridge could not load your session' : 'No workspace is open'}
+          </h1>
+          <p className="mt-2 text-13 text-ink-muted">
+            {stuck === 'error'
+              ? 'The server did not answer. Try again in a moment.'
+              : info?.platform
+                ? 'This session is in the platform console. Sign in again to open a workspace.'
+                : 'Choose a workspace to continue.'}
+          </p>
+          <div className="mt-5 flex justify-center gap-2">
+            {stuck === 'error' ? (
+              <Button variant="primary" onClick={() => void auth.refetch()}>
+                Try again
+              </Button>
+            ) : (
+              <Link
+                to={info?.platform ? '/sign-in' : '/workspaces'}
+                className={buttonClass('primary')}
+              >
+                {info?.platform ? 'Sign in again' : 'Choose a workspace'}
+              </Link>
+            )}
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

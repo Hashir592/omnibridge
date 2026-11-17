@@ -104,6 +104,7 @@ export function resetAuthMock(): void {
   lockedUntil.clear();
   current = undefined;
   currentWorkspace = undefined;
+  demoSession = false;
   mfaDone = false;
   for (const a of Object.values(ACCOUNTS)) {
     a.mfa = a.name !== 'New User';

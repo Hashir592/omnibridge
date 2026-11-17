@@ -14,7 +14,10 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode
 import { cn } from '../../lib/cn.ts';
 
 /** One row height on every screen (Hashir, 19/10/2026; ADR-041): value plus 12 px subtext. */
-/** Row height in px; the rows use `h-14` (56 px) and the header `h-10` (40 px) to match. */
+/**
+ * Row height in px; the rows use `h-[56px]` and the header `h-[40px]`. Pixels, not rem: the
+ * virtualizer places rows every ROW_HEIGHT px whatever the browser's font size.
+ */
 export const ROW_HEIGHT = 56;
 // CSP (ADR-061): fixed sizes are classes. The style props left (grid columns, virtual row offsets,
 // pinned-column offsets) change per table or per row; React sets them through element.style, which
@@ -211,7 +214,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
           <div
             role="row"
             aria-rowindex={1}
-            className="sticky top-0 z-20 grid h-10 border-b border-border bg-rail text-xs font-medium text-ink-muted"
+            className="sticky top-0 z-20 grid h-[40px] border-b border-border bg-rail text-xs font-medium text-ink-muted"
             style={{ gridTemplateColumns: grid }}
           >
             {selectable && (
@@ -263,7 +266,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
       </div>
       {/* Messages sit over the visible area under the header, so they stay centred however wide the columns are. */}
       {((status === 'ready' && rows.length === 0 && empty) || (status === 'error' && error)) && (
-        <div className="absolute inset-x-0 top-10 bottom-0 grid place-items-center overflow-auto bg-card">
+        <div className="absolute inset-x-0 top-[40px] bottom-0 grid place-items-center overflow-auto bg-card">
           {status === 'error' ? error : empty}
         </div>
       )}
@@ -381,7 +384,7 @@ function TableRowImpl<T>({
       className={cn(
         // Each row is placed absolutely at a fixed height, so the browser can lay it out and style
         // it on its own: a row entering the window no longer dirties its neighbours (NFR-8).
-        'group absolute inset-x-0 grid h-14 border-b border-divider text-13 [contain:size_layout_style]',
+        'group absolute inset-x-0 grid h-[56px] border-b border-divider text-13 [contain:size_layout_style]',
         selected ? 'bg-selected' : `${tone} hover:bg-hover`,
       )}
       style={{ gridTemplateColumns: layout.grid, transform: `translateY(${String(start)}px)` }}
@@ -450,11 +453,11 @@ function DelayedSkeleton({ show }: { show: boolean }) {
   return (
     <div
       aria-hidden
-      className="absolute inset-x-0 top-10 bottom-0 bg-card"
+      className="absolute inset-x-0 top-[40px] bottom-0 bg-card"
       data-testid="table-skeleton"
     >
       {Array.from({ length: 14 }, (_, i) => (
-        <div key={i} className="flex h-14 items-center gap-6 border-b border-divider px-3">
+        <div key={i} className="flex h-[56px] items-center gap-6 border-b border-divider px-3">
           <div className="h-3 w-40 rounded bg-surface" />
           <div className="h-3 w-24 rounded bg-surface" />
           <div className="h-3 w-28 rounded bg-surface" />
