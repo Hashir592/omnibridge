@@ -961,11 +961,13 @@
       "prd_ids": [],
       "supports": [],
       "scope": [
+        "FIRST, own light PR: main is red on the dependency audit (picomatch 2.3.2 and 4.0.7, GHSA-fc5q-39xc-vjpf); move to the patched versions (pnpm override if a parent pins it) with a DECISIONS line; never an audit ignore",
         "db-main max_connections 40 to 45; a test that the sum of role caps is at most max_connections minus 5 (FA-22)",
         "F-M02e-01: admin-only writes enforced in the database as well as the route (S4 M02 end file)",
         "Forward-only migration dropping the functions migration 0020 revoked, with -- squawk-ignore ban-drop-function and a -- waiver: line (ADR-063)",
         "The two integration tests that failed under load on S4's machine: reproduce; fix, or quarantine with a task the same day; never delete",
-        "The other Minors in docs/reviews/M02-end.md"
+        "The other Minors in docs/reviews/M02-end.md",
+        "Rename the 26 test titles outside apps/ui that cite ADR numbers so they cite PRD IDs (one mechanical commit; keep the ADR in a comment if useful)"
       ],
       "out_of_scope": [
         "Anything for the vault"
