@@ -33,7 +33,12 @@ export interface ApiProblem {
 
 // The page's own origin: the API is same-origin, and an absolute base also works outside a
 // browser (component tests).
-const api = createApiClient({ baseUrl: globalThis.location.origin });
+// fetch is looked up on each call, not captured here: in browsers that refuse service workers the
+// mock-ups replace window.fetch after this module has loaded (mocks/browser.ts).
+const api = createApiClient({
+  baseUrl: globalThis.location.origin,
+  fetch: (input) => globalThis.fetch(input),
+});
 
 // __Host-: Secure, Path=/ and host-only, so a sibling host cannot plant it (S5 hardening 1).
 const CSRF_COOKIE = '__Host-ob_csrf';

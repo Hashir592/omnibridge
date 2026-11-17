@@ -36,9 +36,19 @@ export function getPersona(): Persona {
   return persona;
 }
 
-/** The website_connector module of the current workspace (ADR-059). */
+/**
+ * The workspace a sign-in in this page entered, as the auth mock knows it (set by mocks/auth.ts,
+ * which imports this file). Undefined until a sign-in reaches a workspace; the persona decides then.
+ */
+let signedInModules: () => { website_connector: boolean } | undefined = () => undefined;
+
+export function setSignedInModules(fn: () => { website_connector: boolean } | undefined): void {
+  signedInModules = fn;
+}
+
+/** The website_connector module of the current workspace (WEB-1): the mock data follows it. */
 export function websiteConnector(): boolean {
-  return persona !== 'starter';
+  return signedInModules()?.website_connector ?? persona !== 'starter';
 }
 
 /** False for the Website channel when the workspace's website connector is off. */

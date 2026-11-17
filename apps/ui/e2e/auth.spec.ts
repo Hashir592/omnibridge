@@ -206,3 +206,16 @@ test('[TEN-7] an invite for someone who already has a sign-in asks only for thei
   await page.getByRole('button', { name: 'Join Demo workspace' }).click();
   await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
 });
+
+test('[WEB-1] the workspace picked at sign-in decides whether the Website channel shows', async ({
+  page,
+}) => {
+  await open(page, '/sign-in', 'Sign in');
+  await signIn(page, 'sam.admin@example.test', DEMO_PASSWORD);
+  await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
+  await page.keyboard.type(DEMO_TOTP);
+  await page.getByRole('button', { name: /Second demo workspace/ }).click();
+  await page.getByRole('link', { name: 'Orders', exact: true }).first().click();
+  await expect(page.getByText('Awaiting dispatch').first()).toBeVisible();
+  await expect(page.locator('main')).not.toContainText(/website|harbourgoods/i);
+});
