@@ -280,7 +280,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       A,
       `SELECT * FROM vault.access_log WHERE capability = 'search' AND purpose = 'erasure'`,
     );
-    expect(log.at(-1)).toMatchObject({ result_count: 1, pii_ref: null });
+    expect(log.at(-1)).toMatchObject({ result_count: '1', pii_ref: null });
     expect(JSON.stringify(log)).not.toContain('EH1');
     // Every identifier must match: the right postcode with a wrong email finds nothing.
     const none = await clients.web.search({

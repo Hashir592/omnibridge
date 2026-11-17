@@ -325,8 +325,9 @@ export class Vault {
       }
       const res = await c.query<{
         kind: 'data' | 'index';
-        version: number;
-        kek_version: number;
+        /** bigint columns: read as strings. */
+        version: string;
+        kek_version: string;
         wrapped: Buffer;
       }>(
         `SELECT kind, version, kek_version, wrapped FROM vault.workspace_keys
@@ -338,8 +339,8 @@ export class Vault {
         if (row === undefined) throw new Error(`missing ${kind} key`);
         return {
           workspaceId,
-          version: row.version,
-          kekVersion: row.kek_version,
+          version: Number(row.version),
+          kekVersion: Number(row.kek_version),
           wrapped: row.wrapped,
         };
       };

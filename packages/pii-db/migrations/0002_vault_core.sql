@@ -12,8 +12,8 @@ SET LOCAL statement_timeout = '30s';
 CREATE TABLE vault.workspace_keys (
   workspace_id uuid NOT NULL,
   kind text NOT NULL CHECK (kind IN ('data', 'index')),
-  version integer NOT NULL CHECK (version > 0),
-  kek_version integer NOT NULL CHECK (kek_version > 0),
+  version bigint NOT NULL CHECK (version > 0),
+  kek_version bigint NOT NULL CHECK (kek_version > 0),
   wrapped bytea NOT NULL,
   created_at timestamptz NOT NULL,
   PRIMARY KEY (workspace_id, kind, version)
@@ -28,7 +28,7 @@ CREATE TABLE vault.records (
   channel_account_id uuid,
   subject_type text NOT NULL CHECK (subject_type IN ('order', 'conversation', 'feedback')),
   subject_id text NOT NULL CHECK (char_length(subject_id) BETWEEN 1 AND 200),
-  data_key_version integer NOT NULL CHECK (data_key_version > 0),
+  data_key_version bigint NOT NULL CHECK (data_key_version > 0),
   delete_after timestamptz,
   created_at timestamptz NOT NULL,
   PRIMARY KEY (workspace_id, pii_ref)
@@ -57,7 +57,7 @@ CREATE TABLE vault.blind_index (
   pii_ref uuid NOT NULL,
   field text NOT NULL CHECK (field IN ('name', 'email', 'phone', 'postcode', 'buyer', 'match')),
   mac bytea NOT NULL CHECK (octet_length(mac) = 32),
-  key_version integer NOT NULL CHECK (key_version > 0),
+  key_version bigint NOT NULL CHECK (key_version > 0),
   PRIMARY KEY (workspace_id, pii_ref, field),
   FOREIGN KEY (workspace_id, pii_ref) REFERENCES vault.records (workspace_id, pii_ref)
 );
@@ -82,7 +82,7 @@ CREATE TABLE vault.access_log (
   purpose text NOT NULL CHECK (purpose ~ '^[a-z_]{1,40}$'),
   actor_user_id uuid,
   pii_ref uuid,
-  result_count integer NOT NULL CHECK (result_count >= 0)
+  result_count bigint NOT NULL CHECK (result_count >= 0)
 );
 CREATE INDEX access_log_workspace ON vault.access_log (workspace_id, at DESC);
 
