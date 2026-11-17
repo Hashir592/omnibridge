@@ -148,7 +148,7 @@ export const authHandlers = [
   // The CSRF cookie (SEC-1), set as the server sets it, so the SPA asks only once. The mock
   // checks no token.
   http.get(
-    '*/auth/csrf',
+    '*/api/auth/csrf',
     () =>
       new HttpResponse(null, {
         status: 204,
@@ -156,7 +156,7 @@ export const authHandlers = [
       }),
   ),
 
-  http.post('*/auth/sign-in', async ({ request }) => {
+  http.post('*/api/auth/sign-in', async ({ request }) => {
     const body = (await request.json()) as { email?: string; password?: string };
     const email = (body.email ?? '').trim().toLowerCase();
     const now = Date.now();
@@ -178,13 +178,13 @@ export const authHandlers = [
     return HttpResponse.json<SignInResult>({ next: account.mfa ? 'mfa_code' : 'mfa_setup' });
   }),
 
-  http.post('*/auth/mfa/verify', async ({ request }) => {
+  http.post('*/api/auth/mfa/verify', async ({ request }) => {
     const { code } = (await request.json()) as { code?: string };
     if (code !== DEMO_TOTP) return problem(401, 'unauthorized', 'invalid_code');
     return HttpResponse.json<MfaResult>({ next: nextAfterMfa() });
   }),
 
-  http.post('*/auth/mfa/recovery', async ({ request }) => {
+  http.post('*/api/auth/mfa/recovery', async ({ request }) => {
     const { code } = (await request.json()) as { code?: string };
     if (!/^[a-z0-9]{5}-[a-z0-9]{5}$/i.test((code ?? '').trim())) {
       return problem(401, 'unauthorized', 'invalid_code');
@@ -192,7 +192,7 @@ export const authHandlers = [
     return HttpResponse.json<MfaResult>({ next: nextAfterMfa(), recoveryCodesLeft: 9 });
   }),
 
-  http.post('*/auth/mfa/enrolment', () =>
+  http.post('*/api/auth/mfa/enrolment', () =>
     HttpResponse.json<MfaEnrolment>({
       secret: 'MOCK SECR ETNO TREA LXXX XXXX XXXX',
       label: 'OmniBridge (n***@example.test)',
@@ -200,7 +200,7 @@ export const authHandlers = [
     }),
   ),
 
-  http.post('*/auth/mfa/enrolment/confirm', async ({ request }) => {
+  http.post('*/api/auth/mfa/enrolment/confirm', async ({ request }) => {
     const { code } = (await request.json()) as { code?: string };
     if (code !== DEMO_TOTP) return problem(401, 'unauthorized', 'invalid_code');
     const account = current ? ACCOUNTS[current] : undefined;
@@ -213,9 +213,9 @@ export const authHandlers = [
   }),
 
   // Always 202, whether or not the email has an account (no account enumeration).
-  http.post('*/auth/password/forgot', () => new HttpResponse(null, { status: 202 })),
+  http.post('*/api/auth/password/forgot', () => new HttpResponse(null, { status: 202 })),
 
-  http.get('*/auth/password/reset/:token', ({ params }) =>
+  http.get('*/api/auth/password/reset/:token', ({ params }) =>
     usable(params.token as string)
       ? HttpResponse.json<ResetTokenInfo>({
           emailMasked: 's***@example.test',
@@ -224,14 +224,14 @@ export const authHandlers = [
       : problem(404, 'not_found', 'link_unusable'),
   ),
 
-  http.post('*/auth/password/reset', async ({ request }) => {
+  http.post('*/api/auth/password/reset', async ({ request }) => {
     const { token, password } = (await request.json()) as { token?: string; password?: string };
     if (!usable(token)) return problem(404, 'not_found', 'link_unusable');
     if ((password ?? '').toLowerCase().includes('password')) return breached();
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.get('*/auth/invites/:token', ({ params }) =>
+  http.get('*/api/auth/invites/:token', ({ params }) =>
     usable(params.token as string)
       ? HttpResponse.json<InviteInfo>({
           workspaceName: 'Demo workspace',
@@ -244,7 +244,7 @@ export const authHandlers = [
       : problem(404, 'not_found', 'link_unusable'),
   ),
 
-  http.post('*/auth/invites/accept', async ({ request }) => {
+  http.post('*/api/auth/invites/accept', async ({ request }) => {
     const { token, password } = (await request.json()) as { token?: string; password?: string };
     if (!usable(token)) return problem(404, 'not_found', 'link_unusable');
     if (token === EXISTING_INVITE) {
@@ -257,7 +257,7 @@ export const authHandlers = [
     return HttpResponse.json<SignInResult>({ next: 'mfa_setup' });
   }),
 
-  http.get('*/auth/terms', () =>
+  http.get('*/api/auth/terms', () =>
     HttpResponse.json<TermsInfo>({
       version: TERMS_VERSION,
       termsUrl: 'https://omnibridge.co.uk/terms',
@@ -265,7 +265,7 @@ export const authHandlers = [
     }),
   ),
 
-  http.post('*/auth/terms', async ({ request }) => {
+  http.post('*/api/auth/terms', async ({ request }) => {
     const { version } = (await request.json()) as { version?: string };
     // A stale version (the terms changed while the screen was open) is refused, as the server does.
     if (version !== TERMS_VERSION) {
@@ -287,12 +287,12 @@ export const authHandlers = [
     });
   }),
 
-  http.get('*/auth/workspaces', () =>
+  http.get('*/api/auth/workspaces', () =>
     HttpResponse.json<WorkspaceChoice[]>([
       { id: 'ws_1', name: 'Demo workspace', role: 'admin', companies: 3 },
       { id: 'ws_2', name: 'Second demo workspace', role: 'member', companies: 1 },
     ]),
   ),
 
-  http.post('*/auth/workspace', () => new HttpResponse(null, { status: 204 })),
+  http.post('*/api/auth/workspace', () => new HttpResponse(null, { status: 204 })),
 ];

@@ -39,36 +39,36 @@ test('[AT-3] login with TOTP', async ({ request, baseURL }) => {
       headers: { origin, 'x-csrf-token': await csrf(request) },
     });
 
-  expect((await request.get('/auth/csrf')).status()).toBe(204);
-  const signIn = await post('/auth/sign-in', { email: DEMO.email, password: DEMO.password });
+  expect((await request.get('/api/auth/csrf')).status()).toBe(204);
+  const signIn = await post('/api/auth/sign-in', { email: DEMO.email, password: DEMO.password });
   expect(signIn.status()).toBe(200);
   expect(await signIn.json()).toEqual({ next: 'mfa_code' });
   // The password alone opens no workspace route (USR-4).
-  expect((await request.get('/companies')).status()).toBe(401);
+  expect((await request.get('/api/companies')).status()).toBe(401);
 
   // Each code works once: if this step's code was already used (a retry), wait for the next one.
-  let verify = await post('/auth/mfa/verify', { code: totp(DEMO.totpSecret, step()) });
+  let verify = await post('/api/auth/mfa/verify', { code: totp(DEMO.totpSecret, step()) });
   if (verify.status() === 401) {
     const next = (step() + 1) * 30_000;
     await new Promise((resolve) => setTimeout(resolve, next - Date.now() + 500));
-    verify = await post('/auth/mfa/verify', { code: totp(DEMO.totpSecret, step()) });
+    verify = await post('/api/auth/mfa/verify', { code: totp(DEMO.totpSecret, step()) });
   }
   expect(verify.status()).toBe(200);
   // WWW-7: on a fresh stack the demo user accepts the current terms first.
   const after = (await verify.json()) as { next: string };
   if (after.next === 'terms') {
-    const terms = (await (await request.get('/auth/terms')).json()) as { version: string };
-    const accepted = await post('/auth/terms', { version: terms.version });
+    const terms = (await (await request.get('/api/auth/terms')).json()) as { version: string };
+    const accepted = await post('/api/auth/terms', { version: terms.version });
     expect(await accepted.json()).toEqual({ next: 'app' });
   } else {
     expect(after).toEqual({ next: 'app' });
   }
 
-  const companies = await request.get('/companies');
+  const companies = await request.get('/api/companies');
   expect(companies.status()).toBe(200);
   expect(((await companies.json()) as { items: unknown[] }).items).toHaveLength(3);
 
   // Signing out ends it.
-  expect((await post('/auth/sign-out', {})).status()).toBe(204);
-  expect((await request.get('/companies')).status()).toBe(401);
+  expect((await post('/api/auth/sign-out', {})).status()).toBe(204);
+  expect((await request.get('/api/companies')).status()).toBe(401);
 });

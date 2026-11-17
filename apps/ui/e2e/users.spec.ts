@@ -114,7 +114,7 @@ test('[PERM-7] the server’s last-admin refusal (409) shows as a plain inline m
   await expect(page.getByRole('heading', { level: 1, name: 'Sam Admin' })).toBeVisible();
   // ...then, behind this page's back, Pat stops being an admin (another admin's change).
   await page.evaluate(async () => {
-    await fetch('/users/usr_2/access', {
+    await fetch('/api/users/usr_2/access', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ role: 'child', tabs: [], companyIds: [] }),

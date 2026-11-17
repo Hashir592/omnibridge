@@ -165,7 +165,7 @@ describe('authentication per route kind (SEC-3)', () => {
   it('[SEC-3] service and signed-webhook routes fail closed until their checks exist', async () => {
     const rs = [internal, webhook] as const;
     const app = await server(rs, { internalPing: open, providerHook: open });
-    for (const url of ['/internal/ping', '/hooks/provider']) {
+    for (const url of ['/api/internal/ping', '/api/hooks/provider']) {
       const res = await app.inject({ method: 'POST', url });
       expect({ url, status: res.statusCode }).toEqual({ url, status: 401 });
     }
@@ -182,7 +182,7 @@ describe('authentication per route kind (SEC-3)', () => {
     );
     await app.ready();
     // An invalid id would be a 400; an anonymous caller learns nothing about the schema.
-    const res = await app.inject({ method: 'GET', url: '/things/nope' });
+    const res = await app.inject({ method: 'GET', url: '/api/things/nope' });
     expect(res.statusCode).toBe(401);
     expect(res.json()).toMatchObject({ code: 'unauthorized' });
     await app.close();
@@ -211,7 +211,7 @@ describe('authentication per route kind (SEC-3)', () => {
         }),
     };
     const app = await server(rs, hs);
-    const res = await app.inject({ method: 'GET', url: '/me' });
+    const res = await app.inject({ method: 'GET', url: '/api/me' });
     expect(res.json()).toEqual({ workspace: SESSION.workspaceId, user: SESSION.userId });
     await app.close();
   });
@@ -244,7 +244,7 @@ describe('authentication per route kind (SEC-3)', () => {
       await app.ready();
       const out: Record<string, number> = {};
       for (const tab of TABS) {
-        out[tab] = (await app.inject({ method: 'GET', url: `/fixture/${tab}` })).statusCode;
+        out[tab] = (await app.inject({ method: 'GET', url: `/api/fixture/${tab}` })).statusCode;
       }
       await app.close();
       return out;
@@ -290,7 +290,7 @@ describe('authentication per route kind (SEC-3)', () => {
       installContract(app);
       void app.register(contractRoutesPlugin(rs, hs, auth));
       await app.ready();
-      const res = await app.inject({ method: 'GET', url: '/admin-thing' });
+      const res = await app.inject({ method: 'GET', url: '/api/admin-thing' });
       await app.close();
       return res.statusCode;
     };
@@ -310,16 +310,16 @@ describe('authentication per route kind (SEC-3)', () => {
 describe('list pagination over HTTP (CAP-7)', () => {
   it('[CAP-7] list routes default to 50 rows and cap at 200', async () => {
     const app = await server();
-    const first = await app.inject({ method: 'GET', url: '/things' });
+    const first = await app.inject({ method: 'GET', url: '/api/things' });
     expect(first.statusCode).toBe(200);
     const page = first.json<{ items: unknown[]; next_cursor: string | null }>();
     expect(page.items).toHaveLength(50);
     expect(page.next_cursor).toBe('50');
 
-    const max = await app.inject({ method: 'GET', url: '/things?limit=200' });
+    const max = await app.inject({ method: 'GET', url: '/api/things?limit=200' });
     expect(max.json<{ items: unknown[] }>().items).toHaveLength(200);
 
-    const over = await app.inject({ method: 'GET', url: '/things?limit=201' });
+    const over = await app.inject({ method: 'GET', url: '/api/things?limit=201' });
     expect(over.statusCode).toBe(400);
     expect(over.headers['content-type']).toMatch(/^application\/problem\+json/);
     expect(over.json()).toMatchObject({ status: 400, code: 'validation_failed' });
@@ -330,7 +330,7 @@ describe('list pagination over HTTP (CAP-7)', () => {
 describe('problem+json errors (RFC 9457)', () => {
   it('[NFR-1] invalid params return a problem with field errors', async () => {
     const app = await server();
-    const res = await app.inject({ method: 'GET', url: '/things/nope' });
+    const res = await app.inject({ method: 'GET', url: '/api/things/nope' });
     expect(res.statusCode).toBe(400);
     expect(res.headers['content-type']).toMatch(/^application\/problem\+json/);
     expect(res.json()).toMatchObject({
@@ -345,7 +345,7 @@ describe('problem+json errors (RFC 9457)', () => {
 
   it('[NFR-1] an ApiError keeps its status and stable code', async () => {
     const app = await server();
-    const res = await app.inject({ method: 'GET', url: '/things/t999999' });
+    const res = await app.inject({ method: 'GET', url: '/api/things/t999999' });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toMatchObject({ status: 404, code: 'not_found', detail: 'No thing.' });
     await app.close();
@@ -353,10 +353,18 @@ describe('problem+json errors (RFC 9457)', () => {
 
   it('[NFR-1] a declared error status still answers problems as problem+json', async () => {
     const app = await server();
-    const held = await app.inject({ method: 'POST', url: '/things/claim', body: { id: 'held' } });
+    const held = await app.inject({
+      method: 'POST',
+      url: '/api/things/claim',
+      body: { id: 'held' },
+    });
     expect(held.statusCode).toBe(409);
     expect(held.json()).toEqual({ holder: 'other' });
-    const gone = await app.inject({ method: 'POST', url: '/things/claim', body: { id: 'gone' } });
+    const gone = await app.inject({
+      method: 'POST',
+      url: '/api/things/claim',
+      body: { id: 'gone' },
+    });
     expect(gone.statusCode).toBe(409);
     expect(gone.headers['content-type']).toMatch(/^application\/problem\+json/);
     expect(gone.json()).toMatchObject({ status: 409, code: 'conflict', detail: 'Gone.' });
@@ -365,7 +373,7 @@ describe('problem+json errors (RFC 9457)', () => {
 
   it('[NFR-1] an unexpected error is a 500 problem that leaks no detail', async () => {
     const app = await server();
-    const res = await app.inject({ method: 'GET', url: '/things/t666' });
+    const res = await app.inject({ method: 'GET', url: '/api/things/t666' });
     expect(res.statusCode).toBe(500);
     expect(res.json()).toMatchObject({ status: 500, code: 'internal_error' });
     expect(res.body).not.toContain('secret detail');
@@ -374,7 +382,7 @@ describe('problem+json errors (RFC 9457)', () => {
 
   it('[NFR-1] unknown paths return a not_found problem', async () => {
     const app = await server();
-    const res = await app.inject({ method: 'GET', url: '/nowhere' });
+    const res = await app.inject({ method: 'GET', url: '/api/nowhere' });
     expect(res.statusCode).toBe(404);
     expect(res.headers['content-type']).toMatch(/^application\/problem\+json/);
     expect(res.json()).toMatchObject({ status: 404, code: 'not_found' });

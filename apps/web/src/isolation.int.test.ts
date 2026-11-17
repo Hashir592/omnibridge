@@ -336,7 +336,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     expect(outcomes.filter((o) => !o.ok)).toEqual([]);
     expect(await snapshotB()).toBe(before);
     // And of A, a child with nothing ticked sees no company at all (PERM-6, invariant 4).
-    const companies = await server.inject({ method: 'GET', url: '/companies', headers: child });
+    const companies = await server.inject({ method: 'GET', url: '/api/companies', headers: child });
     expect(companies.json()).toEqual({ items: [] });
     await server.close();
   });
@@ -345,14 +345,18 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     // Positive controls, so the walker cannot pass because every call fails.
     const server = app();
     const sessionA = sessionHeaders({ workspaceId: A, userId: userA, sessionId: 'session-a' });
-    const own = await server.inject({ method: 'GET', url: `/jobs/${a.job}`, headers: sessionA });
+    const own = await server.inject({
+      method: 'GET',
+      url: `/api/jobs/${a.job}`,
+      headers: sessionA,
+    });
     expect(own.statusCode).toBe(200);
-    const list = await server.inject({ method: 'GET', url: '/companies', headers: sessionA });
+    const list = await server.inject({ method: 'GET', url: '/api/companies', headers: sessionA });
     expect(list.json()).toEqual({ items: [expect.objectContaining({ id: a.company })] });
 
     const created = await server.inject({
       method: 'POST',
-      url: '/platform/workspaces',
+      url: '/api/platform/workspaces',
       headers: platformHeaders(admin),
       payload: { name: 'Created by platform' },
     });
@@ -360,14 +364,14 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     const { id } = created.json<{ id: string }>();
     const company = await server.inject({
       method: 'POST',
-      url: `/platform/workspaces/${id}/companies`,
+      url: `/api/platform/workspaces/${id}/companies`,
       headers: platformHeaders(admin),
       payload: { legal_name: 'New Ltd', trading_name: 'New', registered_address: address },
     });
     expect(company.statusCode).toBe(201);
     const missing = await server.inject({
       method: 'POST',
-      url: `/platform/workspaces/${randomUUID()}/companies`,
+      url: `/api/platform/workspaces/${randomUUID()}/companies`,
       headers: platformHeaders(admin),
       payload: { legal_name: 'Nowhere Ltd', trading_name: 'Nowhere', registered_address: address },
     });

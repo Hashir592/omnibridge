@@ -24,6 +24,7 @@ export {
   TOTAL_COUNT_CAP,
   type PageQuery,
 } from './pages.ts';
+export { API_PREFIX, isRootPath, mountedPath } from './mount.ts';
 export { PROBLEM_CONTENT_TYPE, ProblemSchema, type Problem } from './problem.ts';
 export { contractRoutes, OPENAPI_INFO, type ContractRoutes } from './registry.ts';
 export { getJob, JobProgressSchema, type JobProgress } from './routes/jobs.ts';

@@ -93,7 +93,7 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
   it('[AUD-4] child user gets 403 on audit routes', async () => {
     const server = app();
     const before = (await exportEvents()).length;
-    for (const url of ['/audit-events', '/audit-events/export']) {
+    for (const url of ['/api/audit-events', '/api/audit-events/export']) {
       // A member of the workspace who is not an admin, and a user of another workspace.
       const asChild = await server.inject({ method: 'GET', url, headers: headers(A, child) });
       expect({ url, status: asChild.statusCode }).toEqual({ url, status: 403 });
@@ -124,7 +124,11 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
     }
     const server = app();
     const get = (query: string) =>
-      server.inject({ method: 'GET', url: `/audit-events?${query}`, headers: headers(A, admin) });
+      server.inject({
+        method: 'GET',
+        url: `/api/audit-events?${query}`,
+        headers: headers(A, admin),
+      });
 
     const byUser = await get(`entity_id=${entityId}&user_id=${child}`);
     expect(byUser.statusCode).toBe(200);
@@ -164,7 +168,7 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
     const server = app();
     const res = await server.inject({
       method: 'GET',
-      url: `/audit-events/export?entity_id=${entityId}`,
+      url: `/api/audit-events/export?entity_id=${entityId}`,
       headers: headers(A, admin),
     });
     expect(res.statusCode).toBe(200);
@@ -202,7 +206,7 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
     const server = app({ rows: 2, bytes: 1_000_000 });
     const res = await server.inject({
       method: 'GET',
-      url: `/audit-events/export?entity_id=${entityId}`,
+      url: `/api/audit-events/export?entity_id=${entityId}`,
       headers: headers(A, admin),
     });
     expect(res.statusCode).toBe(400);
@@ -215,7 +219,7 @@ describe('audit log routes (AUD-1, AUD-4)', () => {
     const small = app({ rows: 1_000, bytes: 400 });
     const big = await small.inject({
       method: 'GET',
-      url: `/audit-events/export?entity_id=${entityId}`,
+      url: `/api/audit-events/export?entity_id=${entityId}`,
       headers: headers(A, admin),
     });
     expect(big.statusCode).toBe(400);

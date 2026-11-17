@@ -70,6 +70,9 @@ export function routeMetadataProblems(route: AnyRoute): string[] {
     if (!inPath.includes(name)) problems.push(`params: "${name}" is not in the path`);
   }
   if (Object.keys(route.responses).length === 0) problems.push('responses: none declared');
+  if (path === '/api' || path.startsWith('/api/')) {
+    problems.push('path: leave out /api; the server adds it (ADR-060)');
+  }
   return problems;
 }
 

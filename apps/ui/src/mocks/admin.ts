@@ -124,9 +124,9 @@ const PERM7 = 'A workspace must keep at least one admin';
 
 /** T-0204 user routes, admin only (403 to a child), with the server's 409 for PERM-7. */
 export const userHandlers = [
-  http.get('*/users', () => (isAdmin() ? HttpResponse.json(users) : forbidden())),
+  http.get('*/api/users', () => (isAdmin() ? HttpResponse.json(users) : forbidden())),
 
-  http.post('*/users/invites', async ({ request }) => {
+  http.post('*/api/users/invites', async ({ request }) => {
     if (!isAdmin()) return forbidden();
     const body = (await request.json()) as { email: string } & UserAccess;
     const email = body.email.trim().toLowerCase();
@@ -150,7 +150,7 @@ export const userHandlers = [
     return HttpResponse.json(invited, { status: 201 });
   }),
 
-  http.post('*/users/invites/:inviteId/revoke', ({ params }) => {
+  http.post('*/api/users/invites/:inviteId/revoke', ({ params }) => {
     if (!isAdmin()) return forbidden();
     const id = String(params.inviteId);
     if (!users.some((u) => u.id === id && u.state === 'invited')) return problem(404, 'not_found');
@@ -158,7 +158,7 @@ export const userHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.put('*/users/:userId/access', async ({ params, request }) => {
+  http.put('*/api/users/:userId/access', async ({ params, request }) => {
     if (!isAdmin()) return forbidden();
     const id = String(params.userId);
     const u = users.find((x) => x.id === id && x.state === 'active');
@@ -178,7 +178,7 @@ export const userHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.delete('*/users/:userId', ({ params }) => {
+  http.delete('*/api/users/:userId', ({ params }) => {
     if (!isAdmin()) return forbidden();
     const id = String(params.userId);
     if (!users.some((x) => x.id === id && x.state === 'active')) return problem(404, 'not_found');
@@ -187,9 +187,9 @@ export const userHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.get('*/access-reviews', () => (isAdmin() ? HttpResponse.json(reviews) : forbidden())),
+  http.get('*/api/access-reviews', () => (isAdmin() ? HttpResponse.json(reviews) : forbidden())),
 
-  http.post('*/access-reviews/:reviewId/complete', ({ params }) => {
+  http.post('*/api/access-reviews/:reviewId/complete', ({ params }) => {
     if (!isAdmin()) return forbidden();
     const id = String(params.reviewId);
     const r = reviews.find((x) => x.id === id && x.completedAt === null);

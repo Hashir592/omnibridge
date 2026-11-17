@@ -64,8 +64,11 @@ const EMAIL = /\b[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/gi;
 /**
  * A path segment that is a secret token (F-M02h-01, SEC-5): the segment after one of these route
  * prefixes is redacted wherever a request path appears in a log line. Add new token routes here.
+ * `/invite/` is the SPA page an invite email links to, which web now serves (ADR-060).
  */
-const PATH_TOKEN = /(\/auth\/(?:password\/reset|invites)\/)[^/?#\s"']+/g;
+const PATH_TOKEN = /(\/(?:auth\/(?:password\/reset|invites)|invite)\/)[^/?#\s"']+/g;
+/** A `token` query value, as on the SPA's /reset-password?token=… page (ADR-060). */
+const QUERY_TOKEN = /([?&]token=)[^&#\s"']+/g;
 const MAX_DEPTH = 6;
 
 /** Replaces PII markers, email addresses and path tokens in free text. */
@@ -73,7 +76,8 @@ export function scrubString(value: string): string {
   return value
     .replace(PII_MARKER, REDACTED)
     .replace(EMAIL, REDACTED)
-    .replace(PATH_TOKEN, `$1${REDACTED}`);
+    .replace(PATH_TOKEN, `$1${REDACTED}`)
+    .replace(QUERY_TOKEN, `$1${REDACTED}`);
 }
 
 function scrubValue(value: unknown, depth: number): unknown {

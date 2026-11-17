@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
@@ -24,6 +25,7 @@ import { queueNotifier } from './auth/notifier.ts';
 import { Passwords } from './auth/passwords.ts';
 import { PlatformKeys } from './auth/platform-keys.ts';
 import { AuthService } from './auth/service.ts';
+import { loadSpa } from './spa.ts';
 import { ebayWebhookFromEnv } from './webhooks/ebay.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
@@ -102,9 +104,13 @@ async function piiVaultHealthy(): Promise<boolean> {
   return body.db_pii === 'ok';
 }
 
+// The built SPA (ADR-060), copied next to dist/ in the image; boot fails if it is missing.
+const spa = loadSpa(process.env.UI_DIST_DIR ?? fileURLToPath(new URL('../ui/', import.meta.url)));
+
 const app = buildWebApp({
   logger,
   version,
+  spa,
   checks: { dbMain: () => ping(main.pool), dbPii: piiVaultHealthy },
   tenancy,
   directory: {

@@ -21,6 +21,16 @@ describe('typed client usage from apps/ui', () => {
     expect(calls).toEqual(['GET https://app.test/healthz']);
   });
 
+  it('[SEC-3] sends every other route under /api, so page paths stay the SPA’s (ADR-060)', async () => {
+    const { api, calls } = stubFetch(200, []);
+    await api.GET('/users');
+    await api.GET('/auth/workspaces');
+    expect(calls).toEqual([
+      'GET https://app.test/api/users',
+      'GET https://app.test/api/auth/workspaces',
+    ]);
+  });
+
   it('[NFR-1] surfaces a problem+json body on failure', async () => {
     const problem = {
       type: 'about:blank',

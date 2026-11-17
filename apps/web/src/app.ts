@@ -33,6 +33,7 @@ import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import type { AuthService } from './auth/service.ts';
 import { contractRoutesPlugin, installContract, type Handlers } from './contract.ts';
+import type { SpaFiles } from './spa.ts';
 
 export interface HealthChecks {
   /** db-main answers as ob_app. */
@@ -113,6 +114,8 @@ export interface WebAppOptions {
   people?: PeopleOptions;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
+  /** The built SPA, served for every page path (ADR-060). */
+  spa?: SpaFiles;
 }
 
 async function check(fn: () => Promise<boolean>): Promise<Health['db_main']> {
@@ -129,6 +132,7 @@ export function buildWebApp({
   checks,
   trustedProxies,
   openapi,
+  spa,
   jobs,
   files,
   tenancy,
@@ -142,7 +146,7 @@ export function buildWebApp({
   people,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
-  installContract(app, { openapi: openapi ?? false });
+  installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
   // Baseline security headers on every response, errors included (SEC-2). Strict CSP: only our
   // own origin, no inline script or style, no eval, and the app can never be framed.
   void app.register(fastifyHelmet, {

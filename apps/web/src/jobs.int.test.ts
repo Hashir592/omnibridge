@@ -96,7 +96,7 @@ describe('GET /jobs/:id (NFR-4)', () => {
     const get = () =>
       app.inject({
         method: 'GET',
-        url: `/jobs/${jobId}`,
+        url: `/api/jobs/${jobId}`,
         headers: { 'x-test-workspace': A.workspaceId },
       });
 
@@ -129,21 +129,21 @@ describe('GET /jobs/:id (NFR-4)', () => {
     });
     const other = await app.inject({
       method: 'GET',
-      url: `/jobs/${jobId}`,
+      url: `/api/jobs/${jobId}`,
       headers: { 'x-test-workspace': B.workspaceId },
     });
     expect(other.statusCode).toBe(404);
     expect(other.json()).toMatchObject({ code: 'not_found' });
     expect(JSON.stringify(other.json())).not.toContain('orders.export');
 
-    const anonymous = await app.inject({ method: 'GET', url: `/jobs/${jobId}` });
+    const anonymous = await app.inject({ method: 'GET', url: `/api/jobs/${jobId}` });
     expect(anonymous.statusCode).toBe(401);
     expect(anonymous.json()).toMatchObject({ code: 'unauthorized' });
     expect(
       (
         await app.inject({
           method: 'GET',
-          url: '/jobs/not-a-uuid',
+          url: '/api/jobs/not-a-uuid',
           headers: { 'x-test-workspace': A.workspaceId },
         })
       ).statusCode,
@@ -154,7 +154,7 @@ describe('GET /jobs/:id (NFR-4)', () => {
     const prod = buildWebApp({ logger, version: '0', checks, jobs: records });
     const res = await prod.inject({
       method: 'GET',
-      url: `/jobs/${jobId}`,
+      url: `/api/jobs/${jobId}`,
       headers: { 'x-test-workspace': A.workspaceId },
     });
     expect(res.statusCode).toBe(401);

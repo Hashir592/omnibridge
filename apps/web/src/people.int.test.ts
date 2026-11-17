@@ -117,7 +117,7 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     const server = app();
     const asChild = await server.inject({
       method: 'GET',
-      url: '/companies',
+      url: '/api/companies',
       headers: headers(child),
     });
     expect(asChild.statusCode).toBe(200);
@@ -125,11 +125,11 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     expect(seen).toEqual([companies[0]]);
     const asAdminRes = await server.inject({
       method: 'GET',
-      url: '/companies',
+      url: '/api/companies',
       headers: headers(admin),
     });
     expect(asAdminRes.json<{ items: unknown[] }>().items).toHaveLength(2);
-    for (const url of ['/users', '/access-reviews', '/audit-events']) {
+    for (const url of ['/api/users', '/api/access-reviews', '/api/audit-events']) {
       const res = await server.inject({ method: 'GET', url, headers: headers(child) });
       expect({ url, status: res.statusCode }).toEqual({ url, status: 403 });
     }
@@ -140,7 +140,7 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     const server = app();
     const res = await server.inject({
       method: 'POST',
-      url: '/users/invites',
+      url: '/api/users/invites',
       headers: headers(admin),
       payload: { email: 'Newcomer@Example.test', role: 'child', tabs: [], companyIds: [] },
     });
@@ -148,7 +148,7 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     const body = res.json<{ id: string; email: string; state: string; tabs: string[] }>();
     expect(body).toMatchObject({ email: 'newcomer@example.test', state: 'invited', tabs: [] });
     expect(invited).toContainEqual({ workspaceId: A, inviteId: body.id });
-    const list = await server.inject({ method: 'GET', url: '/users', headers: headers(admin) });
+    const list = await server.inject({ method: 'GET', url: '/api/users', headers: headers(admin) });
     expect(list.json<{ email: string; state: string }[]>()).toContainEqual(
       expect.objectContaining({ email: 'newcomer@example.test', state: 'invited' }),
     );
@@ -157,7 +157,7 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     // A company of another workspace cannot be ticked.
     const bad = await server.inject({
       method: 'POST',
-      url: '/users/invites',
+      url: '/api/users/invites',
       headers: headers(admin),
       payload: { email: 'x@example.test', role: 'child', tabs: [], companyIds: [randomUUID()] },
     });
@@ -165,7 +165,7 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     // Someone already in the workspace is not invited again.
     const again = await server.inject({
       method: 'POST',
-      url: '/users/invites',
+      url: '/api/users/invites',
       headers: headers(admin),
       payload: {
         email: `${child.slice(0, 8)}@example.test`,
@@ -182,14 +182,22 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     const server = app();
     const put = await server.inject({
       method: 'PUT',
-      url: `/users/${child}/access`,
+      url: `/api/users/${child}/access`,
       headers: headers(admin),
       payload: { role: 'child', tabs: ['orders', 'shipping'], companyIds: companies },
     });
     expect(put.statusCode).toBe(204);
-    const res = await server.inject({ method: 'GET', url: '/companies', headers: headers(child) });
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/companies',
+      headers: headers(child),
+    });
     expect(res.json<{ items: unknown[] }>().items).toHaveLength(2);
-    const users = await server.inject({ method: 'GET', url: '/users', headers: headers(admin) });
+    const users = await server.inject({
+      method: 'GET',
+      url: '/api/users',
+      headers: headers(admin),
+    });
     expect(users.json<{ id: string; tabs: string[] }[]>()).toContainEqual(
       expect.objectContaining({ id: child, tabs: ['orders', 'shipping'] }),
     );
@@ -200,13 +208,13 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     const server = app();
     const remove = await server.inject({
       method: 'DELETE',
-      url: `/users/${admin}`,
+      url: `/api/users/${admin}`,
       headers: headers(admin),
     });
     expect(remove.statusCode).toBe(409);
     const demote = await server.inject({
       method: 'PUT',
-      url: `/users/${admin}/access`,
+      url: `/api/users/${admin}/access`,
       headers: headers(admin),
       payload: { role: 'child', tabs: [], companyIds: [] },
     });
@@ -221,19 +229,19 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     const server = app();
     const list = await server.inject({
       method: 'GET',
-      url: '/access-reviews',
+      url: '/api/access-reviews',
       headers: headers(admin),
     });
     expect(list.json<{ id: string }[]>().map((r) => r.id)).toContain(review?.id);
     const done = await server.inject({
       method: 'POST',
-      url: `/access-reviews/${review?.id ?? ''}/complete`,
+      url: `/api/access-reviews/${review?.id ?? ''}/complete`,
       headers: headers(admin),
     });
     expect(done.statusCode).toBe(204);
     const again = await server.inject({
       method: 'POST',
-      url: `/access-reviews/${review?.id ?? ''}/complete`,
+      url: `/api/access-reviews/${review?.id ?? ''}/complete`,
       headers: headers(admin),
     });
     expect(again.statusCode).toBe(404);
@@ -245,17 +253,17 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
   it('[USR-8] removing a user ends their session on the next request', async () => {
     const server = app();
     expect(
-      (await server.inject({ method: 'GET', url: '/companies', headers: headers(child) }))
+      (await server.inject({ method: 'GET', url: '/api/companies', headers: headers(child) }))
         .statusCode,
     ).toBe(200);
     const removed = await server.inject({
       method: 'DELETE',
-      url: `/users/${child}`,
+      url: `/api/users/${child}`,
       headers: headers(admin),
     });
     expect(removed.statusCode).toBe(204);
     expect(
-      (await server.inject({ method: 'GET', url: '/companies', headers: headers(child) }))
+      (await server.inject({ method: 'GET', url: '/api/companies', headers: headers(child) }))
         .statusCode,
     ).toBe(401);
     await server.close();

@@ -22,6 +22,7 @@ RUN --mount=type=cache,id=omnibridge-pnpm-store,target=/pnpm-store \
     pnpm install --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store
 
 ARG APP
+# web also serves the built SPA (ADR-060): apps/ui/dist is copied to /app/ui and read at boot.
 # deploy installs exactly the lockfile versions, but pnpm 12 fetches registry metadata for its
 # supply-chain check on the deployed lockfile, so this step is not --offline.
 RUN --mount=type=cache,id=omnibridge-pnpm-store,target=/pnpm-store \
@@ -29,7 +30,10 @@ RUN --mount=type=cache,id=omnibridge-pnpm-store,target=/pnpm-store \
     test -n "$APP" \
  && pnpm --filter "@omnibridge/${APP}..." run build \
  && pnpm --filter "@omnibridge/${APP}" deploy --prod --frozen-lockfile --ignore-scripts \
-      --store-dir /pnpm-store /out
+      --store-dir /pnpm-store /out \
+ && if [ "$APP" = web ]; then \
+      pnpm --filter "@omnibridge/ui..." run build && cp -r apps/ui/dist /out/ui; \
+    fi
 
 FROM ${NODE_IMAGE} AS runtime
 ENV NODE_ENV=production

@@ -2,11 +2,14 @@ import { STATUS_CODES, type IncomingMessage, type ServerResponse } from 'node:ht
 import fastifySwagger from '@fastify/swagger';
 import {
   ADMIN_ONLY_TABS,
+  API_PREFIX,
   assertRouteMetadata,
   ContractError,
   FileDownloadSchema,
   OPENAPI_INFO,
   type FileDownload,
+  isRootPath,
+  mountedPath,
   PROBLEM_CONTENT_TYPE,
   ProblemSchema,
   type AnyRoute,
@@ -42,6 +45,7 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod';
+import { sendSpa, type SpaFiles } from './spa.ts';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -180,6 +184,8 @@ async function authenticate(
 export interface InstallOptions {
   /** Collect the OpenAPI document (`app.swagger()`). Only the generator and tests need it. */
   openapi?: boolean;
+  /** The built SPA (ADR-060); without it every unknown path answers the JSON 404. */
+  spa?: SpaFiles;
 }
 
 /** The body of a file download in the OpenAPI document. */
@@ -303,7 +309,7 @@ function handleError(error: FastifyError, request: FastifyRequest, reply: Fastif
  */
 export function installContract<L extends FastifyBaseLogger>(
   app: App<L>,
-  { openapi = false }: InstallOptions = {},
+  { openapi = false, spa }: InstallOptions = {},
 ): void {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -317,13 +323,20 @@ export function installContract<L extends FastifyBaseLogger>(
   });
   if (openapi) {
     void app.register(fastifySwagger, {
-      openapi: { openapi: '3.1.0', info: { ...OPENAPI_INFO } },
+      // Paths stay the route files' own; the server URL carries the /api prefix (ADR-060).
+      openapi: { openapi: '3.1.0', info: { ...OPENAPI_INFO }, servers: [{ url: API_PREFIX }] },
       transform: jsonSchemaTransform,
       transformObject: jsonSchemaTransformObject,
     });
   }
   app.setErrorHandler(handleError);
-  app.setNotFoundHandler((_request, reply) => sendProblem(reply, 404, 'not_found'));
+  // Not a route, so the guard above still holds: a page path gets the SPA, anything else
+  // (unknown /api/**, other methods) the JSON 404 envelope (ADR-060).
+  app.setNotFoundHandler((request, reply) =>
+    spa !== undefined && sendSpa(spa, request, reply)
+      ? reply
+      : sendProblem(reply, 404, 'not_found'),
+  );
 }
 
 /**
@@ -374,11 +387,14 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
     const level = levels[route.id];
     app.route({
       method: route.method,
-      url: route.path,
+      // Under /api, except the paths the PRD fixes (ADR-060).
+      url: mountedPath(route.path),
       ...(level ? { logLevel: level } : {}),
       config: { contract: { routeId: route.id } },
       schema: {
         operationId: route.id,
+        // A route outside /api overrides the document's server URL.
+        ...(isRootPath(route.path) ? { servers: [{ url: '/' }] } : {}),
         ...(route.summary ? { summary: route.summary } : {}),
         // Permission metadata in openapi.json, so client authors see it too.
         'x-permissions': {

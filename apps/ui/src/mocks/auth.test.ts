@@ -27,7 +27,7 @@ async function call(
 }
 
 const signIn = (email: string, password: string) =>
-  call('POST', '/auth/sign-in', { email, password });
+  call('POST', '/api/auth/sign-in', { email, password });
 
 beforeEach(() => {
   resetAuthMock();
@@ -77,11 +77,11 @@ describe('mock auth API', () => {
     expect((await signIn('new.user@example.test', DEMO_PASSWORD)).body).toEqual({
       next: 'mfa_setup',
     });
-    const enrol = (await call('POST', '/auth/mfa/enrolment')).body as { qr: string[] };
+    const enrol = (await call('POST', '/api/auth/mfa/enrolment')).body as { qr: string[] };
     expect(enrol.qr.length).toBeGreaterThan(20);
-    const wrong = await call('POST', '/auth/mfa/enrolment/confirm', { code: '000000' });
+    const wrong = await call('POST', '/api/auth/mfa/enrolment/confirm', { code: '000000' });
     expect(wrong.status).toBe(401);
-    const ok = await call('POST', '/auth/mfa/enrolment/confirm', { code: DEMO_TOTP });
+    const ok = await call('POST', '/api/auth/mfa/enrolment/confirm', { code: DEMO_TOTP });
     const codes = (ok.body as { recoveryCodes: string[] }).recoveryCodes;
     expect(new Set(codes).size).toBe(10);
   });
@@ -90,17 +90,17 @@ describe('mock auth API', () => {
     expect((await signIn('sam.admin@example.test', DEMO_PASSWORD)).body).toEqual({
       next: 'mfa_code',
     });
-    expect((await call('POST', '/auth/mfa/verify', { code: '000000' })).status).toBe(401);
-    expect((await call('POST', '/auth/mfa/verify', { code: DEMO_TOTP })).body).toEqual({
+    expect((await call('POST', '/api/auth/mfa/verify', { code: '000000' })).status).toBe(401);
+    expect((await call('POST', '/api/auth/mfa/verify', { code: DEMO_TOTP })).body).toEqual({
       next: 'workspace_picker',
     });
   });
 
   it('[USR-7] forgot password answers 202 whether or not the email has an account', async () => {
-    const known = await call('POST', '/auth/password/forgot', {
+    const known = await call('POST', '/api/auth/password/forgot', {
       email: 'sam.admin@example.test',
     });
-    const unknown = await call('POST', '/auth/password/forgot', {
+    const unknown = await call('POST', '/api/auth/password/forgot', {
       email: 'nobody@example.test',
     });
     expect(known.status).toBe(202);
@@ -108,13 +108,13 @@ describe('mock auth API', () => {
   });
 
   it('[USR-7] [TEN-7] used or expired reset and invite links get one 404', async () => {
-    expect((await call('GET', '/auth/password/reset/expired')).status).toBe(404);
-    expect((await call('GET', '/auth/invites/expired')).status).toBe(404);
-    expect((await call('GET', '/auth/password/reset/demo-reset')).status).toBe(200);
+    expect((await call('GET', '/api/auth/password/reset/expired')).status).toBe(404);
+    expect((await call('GET', '/api/auth/invites/expired')).status).toBe(404);
+    expect((await call('GET', '/api/auth/password/reset/demo-reset')).status).toBe(200);
   });
 
   it('[USR-3] a leaked password is refused with the rule id', async () => {
-    const r = await call('POST', '/auth/password/reset', {
+    const r = await call('POST', '/api/auth/password/reset', {
       token: 'demo-reset',
       password: 'my password is long',
     });

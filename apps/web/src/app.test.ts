@@ -1,4 +1,4 @@
-import { contractRoutes } from '@omnibridge/contract';
+import { contractRoutes, mountedPath } from '@omnibridge/contract';
 import { createLogger } from '@omnibridge/logger';
 import { platformHeaders, sessionHeaders } from '@omnibridge/testkit';
 import { describe, expect, it } from 'vitest';
@@ -128,7 +128,7 @@ describe('web authentication until T-0203 (SEC-3)', () => {
     for (const route of closed) {
       const res = await app.inject({
         method: route.method,
-        url: route.path.replace(/:[A-Za-z0-9_]+/g, id),
+        url: mountedPath(route.path).replace(/:[A-Za-z0-9_]+/g, id),
         headers,
         ...(route.method === 'GET' ? {} : { payload: {} }),
       });
