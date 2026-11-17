@@ -309,7 +309,14 @@ audit() {
     return 1
   }
   rm -f "$report"
-  "${pnpm[@]}" audit --audit-level high
+  # pnpm audit exits 1 when it finds anything; the gate script decides (PS-026 exceptions).
+  report="$(mktemp)"
+  "${pnpm[@]}" audit --json >"$report" || true
+  node scripts/lib/pnpm-audit-gate.mjs <"$report" || {
+    rm -f "$report"
+    return 1
+  }
+  rm -f "$report"
 }
 
 # Every full-gate step, in gate order. --only picks from this list.

@@ -166,7 +166,13 @@ describe('CI workflow and gate', () => {
   });
 
   it('[SEC-4] the full gate runs dependency and secret scanning', () => {
-    for (const step of ['step gitleaks', 'step audit', 'osv-scanner', 'audit --audit-level high']) {
+    for (const step of [
+      'step gitleaks',
+      'step audit',
+      'osv-scanner',
+      'audit --json',
+      'pnpm-audit-gate.mjs',
+    ]) {
       expect(verify).toContain(step);
     }
   });
