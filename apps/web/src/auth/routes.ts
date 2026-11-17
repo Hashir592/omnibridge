@@ -30,6 +30,7 @@ export function authHandlers(auth: AuthService | undefined): Handlers<typeof aut
       forgotPassword: unavailable,
       getPasswordReset: unavailable,
       resetPassword: unavailable,
+      getSession: unavailable,
       listMyWorkspaces: unavailable,
       chooseWorkspace: unavailable,
       enterPlatform: unavailable,
@@ -77,6 +78,11 @@ export function authHandlers(auth: AuthService | undefined): Handlers<typeof aut
       await auth.resetPassword(body.token, body.password);
       return { status: 204, body: null, headers: headers() };
     },
+    getSession: async ({ request }) => ({
+      status: 200,
+      body: await auth.currentSession(request),
+      headers: headers(),
+    }),
     listMyWorkspaces: async ({ account }) => ({
       status: 200,
       body: await auth.workspaces(account),

@@ -187,6 +187,28 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       )
     ).rows;
 
+  /** As the container's superuser: what platform tooling does (forced RLS binds ob_owner). */
+  async function asRoot(text: string, values: unknown[]): Promise<number> {
+    const root = new pg.Client({ connectionString: cluster.container.getConnectionUri() });
+    await root.connect();
+    try {
+      return (await root.query(text, values)).rowCount ?? 0;
+    } finally {
+      await root.end();
+    }
+  }
+
+  /** Switches a workspace module as platform tooling would (the seed, the console). */
+  const setModule = async (workspaceId: string, on: boolean) => {
+    const n = await asRoot(
+      `UPDATE app.workspaces
+          SET modules = modules || jsonb_build_object('website_connector', $2::boolean)
+        WHERE id = $1`,
+      [workspaceId, on],
+    );
+    expect(n).toBe(1);
+  };
+
   /** A user with a password and, unless `mfa` is false, a confirmed TOTP secret. */
   async function makeUser(
     opts: {
@@ -1169,6 +1191,68 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     });
     expect(change.statusCode).toBe(204);
     expect((await anon.send('GET', `/api/auth/password/reset/${link.token}`)).statusCode).toBe(404);
+    await server.close();
+  });
+  it('[USR-2][PLAT-2] GET /auth/session says where the session is at every stage (ADR-062)', async () => {
+    const server = app();
+    const anon = await new Browser(server).start();
+    expect((await anon.send('GET', '/api/auth/session')).statusCode).toBe(401);
+    const session = async (b: Browser) => {
+      const res = await b.send('GET', '/api/auth/session');
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['cache-control']).toBe('no-store');
+      return res.json<Record<string, unknown>>();
+    };
+
+    // Pre-MFA: the step, no workspace, everything off.
+    const user = await makeUser({ workspaces: [A, B] });
+    const b = await new Browser(server).start();
+    expect((await b.signIn(user.email, PASSWORD)).statusCode).toBe(200);
+    expect(await session(b)).toEqual({
+      user: { id: user.id, name: user.name, email: user.email },
+      next: 'mfa_code',
+      platform: false,
+      workspace: null,
+      modules: { website_connector: false },
+    });
+    // Signed in, two workspaces: the picker.
+    later(30_000);
+    await b.send('POST', '/api/auth/mfa/verify', { code: code(user.secret) });
+    expect(await session(b)).toMatchObject({ next: 'workspace_picker', workspace: null });
+    // In A, with its module on; then switched to B, with it off.
+    await setModule(A, true);
+    await b.send('POST', '/api/auth/workspace', { workspaceId: A });
+    expect(await session(b)).toMatchObject({
+      next: null,
+      workspace: { id: A, name: 'Workspace A', role: 'admin' },
+      modules: { website_connector: true },
+    });
+    await b.send('POST', '/api/auth/workspace', { workspaceId: B });
+    expect(await session(b)).toMatchObject({
+      next: null,
+      workspace: { id: B, name: 'Workspace B', role: 'admin' },
+      modules: { website_connector: false },
+    });
+    await setModule(A, false);
+
+    // No MFA yet: the set-up step.
+    const fresh = await makeUser({ mfa: false });
+    const f = await new Browser(server).start();
+    await f.signIn(fresh.email, PASSWORD);
+    expect(await session(f)).toMatchObject({ next: 'mfa_setup' });
+
+    // A platform operator in the console.
+    const operator = await makeUser({ workspaces: [A, B] });
+    expect(
+      await asRoot('UPDATE app.users SET platform_admin = true WHERE id = $1', [operator.id]),
+    ).toBe(1);
+    const { b: op } = await signedIn(server, operator);
+    expect((await op.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    expect(await session(op)).toMatchObject({ next: null, platform: true, workspace: null });
+
+    // Signed out: 401 again.
+    await op.send('POST', '/api/auth/sign-out');
+    expect((await op.send('GET', '/api/auth/session')).statusCode).toBe(401);
     await server.close();
   });
 });

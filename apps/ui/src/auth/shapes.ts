@@ -72,6 +72,22 @@ export interface TermsAccepted {
   next: 'workspace_picker' | 'app';
 }
 
+/**
+ * GET /auth/session → 200 at any sign-in stage, 401 without a session (ADR-062). Read on load and
+ * after every sign-in step or workspace switch: the one source for the module toggles.
+ */
+export interface SessionInfo {
+  user: { id: string; name: string; email: string };
+  /** The sign-in step still to do; null once in a workspace or the console. */
+  next: 'mfa_code' | 'mfa_setup' | 'password_change' | 'terms' | 'workspace_picker' | null;
+  /** True in the platform console. */
+  platform: boolean;
+  /** The workspace the session is in, or null (picker, console, before MFA). */
+  workspace: { id: string; name: string; role: 'admin' | 'member' } | null;
+  /** That workspace's module toggles; all off without a workspace. */
+  modules: { website_connector: boolean };
+}
+
 /** GET /auth/workspaces → 200 (only after MFA). */
 export interface WorkspaceChoice {
   id: string;

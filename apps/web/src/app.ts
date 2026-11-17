@@ -413,6 +413,7 @@ export function buildWebApp({
               resolvePlatform: auth.resolvePlatform,
               resolvePreMfa: auth.resolvePreMfa,
               resolveSignedIn: auth.resolveSignedIn,
+              resolveAnySession: auth.resolveAnySession,
               checkRequest: auth.checkRequest,
             }),
         ...(tenancy === undefined ? {} : { tenancy }),

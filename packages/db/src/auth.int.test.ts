@@ -475,4 +475,24 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
     await store.setPassword(user, fakeHash(77), at(t, 2 * MIN));
     expect(await store.findReset(link, at(t, 3 * MIN))).toBeUndefined();
   });
+
+  it('[USR-2][USR-5] no role but the owner may execute the retired rollout functions (0020)', async () => {
+    const retired = [
+      'app.auth_record_failure(bytea, inet, timestamptz)',
+      'app.auth_reset_allow(bytea, inet, timestamptz)',
+      'app.auth_user_workspaces(uuid)',
+    ];
+    for (const role of ['ob_app', 'ob_worker', 'ob_ops']) {
+      for (const fn of retired) {
+        const { rows } = await app.query<{ ok: boolean }>(
+          'SELECT has_function_privilege($1, $2, $3) AS ok',
+          [role, fn, 'EXECUTE'],
+        );
+        expect({ role, fn, ok: rows[0]?.ok }).toEqual({ role, fn, ok: false });
+      }
+    }
+    await expect(
+      app.query('SELECT * FROM app.auth_user_workspaces($1)', [randomUUID()]),
+    ).rejects.toThrow(/permission denied/);
+  });
 });

@@ -96,6 +96,34 @@ describe('mock auth API', () => {
     });
   });
 
+  it('[USR-2] GET /auth/session: 401 signed out, then the chosen workspace and its modules', async () => {
+    expect((await call('GET', '/api/auth/session')).status).toBe(401);
+    await signIn('sam.admin@example.test', DEMO_PASSWORD);
+    expect((await call('GET', '/api/auth/session')).body).toMatchObject({
+      next: 'mfa_code',
+      workspace: null,
+    });
+    await call('POST', '/api/auth/mfa/verify', { code: DEMO_TOTP });
+    expect((await call('GET', '/api/auth/session')).body).toMatchObject({
+      user: { name: 'Sam Admin', email: 'sam.admin@example.test' },
+      next: 'workspace_picker',
+      platform: false,
+      workspace: null,
+      modules: { website_connector: false },
+    });
+    await call('POST', '/api/auth/workspace', { workspaceId: 'ws_2' });
+    expect((await call('GET', '/api/auth/session')).body).toMatchObject({
+      next: null,
+      workspace: { id: 'ws_2', role: 'member' },
+      modules: { website_connector: false },
+    });
+    await call('POST', '/api/auth/workspace', { workspaceId: 'ws_1' });
+    expect((await call('GET', '/api/auth/session')).body).toMatchObject({
+      workspace: { id: 'ws_1', role: 'admin' },
+      modules: { website_connector: true },
+    });
+  });
+
   it('[USR-7] forgot password answers 202 whether or not the email has an account', async () => {
     const known = await call('POST', '/api/auth/password/forgot', {
       email: 'sam.admin@example.test',

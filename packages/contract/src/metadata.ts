@@ -12,6 +12,11 @@ export const AUTH_KINDS = [
   'pre-mfa',
   /** MFA done, no workspace chosen yet: the picker, sign-out, password change (USR-2). */
   'signed-in',
+  /**
+   * Any live session at any stage, pre-MFA to workspace or console, with no tenant context:
+   * only GET /auth/session, which says where the session is (ADR-062).
+   */
+  'any-session',
   /** A platform operator (console, M05). */
   'platform',
   /** Another OmniBridge service on an internal network. */

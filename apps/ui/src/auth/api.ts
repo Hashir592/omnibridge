@@ -13,6 +13,7 @@ import type {
   SignInResult,
   TermsAccepted,
   TermsInfo,
+  SessionInfo,
   WorkspaceChoice,
 } from './shapes.ts';
 
@@ -150,6 +151,8 @@ export const authApi = {
         headers: await csrfHeaders(),
       }),
     ),
+  /** Where the session is (ADR-062); 401 without one. */
+  session: () => reply<SessionInfo>(api.GET('/auth/session')),
   workspaces: () => reply<WorkspaceChoice[]>(api.GET('/auth/workspaces')),
   invite: (token: string) =>
     reply<InviteInfo>(api.GET('/auth/invites/{token}', { params: { path: { token } } })),

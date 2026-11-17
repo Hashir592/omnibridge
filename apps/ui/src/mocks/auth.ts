@@ -28,6 +28,7 @@ import type {
   SignInResult,
   TermsAccepted,
   TermsInfo,
+  SessionInfo,
   WorkspaceChoice,
 } from '../auth/shapes.ts';
 
@@ -52,6 +53,7 @@ const ACCOUNTS: Record<
 
 /** After MFA: the terms first if this account has not accepted the current version. */
 function nextAfterMfa(): MfaResult['next'] {
+  mfaDone = true;
   const account = current ? ACCOUNTS[current] : undefined;
   if (account?.termsAccepted === false) return 'terms';
   return (account?.workspaces ?? 1) > 1 ? 'workspace_picker' : 'app';
@@ -63,12 +65,35 @@ const failures = new Map<string, number[]>();
 /** Email -> time the lock ends: 15 minutes after the 10th failure, not a sliding window (USR-5). */
 const lockedUntil = new Map<string, number>();
 let current: string | undefined;
+/** False between the password and the code: /auth/session then answers the MFA step. */
+let mfaDone = false;
+/** The workspace the mock session is in, once chosen (or the only one). */
+let currentWorkspace: string | undefined;
+
+const MOCK_WORKSPACES: WorkspaceChoice[] = [
+  {
+    id: 'ws_1',
+    name: 'Demo workspace',
+    role: 'admin',
+    companies: 3,
+    modules: { website_connector: true },
+  },
+  {
+    id: 'ws_2',
+    name: 'Second demo workspace',
+    role: 'member',
+    companies: 1,
+    modules: { website_connector: false },
+  },
+];
 
 /** Clears failure counts and the signed-in email (tests). */
 export function resetAuthMock(): void {
   failures.clear();
   lockedUntil.clear();
   current = undefined;
+  currentWorkspace = undefined;
+  mfaDone = false;
   for (const a of Object.values(ACCOUNTS)) {
     a.mfa = a.name !== 'New User';
     if (a.termsAccepted !== undefined) a.termsAccepted = false;
@@ -177,6 +202,8 @@ export const authHandlers = [
     }
     failures.delete(email);
     current = email;
+    mfaDone = false;
+    currentWorkspace = undefined;
     return HttpResponse.json<SignInResult>({ next: account.mfa ? 'mfa_code' : 'mfa_setup' });
   }),
 
@@ -211,6 +238,7 @@ export const authHandlers = [
       const n = (i + 1) * 7919;
       return `mock${String(i)}-${n.toString(36).padStart(5, '0').slice(-5)}`;
     });
+    mfaDone = true;
     return HttpResponse.json<MfaConfirmResult>({ recoveryCodes });
   }),
 
@@ -289,24 +317,39 @@ export const authHandlers = [
     });
   }),
 
-  http.get('*/api/auth/workspaces', () =>
-    HttpResponse.json<WorkspaceChoice[]>([
-      {
-        id: 'ws_1',
-        name: 'Demo workspace',
-        role: 'admin',
-        companies: 3,
-        modules: { website_connector: true },
-      },
-      {
-        id: 'ws_2',
-        name: 'Second demo workspace',
-        role: 'member',
-        companies: 1,
-        modules: { website_connector: false },
-      },
-    ]),
-  ),
+  http.get('*/api/auth/workspaces', () => HttpResponse.json<WorkspaceChoice[]>(MOCK_WORKSPACES)),
 
-  http.post('*/api/auth/workspace', () => new HttpResponse(null, { status: 204 })),
+  http.post('*/api/auth/workspace', async ({ request }) => {
+    const { workspaceId } = (await request.json()) as { workspaceId?: string };
+    currentWorkspace = workspaceId;
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // The shape of GET /auth/session (ADR-062): the MFA step until the code is in; then one
+  // workspace is entered at once, two wait for the picker.
+  http.get('*/api/auth/session', () => {
+    const account = current ? ACCOUNTS[current] : undefined;
+    if (current === undefined || account === undefined) {
+      return problem(401, 'unauthorized', 'no_session');
+    }
+    if (!mfaDone) {
+      return HttpResponse.json<SessionInfo>({
+        user: { id: 'usr_mock', name: account.name, email: current },
+        next: account.mfa ? 'mfa_code' : 'mfa_setup',
+        platform: false,
+        workspace: null,
+        modules: { website_connector: false },
+      });
+    }
+    const id = currentWorkspace ?? (account.workspaces === 1 ? 'ws_1' : undefined);
+    const ws = MOCK_WORKSPACES.find((w) => w.id === id);
+    return HttpResponse.json<SessionInfo>({
+      user: { id: 'usr_mock', name: account.name, email: current },
+      next:
+        ws !== undefined ? null : account.termsAccepted === false ? 'terms' : 'workspace_picker',
+      platform: false,
+      workspace: ws === undefined ? null : { id: ws.id, name: ws.name, role: ws.role },
+      modules: ws?.modules ?? { website_connector: false },
+    });
+  }),
 ];
