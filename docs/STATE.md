@@ -28,6 +28,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Follow-ups noted
 
+- ADR-068: when S1 writes M07, M08 and M10 tasks: expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first. M22: host timer for the 15-minute journal run.
+
 - **PS-026 (S1):** confirm the expiring audit exception mechanism; when picomatch ships a fix, bump it and delete the entry (before 1 Dec 2026).
 - **M22:** remove the vault's start-up `buyer_exact` backfill before the first deploy (dev data only). `vault.workspace_directory` has no row for a workspace whose only ingests predate db-pii 0005 (dev only): such records are not reached by an eBay notice.
 - **T-0308 (S2):** erasure and access screens against the T-0404 routes; erasure requests are on the Users tab, admins only.
