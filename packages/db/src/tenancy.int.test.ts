@@ -49,6 +49,10 @@ describe('tenancy core (TEN-1, TEN-2, TEN-3, TEN-6, TEN-10)', () => {
   const pools: pg.Pool[] = [];
   const raw = (role: string) => {
     const pool = new pg.Pool({ ...cluster.connection(role), max: 2 });
+    // Teardown: when the container stops, the server ends a closing connection with 57P01
+    // (admin shutdown). That is expected; without a listener it surfaced as an unhandled error
+    // and failed CI once (PR #86). Assertions are unchanged.
+    pool.on('error', () => undefined);
     pools.push(pool);
     return pool;
   };
