@@ -131,6 +131,8 @@ export type ErasureRequest = components['schemas']['ErasureRequest'];
 export type ErasureRequestCreated = components['schemas']['ErasureRequestCreated'];
 export type ErasureMatch = components['schemas']['ErasureMatch'];
 export type JobProgress = components['schemas']['JobProgress'];
+/** The fixed list of withdraw reasons (ADR-067); no free text, so no buyer detail can get in. */
+export type WithdrawReason = NonNullable<ErasureRequest['withdrawReason']>;
 
 /**
  * Hands a downloaded file to the browser's save dialog. The bytes live only in memory for this
@@ -168,6 +170,15 @@ export const privacyApi = {
     reply<ErasureRequest>(
       api.POST('/erasure-requests/{id}/confirm', {
         params: { path: { id } },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** ADR-067: closes an open request without deleting; 409 `conflict` when it is not open. */
+  withdrawErasure: async (id: string, reason: WithdrawReason) =>
+    reply<ErasureRequest>(
+      api.POST('/erasure-requests/{id}/withdraw', {
+        params: { path: { id } },
+        body: { reason },
         headers: await csrfHeaders(),
       }),
     ),

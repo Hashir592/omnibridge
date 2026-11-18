@@ -2,8 +2,9 @@
  * Erasure and subject access requests (T-0404 routes, real contract), the deletion certificate
  * (T-0403) and GET /jobs/:id, for the T-0308 screens. The handlers behave as the server does:
  * admin only (403 to a child), identifiers in the body only, masked matches (the vault's ORD-5
- * rules), a one-month due date (DEL-4), 409 on a second confirm, 422 when the export matches too
- * much. Synthetic buyers only: example.com addresses and Ofcom drama numbers (07700 900xxx).
+ * rules), a one-month due date (DEL-4), 409 when a request is no longer open (confirmed or
+ * withdrawn, ADR-067), 400 for a missing or unknown withdraw reason, 422 when the export matches
+ * too much. Synthetic buyers only: example.com addresses and Ofcom drama numbers (07700 900xxx).
  */
 import { HttpResponse, http } from 'msw/http';
 import type {
@@ -12,6 +13,7 @@ import type {
   ErasureRequest,
   ErasureRequestCreated,
   JobProgress,
+  WithdrawReason,
 } from '../auth/api.ts';
 import { channelAccounts } from './data.ts';
 import { DAY, ago } from './random.ts';
@@ -140,11 +142,22 @@ function search(q: BuyerIdentifiers): VaultRecord[] {
 interface StoredRequest {
   id: string;
   requestedAt: string;
-  state: 'open' | 'confirmed';
+  state: ErasureRequest['state'];
   piiRefs: string[];
   confirmedAt: string | null;
   jobId: string | null;
+  withdrawnAt?: string;
+  withdrawReason?: WithdrawReason;
 }
+
+/** The fixed list of the contract (ERASURE_WITHDRAW_REASONS in @omnibridge/core). */
+const WITHDRAW_REASONS: readonly WithdrawReason[] = [
+  'wrong_identifiers',
+  'no_match',
+  'duplicate',
+  'buyer_withdrew',
+  'other',
+];
 
 /** DEL-4: one calendar month after the request. */
 function oneMonthAfter(iso: string): string {
@@ -164,13 +177,22 @@ const asBody = (r: StoredRequest): ErasureRequest => {
     matchCount: r.piiRefs.length,
     confirmedAt: r.confirmedAt,
     jobId: r.jobId,
-    // T-0408 (ADR-067): the mocks never withdraw yet; S2 adds the Withdraw action.
-    withdrawnAt: null,
-    withdrawReason: null,
+    withdrawnAt: r.withdrawnAt ?? null,
+    withdrawReason: r.withdrawReason ?? null,
   };
 };
 
 const seedRequests = (): StoredRequest[] => [
+  {
+    id: uuid(904),
+    requestedAt: ago(6 * DAY),
+    state: 'withdrawn',
+    piiRefs: [],
+    confirmedAt: null,
+    jobId: null,
+    withdrawnAt: ago(6 * DAY),
+    withdrawReason: 'wrong_identifiers',
+  },
   {
     id: uuid(903),
     requestedAt: ago(3 * DAY),
@@ -312,8 +334,7 @@ export const privacyHandlers = [
     if (!isAdmin()) return forbidden();
     const r = requests.find((x) => x.id === params.id);
     if (!r) return problem(404, 'not_found');
-    if (r.state !== 'open')
-      return problem(409, 'conflict', 'This erasure request was already confirmed.');
+    if (r.state !== 'open') return problem(409, 'conflict', 'This erasure request is not open.');
     let jobId: string | null = null;
     if (r.piiRefs.length > 0) {
       seq += 1;
@@ -324,6 +345,30 @@ export const privacyHandlers = [
     r.confirmedAt = new Date().toISOString();
     r.jobId = jobId;
     return HttpResponse.json(asBody(r), { status: 202 });
+  }),
+
+  http.post('*/api/erasure-requests/:id/withdraw', async ({ params, request }) => {
+    if (!isAdmin()) return forbidden();
+    const body = (await request.json().catch(() => ({}))) as { reason?: unknown };
+    const reason = WITHDRAW_REASONS.find((x) => x === body.reason);
+    if (!reason)
+      return HttpResponse.json(
+        {
+          type: 'about:blank',
+          title: '',
+          status: 400,
+          code: 'validation_failed',
+          errors: [{ path: 'reason', message: 'one of the withdraw reasons' }],
+        },
+        { status: 400, headers: { 'content-type': 'application/problem+json' } },
+      );
+    const r = requests.find((x) => x.id === params.id);
+    if (!r) return problem(404, 'not_found');
+    if (r.state !== 'open') return problem(409, 'conflict', 'This erasure request is not open.');
+    r.state = 'withdrawn';
+    r.withdrawnAt = new Date().toISOString();
+    r.withdrawReason = reason;
+    return HttpResponse.json(asBody(r));
   }),
 
   http.get('*/api/jobs/:id', ({ params }) => {

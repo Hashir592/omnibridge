@@ -16,6 +16,7 @@ import {
   LoaderCircle,
   Search,
   TriangleAlert,
+  Undo2,
 } from 'lucide-react';
 import { useState, type SyntheticEvent, type ReactNode } from 'react';
 import { useAppState } from '../app/session.tsx';
@@ -28,6 +29,7 @@ import {
   type ErasureMatch,
   type ErasureRequest,
   type ErasureRequestCreated,
+  type WithdrawReason,
 } from '../auth/api.ts';
 import { ChannelMark } from '../components/badges.tsx';
 import { useCertificateDownload } from '../components/deletionCertificate.ts';
@@ -35,8 +37,9 @@ import { Card, PageHeader, SimpleTable, Stack, Td, Tr } from '../components/Card
 import { TabGate } from '../components/TabGate.tsx';
 import { StatusLabel } from '../kit/Badge.tsx';
 import { Button } from '../kit/Button.tsx';
-import { ConfirmDialog } from '../kit/Dialog.tsx';
+import { ConfirmDialog, Dialog } from '../kit/Dialog.tsx';
 import { Field, Input } from '../kit/Field.tsx';
+import { Select } from '../kit/Select.tsx';
 import { EmptyState, ErrorState } from '../kit/states.tsx';
 import { useToast } from '../kit/Toast.tsx';
 import { formatDate, formatDateTime, formatInt, formatTime, londonDayKey } from '../lib/format.ts';
@@ -70,7 +73,7 @@ function problemText(r: ApiReply<unknown>, fallback: string): string {
   if (r.status === 503) return 'The buyer data store is not reachable. Try again in a few minutes.';
   if (r.status === 422 && p?.detail) return p.detail;
   if (r.status === 422) return 'Enter at least one detail of the buyer.';
-  if (r.status === 409) return 'This request was already confirmed.';
+  if (r.status === 409) return 'This request is no longer open: it was completed or withdrawn.';
   if (r.status === 404) return 'This request no longer exists. Refresh the page.';
   return fallback;
 }
@@ -94,6 +97,15 @@ const SUBJECT: Record<string, string> = {
   order: 'Order',
   message_thread: 'Message',
   feedback: 'Feedback',
+};
+
+/** Why an admin withdraws a request (ADR-067). A fixed list: no free text, so no buyer detail. */
+const WITHDRAW_REASON: Record<WithdrawReason, string> = {
+  wrong_identifiers: 'Wrong details entered',
+  no_match: 'The records found are not this buyer',
+  duplicate: 'Duplicate of another request',
+  buyer_withdrew: 'The buyer withdrew the request',
+  other: 'Other reason',
 };
 
 /** The masked values in a fixed order; fields with no masking rule (all stars) are left out. */
@@ -259,9 +271,6 @@ function BuyerData() {
             key={result.id}
             result={result}
             listed={requests.data?.find((r) => r.id === result.id)}
-            onDone={() => {
-              setResult(undefined);
-            }}
           />
         )}
 
@@ -294,16 +303,16 @@ function MaskedValues({ masked }: { masked: Record<string, string> }) {
 function MatchResult({
   result,
   listed,
-  onDone,
 }: {
   result: ErasureRequestCreated;
-  /** The same request in the list: confirmed there, the card follows. */
+  /** The same request in the list: confirmed or withdrawn there, the card follows. */
   listed: ErasureRequest | undefined;
-  onDone: () => void;
 }) {
   const { session } = useAppState();
-  const [justConfirmed, setConfirmed] = useState<ErasureRequest>();
-  const confirmed = justConfirmed ?? (listed?.state === 'confirmed' ? listed : undefined);
+  const [justClosed, setClosed] = useState<ErasureRequest>();
+  const closed = justClosed ?? (listed && listed.state !== 'open' ? listed : undefined);
+  const confirmed = closed?.state === 'confirmed' ? closed : undefined;
+  const withdrawn = closed?.state === 'withdrawn' ? closed : undefined;
   const n = result.matches.length;
   const account = (id: string | null) => session?.channelAccounts.find((a) => a.id === id);
 
@@ -311,13 +320,15 @@ function MatchResult({
     <Card
       className="mt-5"
       title={
-        confirmed
-          ? n === 0
-            ? 'Request completed'
-            : `${plural(n, 'record')} deleted`
-          : n === 0
-            ? 'No records match'
-            : `${plural(n, 'record')} found`
+        withdrawn
+          ? 'Request withdrawn'
+          : confirmed
+            ? n === 0
+              ? 'Request completed'
+              : `${plural(n, 'record')} deleted`
+            : n === 0
+              ? 'No records match'
+              : `${plural(n, 'record')} found`
       }
       aside={
         <span className="text-ink-muted">
@@ -325,7 +336,14 @@ function MatchResult({
         </span>
       }
     >
-      {confirmed ? (
+      {withdrawn ? (
+        <div className="px-5 py-4" role="status">
+          <RequestState r={withdrawn} />
+          <p className="mt-1.5 text-13 text-ink-muted">
+            Nothing was deleted. The request is closed and recorded in the audit log.
+          </p>
+        </div>
+      ) : confirmed ? (
         <Confirmed request={confirmed} />
       ) : (
         <>
@@ -380,12 +398,8 @@ function MatchResult({
           )}
           <ConfirmBar
             request={result}
-            onConfirmed={setConfirmed}
-            secondary={
-              <Button variant="ghost" onClick={onDone}>
-                Not this buyer
-              </Button>
-            }
+            onConfirmed={setClosed}
+            secondary={<WithdrawButton request={result} onWithdrawn={setClosed} />}
           />
         </>
       )}
@@ -451,7 +465,10 @@ function ConfirmBar({
     <>
       {compact ? (
         <span className="flex flex-col items-end gap-1">
-          {button}
+          <span className="flex gap-2">
+            {secondary}
+            {button}
+          </span>
           {error && <Inline tone="danger">{error}</Inline>}
         </span>
       ) : (
@@ -484,6 +501,119 @@ function ConfirmBar({
           confirm.mutate();
         }}
       />
+    </>
+  );
+}
+
+/**
+ * Closes an open request without deleting anything (ADR-067): wrong details, not this buyer, a
+ * duplicate, or the buyer changed their mind. The reason comes from a fixed list.
+ */
+function WithdrawButton({
+  request,
+  onWithdrawn,
+  compact,
+}: {
+  request: ErasureRequest;
+  onWithdrawn: (r: ErasureRequest) => void;
+  compact?: boolean;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState<WithdrawReason | null>(null);
+  const [error, setError] = useState<string>();
+
+  const withdraw = useMutation({
+    mutationFn: (r: WithdrawReason) => privacyApi.withdrawErasure(request.id, r),
+    onSuccess: async (r) => {
+      if (r.ok) {
+        setOpen(false);
+        onWithdrawn(r.body as ErasureRequest);
+        toast({
+          title: 'Request withdrawn',
+          description: 'Nothing was deleted. The reason is in the audit log.',
+          tone: 'success',
+        });
+      } else if (r.status === 409) {
+        // The list refresh below closes this request's row, so say it outside the dialog.
+        setOpen(false);
+        toast({ title: 'Not withdrawn', description: problemText(r, ''), tone: 'error' });
+      } else setError(problemText(r, 'The request could not be withdrawn. Try again.'));
+      await qc.invalidateQueries({ queryKey: ['erasure-requests'] });
+    },
+    onError: () => {
+      setError('The request could not be withdrawn. Try again.');
+    },
+  });
+
+  return (
+    <>
+      <Button
+        size={compact ? 'sm' : 'md'}
+        variant="ghost"
+        icon={<Undo2 />}
+        onClick={() => {
+          setReason(null);
+          setError(undefined);
+          setOpen(true);
+        }}
+      >
+        Withdraw
+        <span className="sr-only"> the request of {formatDateTime(request.requestedAt)}</span>
+      </Button>
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        size="sm"
+        title="Withdraw this request?"
+        description="Nothing is deleted. The request is closed, never turns overdue, and the reason is recorded in the audit log."
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={withdraw.isPending}
+              onClick={() => {
+                if (!reason) {
+                  setError('Choose a reason.');
+                  return;
+                }
+                withdraw.mutate(reason);
+              }}
+            >
+              Withdraw request
+            </Button>
+          </>
+        }
+      >
+        <Field label="Reason">
+          <Select
+            label="Reason"
+            options={(Object.keys(WITHDRAW_REASON) as WithdrawReason[]).map((k) => ({
+              value: k,
+              label: WITHDRAW_REASON[k],
+            }))}
+            value={reason}
+            onChange={(v) => {
+              setReason(v as WithdrawReason | null);
+              setError(undefined);
+            }}
+          />
+        </Field>
+        {error && (
+          <div className="mt-3">
+            <Inline tone="danger">{error}</Inline>
+          </div>
+        )}
+      </Dialog>
     </>
   );
 }
@@ -543,6 +673,13 @@ function Confirmed({ request }: { request: ErasureRequest }) {
 /* ---------- the list of erasure requests ---------- */
 
 function RequestState({ r }: { r: ErasureRequest }) {
+  if (r.state === 'withdrawn')
+    return (
+      <StatusLabel tone="neutral" icon={Undo2}>
+        Withdrawn {r.withdrawnAt ? formatDate(r.withdrawnAt) : ''}
+        {r.withdrawReason ? ` · ${WITHDRAW_REASON[r.withdrawReason]}` : ''}
+      </StatusLabel>
+    );
   if (r.state === 'confirmed')
     return (
       <StatusLabel tone="success" icon={CircleCheck}>
@@ -601,7 +738,12 @@ function RequestList({ requests }: { requests: ReturnType<typeof useRequests> })
               </Td>
               <Td className="text-right">
                 {r.state === 'open' && (
-                  <ConfirmBar request={r} onConfirmed={() => undefined} compact />
+                  <ConfirmBar
+                    request={r}
+                    onConfirmed={() => undefined}
+                    secondary={<WithdrawButton request={r} onWithdrawn={() => undefined} compact />}
+                    compact
+                  />
                 )}
               </Td>
             </Tr>

@@ -85,6 +85,42 @@ describe('mock erasure requests', () => {
     expect(items.some((r) => r.overdue && r.state === 'open')).toBe(true);
     expect(items.every((r) => !r.overdue || Date.parse(r.dueAt) < Date.now())).toBe(true);
   });
+
+  it('[DEL-4] withdraws an open request with a reason, never overdue, then answers 409', async () => {
+    const overdueId = '00000000-0000-4000-8000-000000000902';
+    const res = await call('POST', `/api/erasure-requests/${overdueId}/withdraw`, {
+      reason: 'wrong_identifiers',
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ErasureRequest;
+    expect(body.state).toBe('withdrawn');
+    expect(body.overdue).toBe(false);
+    expect(body.withdrawReason).toBe('wrong_identifiers');
+    expect(body.withdrawnAt).not.toBeNull();
+    const again = await call('POST', `/api/erasure-requests/${overdueId}/withdraw`, {
+      reason: 'duplicate',
+    });
+    expect(again.status).toBe(409);
+    expect((await call('POST', `/api/erasure-requests/${overdueId}/confirm`)).status).toBe(409);
+  });
+
+  it('[DEL-4] a withdraw needs a reason from the fixed list (400), on a known request (404)', async () => {
+    const open = '00000000-0000-4000-8000-000000000903';
+    expect((await call('POST', `/api/erasure-requests/${open}/withdraw`, {})).status).toBe(400);
+    expect(
+      (await call('POST', `/api/erasure-requests/${open}/withdraw`, { reason: 'free text' }))
+        .status,
+    ).toBe(400);
+    const unknown = '00000000-0000-4000-8000-000000009999';
+    expect(
+      (await call('POST', `/api/erasure-requests/${unknown}/withdraw`, { reason: 'other' })).status,
+    ).toBe(404);
+    const confirmed = '00000000-0000-4000-8000-000000000901';
+    expect(
+      (await call('POST', `/api/erasure-requests/${confirmed}/withdraw`, { reason: 'other' }))
+        .status,
+    ).toBe(409);
+  });
 });
 
 describe('mock subject access export', () => {
@@ -113,10 +149,13 @@ describe('admin only', () => {
       call('GET', '/api/erasure-requests'),
       call('POST', '/api/erasure-requests', { identifiers: MORGAN }),
       call('POST', '/api/erasure-requests/00000000-0000-4000-8000-000000000903/confirm'),
+      call('POST', '/api/erasure-requests/00000000-0000-4000-8000-000000000903/withdraw', {
+        reason: 'other',
+      }),
       call('POST', '/api/access-requests/export', { identifiers: MORGAN }),
       call('GET', '/api/channel-accounts/ca_1/deletion-certificate'),
     ]);
-    expect(statuses.map((r) => r.status)).toEqual([403, 403, 403, 403, 403]);
+    expect(statuses.map((r) => r.status)).toEqual([403, 403, 403, 403, 403, 403]);
   });
 
   it('[DEL-3] the deletion certificate holds counts and IDs, never a buyer value', async () => {
