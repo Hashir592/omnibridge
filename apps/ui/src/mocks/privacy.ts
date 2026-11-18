@@ -164,6 +164,9 @@ const asBody = (r: StoredRequest): ErasureRequest => {
     matchCount: r.piiRefs.length,
     confirmedAt: r.confirmedAt,
     jobId: r.jobId,
+    // T-0408 (ADR-067): the mocks never withdraw yet; S2 adds the Withdraw action.
+    withdrawnAt: null,
+    withdrawReason: null,
   };
 };
 
