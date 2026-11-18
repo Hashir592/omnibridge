@@ -72,15 +72,18 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
     destination: { write: (line: string) => (logs.push(line), true) },
   });
 
+  /** Runs inside each send, before it is recorded; a test sets it to race or fail the queue. */
+  let beforeSend: (() => Promise<void>) | undefined;
   /** Stands in for the queue: what web would enqueue, checked and then run by hand. */
   const queue: Pick<JobQueue, 'send'> = {
-    send: (_def, input) => {
+    send: async (_def, input) => {
+      await beforeSend?.();
       sent.push({
         workspaceId: input.ctx.workspaceId,
         payload: input.payload as Sent['payload'],
         key: input.idempotencyKey,
       });
-      return Promise.resolve({ id: randomUUID(), created: true });
+      return { id: randomUUID(), created: true };
     },
   };
 
@@ -383,6 +386,157 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
     await server.close();
   });
 
+  it('[DEL-4] a withdraw that races a confirm never leaves a withdrawn request with a deletion job (S5-20261118-02)', async () => {
+    const server = app();
+    const target = await ingest('order-r1', contact('Rae'), amazonAccount);
+    const created = (
+      await server.inject({
+        method: 'POST',
+        url: '/api/erasure-requests',
+        headers: headers(admin),
+        payload: { identifiers: { email: `${PII_MARKER}rae@example.test` } },
+      })
+    ).json<{ id: string }>();
+    // A second admin withdraws while the confirm is queueing the deletion.
+    let raced: number | undefined;
+    beforeSend = async () => {
+      beforeSend = undefined;
+      raced = (
+        await server.inject({
+          method: 'POST',
+          url: `/api/erasure-requests/${created.id}/withdraw`,
+          headers: headers(admin),
+          payload: { reason: 'wrong_identifiers' },
+        })
+      ).statusCode;
+    };
+    sent.length = 0;
+    try {
+      const confirmed = await server.inject({
+        method: 'POST',
+        url: `/api/erasure-requests/${created.id}/confirm`,
+        headers: headers(admin),
+      });
+      expect(raced).toBe(409);
+      expect(confirmed.statusCode).toBe(202);
+      expect(confirmed.json()).toMatchObject({ state: 'confirmed', withdrawnAt: null });
+      expect(sent).toHaveLength(1);
+      const listed = await server.inject({
+        method: 'GET',
+        url: '/api/erasure-requests',
+        headers: headers(admin),
+      });
+      const row = listed
+        .json<{ items: { id: string; state: string; jobId: string | null }[] }>()
+        .items.find((r) => r.id === created.id);
+      expect(row?.state).toBe('confirmed');
+      expect(row?.jobId).not.toBeNull();
+      await runQueued(sent[0] as Sent);
+      expect(await alive(target.pii_ref)).toBe(false);
+    } finally {
+      beforeSend = undefined;
+      await server.close();
+    }
+  });
+
+  it('[DEL-4] a confirm whose queue call fails stays claimed: it cannot be withdrawn, and confirming again queues it once (S5-20261118-02)', async () => {
+    const server = app();
+    const target = await ingest('order-q1', contact('Quin'), amazonAccount);
+    const created = (
+      await server.inject({
+        method: 'POST',
+        url: '/api/erasure-requests',
+        headers: headers(admin),
+        payload: { identifiers: { email: `${PII_MARKER}quin@example.test` } },
+      })
+    ).json<{ id: string }>();
+    const confirm = () =>
+      server.inject({
+        method: 'POST',
+        url: `/api/erasure-requests/${created.id}/confirm`,
+        headers: headers(admin),
+      });
+    sent.length = 0;
+    beforeSend = () => {
+      beforeSend = undefined;
+      return Promise.reject(new Error('queue down'));
+    };
+    try {
+      expect((await confirm()).statusCode).toBe(500);
+      expect(sent).toEqual([]);
+      const withdraw = await server.inject({
+        method: 'POST',
+        url: `/api/erasure-requests/${created.id}/withdraw`,
+        headers: headers(admin),
+        payload: { reason: 'other' },
+      });
+      expect(withdraw.statusCode).toBe(409);
+      const retried = await confirm();
+      expect(retried.statusCode).toBe(202);
+      expect(retried.json<{ jobId: string | null }>().jobId).not.toBeNull();
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.key).toBe(`erasure:${created.id}`);
+      // Once queued, another confirm is a conflict and queues nothing.
+      expect((await confirm()).statusCode).toBe(409);
+      expect(sent).toHaveLength(1);
+      await runQueued(sent[0] as Sent);
+      expect(await alive(target.pii_ref)).toBe(false);
+      // Audited once, when the request was claimed.
+      const audit = await tenancy.runWorkspace({ workspaceId: A }, (c) =>
+        new AuditLog(db.db).list(c, {}, { limit: 200 }),
+      );
+      expect(
+        audit.items.filter(
+          (e) =>
+            e.entityId === created.id &&
+            (e.after as { kind?: string } | null)?.kind === 'erasure_confirmed',
+        ),
+      ).toHaveLength(1);
+    } finally {
+      beforeSend = undefined;
+      await server.close();
+    }
+  });
+
+  it('[DEL-5][DEL-4] a postcode alone is refused for an access export and an erasure; a name with it, or one strong identifier, is not (S5-20261118-04)', async () => {
+    const server = app();
+    const post = (url: string, identifiers: Record<string, string>) =>
+      server.inject({ method: 'POST', url, headers: headers(admin), payload: { identifiers } });
+    for (const url of ['/api/access-requests/export', '/api/erasure-requests']) {
+      for (const weak of [{ postcode: 'SW1A 1AA' }, { name: `${PII_MARKER}Nobody Buyer` }, {}]) {
+        const res = await post(url, weak);
+        expect(res.statusCode).toBe(400);
+        expect(res.json<{ code: string }>().code).toBe('validation_failed');
+        expect(res.body).not.toContain(PII_MARKER);
+      }
+    }
+    const strong = [
+      { email: `${PII_MARKER}nobody-s@example.test` },
+      { phone: '07700900999' },
+      { buyer: `${PII_MARKER}nobody-s` },
+      { name: `${PII_MARKER}Nobody Buyer`, postcode: 'SW1A 1AA' },
+    ];
+    for (const identifiers of strong) {
+      expect((await post('/api/erasure-requests', identifiers)).statusCode).toBe(201);
+    }
+    await server.close();
+  });
+
+  it('[DP-8] every /api response says no-store, errors too (S5-20261118 hardening 2)', async () => {
+    const server = app();
+    const listed = await server.inject({
+      method: 'GET',
+      url: '/api/erasure-requests',
+      headers: headers(admin),
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers['cache-control']).toBe('no-store');
+    const refused = await server.inject({ method: 'GET', url: '/api/erasure-requests' });
+    expect(refused.statusCode).toBe(401);
+    expect(refused.headers['cache-control']).toBe('no-store');
+    await server.close();
+  });
+
   it("[DEL-5] the access export holds that buyer's records only, streamed, every read logged", async () => {
     const server = app();
     const mine = await ingest('order-f1', contact('Fay'), amazonAccount);
@@ -408,12 +562,14 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
       payload: { identifiers: { email: `${PII_MARKER}fay@example.test` } },
     });
     expect(child403.statusCode).toBe(403);
-    // Too broad: three records share this postcode, over the cap of 2 set for this test.
+    // Too broad: three records match this name and postcode, over the cap of 2 set for this test.
+    await ingest('order-f2', contact('Fay'), ebayAccount);
+    await ingest('order-f3', contact('Fay'), ebayAccount);
     const broad = await server.inject({
       method: 'POST',
       url: '/api/access-requests/export',
       headers: headers(admin),
-      payload: { identifiers: { postcode: 'SW1A 1AA' } },
+      payload: { identifiers: { name: `${PII_MARKER}Fay Buyer`, postcode: 'SW1A 1AA' } },
     });
     expect(broad.statusCode).toBe(422);
     const c = await owner.connect();

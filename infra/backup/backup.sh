@@ -5,7 +5,8 @@
 # 2. db-pii:  pg_dump streamed into the PII repository, tag db-pii (fields are ciphertext; the
 #    master key is never in a backup, invariant 9).
 # 3. The off-site tombstone journal (pii_journal volume, IDs only) into the main repository,
-#    tag journal, so a restore can always re-apply every deletion (invariant 10).
+#    tag journal, so a restore can always re-apply every deletion (invariant 10). journal.sh also
+#    ships it every 15 minutes between nightly runs (S5-20261118-01).
 # Never backed up: the vault's label files, the files volume, keys or secrets.
 # The server's keys cannot delete: forget and prune run only from retention.sh (ADR-016).
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -25,6 +26,5 @@ dump db-main omnibridge main db-main
 dump db-pii omnibridge_pii pii db-pii
 
 # The journal volume exists once pii-vault has run; an empty one is created if not.
-restic_run main --docker -v "$JOURNAL_VOLUME:/journal:ro" -- \
-  backup --quiet --host omnibridge --tag journal /journal
+journal_backup
 echo "backup: journal done"

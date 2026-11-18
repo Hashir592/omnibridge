@@ -91,6 +91,25 @@ export function withTenantTransaction<T>(
 }
 
 /**
+ * Runs `fn` in a new tenant transaction that commits on its own, even when `ctx` is bound to an
+ * open request or job transaction. Only for a write that must be visible to other transactions
+ * before the caller goes on, such as claiming an erasure request before its deletion is queued
+ * (S5-20261118-02). Everything else joins the bound transaction through `withTenantTransaction`.
+ */
+export function withOwnTenantTransaction<T>(
+  db: Kysely<MainDb>,
+  ctx: TenantContext,
+  fn: (trx: Transaction<MainDb>) => Promise<T>,
+): Promise<T> {
+  const problem = contextProblem(ctx);
+  if (problem !== undefined) return Promise.reject(problem);
+  return db.transaction().execute(async (trx) => {
+    await setTenant(trx, ctx);
+    return fn(trx);
+  });
+}
+
+/**
  * Opens the one transaction of a request or a job (TEN-1, invariant 3) and builds its context.
  * Used by the web request plugin, the job wrapper and the platform routes.
  */

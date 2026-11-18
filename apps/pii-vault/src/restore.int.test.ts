@@ -1,7 +1,9 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createLogger } from '@omnibridge/logger';
 import { PII_MARKER, startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { VaultClient } from '@omnibridge/vault-client';
@@ -55,6 +57,7 @@ describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
   const replay = async (
     database: string,
     mainTombstones: { workspace_id: string; pii_ref: string; run_id: string }[] = [],
+    journal = journalDir,
   ) => {
     const c = superuser(database);
     await c.connect();
@@ -64,8 +67,10 @@ describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
         `CREATE TEMP TABLE replay_main (workspace_id uuid, pii_ref uuid, run_id uuid,
                                         channel_account_id uuid, deleted_at timestamptz)`,
       );
-      const lines = readdirSync(journalDir)
-        .flatMap((f) => readFileSync(join(journalDir, f), 'utf8').split('\n'))
+      // A restic restore nests the files under /journal, so look in every folder.
+      const lines = readdirSync(journal, { recursive: true, withFileTypes: true })
+        .filter((f) => f.isFile() && /^tombstones-.*\.jsonl$/.test(f.name))
+        .flatMap((f) => readFileSync(join(f.parentPath, f.name), 'utf8').split('\n'))
         .filter((l) => l !== '');
       for (const line of lines) await c.query('INSERT INTO replay_journal VALUES ($1)', [line]);
       for (const t of mainTombstones) {
@@ -196,4 +201,64 @@ describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
     const plain = await sh(`pg_dump -U ${user} restored`);
     expect(plain).not.toContain(PII_MARKER);
   });
+
+  it('[AT-8][DEL-2] a deletion made after the nightly backup stays deleted after a full restore: the 15-minute journal run ships it (S5-20261118-01)', async () => {
+    const user = cluster.container.getUsername();
+    const backupDir = mkdtempSync(join(tmpdir(), 'ob-restic-'));
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      BACKUP_DIR: backupDir,
+      JOURNAL_VOLUME: journalDir,
+    };
+    const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    const bash = (script: string) => {
+      const res = spawnSync('bash', ['-c', script], { cwd: repoRoot, env, encoding: 'utf8' });
+      if (res.status !== 0) throw new Error(`${script}: ${res.stderr}`);
+      return res.stdout;
+    };
+    const keep = await ingest(A, 'day-keep');
+    const erased = await ingest(A, 'day-erased');
+
+    // The nightly run: the db-pii dump and the journal as it stood then.
+    await sh(`pg_dump -U ${user} -Fc -f /tmp/nightly.dump omnibridge_pii`);
+    bash('infra/backup/journal.sh');
+
+    // 14:00: an erasure. 14:15: the journal-only run ships its tombstone off-site.
+    await clients.deletion.delete({
+      workspace_id: A,
+      run_id: randomUUID(),
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [erased] },
+    });
+    expect(bash('infra/backup/journal.sh')).toContain('journal: backed up');
+
+    // 18:00: the host is lost. Only last night's dump and the off-site journal are left; db-main
+    // comes from the same nightly run, so it holds no tombstone of this deletion.
+    await sh(`createdb -U ${user} lost && pg_restore -U ${user} -d lost /tmp/nightly.dump`);
+    const restored = await rows(
+      'lost',
+      A,
+      'SELECT pii_ref FROM vault.records WHERE workspace_id = $1',
+    );
+    expect(restored.map((r) => r.pii_ref)).toEqual(expect.arrayContaining([keep, erased]));
+    const offsite = mkdtempSync(join(tmpdir(), 'ob-offsite-'));
+    env.OFFSITE = offsite;
+    bash('source infra/backup/lib.sh && journal_restore "$OFFSITE"');
+    await replay('lost', [], offsite);
+
+    const left = await rows(
+      'lost',
+      A,
+      'SELECT pii_ref FROM vault.records WHERE workspace_id = $1 AND NOT canary',
+    );
+    expect(left.map((r) => r.pii_ref)).toContain(keep);
+    expect(left.map((r) => r.pii_ref)).not.toContain(erased);
+    expect(
+      await rows(
+        'lost',
+        A,
+        `SELECT 1 FROM vault.record_fields WHERE pii_ref = '${erased}' AND workspace_id = $1`,
+      ),
+    ).toEqual([]);
+  }, 300_000);
 });

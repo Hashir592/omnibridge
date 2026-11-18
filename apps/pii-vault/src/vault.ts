@@ -191,12 +191,16 @@ export class Vault {
     });
   }
 
-  /** DEL-1: the caller sets delete_after once dispatch or delivery is known. */
+  /**
+   * DEL-1: the caller sets delete_after once dispatch or delivery is known. The canary never
+   * expires (S5-20261118 hardening 3): a caller holding its ref cannot move it.
+   */
   async setExpiry(req: ExpiryRequest): Promise<{ updated: number }> {
     this.#checkExpiry(req.delete_after);
     return this.#tx(req.workspace_id, async (c) => {
       const res = await c.query(
-        `UPDATE vault.records SET delete_after = $3 WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[])`,
+        `UPDATE vault.records SET delete_after = $3
+          WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[]) AND NOT canary`,
         [req.workspace_id, req.pii_refs, req.delete_after],
       );
       return { updated: res.rowCount ?? 0 };
@@ -386,6 +390,16 @@ export class Vault {
       if (matches.length > 0) workspaces.push({ workspace_id: workspaceId, matches });
     }
     return { workspaces };
+  }
+
+  /**
+   * Security log retention (ADR-068, PRD 7.3): deletes access-log rows and canary events older
+   * than 6 years, in every workspace, closed ones too. The cut-off is fixed in db-pii 0007. Run
+   * daily; returns how many rows went (a count only).
+   */
+  async purgeSecurityLogs(): Promise<number> {
+    const res = await this.#pool.query<{ n: string }>('SELECT vault.purge_security_logs() AS n');
+    return Number(res.rows[0]?.n ?? '0');
   }
 
   /**

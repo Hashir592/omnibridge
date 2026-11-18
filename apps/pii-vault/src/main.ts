@@ -60,6 +60,27 @@ const deletion = new DeletionService({
   },
 });
 
+// ADR-068 hardening 4: the access log and canary events are kept 6 years, then purged. Once at
+// start and then daily; a failure is logged (no values) and retried the next day.
+const DAY_MS = 86_400_000;
+const purgeSecurityLogs = async () => {
+  try {
+    const count = await vault.purgeSecurityLogs();
+    logger.info({ event: 'vault.security_log_purge', count }, 'security logs purged');
+  } catch (err) {
+    logger.error(
+      {
+        event: 'vault.security_log_purge_failed',
+        error: err instanceof Error ? err.name : 'unknown',
+      },
+      'security log purge failed',
+    );
+  }
+};
+void purgeSecurityLogs();
+const purgeTimer = setInterval(() => void purgeSecurityLogs(), DAY_MS);
+purgeTimer.unref();
+
 const app = buildVaultApp({
   logger,
   version,
@@ -71,6 +92,7 @@ const app = buildVaultApp({
 await app.listen({ host: '0.0.0.0', port: Number(process.env.PORT ?? '8080') });
 
 const shutdown = async () => {
+  clearInterval(purgeTimer);
   await app.close();
   await pool.end();
   process.exit(0);

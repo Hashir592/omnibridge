@@ -85,3 +85,26 @@ restic_init() {
     echo "restic: $which repository initialised"
   fi
 }
+
+# The tombstone journal (invariant 10, S5-20261118-01): the pii_journal volume, or a directory
+# given as an absolute path (tests), into the main repository under the tag journal.
+journal_source() {
+  if [[ "$JOURNAL_VOLUME" == */* || "$JOURNAL_VOLUME" == *\* ]]; then
+    host_path "$JOURNAL_VOLUME"
+  else
+    printf '%s' "$JOURNAL_VOLUME"
+  fi
+}
+journal_backup() {
+  restic_run main --docker -v "$(journal_source):/journal:ro" -- \
+    backup --quiet --host omnibridge --tag journal /journal
+}
+
+# The latest backed-up journal (what a restore after a host loss would have) into <dir>, owned
+# by the calling user so it can be cleaned up without root.
+journal_restore() {
+  local out="$1"
+  mkdir -p "$out"
+  restic_run main --docker -v "$(host_path "$out"):/out" --entrypoint sh -- \
+    -c "restic restore --quiet --tag journal latest --target /out && chown -R $(id -u):$(id -g) /out"
+}

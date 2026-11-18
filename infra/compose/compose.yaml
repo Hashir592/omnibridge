@@ -211,6 +211,7 @@ services:
         aliases: [omnibridge-web]
       ob_app: {}
       ob_db: {}
+      ob_vault: {}
     depends_on:
       migrate-main: { condition: service_completed_successfully }
       pii-vault: { condition: service_healthy }
@@ -243,7 +244,7 @@ services:
       WORKER_HEALTH_FILE: /tmp/worker-heartbeat
       # Most jobs at once across all queues; /metrics on an unpublished port (T-0104).
       FILES_DIR: /data/files
-      # pii-vault over ob_app (T-0402): the worker token for ingest, labels and the inbox; the
+      # pii-vault over ob_vault (T-0402, ADR-068): the worker token for ingest, labels and the inbox; the
       # deletion token only for the deletion jobs (DEL-1).
       PII_VAULT_URL: http://pii-vault:8080
       VAULT_TOKEN_FILE: /run/secrets/vault_token_worker
@@ -271,7 +272,7 @@ services:
     # The worker only reads files (to scan them); it never writes the volume.
     volumes:
       - files_data:/data/files:ro
-    networks: [ob_app, ob_db, scan_ob]
+    networks: [ob_app, ob_db, ob_vault, scan_ob]
     depends_on:
       migrate-main: { condition: service_completed_successfully }
       pii-vault: { condition: service_healthy }
@@ -346,7 +347,8 @@ services:
       [vault_app_password, pii_kek, vault_token_web, vault_token_worker, vault_token_deletion]
     volumes:
       - pii_journal:/data/journal
-    networks: [ob_app, ob_pii]
+    # ob_vault and ob_pii are both internal: the vault has no internet egress (ADR-068).
+    networks: [ob_vault, ob_pii]
     depends_on:
       migrate-pii: { condition: service_completed_successfully }
     mem_limit: 96m
@@ -389,6 +391,10 @@ networks:
     internal: true # ADR-034: PostgreSQL needs no internet egress
   ob_pii:
     name: ob_pii
+    internal: true
+  # Web and worker to pii-vault only (T-0409, S5-20261118 hardening 1).
+  ob_vault:
+    name: ob_vault
     internal: true
   scan_ob:
     name: scan_ob

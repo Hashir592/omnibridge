@@ -1,7 +1,7 @@
 import type { ErasureWithdrawReason, TenantContext } from '@omnibridge/core';
 import type { Kysely, Selectable } from 'kysely';
 import type { ErasureRequestsTable, MainDb } from './schema.ts';
-import { withTenantTransaction } from './tenant.ts';
+import { withOwnTenantTransaction, withTenantTransaction } from './tenant.ts';
 
 /** DEL-4: an erasure request is due one calendar month after it was made. */
 export function erasureDueAt(requestedAt: Date): Date {
@@ -132,24 +132,40 @@ export class ErasureRequestRepository {
     });
   }
 
-  /** Marks an open request confirmed; undefined when it is not open (confirmed or withdrawn). */
-  async confirm(
+  /**
+   * Claims an open request for deletion (S5-20261118-02): marks it confirmed, with no job yet, in
+   * a transaction of its own that commits before the caller queues the deletion, even inside a
+   * request's transaction. From then on a withdraw finds it not open, so a request with a queued
+   * deletion can never end up withdrawn. Undefined when it is not open.
+   */
+  async claim(
     ctx: TenantContext,
     id: string,
-    input: { by: string; at: Date; jobId: string | null },
+    input: { by: string; at: Date },
   ): Promise<ErasureRequest | undefined> {
-    return withTenantTransaction(this.#db, ctx, async (trx) => {
+    return withOwnTenantTransaction(this.#db, ctx, async (trx) => {
       const row = await trx
         .updateTable('app.erasure_requests')
-        .set({
-          state: 'confirmed',
-          confirmed_by: input.by,
-          confirmed_at: input.at,
-          job_id: input.jobId,
-        })
+        .set({ state: 'confirmed', confirmed_by: input.by, confirmed_at: input.at, job_id: null })
         .where('workspace_id', '=', ctx.workspaceId)
         .where('id', '=', id)
         .where('state', '=', 'open')
+        .returningAll()
+        .executeTakeFirst();
+      return row === undefined ? undefined : toRequest(row);
+    });
+  }
+
+  /** Records the queued deletion of a claimed request; undefined when it already has one. */
+  async setJob(ctx: TenantContext, id: string, jobId: string): Promise<ErasureRequest | undefined> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const row = await trx
+        .updateTable('app.erasure_requests')
+        .set({ job_id: jobId })
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('id', '=', id)
+        .where('state', '=', 'confirmed')
+        .where((eb) => eb.or([eb('job_id', 'is', null), eb('job_id', '=', jobId)]))
         .returningAll()
         .executeTakeFirst();
       return row === undefined ? undefined : toRequest(row);
