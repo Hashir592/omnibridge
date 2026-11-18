@@ -1229,6 +1229,33 @@
       "status": "review"
     },
     {
+      "id": "T-0309",
+      "module": "M03",
+      "session": "S2",
+      "title": "Withdraw action on erasure requests (ADR-067)",
+      "goal": "An admin can withdraw a wrong erasure request from the screen.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-4"
+      ],
+      "scope": [
+        "Withdraw with a reason on every open request, in the list and on the matches card; 'Not this buyer' removed; list shows Withdrawn DD/MM/YYYY and the reason; MSW mock 200/400/403/404/409"
+      ],
+      "out_of_scope": [
+        "Server logic (T-0408)"
+      ],
+      "depends_on": [
+        "T-0408"
+      ],
+      "acceptance": [
+        "UI tests cite DEL-4",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "done",
+      "notes": "Recorded after the fact by S1: PR #94."
+    },
+    {
       "id": "T-0406",
       "module": "M04",
       "session": "S5",
