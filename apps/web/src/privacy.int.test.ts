@@ -346,7 +346,7 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
     await server.close();
   });
 
-  it("[AT-10] a signed eBay notice deletes that user's eBay records only; the challenge still answers the right hash", async () => {
+  it("[AT-10] a signed eBay notice deletes that user's eBay records only, matched exactly ('AbC' never 'abc'); the challenge still answers the right hash", async () => {
     const server = app();
     const { username, userId } = SAMPLE.message.notification.data;
     const feedback = await clients.worker.ingest({
@@ -368,6 +368,20 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
       contact('Ida', { channel_username: username }),
       amazonAccount,
     );
+    // ADR-066: IDs and usernames that differ only in case are other people on eBay too.
+    const otherCaseId = await ingest(
+      'ebay-order-case-id',
+      contact('Jo', { channel_buyer_id: userId.toLowerCase() }),
+      ebayAccount,
+    );
+    const otherCaseName = await clients.worker.ingest({
+      workspace_id: A,
+      kind: 'ebay_feedback',
+      channel_account_id: ebayAccount,
+      subject_type: 'feedback',
+      subject_id: 'fb-case-name',
+      fields: { buyer_username: username.toUpperCase() },
+    });
     sent.length = 0;
     const res = await server.inject({
       method: 'POST',
@@ -387,6 +401,8 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
     expect(await alive(feedback.pii_ref)).toBe(false);
     expect(await alive(ebayOrder.pii_ref)).toBe(false);
     expect(await alive(amazonOrder.pii_ref)).toBe(true);
+    expect(await alive(otherCaseId.pii_ref)).toBe(true);
+    expect(await alive(otherCaseName.pii_ref)).toBe(true);
 
     // A second notice for the same user finds nothing left and queues nothing.
     sent.length = 0;

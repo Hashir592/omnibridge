@@ -21,7 +21,13 @@ import {
   type ReadPurpose,
   type SearchResponse,
 } from '@omnibridge/vault-client/schemas';
-import { indexValues, maskFields, normaliseBuyer, queryValues } from './normalise.ts';
+import {
+  BUYER_SOURCE_FIELDS,
+  indexValues,
+  maskFields,
+  normaliseBuyerExact,
+  queryValues,
+} from './normalise.ts';
 
 /** The caller a service token stands for (invariant 8). */
 export type Caller = 'web' | 'worker' | 'deletion';
@@ -335,14 +341,15 @@ export class Vault {
   }
 
   /**
-   * AT-10 (FA-14): the records of one eBay user, by user ID or username on the `buyer` blind
-   * index, in every workspace that holds PII. One short transaction per workspace; a workspace
+   * AT-10 (FA-14): the records of one eBay user, by user ID or username on the exact
+   * `buyer_exact` blind index (ADR-066: trim only, never case-folded), in every workspace that
+   * holds PII. One short transaction per workspace; a workspace
    * with a hit gets an access-log row with the count, one without is not logged.
    */
   async ebayUserMatch(req: EbayUserMatchRequest, actor: Actor): Promise<EbayUserMatchResponse> {
     const values = [req.user_id, req.username]
       .filter((v): v is string => v !== undefined)
-      .map(normaliseBuyer)
+      .map(normaliseBuyerExact)
       .filter((v) => v !== '');
     const directory = await this.#pool.query<{ workspace_id: string }>(
       'SELECT workspace_id FROM vault.workspace_directory ORDER BY workspace_id',
@@ -357,11 +364,11 @@ export class Vault {
              FROM vault.records r
             WHERE r.workspace_id = $1 AND NOT r.canary
               AND r.pii_ref IN (SELECT b.pii_ref FROM vault.blind_index b
-                                 WHERE b.workspace_id = $1 AND b.field = 'buyer'
+                                 WHERE b.workspace_id = $1 AND b.field = 'buyer_exact'
                                    AND b.mac = ANY($2::bytea[]))
             ORDER BY r.pii_ref
             LIMIT $3`,
-          [workspaceId, values.map((v) => keys.index.mac('buyer', v)), SEARCH_LIMIT],
+          [workspaceId, values.map((v) => keys.index.mac('buyer_exact', v)), SEARCH_LIMIT],
         );
         if (res.rows.length > 0) {
           await this.#log(
@@ -379,6 +386,61 @@ export class Vault {
       if (matches.length > 0) workspaces.push({ workspace_id: workspaceId, matches });
     }
     return { workspaces };
+  }
+
+  /**
+   * ADR-066 backfill (T-0407): records ingested before `buyer_exact` existed get that entry,
+   * from their stored buyer fields. Idempotent: a record that has one is skipped. One short
+   * transaction per workspace. Returns how many entries were added (a count, never a value).
+   */
+  async backfillBuyerExact(): Promise<number> {
+    const directory = await this.#pool.query<{ workspace_id: string }>(
+      'SELECT workspace_id FROM vault.workspace_directory ORDER BY workspace_id',
+    );
+    let added = 0;
+    for (const { workspace_id: workspaceId } of directory.rows) {
+      added += await this.#tx(workspaceId, async (c, tx) => {
+        const keys = await this.#loadKeys(tx, workspaceId, false);
+        if (keys === undefined) return 0;
+        const res = await c.query<{ pii_ref: string; field: string; ciphertext: Buffer }>(
+          `SELECT f.pii_ref, f.field, f.ciphertext
+             FROM vault.record_fields f
+             JOIN vault.records r ON r.workspace_id = f.workspace_id AND r.pii_ref = f.pii_ref
+            WHERE f.workspace_id = $1 AND NOT r.canary AND f.field = ANY($2::text[])
+              AND NOT EXISTS (SELECT 1 FROM vault.blind_index b
+                               WHERE b.workspace_id = f.workspace_id AND b.pii_ref = f.pii_ref
+                                 AND b.field = 'buyer_exact')
+            ORDER BY f.pii_ref`,
+          [workspaceId, BUYER_SOURCE_FIELDS],
+        );
+        const byRef = new Map<string, Record<string, string>>();
+        for (const row of res.rows) {
+          const fields = byRef.get(row.pii_ref) ?? {};
+          fields[row.field] = keys.data
+            .decrypt(row.ciphertext, {
+              workspaceId,
+              table: FIELD_TABLE,
+              column: row.field,
+              rowId: row.pii_ref,
+            })
+            .toString('utf8');
+          byRef.set(row.pii_ref, fields);
+        }
+        let count = 0;
+        for (const [piiRef, fields] of byRef) {
+          const exact = indexValues(fields).buyer_exact;
+          if (exact === undefined) continue;
+          const ins = await c.query(
+            `INSERT INTO vault.blind_index (workspace_id, pii_ref, field, mac, key_version)
+             VALUES ($1, $2, 'buyer_exact', $3, $4) ON CONFLICT DO NOTHING`,
+            [workspaceId, piiRef, keys.index.mac('buyer_exact', exact), keys.index.version],
+          );
+          count += ins.rowCount ?? 0;
+        }
+        return count;
+      });
+    }
+    return added;
   }
 
   /** SEC-12: the workspace's canary, made with its first keys. No blind index, never expires. */

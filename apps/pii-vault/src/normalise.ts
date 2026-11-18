@@ -37,8 +37,34 @@ export function normalisePhone(value: string): string {
   return national === undefined ? digits : `0${national.replace(/^0/, '')}`;
 }
 
+/** Case-folded: the DEL-4 erasure search finds a buyer however the admin typed the ID. */
 export function normaliseBuyer(value: string): string {
   return value.trim().toLowerCase();
+}
+
+/**
+ * ADR-066: exact, trim only. Channel IDs and usernames are case-sensitive, and an eBay deletion
+ * notice cannot be undone, so 'AbC' must never reach 'abc'.
+ */
+export function normaliseBuyerExact(value: string): string {
+  return value.trim();
+}
+
+/** The fields that name the channel's buyer, in order: its ID, else a username. */
+export const BUYER_SOURCE_FIELDS = [
+  'channel_buyer_id',
+  'channel_username',
+  'buyer_username',
+  'sender_username',
+] as const;
+
+/** The channel's buyer of a record: the first source field that is not blank. */
+export function buyerSource(fields: Readonly<Record<string, string>>): string | undefined {
+  for (const name of BUYER_SOURCE_FIELDS) {
+    const value = fields[name];
+    if (value !== undefined && value.trim() !== '') return value;
+  }
+  return undefined;
 }
 
 /** The blind-indexed fields of a record, normalised; empty results are left out. */
@@ -54,15 +80,11 @@ export function indexValues(fields: Readonly<Record<string, string>>): Record<st
   add('phone', fields.phone, normalisePhone);
   add('postcode', fields.postcode, normalisePostcode);
   // The channel's buyer: its ID, else its username (an eBay message or feedback has only that).
-  // An eBay deletion notice (AT-10) and DEL-4 erasure search by either.
-  add(
-    'buyer',
-    fields.channel_buyer_id ??
-      fields.channel_username ??
-      fields.buyer_username ??
-      fields.sender_username,
-    normaliseBuyer,
-  );
+  // DEL-4 erasure searches by either, case-folded.
+  // An eBay deletion notice (AT-10) matches `buyer_exact` only (ADR-066).
+  const buyer = buyerSource(fields);
+  add('buyer', buyer, normaliseBuyer);
+  add('buyer_exact', buyer, normaliseBuyerExact);
   // ORD-9: same buyer and same delivery address, exact after normalising.
   const name = fields.name === undefined ? '' : normaliseName(fields.name);
   const line1 = fields.address_line1 === undefined ? '' : normaliseName(fields.address_line1);

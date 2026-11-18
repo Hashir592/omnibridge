@@ -31,6 +31,25 @@ const vault = new Vault({
     );
   },
 });
+// ADR-066 (T-0407): give records from before the exact buyer index their entry. Runs before
+// the vault serves, so an eBay notice never meets a record without one; a no-op once done.
+// A failure is logged (no values) and never keeps the vault down: the next start retries.
+// Nothing is deployed yet (ADR-029), so this only touches dev data; remove it before M22.
+try {
+  const backfilled = await vault.backfillBuyerExact();
+  logger.info(
+    { event: 'vault.buyer_exact_backfill', count: backfilled },
+    'exact buyer index ready',
+  );
+} catch (err) {
+  logger.error(
+    {
+      event: 'vault.buyer_exact_backfill_failed',
+      error: err instanceof Error ? err.name : 'unknown',
+    },
+    'exact buyer index backfill failed',
+  );
+}
 // DEL-1: tombstones are also journalled to this directory (invariant 10), a volume shipped
 // off-site by the backup job (T-0405).
 const deletion = new DeletionService({
