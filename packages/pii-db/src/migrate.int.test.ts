@@ -50,6 +50,7 @@ describe('db-pii roles and migrations', () => {
       '0004_closed_workspaces',
       '0005_erasure_canary',
       '0006_buyer_exact',
+      '0007_security_log_retention',
     ]);
     expect((await migratePii(owner)).applied).toEqual([]);
   });

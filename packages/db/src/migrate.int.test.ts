@@ -84,6 +84,7 @@ describe('db-main roles and migrations', () => {
       '0024_deletion',
       '0025_erasure_requests',
       '0026_erasure_withdraw',
+      '0027_validate_erasure_states',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });
