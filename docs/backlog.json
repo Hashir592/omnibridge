@@ -1199,6 +1199,46 @@
       "status": "review"
     },
     {
+      "id": "T-0409",
+      "module": "M04",
+      "session": "S3",
+      "title": "Fixes from the PII-boundary audit (ADR-068)",
+      "goal": "A restore never brings back a deletion, the leak scan can fail, and one postcode cannot reach hundreds of buyers.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-2",
+        "DEL-4",
+        "DEL-5",
+        "AT-8",
+        "AT-9",
+        "DP-7",
+        "DP-8"
+      ],
+      "scope": [
+        "S5-20261118-01: journal-only restic run every 15 minutes (local scheduler; M22 adds the host timer); drill test: a deletion after the nightly backup stays deleted after a full restore",
+        "S5-20261118-02: confirm claims the request, then queues the deletion",
+        "S5-20261118-03: a scrubbed marker in a log line counts as a leak; the drill scans full Mailpit bodies",
+        "S5-20261118-04: at least one strong identifier (email, phone, channel buyer ID or username, or name plus postcode); postcode alone 400",
+        "Hardening 1, 2, 3, 7: internal ob_vault network; Cache-Control no-store on /api; canary expiry fixed; VALIDATE the two NOT VALID constraints",
+        "Hardening 4: access log and canary events kept 6 years, purged daily by the ops role",
+        "Hardening 5: one line in the restore runbook on VACUUM residue"
+      ],
+      "out_of_scope": [
+        "UI gcTime (S2)",
+        "M22 host timers"
+      ],
+      "depends_on": [
+        "T-0406"
+      ],
+      "acceptance": [
+        "Each finding ID listed in the PR with the test that proves it; tests first",
+        "S5 re-checks in one PR comment",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
       "id": "T-0308",
       "module": "M03",
       "session": "S2",
