@@ -15,7 +15,7 @@ import type { Handlers } from './contract.ts';
  */
 export interface PrivacyOptions {
   vault: Pick<VaultClient, 'search' | 'mask' | 'readFull'>;
-  erasures: Pick<ErasureRequestRepository, 'create' | 'get' | 'list' | 'confirm'>;
+  erasures: Pick<ErasureRequestRepository, 'create' | 'get' | 'list' | 'confirm' | 'withdraw'>;
   queue: Pick<JobQueue, 'send'>;
   audit: Pick<AuditLog, 'record'>;
   now?: () => Date;
@@ -45,6 +45,8 @@ function requestBody(request: ErasureRequest, now: Date) {
     matchCount: request.piiRefs.length,
     confirmedAt: request.confirmedAt?.toISOString() ?? null,
     jobId: request.jobId,
+    withdrawnAt: request.withdrawnAt?.toISOString() ?? null,
+    withdrawReason: request.withdrawReason,
   };
 }
 
@@ -56,6 +58,7 @@ export function privacyHandlers(
       createErasureRequest: unavailable,
       listErasureRequests: unavailable,
       confirmErasureRequest: unavailable,
+      withdrawErasureRequest: unavailable,
       exportSubjectAccess: unavailable,
     };
   }
@@ -120,7 +123,7 @@ export function privacyHandlers(
         throw new ApiError({
           status: 409,
           code: 'conflict',
-          detail: 'This erasure request was already confirmed.',
+          detail: `This erasure request is ${existing.state}, not open.`,
         });
       }
       // One deletion of exactly the refs the admin saw, keyed by the request so it runs once.
@@ -149,6 +152,37 @@ export function privacyHandlers(
         ip: request.ip,
       });
       return { status: 202, body: requestBody(confirmed, at) };
+    },
+
+    // ADR-067: an open request is closed with a reason code; nothing is queued or deleted.
+    withdrawErasureRequest: async ({ params, body, session, tenant, request }) => {
+      const existing = await o.erasures.get(tenant, params.id);
+      if (existing === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      const at = now();
+      const withdrawn =
+        existing.state === 'open'
+          ? await o.erasures.withdraw(tenant, existing.id, {
+              by: session.userId,
+              at,
+              reason: body.reason,
+            })
+          : undefined;
+      if (withdrawn === undefined) {
+        throw new ApiError({
+          status: 409,
+          code: 'conflict',
+          detail: 'Only an open erasure request can be withdrawn.',
+        });
+      }
+      await o.audit.record(tenant, {
+        action: 'deletion.run',
+        actor: { kind: 'user', userId: session.userId },
+        entityId: existing.id,
+        after: { kind: 'erasure_withdrawn', row_count: existing.piiRefs.length },
+        reason: body.reason,
+        ip: request.ip,
+      });
+      return { status: 200, body: requestBody(withdrawn, at) };
     },
 
     exportSubjectAccess: async ({ body, session, tenant, request }) => {

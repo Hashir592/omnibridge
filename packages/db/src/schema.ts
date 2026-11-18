@@ -1,4 +1,4 @@
-import type { AuditValues } from '@omnibridge/core';
+import type { AuditValues, ErasureWithdrawReason } from '@omnibridge/core';
 import type { ColumnType, Generated } from 'kysely';
 
 /**
@@ -231,10 +231,13 @@ export interface ErasureRequestsTable {
   requested_at: ColumnType<Date, Date, never>;
   due_at: ColumnType<Date, Date, never>;
   pii_refs: ColumnType<string[], string[], never>;
-  state: 'open' | 'confirmed';
+  state: 'open' | 'confirmed' | 'withdrawn';
   confirmed_by: string | null;
   confirmed_at: Date | null;
   job_id: string | null;
+  withdrawn_by: string | null;
+  withdrawn_at: Date | null;
+  withdraw_reason: ErasureWithdrawReason | null;
 }
 
 /** app.pii_tombstones (T-0403, invariant 10): the db-main copy, IDs only. */

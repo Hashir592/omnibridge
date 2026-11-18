@@ -1,4 +1,4 @@
-import type { TenantContext } from '@omnibridge/core';
+import type { ErasureWithdrawReason, TenantContext } from '@omnibridge/core';
 import type { Kysely, Selectable } from 'kysely';
 import type { ErasureRequestsTable, MainDb } from './schema.ts';
 import { withTenantTransaction } from './tenant.ts';
@@ -19,10 +19,13 @@ export interface ErasureRequest {
   requestedAt: Date;
   dueAt: Date;
   piiRefs: string[];
-  state: 'open' | 'confirmed';
+  state: 'open' | 'confirmed' | 'withdrawn';
   confirmedBy: string | null;
   confirmedAt: Date | null;
   jobId: string | null;
+  withdrawnBy: string | null;
+  withdrawnAt: Date | null;
+  withdrawReason: ErasureWithdrawReason | null;
 }
 
 const toRequest = (r: Selectable<ErasureRequestsTable>): ErasureRequest => ({
@@ -35,6 +38,9 @@ const toRequest = (r: Selectable<ErasureRequestsTable>): ErasureRequest => ({
   confirmedBy: r.confirmed_by,
   confirmedAt: r.confirmed_at,
   jobId: r.job_id,
+  withdrawnBy: r.withdrawn_by,
+  withdrawnAt: r.withdrawn_at,
+  withdrawReason: r.withdraw_reason,
 });
 
 /**
@@ -99,7 +105,34 @@ export class ErasureRequestRepository {
     );
   }
 
-  /** Marks an open request confirmed; undefined when it is not open (already confirmed). */
+  /**
+   * ADR-067: closes an open request without deleting anything; undefined when it is not open
+   * (confirmed or already withdrawn).
+   */
+  async withdraw(
+    ctx: TenantContext,
+    id: string,
+    input: { by: string; at: Date; reason: ErasureWithdrawReason },
+  ): Promise<ErasureRequest | undefined> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const row = await trx
+        .updateTable('app.erasure_requests')
+        .set({
+          state: 'withdrawn',
+          withdrawn_by: input.by,
+          withdrawn_at: input.at,
+          withdraw_reason: input.reason,
+        })
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('id', '=', id)
+        .where('state', '=', 'open')
+        .returningAll()
+        .executeTakeFirst();
+      return row === undefined ? undefined : toRequest(row);
+    });
+  }
+
+  /** Marks an open request confirmed; undefined when it is not open (confirmed or withdrawn). */
   async confirm(
     ctx: TenantContext,
     id: string,

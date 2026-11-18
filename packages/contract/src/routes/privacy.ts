@@ -1,3 +1,4 @@
+import { ERASURE_WITHDRAW_REASONS } from '@omnibridge/core';
 import { z } from 'zod';
 import { FileDownloadSchema } from '../download.ts';
 import { defineRoute } from '../route.ts';
@@ -8,7 +9,8 @@ import { defineRoute } from '../route.ts';
  * a URL, and are never stored: an erasure request keeps the matching record refs, and the access
  * export is streamed and kept nowhere. Errors:
  * - 404 not_found: no such request in this workspace
- * - 409 conflict: the request was already confirmed
+ * - 400 validation_failed: a withdraw reason missing or not in the list
+ * - 409 conflict: the request is no longer open (confirmed or withdrawn)
  * - 422 validation_failed: no identifier given
  * - 503 service_unavailable: the PII vault is not configured or not reachable
  */
@@ -48,11 +50,13 @@ export const ErasureRequestSchema = z
     requestedAt: z.iso.datetime(),
     /** DEL-4: one month after the request. */
     dueAt: z.iso.datetime(),
-    /** Still open after its due date. */
+    /** Still open after its due date. A withdrawn request is never overdue (ADR-067). */
     overdue: z.boolean(),
-    state: z.enum(['open', 'confirmed']),
+    state: z.enum(['open', 'confirmed', 'withdrawn']),
     matchCount: z.number().int().min(0),
     confirmedAt: z.iso.datetime().nullable(),
+    withdrawnAt: z.iso.datetime().nullable(),
+    withdrawReason: z.enum(ERASURE_WITHDRAW_REASONS).nullable(),
     /** The deletion job (GET /jobs/:id shows its progress), once confirmed. */
     jobId: z.uuid().nullable(),
   })
@@ -96,6 +100,21 @@ export const confirmErasureRequest = defineRoute({
 });
 
 /**
+ * ADR-067: close an open request without deleting anything (a wrong or empty search). The reason
+ * is a code from a fixed list, never free text. 409 once it is confirmed or withdrawn.
+ */
+export const withdrawErasureRequest = defineRoute({
+  id: 'withdrawErasureRequest',
+  method: 'POST',
+  path: '/erasure-requests/:id/withdraw',
+  summary: 'Withdraw an open erasure request: nothing is deleted',
+  params: z.object({ id: z.uuid() }),
+  body: z.object({ reason: z.enum(ERASURE_WITHDRAW_REASONS) }).strict(),
+  responses: { 200: ErasureRequestSchema },
+  ...privacy,
+});
+
+/**
  * DEL-5: everything held about one buyer, as a JSON file streamed to the admin and stored
  * nowhere (the one export DP-8 allows, because the buyer asked for it). Every read is logged.
  */
@@ -113,5 +132,6 @@ export const privacyRoutes = [
   createErasureRequest,
   listErasureRequests,
   confirmErasureRequest,
+  withdrawErasureRequest,
   exportSubjectAccess,
 ] as const;
