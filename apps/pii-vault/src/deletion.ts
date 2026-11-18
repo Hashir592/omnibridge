@@ -139,6 +139,7 @@ export class DeletionService {
         // Closure: the keys go last, once no record is left that they could open. The marker
         // makes the vault refuse any later ingest for this workspace (ADR-065, F-M04h-04).
         await c.query('DELETE FROM vault.workspace_keys WHERE workspace_id = $1', [ws]);
+        await c.query('DELETE FROM vault.workspace_directory WHERE workspace_id = $1', [ws]);
         await c.query(
           `INSERT INTO vault.closed_workspaces (workspace_id, closed_at) VALUES ($1, $2)
            ON CONFLICT DO NOTHING`,

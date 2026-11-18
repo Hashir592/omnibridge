@@ -19,7 +19,7 @@ export const CALLER_CAPABILITIES: Readonly<Record<Caller, readonly Capability[]>
 
 /** DP-7: which caller may read in full for which purpose. */
 export const CALLER_READ_PURPOSES: Readonly<Record<Caller, readonly ReadPurpose[]>> = {
-  web: ['order_detail', 'inbox'],
+  web: ['order_detail', 'inbox', 'subject_access'],
   worker: ['label', 'inbox'],
   deletion: [],
 };

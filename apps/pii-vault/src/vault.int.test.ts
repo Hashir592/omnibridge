@@ -87,7 +87,16 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       version: 'test',
       destination: { write: (line: string) => (logs.push(line), true) },
     });
-    const vault = new Vault({ pool: appPool, keyring: parseKeyring('pii', generateKekLine(1)) });
+    const vault = new Vault({
+      pool: appPool,
+      keyring: parseKeyring('pii', generateKekLine(1)),
+      onCanary: (event) => {
+        logger.warn(
+          { event: 'vault.canary_read', workspaceId: event.workspaceId },
+          'canary record read',
+        );
+      },
+    });
     const app = buildVaultApp({
       logger,
       version: 'test',
@@ -397,6 +406,88 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect((matched as VaultError).status).toBe(404);
     expect(await raw(ownerPool, unknown, 'SELECT 1 FROM vault.workspace_keys')).toEqual([]);
     expect(await raw(ownerPool, unknown, 'SELECT 1 FROM vault.access_log')).toEqual([]);
+  });
+
+  it('[SEC-12] each workspace gets one canary that no search finds; reading or masking it writes a canary event', async () => {
+    const C = randomUUID();
+    await ingest(C, 'order-canary-1', contact('301'));
+    const canaries = await raw(
+      ownerPool,
+      C,
+      'SELECT pii_ref, delete_after FROM vault.records WHERE canary',
+    );
+    expect(canaries).toHaveLength(1);
+    const canary = canaries[0]?.pii_ref as string;
+    expect(String(canaries[0]?.delete_after)).toBe('Infinity');
+    // No blind index, so no search or match reaches it.
+    expect(
+      await raw(ownerPool, C, 'SELECT 1 FROM vault.blind_index WHERE pii_ref = $1', [canary]),
+    ).toEqual([]);
+    const found = await clients.web.search({
+      workspaceId: C,
+      purpose: 'erasure',
+      query: { name: 'Canary Record' },
+    });
+    expect(found.matches).toEqual([]);
+    // A second ingest makes no second canary.
+    await ingest(C, 'order-canary-2', contact('302'));
+    expect(await raw(ownerPool, C, 'SELECT 1 FROM vault.records WHERE canary')).toHaveLength(1);
+    const before = logs.length;
+    await clients.web.readFull({ workspaceId: C, piiRef: canary, purpose: 'order_detail' });
+    await clients.web.mask(C, [canary]);
+    const events = await raw(
+      ownerPool,
+      C,
+      'SELECT pii_ref, caller, capability FROM vault.canary_events ORDER BY id',
+    );
+    expect(events).toEqual([
+      { pii_ref: canary, caller: 'web', capability: 'read_full' },
+      { pii_ref: canary, caller: 'web', capability: 'mask' },
+    ]);
+    expect(logs.slice(before).filter((l) => l.includes('vault.canary_read'))).toHaveLength(2);
+  });
+
+  it('[AT-10] an eBay user is matched by ID or username in every workspace that holds PII; web only', async () => {
+    const E1 = randomUUID();
+    const E2 = randomUUID();
+    const user = `pIIMARK-ebayuser-${randomUUID().slice(0, 6)}`.replace('pIIMARK', PII_MARKER);
+    const feedback = await clients.worker.ingest({
+      workspace_id: E1,
+      kind: 'ebay_feedback',
+      channel_account_id: account,
+      subject_type: 'feedback',
+      subject_id: 'fb-1',
+      fields: { buyer_username: user },
+    });
+    const order = await clients.web.ingest({
+      workspace_id: E2,
+      kind: 'buyer_contact',
+      channel_account_id: otherAccount,
+      subject_type: 'order',
+      subject_id: 'ebay-order-1',
+      fields: { ...contact('401'), channel_buyer_id: 'EBAY-ID-77' },
+    });
+    await ingest(E2, 'someone-else', contact('402'));
+    const res = await clients.web.ebayUserMatch({
+      user_id: 'ebay-id-77',
+      username: user.toUpperCase(),
+    });
+    const byWorkspace = Object.fromEntries(
+      res.workspaces.map((w) => [w.workspace_id, w.matches.map((m) => m.pii_ref)]),
+    );
+    expect(byWorkspace[E1]).toEqual([feedback.pii_ref]);
+    expect(byWorkspace[E2]).toEqual([order.pii_ref]);
+    expect(await clients.web.ebayUserMatch({ username: 'nobody-at-all' })).toEqual({
+      workspaces: [],
+    });
+    const refused = await clients.worker.ebayUserMatch({ username: user }).catch((e: unknown) => e);
+    expect((refused as VaultError).status).toBe(403);
+    const logged = await raw(
+      ownerPool,
+      E1,
+      `SELECT purpose, result_count FROM vault.access_log WHERE purpose = 'ebay_account_deletion'`,
+    );
+    expect(logged).toEqual([{ purpose: 'ebay_account_deletion', result_count: '1' }]);
   });
 
   it('[DP-4] the vault holds the only db-pii credentials: web and worker cannot reach it', async () => {

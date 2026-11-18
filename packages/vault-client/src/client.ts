@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import {
   DeleteResponse,
+  EbayUserMatchResponse,
   ExpiryResponse,
   IngestResponse,
   MaskResponse,
@@ -8,6 +9,7 @@ import {
   ReadFullResponse,
   SearchResponse,
   type DeleteRequest,
+  type EbayUserMatchRequest,
   type ExpiryRequest,
   type IngestRequest,
   type ReadPurpose,
@@ -106,6 +108,11 @@ export class VaultClient {
   /** DEL-1: the deletion jobs only (the deletion token). */
   delete(request: DeleteRequest): Promise<DeleteResponse> {
     return this.#post('/v1/delete', request, DeleteResponse);
+  }
+
+  /** AT-10: the refs of one eBay user in every workspace (web only). */
+  ebayUserMatch(request: EbayUserMatchRequest): Promise<EbayUserMatchResponse> {
+    return this.#post('/v1/ebay-user-match', request, EbayUserMatchResponse);
   }
 
   match(workspaceId: string, piiRef: string): Promise<MatchResponse> {

@@ -5,6 +5,7 @@ import {
   AccessReviewRepository,
   ChannelAccountRepository,
   DeletionLog,
+  ErasureRequestRepository,
   AuditLog,
   AuthStore,
   CompanyRepository,
@@ -22,6 +23,7 @@ import {
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
 import { createQueueClient, JobQueue } from '@omnibridge/queue';
+import { VaultClient } from '@omnibridge/vault-client';
 import { buildWebApp } from './app.ts';
 import { queueNotifier } from './auth/notifier.ts';
 import { Passwords } from './auth/passwords.ts';
@@ -99,6 +101,9 @@ const auth = new AuthService({
   termsVersion: requireEnv('TERMS_VERSION'),
 });
 
+// The vault with web's own token (invariant 8): ingest, read, mask, search, match. Never delete.
+const vault = new VaultClient({ baseUrl: piiVaultUrl, token: readSecretFile('VAULT_TOKEN') });
+
 async function piiVaultHealthy(): Promise<boolean> {
   const res = await fetch(new URL('/healthz', piiVaultUrl), { signal: AbortSignal.timeout(2_000) });
   if (!res.ok) return false;
@@ -132,11 +137,24 @@ const app = buildWebApp({
     audit: new AuditLog(main.db),
     tenancy,
   },
+  // Erasure and subject access requests (DEL-4, DEL-5).
+  privacy: {
+    vault,
+    erasures: new ErasureRequestRepository(main.db),
+    queue,
+    audit: new AuditLog(main.db),
+  },
   jobs: new JobRecordRepository(main.db),
   files: { store: fileStore, linkKey },
   // The eBay account deletion endpoint (EBAY-2), when its secrets are mounted.
   ...(() => {
-    const ebay = ebayWebhookFromEnv(logger);
+    // AT-10: a verified notice is matched in the vault and queued by ref (FA-14).
+    const ebay = ebayWebhookFromEnv(logger, {
+      vault,
+      accounts: new ChannelAccountRepository(main.db),
+      tenancy,
+      queue,
+    });
     return ebay === undefined ? {} : { ebay };
   })(),
   // compose sets uniquelocal: only the private-network edge may name the client address.

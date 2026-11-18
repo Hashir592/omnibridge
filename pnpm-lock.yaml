@@ -382,6 +382,9 @@ importers:
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@omnibridge/vault-client':
+        specifier: workspace:*
+        version: link:../../packages/vault-client
       '@oslojs/otp':
         specifier: 1.1.0
         version: 1.1.0

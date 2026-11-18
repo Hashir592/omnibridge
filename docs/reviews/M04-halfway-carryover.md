@@ -35,3 +35,12 @@ Fix PR: branch `task/M04h-fixes` (one PR, high tier).
 
 - Ingest idempotent per subject (`pii_ref` reused for the same order and kind): M10 ingestion task.
 - The vault reads `data_key_version` with PII key rotation: M22.
+
+## T-0404 observations for the M04 end (S3's `/code-review` high)
+
+- **eBay user IDs are case-folded:** the `buyer` blind index lowercases values. eBay user IDs are case-sensitive, so a notice could also match a different user whose ID differs only in case.
+  - Rare, but deletion cannot be undone.
+  - Fix: a separate case-sensitive index field for channel buyer IDs (squawk needs a constraint change on `blind_index.field`, ADR-045 waiver). Proposed for S1 with PS-027.
+- **Cost per eBay notice:** one vault transaction per workspace in the directory. Fine at launch scale; measure on staging (FA-14 asks for the real notice volume).
+- **Directory drift:** if the vault directory names a workspace db-main no longer has, the notice answers 500 and eBay retries it. Workspaces are never hard-deleted in db-main today, and closure removes the directory row.
+- **Route walker:** the new `searchText` flag covers the two identifier-search routes only (their body is typed search text, never an id of B's); the leak check still runs on their answers.

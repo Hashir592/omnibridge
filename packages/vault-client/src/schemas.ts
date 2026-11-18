@@ -38,7 +38,7 @@ export const CAPABILITIES = ['ingest', 'read_full', 'mask', 'search', 'match', '
 export type Capability = (typeof CAPABILITIES)[number];
 
 /** DP-7: why a full record is read. Logged with every read. */
-export const READ_PURPOSES = ['label', 'order_detail', 'inbox'] as const;
+export const READ_PURPOSES = ['label', 'order_detail', 'inbox', 'subject_access'] as const;
 export type ReadPurpose = (typeof READ_PURPOSES)[number];
 
 /** DP-7: which kinds of record each purpose may open (a label never needs a message). */
@@ -46,10 +46,17 @@ export const PURPOSE_KINDS: Readonly<Record<ReadPurpose, readonly RecordKind[]>>
   label: ['buyer_contact'],
   order_detail: ['buyer_contact'],
   inbox: ['buyer_contact', 'ebay_message', 'ebay_feedback'],
+  /** DEL-5: everything held about one buyer, for the export the buyer asked for. */
+  subject_access: ['buyer_contact', 'ebay_message', 'ebay_feedback'],
 };
 
 /** Why a search runs (ORD-2 order search, DEL-4 erasure, DEL-5 access request). Logged. */
-export const SEARCH_PURPOSES = ['order_search', 'erasure', 'access_request'] as const;
+export const SEARCH_PURPOSES = [
+  'order_search',
+  'erasure',
+  'access_request',
+  'ebay_account_deletion',
+] as const;
 export type SearchPurpose = (typeof SEARCH_PURPOSES)[number];
 
 const fieldValue = z.string().min(1).max(4000);
@@ -162,6 +169,26 @@ export const SearchResponse = z
   .object({ matches: z.array(Subject), truncated: z.boolean() })
   .strict();
 export type SearchResponse = z.infer<typeof SearchResponse>;
+
+/**
+ * AT-10 (FA-14): an eBay deletion notice names an eBay user, not a workspace. The vault checks
+ * every workspace that holds PII for records of that user (the `buyer` blind index, by user ID
+ * or username) and answers the refs per workspace. Nothing is deleted here.
+ */
+export const EbayUserMatchRequest = z
+  .object({
+    user_id: z.string().min(1).max(200).optional(),
+    username: z.string().min(1).max(200).optional(),
+  })
+  .strict()
+  .refine((r) => r.user_id !== undefined || r.username !== undefined, 'user_id or username');
+export type EbayUserMatchRequest = z.infer<typeof EbayUserMatchRequest>;
+export const EbayUserMatchResponse = z
+  .object({
+    workspaces: z.array(z.object({ workspace_id: uuid, matches: z.array(Subject) }).strict()),
+  })
+  .strict();
+export type EbayUserMatchResponse = z.infer<typeof EbayUserMatchResponse>;
 
 export const MatchRequest = z.object({ workspace_id: uuid, pii_ref: uuid }).strict();
 export type MatchRequest = z.infer<typeof MatchRequest>;

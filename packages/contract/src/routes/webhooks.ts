@@ -35,7 +35,8 @@ export const ebayAccountDeletion = defineRoute({
       notification: z.looseObject({}),
     })
     .meta({ id: 'EbayAccountDeletionNotice' }),
-  responses: { 204: z.null() },
+  /** EBAY-2: 200 within 3 seconds; the deletion itself is queued. */
+  responses: { 200: z.null() },
   auth: 'signed-webhook',
   ...outsideTabs,
 });

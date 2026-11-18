@@ -38,7 +38,17 @@ export async function startTestVault(options: {
     deletion: randomBytes(32).toString('base64url'),
   };
   const now = options.now ?? (() => new Date());
-  const vault = new Vault({ pool, keyring: parseKeyring('pii', generateKekLine(1)), now });
+  const vault = new Vault({
+    pool,
+    keyring: parseKeyring('pii', generateKekLine(1)),
+    now,
+    onCanary: (event) => {
+      options.logger.warn(
+        { event: 'vault.canary_read', workspaceId: event.workspaceId },
+        'canary record read',
+      );
+    },
+  });
   const deletion = new DeletionService({
     pool,
     journal: new DeletionJournal(options.journalDir),

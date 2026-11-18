@@ -10,6 +10,8 @@ import {
 import type { Pool, PoolClient } from '@omnibridge/pii-db';
 import {
   PURPOSE_KINDS,
+  type EbayUserMatchRequest,
+  type EbayUserMatchResponse,
   type ExpiryRequest,
   type IngestRequest,
   type MaskResponse,
@@ -19,7 +21,7 @@ import {
   type ReadPurpose,
   type SearchResponse,
 } from '@omnibridge/vault-client/schemas';
-import { indexValues, maskFields, queryValues } from './normalise.ts';
+import { indexValues, maskFields, normaliseBuyer, queryValues } from './normalise.ts';
 
 /** The caller a service token stands for (invariant 8). */
 export type Caller = 'web' | 'worker' | 'deletion';
@@ -51,7 +53,27 @@ interface Keys {
 interface Tx {
   readonly c: PoolClient;
   keys?: Keys;
+  /** True when this transaction stored the workspace's first keys. */
+  created?: boolean;
 }
+
+/** A read of a canary record (SEC-12): IDs only, for M05's alerts. */
+export interface CanaryEvent {
+  workspaceId: string;
+  piiRef: string;
+  caller: Caller;
+  capability: 'read_full' | 'mask';
+}
+
+/**
+ * The canary's synthetic fields: obviously fake, and on the reserved `.invalid` domain, so they
+ * can never be a real person. No blind index is written for them.
+ */
+const canaryFields = (workspaceId: string) => ({
+  name: 'Canary Record',
+  email: `canary.${workspaceId.slice(0, 8)}@canary.invalid`,
+  postcode: 'ZZ99 9ZZ',
+});
 
 /**
  * The advisory lock key that orders ingest against workspace closure (ADR-065): a stable 64-bit
@@ -83,10 +105,19 @@ export class Vault {
   /** Unwrapped keys per workspace, cached only after the transaction that read them commits. */
   readonly #keys = new Map<string, Keys>();
 
-  constructor(options: { pool: Pool; keyring: Keyring; now?: () => Date }) {
+  readonly #onCanary: (event: CanaryEvent) => void;
+
+  constructor(options: {
+    pool: Pool;
+    keyring: Keyring;
+    now?: () => Date;
+    /** Called after a canary read is recorded (SEC-12); the app logs it at warn. */
+    onCanary?: (event: CanaryEvent) => void;
+  }) {
     this.#pool = options.pool;
     this.#keyring = options.keyring;
     this.#now = options.now ?? (() => new Date());
+    this.#onCanary = options.onCanary ?? (() => undefined);
   }
 
   /** A closed workspace's keys are deleted with it; the cached copies go too. */
@@ -112,6 +143,7 @@ export class Vault {
       // Keys are made here and only here, never by a read (F-M04h-04).
       const keys = await this.#loadKeys(tx, req.workspace_id, true);
       if (keys === undefined) throw new Error('keys were not created');
+      if (tx.created === true) await this.#insertCanary(c, req.workspace_id, keys);
       // pii_ref defaults to uuidv7() (PostgreSQL 18): time-ordered, so the key index stays compact.
       const inserted = await c.query<{ pii_ref: string }>(
         `INSERT INTO vault.records (workspace_id, kind, channel_account_id, subject_type,
@@ -178,6 +210,7 @@ export class Vault {
       if (keys === undefined) throw new NotFound();
       const fields = await this.#decryptFields(c, keys.data, workspaceId, piiRef);
       await this.#log(c, workspaceId, actor, 'read_full', purpose, piiRef, 1);
+      if (record.canary) await this.#canary(c, workspaceId, [piiRef], actor, 'read_full');
       return {
         pii_ref: piiRef,
         kind: record.kind,
@@ -189,7 +222,7 @@ export class Vault {
   }
 
   /** ORD-5: masked strings, computed now and never stored. Unknown refs are left out. */
-  async mask(workspaceId: string, piiRefs: readonly string[]): Promise<MaskResponse> {
+  async mask(workspaceId: string, piiRefs: readonly string[], actor: Actor): Promise<MaskResponse> {
     return this.#tx(workspaceId, async (c, tx) => {
       const keys = await this.#loadKeys(tx, workspaceId, false);
       if (keys === undefined) return { records: [] };
@@ -215,6 +248,20 @@ export class Vault {
         pii_ref: piiRef,
         fields: maskFields(fields),
       }));
+      const canaries = await c.query<{ pii_ref: string }>(
+        `SELECT pii_ref FROM vault.records
+          WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[]) AND canary`,
+        [workspaceId, piiRefs],
+      );
+      if (canaries.rows.length > 0) {
+        await this.#canary(
+          c,
+          workspaceId,
+          canaries.rows.map((r) => r.pii_ref),
+          actor,
+          'mask',
+        );
+      }
       return { records };
     });
   }
@@ -287,13 +334,112 @@ export class Vault {
     });
   }
 
+  /**
+   * AT-10 (FA-14): the records of one eBay user, by user ID or username on the `buyer` blind
+   * index, in every workspace that holds PII. One short transaction per workspace; a workspace
+   * with a hit gets an access-log row with the count, one without is not logged.
+   */
+  async ebayUserMatch(req: EbayUserMatchRequest, actor: Actor): Promise<EbayUserMatchResponse> {
+    const values = [req.user_id, req.username]
+      .filter((v): v is string => v !== undefined)
+      .map(normaliseBuyer)
+      .filter((v) => v !== '');
+    const directory = await this.#pool.query<{ workspace_id: string }>(
+      'SELECT workspace_id FROM vault.workspace_directory ORDER BY workspace_id',
+    );
+    const workspaces: EbayUserMatchResponse['workspaces'] = [];
+    for (const { workspace_id: workspaceId } of directory.rows) {
+      const matches = await this.#tx(workspaceId, async (c, tx) => {
+        const keys = await this.#loadKeys(tx, workspaceId, false);
+        if (keys === undefined || values.length === 0) return [];
+        const res = await c.query<SearchResponse['matches'][number]>(
+          `SELECT r.pii_ref, r.kind, r.subject_type, r.subject_id, r.channel_account_id
+             FROM vault.records r
+            WHERE r.workspace_id = $1 AND NOT r.canary
+              AND r.pii_ref IN (SELECT b.pii_ref FROM vault.blind_index b
+                                 WHERE b.workspace_id = $1 AND b.field = 'buyer'
+                                   AND b.mac = ANY($2::bytea[]))
+            ORDER BY r.pii_ref
+            LIMIT $3`,
+          [workspaceId, values.map((v) => keys.index.mac('buyer', v)), SEARCH_LIMIT],
+        );
+        if (res.rows.length > 0) {
+          await this.#log(
+            c,
+            workspaceId,
+            actor,
+            'search',
+            'ebay_account_deletion',
+            null,
+            res.rows.length,
+          );
+        }
+        return res.rows;
+      });
+      if (matches.length > 0) workspaces.push({ workspace_id: workspaceId, matches });
+    }
+    return { workspaces };
+  }
+
+  /** SEC-12: the workspace's canary, made with its first keys. No blind index, never expires. */
+  async #insertCanary(c: PoolClient, workspaceId: string, keys: Keys): Promise<void> {
+    const inserted = await c.query<{ pii_ref: string }>(
+      `INSERT INTO vault.records (workspace_id, kind, subject_type, subject_id, data_key_version,
+                                  delete_after, created_at, canary)
+       VALUES ($1, 'buyer_contact', 'order', 'canary', $2, 'infinity', $3, true)
+       RETURNING pii_ref`,
+      [workspaceId, keys.data.version, this.#now()],
+    );
+    const piiRef = inserted.rows[0]?.pii_ref ?? '';
+    for (const [field, value] of Object.entries(canaryFields(workspaceId))) {
+      await c.query(
+        `INSERT INTO vault.record_fields (workspace_id, pii_ref, field, ciphertext) VALUES ($1, $2, $3, $4)`,
+        [
+          workspaceId,
+          piiRef,
+          field,
+          keys.data.encrypt(value, {
+            workspaceId,
+            table: FIELD_TABLE,
+            column: field,
+            rowId: piiRef,
+          }),
+        ],
+      );
+    }
+  }
+
+  /** Records a canary read in db-pii and tells the app (SEC-12). IDs only. */
+  async #canary(
+    c: PoolClient,
+    workspaceId: string,
+    piiRefs: readonly string[],
+    actor: Actor,
+    capability: CanaryEvent['capability'],
+  ): Promise<void> {
+    for (const piiRef of piiRefs) {
+      await c.query(
+        `INSERT INTO vault.canary_events (workspace_id, pii_ref, at, caller, capability, actor_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [workspaceId, piiRef, this.#now(), actor.caller, capability, actor.userId ?? null],
+      );
+      this.#onCanary({ workspaceId, piiRef, caller: actor.caller, capability });
+    }
+  }
+
   async #record(
     c: PoolClient,
     workspaceId: string,
     piiRef: string,
-  ): Promise<{ kind: RecordKind; subject_type: string; subject_id: string }> {
-    const res = await c.query<{ kind: RecordKind; subject_type: string; subject_id: string }>(
-      `SELECT kind, subject_type, subject_id FROM vault.records WHERE workspace_id = $1 AND pii_ref = $2`,
+  ): Promise<{ kind: RecordKind; subject_type: string; subject_id: string; canary: boolean }> {
+    const res = await c.query<{
+      kind: RecordKind;
+      subject_type: string;
+      subject_id: string;
+      canary: boolean;
+    }>(
+      `SELECT kind, subject_type, subject_id, canary FROM vault.records
+        WHERE workspace_id = $1 AND pii_ref = $2`,
       [workspaceId, piiRef],
     );
     const row = res.rows[0];
@@ -373,12 +519,19 @@ export class Vault {
         ['data', data],
         ['index', index],
       ] as const) {
-        await tx.c.query(
+        const made = await tx.c.query(
           `INSERT INTO vault.workspace_keys (workspace_id, kind, version, kek_version, wrapped, created_at)
            VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
           [workspaceId, kind, w.version, w.kekVersion, w.wrapped, this.#now()],
         );
+        if (kind === 'data' && (made.rowCount ?? 0) > 0) tx.created = true;
       }
+      // AT-10: the workspace holds PII from now on, so an eBay notice must look in it.
+      await tx.c.query(
+        `INSERT INTO vault.workspace_directory (workspace_id, added_at) VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [workspaceId, this.#now()],
+      );
     }
     const res = await tx.c.query<{
       kind: 'data' | 'index';

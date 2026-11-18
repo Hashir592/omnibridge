@@ -1,6 +1,7 @@
 import type { Logger } from '@omnibridge/logger';
 import {
   DeleteRequest,
+  EbayUserMatchRequest,
   ExpiryRequest,
   IngestRequest,
   MaskRequest,
@@ -134,9 +135,9 @@ export function buildVaultApp({
   });
 
   app.post('/v1/mask', async (request) => {
-    authorise(request, 'mask');
+    const caller = authorise(request, 'mask');
     const body = parse(MaskRequest, request.body);
-    return vault.mask(body.workspace_id, body.pii_refs);
+    return vault.mask(body.workspace_id, body.pii_refs, { caller });
   });
 
   app.post('/v1/search', async (request) => {
@@ -152,6 +153,13 @@ export function buildVaultApp({
     const caller = authorise(request, 'match');
     const body = parse(MatchRequest, request.body);
     return vault.match(body.workspace_id, body.pii_ref, { caller });
+  });
+
+  // AT-10: an eBay deletion notice, matched across workspaces; web's token only (FA-14).
+  app.post('/v1/ebay-user-match', async (request) => {
+    const caller = authorise(request, 'search');
+    if (caller !== 'web') throw new HttpError(403, 'capability_missing');
+    return vault.ebayUserMatch(parse(EbayUserMatchRequest, request.body), { caller });
   });
 
   // DEL-1: the deletion service, for the deletion jobs' token only.

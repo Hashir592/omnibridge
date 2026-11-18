@@ -133,7 +133,7 @@ describe('eBay account deletion endpoint (EBAY-2)', () => {
 
   it('[EBAY-2] no PII or identifiers are kept: the receipt logs only the topic', async () => {
     const { app, log } = server();
-    expect((await app.inject(notice())).statusCode).toBe(204);
+    expect((await app.inject(notice())).statusCode).toBe(200);
     const text = log();
     expect(text).toContain('"event":"ebay.account_deletion.received"');
     expect(text).toContain('"topic":"MARKETPLACE_ACCOUNT_DELETION"');
@@ -159,7 +159,7 @@ describe('eBay account deletion endpoint (EBAY-2)', () => {
 
     const { app } = server({ perMinute: 2 });
     // eBay's own verified notices are never limited, however many come from one address.
-    for (let i = 0; i < 5; i += 1) expect((await app.inject(notice())).statusCode).toBe(204);
+    for (let i = 0; i < 5; i += 1) expect((await app.inject(notice())).statusCode).toBe(200);
     // Bad ones are: after 2 failures in a minute the address waits.
     expect((await app.inject(notice({}))).statusCode).toBe(412);
     expect((await app.inject(notice({}))).statusCode).toBe(412);

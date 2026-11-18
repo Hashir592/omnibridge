@@ -202,10 +202,13 @@ describe('deletion service in the vault [DEL-1][DEL-2][DEL-3][AT-8]', () => {
     await ingest('c-2', { workspace: closing });
     const survivor = await ingest('c-3', { workspace: other });
     const run = await del({ type: 'workspace' }, 'workspace_closure', randomUUID(), closing);
-    expect(run.deleted).toHaveLength(2);
+    // The two records and the workspace's canary (SEC-12).
+    expect(run.deleted).toHaveLength(3);
     expect(await ownerRows('records', closing)).toEqual([]);
     expect(await ownerRows('workspace_keys', closing)).toEqual([]);
-    expect((await ownerRows('records', other)).map((r) => r.pii_ref)).toEqual([survivor]);
+    expect(
+      (await ownerRows('records', other)).filter((r) => r.canary !== true).map((r) => r.pii_ref),
+    ).toEqual([survivor]);
     // ADR-065 (F-M04h-04): closure leaves a marker; ingest for the closed workspace answers 409
     // and makes no new keys, and reads find nothing.
     expect(await ownerRows('closed_workspaces', closing)).toHaveLength(1);
@@ -248,7 +251,9 @@ describe('deletion service in the vault [DEL-1][DEL-2][DEL-3][AT-8]', () => {
     expect(await ownerRows('closed_workspaces', closing)).toEqual([]);
     const two = await service.delete(request);
     expect(two.more).toBe(false);
-    expect(two.deleted.map((d) => d.pii_ref).sort()).toEqual([first, late].sort());
+    const refs = two.deleted.map((d) => d.pii_ref);
+    expect(refs).toEqual(expect.arrayContaining([first, late]));
+    expect(refs).toHaveLength(3); // and the canary
     expect(await ownerRows('records', closing)).toEqual([]);
     expect(await ownerRows('workspace_keys', closing)).toEqual([]);
     expect(await ownerRows('closed_workspaces', closing)).toHaveLength(1);

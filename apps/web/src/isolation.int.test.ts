@@ -11,6 +11,7 @@ import {
   AuthStore,
   ChannelAccountRepository,
   DeletionLog,
+  ErasureRequestRepository,
   CompanyRepository,
   createMainDb,
   FileRepository,
@@ -57,7 +58,15 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
   const userB = randomUUID();
   const childA = randomUUID();
   const admin = randomUUID();
-  const b = { company: '', job: '', file: '', invite: '', review: '', account: '' };
+  const b = {
+    company: '',
+    job: '',
+    file: '',
+    invite: '',
+    review: '',
+    account: '',
+    erasure: '',
+  };
   const a = { company: '', job: '' };
 
   const repos = () => ({
@@ -83,6 +92,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         members: await new MemberAccessRepository(main.db).list(ctx),
         invites: await new InviteRepository(main.db).pending(ctx),
         reviews: await new AccessReviewRepository(main.db).list(ctx),
+        erasures: await new ErasureRequestRepository(main.db).list(ctx),
       });
     });
 
@@ -139,6 +149,14 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         )
       ).id;
       b.review = (await new AccessReviewRepository(main.db).ensureDue(ctx, new Date()))?.id ?? '';
+      b.erasure = (
+        await new ErasureRequestRepository(main.db).create(ctx, {
+          id: randomUUID(),
+          requestedBy: userB,
+          piiRefs: [randomUUID()],
+          at: new Date(),
+        })
+      ).id;
     });
     a.company = await tenancy.runWorkspace({ workspaceId: A }, (ctx) =>
       r.companies.create(ctx, { legalName: 'A Ltd', tradingName: 'A', registeredAddress: address }),
@@ -225,6 +243,37 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         audit: new AuditLog(main.db),
         tenancy,
       },
+      // T-0404: a stand-in vault that echoes the workspace it was asked about, so a request that
+      // reached B's PII would show B's id in its answer.
+      privacy: {
+        vault: {
+          search: (req) =>
+            Promise.resolve({
+              matches: [
+                {
+                  pii_ref: randomUUID(),
+                  kind: 'buyer_contact' as const,
+                  subject_type: 'order',
+                  subject_id: req.workspaceId,
+                  channel_account_id: null,
+                },
+              ],
+              truncated: false,
+            }),
+          mask: () => Promise.resolve({ records: [] }),
+          readFull: (req) =>
+            Promise.resolve({
+              pii_ref: req.piiRef,
+              kind: 'buyer_contact' as const,
+              subject_type: 'order',
+              subject_id: req.workspaceId,
+              fields: {},
+            }),
+        },
+        erasures: new ErasureRequestRepository(main.db),
+        queue: { send: () => Promise.resolve({ id: randomUUID(), created: true }) },
+        audit: new AuditLog(main.db),
+      },
     });
   };
 
@@ -301,13 +350,24 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
             password: 'a long enough password 1',
           },
         },
+        // Erasure and access requests (T-0404): B's request cannot be confirmed from A.
+        createErasureRequest: {
+          body: { identifiers: { email: 'walker@example.test' } },
+          searchText: true,
+        },
+        listErasureRequests: {},
+        confirmErasureRequest: { params: { id: b.erasure } },
+        exportSubjectAccess: {
+          body: { identifiers: { email: 'walker@example.test' } },
+          searchText: true,
+        },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
           body: { metadata: { topic: MARKER }, notification: { userId: userB } },
         },
       },
-      markers: [MARKER, B, b.company, b.job, b.file, b.invite, b.review, userB],
+      markers: [MARKER, B, b.company, b.job, b.file, b.invite, b.review, b.erasure, userB],
     });
   }
 
