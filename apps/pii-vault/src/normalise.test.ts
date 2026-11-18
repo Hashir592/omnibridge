@@ -6,6 +6,7 @@ import {
   maskName,
   maskPhone,
   maskPostcode,
+  normaliseBuyerExact,
   normaliseName,
   normalisePhone,
   normalisePostcode,
@@ -35,10 +36,26 @@ describe('normalising and masking', () => {
       email: 'jane@example.test',
       postcode: 'G21AA',
       buyer: 'buyer-1',
+      buyer_exact: 'Buyer-1',
       match: 'jane smith|1 high st|G21AA',
     });
     expect(indexValues({ name: 'Jane Smith' }).match).toBeUndefined();
     expect(queryValues({ postcode: ' ', email: 'A@B.TEST' })).toEqual({ email: 'a@b.test' });
+  });
+
+  it("[AT-10] the exact buyer index trims only: 'AbC' and 'abc' stay different (ADR-066)", () => {
+    expect(normaliseBuyerExact('  AbC	')).toBe('AbC');
+    expect(normaliseBuyerExact('AbC')).not.toBe(normaliseBuyerExact('abc'));
+    expect(indexValues({ buyer_username: ' Seller_Fan ' })).toEqual({
+      buyer: 'seller_fan',
+      buyer_exact: 'Seller_Fan',
+    });
+    expect(indexValues({ channel_buyer_id: '   ' })).toEqual({});
+    // A blank ID never hides the username behind it.
+    expect(indexValues({ channel_buyer_id: ' ', buyer_username: 'Fan' })).toEqual({
+      buyer: 'fan',
+      buyer_exact: 'Fan',
+    });
   });
 
   it('[DP-7] masks follow ORD-5 and show nothing else', () => {

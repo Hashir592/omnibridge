@@ -29,6 +29,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
   let appPool: pg.Pool;
   let ownerPool: pg.Pool;
   let close: () => Promise<void>;
+  let vault: Vault;
   let baseUrl = '';
   const logs: string[] = [];
   const tokens = { web: token(), worker: token(), deletion: token() };
@@ -87,7 +88,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       version: 'test',
       destination: { write: (line: string) => (logs.push(line), true) },
     });
-    const vault = new Vault({
+    vault = new Vault({
       pool: appPool,
       keyring: parseKeyring('pii', generateKekLine(1)),
       onCanary: (event) => {
@@ -468,9 +469,10 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       fields: { ...contact('401'), channel_buyer_id: 'EBAY-ID-77' },
     });
     await ingest(E2, 'someone-else', contact('402'));
+    // ADR-066: exact values only; surrounding spaces are trimmed.
     const res = await clients.web.ebayUserMatch({
-      user_id: 'ebay-id-77',
-      username: user.toUpperCase(),
+      user_id: ' EBAY-ID-77 ',
+      username: user,
     });
     const byWorkspace = Object.fromEntries(
       res.workspaces.map((w) => [w.workspace_id, w.matches.map((m) => m.pii_ref)]),
@@ -488,6 +490,76 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       `SELECT purpose, result_count FROM vault.access_log WHERE purpose = 'ebay_account_deletion'`,
     );
     expect(logged).toEqual([{ purpose: 'ebay_account_deletion', result_count: '1' }]);
+  });
+
+  it("[AT-10] a notice for 'AbC' matches 'AbC' and leaves 'abc' (ADR-066: exact, trim only)", async () => {
+    const W = randomUUID();
+    const suffix = randomUUID().slice(0, 6);
+    const upper = await ingest(W, 'case-upper', {
+      ...contact('501'),
+      channel_buyer_id: `${PII_MARKER}AbC-${suffix}`,
+    });
+    const lower = await ingest(W, 'case-lower', {
+      ...contact('502'),
+      channel_buyer_id: `${PII_MARKER}abc-${suffix}`,
+    });
+    const named = await clients.worker.ingest({
+      workspace_id: W,
+      kind: 'ebay_feedback',
+      channel_account_id: account,
+      subject_type: 'feedback',
+      subject_id: 'case-name-upper',
+      fields: { buyer_username: `${PII_MARKER}AbC-name-${suffix}` },
+    });
+    await clients.worker.ingest({
+      workspace_id: W,
+      kind: 'ebay_feedback',
+      channel_account_id: account,
+      subject_type: 'feedback',
+      subject_id: 'case-name-lower',
+      fields: { buyer_username: `${PII_MARKER}abc-name-${suffix}` },
+    });
+    const refs = async (q: { user_id?: string; username?: string }) =>
+      (await clients.web.ebayUserMatch(q)).workspaces
+        .filter((w) => w.workspace_id === W)
+        .flatMap((w) => w.matches.map((m) => m.pii_ref));
+    expect(await refs({ user_id: `${PII_MARKER}AbC-${suffix}` })).toEqual([upper.pii_ref]);
+    expect(await refs({ user_id: ` ${PII_MARKER}abc-${suffix}	` })).toEqual([lower.pii_ref]);
+    expect(await refs({ user_id: `${PII_MARKER}ABC-${suffix}` })).toEqual([]);
+    expect(await refs({ username: `${PII_MARKER}AbC-name-${suffix}` })).toEqual([named.pii_ref]);
+    // The case-folded buyer index still serves DEL-4 search: both people are found there.
+    const search = await clients.web.search({
+      workspaceId: W,
+      purpose: 'erasure',
+      query: { buyer: `${PII_MARKER}ABC-${suffix}` },
+    });
+    expect(search.matches.map((m) => m.pii_ref).sort()).toEqual(
+      [upper.pii_ref, lower.pii_ref].sort(),
+    );
+  });
+
+  it('[AT-10] the start-up backfill gives older records their exact buyer entry, once (ADR-066)', async () => {
+    const W = randomUUID();
+    const id = `${PII_MARKER}Old-Buyer-${randomUUID().slice(0, 6)}`;
+    const old = await ingest(W, 'old-order', { ...contact('601'), channel_buyer_id: id });
+    const plain = await ingest(W, 'no-buyer', contact('602'));
+    // As a record ingested before 0006: no buyer_exact entry.
+    await raw(ownerPool, W, `DELETE FROM vault.blind_index WHERE field = 'buyer_exact'`);
+    const found = async () =>
+      (await clients.web.ebayUserMatch({ user_id: id })).workspaces.filter(
+        (w) => w.workspace_id === W,
+      );
+    expect(await found()).toEqual([]);
+    expect(await vault.backfillBuyerExact()).toBeGreaterThanOrEqual(1);
+    expect((await found()).flatMap((w) => w.matches.map((m) => m.pii_ref))).toEqual([old.pii_ref]);
+    const entries = await raw(
+      ownerPool,
+      W,
+      `SELECT pii_ref FROM vault.blind_index WHERE field = 'buyer_exact'`,
+    );
+    expect(entries).toEqual([{ pii_ref: old.pii_ref }]);
+    expect(entries).not.toContainEqual({ pii_ref: plain.pii_ref });
+    expect(await vault.backfillBuyerExact()).toBe(0);
   });
 
   it('[DP-4] the vault holds the only db-pii credentials: web and worker cannot reach it', async () => {
