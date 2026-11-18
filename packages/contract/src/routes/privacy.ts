@@ -11,13 +11,19 @@ import { defineRoute } from '../route.ts';
  * - 404 not_found: no such request in this workspace
  * - 400 validation_failed: a withdraw reason missing or not in the list
  * - 409 conflict: the request is no longer open (confirmed or withdrawn)
- * - 422 validation_failed: no identifier given
+ * - 400 validation_failed: the identifiers do not pin one buyer (no email, phone or marketplace
+ *   ID, and not a name with a postcode)
+ * - 422 validation_failed: an access export matches too many records
  * - 503 service_unavailable: the PII vault is not configured or not reachable
  */
 
 const privacy = { auth: 'session', tab: 'users', adminOnly: true, companyScoped: false } as const;
 
-/** What an admin knows about the buyer. At least one; all given must match (AND). */
+/**
+ * What an admin knows about the buyer; all given must match (AND). It must pin one person
+ * (S5-20261118-04, ADR-068): an email, a phone, a marketplace ID or username, or a name with a
+ * postcode. A postcode or a name alone matches many buyers, so it is refused (400).
+ */
 export const BuyerIdentifiersSchema = z
   .object({
     name: z.string().trim().min(1).max(200).optional(),
@@ -28,7 +34,14 @@ export const BuyerIdentifiersSchema = z
     buyer: z.string().trim().min(1).max(200).optional(),
   })
   .strict()
-  .refine((q) => Object.values(q).some((v) => v !== undefined), 'at least one identifier')
+  .refine(
+    (q) =>
+      q.email !== undefined ||
+      q.phone !== undefined ||
+      q.buyer !== undefined ||
+      (q.name !== undefined && q.postcode !== undefined),
+    "Add the buyer's email, phone or marketplace ID, or their name and postcode",
+  )
   .meta({ id: 'BuyerIdentifiers' });
 
 /** One record found, shown masked (ORD-5): the admin checks it is the right buyer. */

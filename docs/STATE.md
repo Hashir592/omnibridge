@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Nov 2026 by S3 (T-0407, T-0408).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Nov 2026 by S3 (T-0409).
 
 ## Now
 
@@ -16,7 +16,9 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **T-0405 (S3) backups, restore drill, marker scan:** PR on `task/T-0405-backups-restore` (auto-merge). `infra/backup/` (`backup.sh`, `retention.sh`, `restore-drill.sh`, `apply-tombstones.sql`, `b2.md` for M22), `scripts/lib/marker-scan.mjs`, runbook `docs/ops/runbooks/restore.md`. Local restic repositories in `.backup/` (gitignored). The journal now also records workspace closures.
 - **T-0407 (S3, high) exact eBay buyer IDs (ADR-066):** PR #92 (auto-merge). db-pii 0006 adds blind-index field `buyer_exact` (trim only); ingest writes it; `/v1/ebay-user-match` uses only it. `buyer` stays case-folded for DEL-4 search. The vault backfills older records at start-up (logged count; a failure is logged, never stops the vault).
 - **T-0408 (S3, normal) withdraw an erasure request (ADR-067):** PR on `task/T-0408-withdraw-erasure` (auto-merge). db-main 0026 (state `withdrawn`, `withdrawn_by/at`, `withdraw_reason` from a fixed list: `wrong_identifiers`, `no_match`, `duplicate`, `buyer_withdrew`, `other`, Hashir 18 Nov). `POST /erasure-requests/:id/withdraw` (admin, open only else 409, reason required, 200). Audit `deletion.run` kind `erasure_withdrawn` with the reason code and count. List `@omnibridge/core` `ERASURE_WITHDRAW_REASONS`.
-- **After pulling:** restart pii-vault once (runs the `buyer_exact` backfill). Then run `scripts/dev-secrets.sh` (three new vault tokens). For db-main max_connections 45, restart db-main (compose passes `-c max_connections=45`). An existing db-pii volume keeps vault_app's old cap 8: run `ALTER ROLE vault_app CONNECTION LIMIT 6` or recreate it.
+- **T-0409 (S3, high) fixes from the S5 PII audit (ADR-068):** PR on `task/T-0409-pii-audit-fixes` (auto-merge). `infra/backup/journal.sh` (journal-only restic run; `--every 900` is the local scheduler), drill test with real restic; confirm claims the request in its own committed transaction, then queues; logger writes `[PIIMARK-REDACTED]` so scans flag scrubbed markers; drill scans full Mailpit sources (`infra/backup/mailpit-raw.mjs`); identifiers must pin one buyer (400); internal `ob_vault` network (vault off `ob_app`); `no-store` on every `/api` response; canary expiry fixed; db-main 0027 and db-pii 0007 validate the NOT VALID checks; db-pii 0007 adds `vault.purge_security_logs()` (6 years, run daily by the vault). **Waiting on S5's re-check comment.**
+- **After pulling:** recreate the stack once (`docker compose up -d`) so web, worker and pii-vault join `ob_vault`. Locally, run `infra/backup/journal.sh --every 900` in a spare terminal if you want the 15-minute journal runs.
+- **After pulling (older):** restart pii-vault once (runs the `buyer_exact` backfill). Then run `scripts/dev-secrets.sh` (three new vault tokens). For db-main max_connections 45, restart db-main (compose passes `-c max_connections=45`). An existing db-pii volume keeps vault_app's old cap 8: run `ALTER ROLE vault_app CONNECTION LIMIT 6` or recreate it.
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; short sessions.
 - **Process (ADR-053, ADR-054):** sessions merge their own green PRs; CI is the only full gate.
 - **Hashir:** GitHub CLI on Hashir592. Dev machine to 16 GB in 1 to 2 weeks.
@@ -27,6 +29,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - Batch 2: T-0404 erasure/access requests and eBay deletion (S3, high), T-0405 backups, restore drill and marker scan (S3, high), T-0308 screens (S2), then T-0406 S5 audit, then the S4 M04 end review.
 
 ## Follow-ups noted
+
+- T-0409: **S1** to update ARCHITECTURE §6 and the networks line (vault on `ob_vault`, not `ob_app`). **S2** (with the gcTime trivial fix): the buyer-data screen and its mock should send a strong identifier and show the 400 message; the mock still answers 422 for empty and accepts a postcode alone. S5 asked to lower `MAX_EXPORT_RECORDS` to 100; the ruling did not include it, so it stays 500 (S1 to decide). Accepted after review: two simultaneous confirms each write an audit row; the claim takes a second web-pool connection.
 
 - ADR-068: when S1 writes M07, M08 and M10 tasks: expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first. M22: host timer for the 15-minute journal run.
 
@@ -49,8 +53,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. S3: PR #92 (T-0407) and the T-0408 PR merge themselves on green (if one goes red, S3 fixes it).
-2. S2: Withdraw action and `withdrawn` state on the erasure screen. Then T-0406 S5 audit, then S4 M04 end review (with the carry-over file).
+1. S3: the T-0409 PR merges itself on green (if red, S3 fixes it).
+2. S5: re-check T-0409 in one PR comment. Then the S4 M04 end review (with the carry-over file).
 
 ## Prerequisites outstanding (Hashir)
 

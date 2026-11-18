@@ -338,6 +338,14 @@ export function installContract<L extends FastifyBaseLogger>(
     });
   }
   app.setErrorHandler(handleError);
+  // Hardening 2 (S5-20261118, ADR-068): no API answer is ever cached, errors included. A route
+  // that sets its own (file downloads: private, no-store) keeps it.
+  app.addHook('onSend', (request, reply, payload, done) => {
+    if (request.url.startsWith(`${API_PREFIX}/`) && !reply.hasHeader('cache-control')) {
+      void reply.header('cache-control', 'no-store');
+    }
+    done(null, payload);
+  });
   // Not a route, so the guard above still holds: a page path gets the SPA, anything else
   // (unknown /api/**, other methods) the JSON 404 envelope (ADR-060).
   app.setNotFoundHandler((request, reply) =>

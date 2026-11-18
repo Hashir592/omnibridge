@@ -7,8 +7,8 @@
 #   1. re-applies every deletion to the restored PII store BEFORE anything reads it: db-pii's own
 #      tombstones, db-main's copy (app.pii_tombstones) and the off-site journal, plus the
 #      expiry re-run and closed workspaces (infra/backup/apply-tombstones.sql);
-#   2. runs the AT-9 marker scan over the restored db-main and db-pii dumps, the stack's logs and
-#      the mail captured by Mailpit;
+#   2. runs the AT-9 marker scan over the restored db-main and db-pii dumps, the stack's logs
+#      (a marker the logger scrubbed still counts) and every message Mailpit captured, in full;
 #   3. drops the scratch databases and fails if any step failed or it took over 10 minutes.
 # The real restore (over the live databases) is docs/ops/runbooks/restore.md.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -39,10 +39,9 @@ restore db-main "$MAIN_DB" main db-main
 restore db-pii "$PII_DB" pii db-pii
 
 # The off-site journal as backed up (not the live volume): what a real restore would have.
-mkdir -p "$WORK/journal"
-# Handed to the calling user afterwards, so the files can be cleaned up without root.
-restic_run main --docker -v "$(host_path "$WORK/journal"):/out" --entrypoint sh -- \
-  -c "restic restore --quiet --tag journal latest --target /out && chown -R $(id -u):$(id -g) /out"
+# That is the latest journal-only run (journal.sh, every 15 minutes), so a deletion made after
+# the nightly dumps is re-applied too (S5-20261118-01).
+journal_restore "$WORK/journal"
 JOURNAL_LINES="$(find "$WORK/journal" -name 'tombstones-*.jsonl' -exec cat {} + 2>/dev/null | wc -l)"
 
 # db-main's tombstone copy (superuser: the drill reads every workspace).
@@ -68,8 +67,12 @@ echo "drill: tombstones re-applied (journal lines: $JOURNAL_LINES, db-main tombs
 "${COMPOSE[@]}" exec -T db-pii pg_dump -U postgres "$PII_DB" >"$WORK/db-pii.sql"
 "${COMPOSE[@]}" logs --no-color >"$WORK/logs.txt" 2>&1 || true
 sources=("$WORK/db-main.sql" "$WORK/db-pii.sql" "$WORK/logs.txt")
-if curl -fsS --max-time 5 'http://127.0.0.1:8025/api/v1/messages?limit=500' >"$WORK/mail.json" 2>/dev/null; then
-  sources+=("$WORK/mail.json")
+# Every captured message in full (headers and raw body), not the list's short snippets
+# (S5-20261118-03).
+# Mailpit reachable but not fully read fails the drill; no Mailpit (not dev) skips mail.
+if curl -fsS --max-time 5 'http://127.0.0.1:8025/readyz' >/dev/null 2>&1; then
+  node "$(host_path "$REPO_ROOT/infra/backup/mailpit-raw.mjs")" http://127.0.0.1:8025 >"$WORK/mail.eml"
+  sources+=("$WORK/mail.eml")
 else
   echo "drill: Mailpit not reachable on 127.0.0.1:8025; mail not scanned"
 fi

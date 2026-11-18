@@ -58,8 +58,17 @@ export const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 const REDACTED = '[REDACTED]';
-/** Synthetic PII in fixtures carries this marker so leaks can be found (ARCHITECTURE.md invariant 7). */
-const PII_MARKER = /PIIMARK-[^\s"'`,;:()[\]{}<>]*/g;
+/**
+ * What a PII marker is replaced with (S5-20261118-03, ADR-068). It still holds the marker, so the
+ * AT-9 scans of logs flag the line: a marker that reached the logger at all is a leak, because in
+ * production the same path would log the real value (scrubbed only up to the first space).
+ */
+export const MARKER_REDACTED = '[PIIMARK-REDACTED]';
+/**
+ * Synthetic PII in fixtures carries this marker so leaks can be found (ARCHITECTURE.md
+ * invariant 7). An already scrubbed token is left as it is.
+ */
+const PII_MARKER = /PIIMARK-(?!REDACTED\])[^\s"'`,;:()[\]{}<>]*/g;
 const EMAIL = /\b[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/gi;
 /**
  * A path segment that is a secret token (F-M02h-01, SEC-5): the segment after one of these route
@@ -74,7 +83,7 @@ const MAX_DEPTH = 6;
 /** Replaces PII markers, email addresses and path tokens in free text. */
 export function scrubString(value: string): string {
   return value
-    .replace(PII_MARKER, REDACTED)
+    .replace(PII_MARKER, MARKER_REDACTED)
     .replace(EMAIL, REDACTED)
     .replace(PATH_TOKEN, `$1${REDACTED}`)
     .replace(QUERY_TOKEN, `$1${REDACTED}`);

@@ -15,7 +15,10 @@ import type { Handlers } from './contract.ts';
  */
 export interface PrivacyOptions {
   vault: Pick<VaultClient, 'search' | 'mask' | 'readFull'>;
-  erasures: Pick<ErasureRequestRepository, 'create' | 'get' | 'list' | 'confirm' | 'withdraw'>;
+  erasures: Pick<
+    ErasureRequestRepository,
+    'create' | 'get' | 'list' | 'claim' | 'setJob' | 'withdraw'
+  >;
   queue: Pick<JobQueue, 'send'>;
   audit: Pick<AuditLog, 'record'>;
   now?: () => Date;
@@ -116,39 +119,51 @@ export function privacyHandlers(
       return { status: 200, body: { items: items.map((r) => requestBody(r, at)) } };
     },
 
+    // S5-20261118-02: claim first (committed), then queue, then record the job. A withdraw that
+    // comes in between finds the request no longer open. A claimed request whose queue call
+    // failed has no job yet: confirming it again queues it (same key, so it runs once).
     confirmErasureRequest: async ({ params, session, tenant, request }) => {
       const existing = await o.erasures.get(tenant, params.id);
       if (existing === undefined) throw new ApiError({ status: 404, code: 'not_found' });
-      if (existing.state !== 'open') {
-        throw new ApiError({
-          status: 409,
-          code: 'conflict',
-          detail: `This erasure request is ${existing.state}, not open.`,
-        });
-      }
-      // One deletion of exactly the refs the admin saw, keyed by the request so it runs once.
-      const job =
-        existing.piiRefs.length === 0
-          ? undefined
-          : await requestDeletion(o.queue, tenant, {
-              trigger: 'erasure',
-              scope: { type: 'refs', pii_refs: existing.piiRefs },
-              idempotencyKey: existing.id,
-            });
       const at = now();
-      const confirmed = await o.erasures.confirm(tenant, existing.id, {
-        by: session.userId,
-        at,
-        jobId: job?.id ?? null,
-      });
-      if (confirmed === undefined) {
-        throw new ApiError({ status: 409, code: 'conflict' });
+      let claimed =
+        existing.state === 'open'
+          ? await o.erasures.claim(tenant, existing.id, { by: session.userId, at })
+          : undefined;
+      if (claimed === undefined) {
+        // Not open, or claimed by someone else just now: only a claim with no job yet is retried.
+        const current =
+          existing.state === 'open' ? await o.erasures.get(tenant, existing.id) : existing;
+        const retry =
+          current?.state === 'confirmed' && current.jobId === null && current.piiRefs.length > 0;
+        if (!retry) {
+          throw new ApiError({
+            status: 409,
+            code: 'conflict',
+            detail: `This erasure request is ${current?.state ?? 'gone'}, not open.`,
+          });
+        }
+        claimed = current;
       }
+      let confirmed = claimed;
+      if (claimed.piiRefs.length > 0) {
+        // One deletion of exactly the refs the admin saw, keyed by the request so it runs once.
+        const job = await requestDeletion(o.queue, tenant, {
+          trigger: 'erasure',
+          scope: { type: 'refs', pii_refs: claimed.piiRefs },
+          idempotencyKey: claimed.id,
+        });
+        confirmed = (await o.erasures.setJob(tenant, claimed.id, job.id)) ?? {
+          ...claimed,
+          jobId: job.id,
+        };
+      }
+      // Audited with the response that queued it (a failed queue call rolls its audit row back).
       await o.audit.record(tenant, {
         action: 'deletion.run',
         actor: { kind: 'user', userId: session.userId },
-        entityId: existing.id,
-        after: { kind: 'erasure_confirmed', row_count: existing.piiRefs.length },
+        entityId: claimed.id,
+        after: { kind: 'erasure_confirmed', row_count: claimed.piiRefs.length },
         ip: request.ip,
       });
       return { status: 202, body: requestBody(confirmed, at) };

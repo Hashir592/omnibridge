@@ -448,6 +448,83 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(logs.slice(before).filter((l) => l.includes('vault.canary_read'))).toHaveLength(2);
   });
 
+  it('[SEC-12] the canary expiry cannot be moved, so the expiry job never deletes it (S5-20261118 hardening 3)', async () => {
+    const D = randomUUID();
+    const { pii_ref: real } = await ingest(D, 'order-canary-exp', contact('303'));
+    const canary = (await raw(ownerPool, D, 'SELECT pii_ref FROM vault.records WHERE canary'))[0]
+      ?.pii_ref as string;
+    const soon = new Date(Date.now() + 60_000).toISOString();
+    expect(
+      await clients.worker.setExpiry({
+        workspace_id: D,
+        pii_refs: [canary, real],
+        delete_after: soon,
+      }),
+    ).toEqual({ updated: 1 });
+    const rows = await raw(
+      ownerPool,
+      D,
+      'SELECT pii_ref, delete_after FROM vault.records WHERE pii_ref = ANY($1::uuid[])',
+      [[canary, real]],
+    );
+    const after = new Map(rows.map((r) => [r.pii_ref as string, String(r.delete_after)]));
+    expect(after.get(canary)).toBe('Infinity');
+    expect(after.get(real)).not.toBe('Infinity');
+  });
+
+  it('[DP-7] access-log rows and canary events go after 6 years, in every workspace, and only through the purge (ADR-068)', async () => {
+    const E = randomUUID();
+    const F = randomUUID();
+    const old = "now() - interval '6 years' - interval '1 day'";
+    const recent = "now() - interval '6 years' + interval '1 day'";
+    for (const w of [E, F]) {
+      for (const at of [old, recent]) {
+        await raw(
+          ownerPool,
+          w,
+          `INSERT INTO vault.access_log (workspace_id, at, caller, capability, purpose, result_count)
+           VALUES ($1, ${at}, 'web', 'search', 'erasure', 0)`,
+          [w],
+        );
+        await raw(
+          ownerPool,
+          w,
+          `INSERT INTO vault.canary_events (workspace_id, pii_ref, at, caller, capability)
+           VALUES ($1, gen_random_uuid(), ${at}, 'web', 'mask')`,
+          [w],
+        );
+      }
+    }
+    // The vault's own role cannot delete them directly.
+    await expect(
+      raw(appPool, E, 'DELETE FROM vault.access_log WHERE workspace_id = $1', [E]),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      raw(appPool, E, 'DELETE FROM vault.canary_events WHERE workspace_id = $1', [E]),
+    ).rejects.toThrow(/permission denied/);
+    // Outside the purge, the owner sees no other workspace's rows either.
+    expect(
+      await raw(ownerPool, E, 'SELECT 1 FROM vault.access_log WHERE workspace_id = $1', [F]),
+    ).toEqual([]);
+
+    expect(await vault.purgeSecurityLogs()).toBeGreaterThanOrEqual(4);
+    for (const w of [E, F]) {
+      const logRows = await raw(
+        ownerPool,
+        w,
+        `SELECT at > now() - interval '6 years' AS recent FROM vault.access_log`,
+      );
+      expect(logRows).toEqual([{ recent: true }]);
+      const events = await raw(
+        ownerPool,
+        w,
+        `SELECT at > now() - interval '6 years' AS recent FROM vault.canary_events`,
+      );
+      expect(events).toEqual([{ recent: true }]);
+    }
+    expect(await vault.purgeSecurityLogs()).toBe(0);
+  });
+
   it('[AT-10] an eBay user is matched by ID or username in every workspace that holds PII; web only', async () => {
     const E1 = randomUUID();
     const E2 = randomUUID();

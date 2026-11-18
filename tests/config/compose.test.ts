@@ -133,6 +133,14 @@ describe('compose stack: isolation (NFR-1, NFR-2, OPS-7, OPS-8, OPS-9)', () => {
     expect(networksOf('worker')).not.toContain('ob_pii');
   });
 
+  it('[DP-4] pii-vault has no internet egress: only the internal ob_vault and ob_pii networks, shared with web and worker alone (ADR-068)', () => {
+    const model = composeModel();
+    expect(networksOf('pii-vault').sort()).toEqual(['ob_pii', 'ob_vault']);
+    expect(model.networks.ob_vault?.internal).toBe(true);
+    const onVault = Object.keys(model.services).filter((s) => networksOf(s).includes('ob_vault'));
+    expect(onVault.sort()).toEqual(['pii-vault', 'web', 'worker']);
+  });
+
   it('[NFR-2] integration tests use the same PostgreSQL image as compose', () => {
     expect(service('db-main').image).toBe(POSTGRES_IMAGE);
     expect(service('db-pii').image).toBe(POSTGRES_IMAGE);
@@ -142,7 +150,7 @@ describe('compose stack: isolation (NFR-1, NFR-2, OPS-7, OPS-8, OPS-9)', () => {
     const model = composeModel();
     expect(model.name).toBe('omnibridge');
     const names = Object.values(model.networks).map((n) => n.name);
-    expect(names.sort()).toEqual(['ob_app', 'ob_db', 'ob_edge', 'ob_pii', 'scan_ob']);
+    expect(names.sort()).toEqual(['ob_app', 'ob_db', 'ob_edge', 'ob_pii', 'ob_vault', 'scan_ob']);
     expect(model.networks.ob_pii?.internal).toBe(true);
     expect(model.networks.ob_db?.internal).toBe(true);
   });

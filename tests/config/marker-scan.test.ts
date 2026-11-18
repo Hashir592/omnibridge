@@ -1,5 +1,7 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -29,6 +31,51 @@ describe('marker scan', () => {
     expect(res.status).toBe(1);
     expect(res.stdout).toContain(`${planted}:2`);
     expect(res.stdout).not.toContain('planted@example.test');
+  });
+
+  it('[AT-9] the drill scans every Mailpit message in full: a marker past the snippet is found (S5-20261118-03)', async () => {
+    const deep = `Subject: Invite\r\n\r\n${'filler text '.repeat(400)}\r\nPIIMARK-deep-in-body\r\n`;
+    const server = createServer((req, res) => {
+      const url = req.url ?? '';
+      if (url.startsWith('/api/v1/messages')) {
+        res.setHeader('content-type', 'application/json');
+        res.end(
+          JSON.stringify({
+            total: 1,
+            messages_count: 1,
+            messages: [{ ID: 'm1', Snippet: 'filler text filler text' }],
+          }),
+        );
+      } else if (url === '/api/v1/message/m1/raw') {
+        res.end(deep);
+      } else {
+        res.statusCode = 404;
+        res.end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const dump = await new Promise<{ status: number | null; stdout: string }>((resolve) => {
+        const child = spawn(process.execPath, [
+          'infra/backup/mailpit-raw.mjs',
+          `http://127.0.0.1:${String(port)}`,
+        ]);
+        let stdout = '';
+        child.stdout.on('data', (d: Buffer) => (stdout += d.toString('utf8')));
+        child.on('close', (status) => {
+          resolve({ status, stdout });
+        });
+      });
+      expect(dump.status).toBe(0);
+      const mail = join(dir, 'mail.eml');
+      writeFileSync(mail, dump.stdout);
+      const res = run([mail]);
+      expect(res.status).toBe(1);
+      expect(res.stdout).toContain('1 hits');
+    } finally {
+      server.close();
+    }
   });
 
   it('[AT-9] a source that cannot be read fails the scan', () => {

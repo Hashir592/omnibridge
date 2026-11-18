@@ -7,7 +7,14 @@
 // Prints one line per problem and exits 1 if there is any.
 import { readFileSync } from 'node:fs';
 
-const OMNIBRIDGE_NETWORKS = new Set(['ob_edge', 'ob_app', 'ob_db', 'ob_pii', 'scan_ob']);
+const OMNIBRIDGE_NETWORKS = new Set([
+  'ob_edge',
+  'ob_app',
+  'ob_db',
+  'ob_pii',
+  'ob_vault',
+  'scan_ob',
+]);
 
 function checkModel(model) {
   const problems = [];
