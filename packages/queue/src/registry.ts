@@ -1,3 +1,4 @@
+import { DELETION_TRIGGERS, DeletionScope } from '@omnibridge/vault-client/schemas';
 import { z } from 'zod';
 import {
   defineJob,
@@ -85,6 +86,26 @@ export const jobsRetentionJob = defineJob({
 });
 
 /**
+ * One run of the deletion service (DEL-1): the vault hard-deletes the scope, then db-main keeps
+ * the run log and tombstones (T-0403). The payload is a trigger and IDs, never PII (invariant 7a).
+ * Sent through `requestDeletion`, which checks the trigger and scope fit.
+ */
+export const piiDeleteJob = defineJob({
+  type: 'pii.delete',
+  payload: z.object({ trigger: z.enum(DELETION_TRIGGERS), scope: DeletionScope }).strict(),
+  retry: { limit: 10, delaySeconds: 30, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 900,
+});
+
+/** The hourly PII expiry of one workspace (DEL-1 trigger 1, AT-8): records past delete_after. */
+export const piiExpiryJob = defineJob({
+  type: 'pii.expiry',
+  payload: z.object({}).strict(),
+  retry: { limit: 5, delaySeconds: 60, backoff: true, maxDelaySeconds: 1_800 },
+  expireInSeconds: 900,
+});
+
+/**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
@@ -97,6 +118,8 @@ export const JOBS: readonly JobDefinition[] = [
   authInviteJob,
   accessReviewJob,
   jobsRetentionJob,
+  piiDeleteJob,
+  piiExpiryJob,
 ];
 
 /**
@@ -127,6 +150,16 @@ export const housekeepingSweepJob = definePlatformJob({
 });
 
 /**
+ * The hourly PII expiry sweep (ARCHITECTURE 6.2): one pii.expiry job per workspace, five minutes
+ * past every hour. Light, so it runs around the clock (records past delete_after go within the hour).
+ */
+export const piiExpirySweepJob = definePlatformJob({
+  type: 'pii.expiry-sweep',
+  cron: '5 * * * *',
+  heavy: false,
+});
+
+/**
  * Every platform job with a cron (no workspace). The migrate job creates their queues, and the
  * worker schedules and consumes each one.
  */
@@ -134,4 +167,5 @@ export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [
   auditRetentionSweepJob,
   accessReviewSweepJob,
   housekeepingSweepJob,
+  piiExpirySweepJob,
 ];

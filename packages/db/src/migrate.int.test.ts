@@ -81,6 +81,7 @@ describe('db-main roles and migrations', () => {
       '0021_m02_end_fixes',
       '0022_validate_job_company',
       '0023_drop_retired_functions',
+      '0024_deletion',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

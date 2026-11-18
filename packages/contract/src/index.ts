@@ -59,6 +59,7 @@ export {
   ebayAccountDeletionChallenge,
   webhookRoutes,
 } from './routes/webhooks.ts';
+export { getDeletionCertificate } from './routes/deletion.ts';
 export {
   AuditEventSchema,
   auditFilters,

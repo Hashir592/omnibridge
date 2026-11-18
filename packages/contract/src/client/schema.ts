@@ -392,6 +392,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/channel-accounts/{id}/deletion-certificate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Download the deletion certificate of a channel account */
+    get: operations['getDeletionCertificate'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/companies': {
     parameters: {
       query?: never;
@@ -2183,6 +2200,46 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['WorkspaceChoice'][];
+        };
+      };
+    };
+  };
+  getDeletionCertificate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description File content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
         };
       };
     };

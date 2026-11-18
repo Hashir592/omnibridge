@@ -1729,6 +1729,52 @@
         }
       }
     },
+    "/channel-accounts/{id}/deletion-certificate": {
+      "get": {
+        "operationId": "getDeletionCertificate",
+        "summary": "Download the deletion certificate of a channel account",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary", "description": "File bytes" }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
     "/auth/csrf": {
       "get": {
         "operationId": "getCsrf",

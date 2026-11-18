@@ -170,3 +170,79 @@ export const MatchResponse = z.object({ subject_ids: z.array(z.string()) }).stri
 export type MatchResponse = z.infer<typeof MatchResponse>;
 
 export const ErrorBody = z.object({ error: z.string() }).strict();
+
+/** DEL-1: the seven triggers of the one deletion service. */
+export const DELETION_TRIGGERS = [
+  'expiry',
+  'cancellation',
+  'erasure',
+  'ebay_account_deletion',
+  'amazon_revocation',
+  'ebay_termination',
+  'workspace_closure',
+] as const;
+export type DeletionTrigger = (typeof DELETION_TRIGGERS)[number];
+
+/**
+ * What a run deletes. IDs only, never PII (invariant 7a): an erasure or eBay deletion notice
+ * resolves its identifiers to pii_refs with a logged search first (FA-14), then deletes by ref.
+ */
+export const DeletionScope = z.discriminatedUnion('type', [
+  /** Every record of the workspace whose delete_after has passed (the hourly job). */
+  z.object({ type: z.literal('expiry') }).strict(),
+  /** Every record of these subjects (an order's cancellation). */
+  z
+    .object({
+      type: z.literal('subjects'),
+      subject_type: z.enum(['order', 'conversation', 'feedback']),
+      subject_ids: z.array(z.string().min(1).max(200)).min(1).max(1000),
+    })
+    .strict(),
+  /** These records (erasure and eBay account deletion, after a search). */
+  z.object({ type: z.literal('refs'), pii_refs: z.array(uuid).min(1).max(5000) }).strict(),
+  /** Every record of one channel account (Amazon revocation, eBay termination). */
+  z.object({ type: z.literal('channel_account'), channel_account_id: uuid }).strict(),
+  /** Every record and key of the workspace (closure). */
+  z.object({ type: z.literal('workspace') }).strict(),
+]);
+export type DeletionScope = z.infer<typeof DeletionScope>;
+
+/** Which scope each trigger may use (DEL-1); anything else is refused before it runs. */
+export const TRIGGER_SCOPES: Readonly<Record<DeletionTrigger, readonly DeletionScope['type'][]>> = {
+  expiry: ['expiry'],
+  cancellation: ['subjects'],
+  erasure: ['refs'],
+  ebay_account_deletion: ['refs'],
+  amazon_revocation: ['channel_account'],
+  ebay_termination: ['channel_account'],
+  workspace_closure: ['workspace'],
+};
+
+export const DeleteRequest = z
+  .object({
+    workspace_id: uuid,
+    /** The caller's run id: a retry with the same id reports what that run already deleted. */
+    run_id: uuid,
+    trigger: z.enum(DELETION_TRIGGERS),
+    scope: DeletionScope,
+  })
+  .strict()
+  .refine((r) => TRIGGER_SCOPES[r.trigger].includes(r.scope.type), {
+    message: 'scope does not fit the trigger',
+    path: ['scope'],
+  });
+export type DeleteRequest = z.infer<typeof DeleteRequest>;
+export const DeleteResponse = z
+  .object({
+    run_id: uuid,
+    /** Every record this run has deleted, this call and any earlier attempt: IDs only. */
+    deleted: z.array(z.object({ pii_ref: uuid, channel_account_id: uuid.nullable() }).strict()),
+    /** True when the scope had more than one batch: call again with the same run id. */
+    more: z.boolean(),
+    /** Rows removed by this call: 0 on a repeat (DEL-3: counts, never values). */
+    counts: z
+      .object({ records: z.number().int(), fields: z.number().int(), index: z.number().int() })
+      .strict(),
+  })
+  .strict();
+export type DeleteResponse = z.infer<typeof DeleteResponse>;

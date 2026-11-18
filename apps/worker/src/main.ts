@@ -2,6 +2,7 @@ import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  DeletionLog,
   AuditLog,
   AuthStore,
   createMainDb,
@@ -19,8 +20,10 @@ import { createLogger } from '@omnibridge/logger';
 import { Mailer } from '@omnibridge/mail';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
+import { VaultClient } from '@omnibridge/vault-client';
 import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
+import { piiDeleteHandler, piiExpiryHandler } from './deletion.ts';
 import { jobsRetentionHandler } from './housekeeping.ts';
 import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
 import { workerHandlerDbConfig } from './db.ts';
@@ -93,6 +96,16 @@ const mailer = new Mailer({
   allowPlain: process.env.SMTP_ALLOW_PLAIN === '1',
 });
 const users = new UserRepository(handlerDb.db);
+// DEL-1: the deletion jobs reach pii-vault with the deletion token, the only one that may delete.
+const deletionDeps = {
+  vault: new VaultClient({
+    baseUrl: requireEnv('PII_VAULT_URL'),
+    token: readSecretFile('VAULT_DELETION_TOKEN'),
+    timeoutMs: 60_000,
+  }),
+  log: new DeletionLog(handlerDb.db),
+  logger: log,
+};
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -129,6 +142,8 @@ await registerHandlers(queue, {
     records: new JobRecordRepository(handlerDb.db),
     logger: log,
   }),
+  'pii.delete': piiDeleteHandler(deletionDeps),
+  'pii.expiry': piiExpiryHandler(deletionDeps),
 });
 // The scheduled fan-out, the worker's only use of ob_platform (invariant 2).
 const closePlatformJobs = await startPlatformJobs({

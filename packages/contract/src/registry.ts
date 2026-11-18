@@ -1,5 +1,6 @@
 import { exportAuditEvents, listAuditEvents } from './routes/audit.ts';
 import { authRoutes } from './routes/auth.ts';
+import { getDeletionCertificate } from './routes/deletion.ts';
 import { getHealth } from './routes/health.ts';
 import { getFile } from './routes/files.ts';
 import { getJob } from './routes/jobs.ts';
@@ -20,6 +21,7 @@ export const contractRoutes = [
   createCompany,
   listAuditEvents,
   exportAuditEvents,
+  getDeletionCertificate,
   ...authRoutes,
   ...webhookRoutes,
   ...userRoutes,

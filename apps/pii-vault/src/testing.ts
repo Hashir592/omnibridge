@@ -6,6 +6,7 @@ import { migratePii, type PoolConfig } from '@omnibridge/pii-db';
 import pg from 'pg';
 import { buildVaultApp } from './app.ts';
 import { ServiceTokens } from './auth.ts';
+import { DeletionJournal, DeletionService } from './deletion.ts';
 import type { Caller } from './vault.ts';
 import { Vault } from './vault.ts';
 
@@ -25,6 +26,9 @@ export async function startTestVault(options: {
   owner: PoolConfig;
   app: PoolConfig;
   logger: Logger;
+  /** The off-site journal stand-in (a temporary directory in tests). */
+  journalDir: string;
+  now?: () => Date;
 }): Promise<TestVault> {
   await migratePii(options.owner);
   const pool = new pg.Pool({ ...options.app, max: 4 });
@@ -33,13 +37,23 @@ export async function startTestVault(options: {
     worker: randomBytes(32).toString('base64url'),
     deletion: randomBytes(32).toString('base64url'),
   };
-  const vault = new Vault({ pool, keyring: parseKeyring('pii', generateKekLine(1)) });
+  const now = options.now ?? (() => new Date());
+  const vault = new Vault({ pool, keyring: parseKeyring('pii', generateKekLine(1)), now });
+  const deletion = new DeletionService({
+    pool,
+    journal: new DeletionJournal(options.journalDir),
+    now,
+    onWorkspaceClosed: (workspaceId) => {
+      vault.forgetKeys(workspaceId);
+    },
+  });
   const app = buildVaultApp({
     logger: options.logger,
     version: 'test',
     dbPii: () => Promise.resolve(true),
     vault,
     tokens: new ServiceTokens(tokens),
+    deletion,
   });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const { port } = app.server.address() as AddressInfo;

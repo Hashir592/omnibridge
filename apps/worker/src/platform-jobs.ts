@@ -5,6 +5,7 @@ import type { Logger } from '@omnibridge/logger';
 import { PLATFORM_JOBS, schedulePlatformJob, type JobQueue } from '@omnibridge/queue';
 import type { PgBoss } from 'pg-boss';
 import { sweepAuditRetention } from './audit-retention.ts';
+import { sweepPiiExpiry } from './deletion.ts';
 import { sweepHousekeeping } from './housekeeping.ts';
 import { sweepAccessReviews } from './users-jobs.ts';
 
@@ -68,6 +69,10 @@ export async function startPlatformJobs({
       'users.access-review-sweep': async () => {
         const workspaces = await sweepAccessReviews({ directory, queue });
         logger.info({ event: 'users.access_review_sweep', count: workspaces }, 'reviews sent');
+      },
+      'pii.expiry-sweep': async () => {
+        const workspaces = await sweepPiiExpiry({ directory, queue });
+        logger.info({ event: 'pii.expiry_sweep', count: workspaces }, 'PII expiry sent');
       },
       'housekeeping.daily-sweep': async () => {
         const workspaces = await sweepHousekeeping({ auth, directory, queue, logger });

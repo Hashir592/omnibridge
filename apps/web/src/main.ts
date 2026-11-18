@@ -3,6 +3,8 @@ import { readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  ChannelAccountRepository,
+  DeletionLog,
   AuditLog,
   AuthStore,
   CompanyRepository,
@@ -118,6 +120,7 @@ const app = buildWebApp({
     companies: new CompanyRepository(main.db),
   },
   audit: new AuditLog(main.db),
+  deletion: { log: new DeletionLog(main.db), accounts: new ChannelAccountRepository(main.db) },
   auth,
   people: {
     members: new MemberAccessRepository(main.db),
