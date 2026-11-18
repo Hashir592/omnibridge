@@ -47,6 +47,7 @@ describe('db-pii roles and migrations', () => {
       '0001_baseline',
       '0002_vault_core',
       '0003_deletion',
+      '0004_closed_workspaces',
     ]);
     expect((await migratePii(owner)).applied).toEqual([]);
   });

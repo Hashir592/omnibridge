@@ -3,10 +3,12 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from '@omnibridge/logger';
+import type { Pool } from '@omnibridge/pii-db';
 import { PII_MARKER, startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { VaultClient, VaultError, type DeleteRequest } from '@omnibridge/vault-client';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DeletionJournal, DeletionService } from './deletion.ts';
 import { startTestVault, type TestVault } from './testing.ts';
 
 // T-0403: the one deletion service (DEL-1, DEL-2, DEL-3, AT-8, invariant 10) against a real
@@ -204,8 +206,94 @@ describe('deletion service in the vault [DEL-1][DEL-2][DEL-3][AT-8]', () => {
     expect(await ownerRows('records', closing)).toEqual([]);
     expect(await ownerRows('workspace_keys', closing)).toEqual([]);
     expect((await ownerRows('records', other)).map((r) => r.pii_ref)).toEqual([survivor]);
-    // A new record in the closed workspace gets fresh keys, never the deleted ones.
-    await ingest('c-4', { workspace: closing });
+    // ADR-065 (F-M04h-04): closure leaves a marker; ingest for the closed workspace answers 409
+    // and makes no new keys, and reads find nothing.
+    expect(await ownerRows('closed_workspaces', closing)).toHaveLength(1);
+    const refused = await ingest('c-4', { workspace: closing }).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(VaultError);
+    expect((refused as VaultError).status).toBe(409);
+    expect(await ownerRows('workspace_keys', closing)).toEqual([]);
+    expect(await clients.web.mask(closing, [survivor])).toEqual({ records: [] });
+    expect(await ownerRows('workspace_keys', closing)).toEqual([]);
+    // The other workspace is not closed.
+    expect(await ownerRows('closed_workspaces', other)).toEqual([]);
+    await ingest('c-5', { workspace: other });
+  });
+
+  it('[DEL-1] an ingest that lands during closure is caught: the run says more and finishes next call (ADR-065)', async () => {
+    const closing = randomUUID();
+    const first = await ingest('race-1', { workspace: closing });
+    const appPool = new pg.Pool({ ...cluster.connection('vault_app'), max: 2 });
+    let connects = 0;
+    let late = '';
+    // The real pool, except that an ingest commits after closure has read its targets.
+    const racing = {
+      connect: async () => {
+        connects += 1;
+        if (connects === 2) late = await ingest('race-2', { workspace: closing });
+        return appPool.connect();
+      },
+      query: (text: string, values?: unknown[]) => appPool.query(text, values),
+    } as unknown as Pool;
+    const service = new DeletionService({ pool: racing, journal: new DeletionJournal(journalDir) });
+    const request = {
+      workspace_id: closing,
+      run_id: randomUUID(),
+      trigger: 'workspace_closure' as const,
+      scope: { type: 'workspace' as const },
+    };
+    const one = await service.delete(request);
+    expect(one.more).toBe(true);
     expect(await ownerRows('workspace_keys', closing)).toHaveLength(2);
+    expect(await ownerRows('closed_workspaces', closing)).toEqual([]);
+    const two = await service.delete(request);
+    expect(two.more).toBe(false);
+    expect(two.deleted.map((d) => d.pii_ref).sort()).toEqual([first, late].sort());
+    expect(await ownerRows('records', closing)).toEqual([]);
+    expect(await ownerRows('workspace_keys', closing)).toEqual([]);
+    expect(await ownerRows('closed_workspaces', closing)).toHaveLength(1);
+    await appPool.end();
+  });
+
+  it('[DEL-2] a retry of the same run VACUUMs even though it finds nothing left to delete (F-M04h-03)', async () => {
+    const appPool = new pg.Pool({ ...cluster.connection('vault_app'), max: 2 });
+    const vacuums: string[] = [];
+    let failNext = true;
+    // The real pool, except that the first VACUUM fails after the delete has committed.
+    const flaky = {
+      connect: () => appPool.connect(),
+      query: async (text: string, values?: unknown[]) => {
+        if (text.startsWith('VACUUM')) {
+          vacuums.push(text);
+          if (failNext) {
+            failNext = false;
+            throw new Error('vacuum interrupted');
+          }
+        }
+        return appPool.query(text, values);
+      },
+    } as unknown as Pool;
+    const service = new DeletionService({ pool: flaky, journal: new DeletionJournal(journalDir) });
+    const ref = await ingest('o-vacuum');
+    const request = {
+      workspace_id: ws,
+      run_id: randomUUID(),
+      trigger: 'erasure' as const,
+      scope: { type: 'refs' as const, pii_refs: [ref] },
+    };
+    await expect(service.delete(request)).rejects.toThrow(/vacuum interrupted/);
+    expect(await exists(ref)).toBe(false);
+    const retry = await service.delete(request);
+    expect(retry.counts.records).toBe(0);
+    expect(retry.deleted.map((d) => d.pii_ref)).toEqual([ref]);
+    expect(vacuums).toHaveLength(2);
+    // A run that never deleted anything has no tombstones and needs no VACUUM.
+    await service.delete({
+      ...request,
+      run_id: randomUUID(),
+      scope: { type: 'refs', pii_refs: [randomUUID()] },
+    });
+    expect(vacuums).toHaveLength(2);
+    await appPool.end();
   });
 });

@@ -2,6 +2,7 @@ import { open, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool, PoolClient } from '@omnibridge/pii-db';
 import type { DeleteRequest, DeleteResponse } from '@omnibridge/vault-client/schemas';
+import { workspaceLock } from './vault.ts';
 
 /** At most this many records per call; the response says `more` and the caller calls again. */
 export const DELETE_BATCH = 5000;
@@ -52,7 +53,8 @@ export class DeletionJournal {
  * IDs. A run: picks the records, journals their refs off-site, then in one transaction hard-deletes
  * fields, blind indexes and records and writes the db-pii tombstones and the run log; after the
  * commit it VACUUMs the tables, so no deleted value stays in a dead tuple. Idempotent: a repeat
- * finds nothing left, deletes nothing and logs zero, and still reports what its run id deleted.
+ * finds nothing left, deletes nothing and logs zero, still reports what its run id deleted, and
+ * VACUUMs again (in case the first VACUUM failed).
  */
 export class DeletionService {
   readonly #pool: Pool;
@@ -93,6 +95,10 @@ export class DeletionService {
     );
     const refs = targets.map((t) => t.pii_ref);
     const result = await this.#tx(ws, async (c) => {
+      // Closure's last batch: hold off any ingest for this workspace until it commits (ADR-065).
+      if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
+        await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(ws)]);
+      }
       const fields = await c.query(
         'DELETE FROM vault.record_fields WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[])',
         [ws, refs],
@@ -121,10 +127,23 @@ export class DeletionService {
           ],
         );
       }
-      const more = targets.length === DELETE_BATCH;
+      let more = targets.length === DELETE_BATCH;
       if (req.scope.type === 'workspace' && !more) {
-        // Closure: the keys go last, once no record is left that they could open.
+        // An ingest that committed after the targets were read: not done yet, call again.
+        const left = await c.query('SELECT 1 FROM vault.records WHERE workspace_id = $1 LIMIT 1', [
+          ws,
+        ]);
+        more = (left.rowCount ?? 0) > 0;
+      }
+      if (req.scope.type === 'workspace' && !more) {
+        // Closure: the keys go last, once no record is left that they could open. The marker
+        // makes the vault refuse any later ingest for this workspace (ADR-065, F-M04h-04).
         await c.query('DELETE FROM vault.workspace_keys WHERE workspace_id = $1', [ws]);
+        await c.query(
+          `INSERT INTO vault.closed_workspaces (workspace_id, closed_at) VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [ws, at],
+        );
       }
       const counts = {
         records: records.rowCount ?? 0,
@@ -153,9 +172,11 @@ export class DeletionService {
       return { counts, deleted: deleted.rows, more, removed: records.rows.map((r) => r.pii_ref) };
     });
     const { removed, ...answer } = result;
-    if (removed.length > 0) {
-      await this.#labels.deleteFor(ws, removed);
-      // Invariant 10: VACUUM cannot run in a transaction; it clears the dead tuples just made.
+    if (removed.length > 0) await this.#labels.deleteFor(ws, removed);
+    // Invariant 10: VACUUM cannot run in a transaction; it clears the dead tuples just made. It
+    // runs whenever the run has tombstones, so a retry after a failed VACUUM runs it again even
+    // though it finds nothing left to delete (ADR-065, F-M04h-03).
+    if (removed.length > 0 || answer.deleted.length > 0) {
       await this.#pool.query('VACUUM vault.record_fields, vault.blind_index, vault.records');
     }
     if (req.scope.type === 'workspace' && !result.more) this.#onWorkspaceClosed(ws);

@@ -178,6 +178,27 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
     await server.close();
   });
 
+  it('[PERM-5] a child still cannot invite, through the route or straight at the database (F-M04h-01)', async () => {
+    const server = app();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/api/users/invites',
+      headers: headers(child),
+      payload: { email: 'sneaky@example.test', role: 'admin', tabs: [], companyIds: [] },
+    });
+    expect(res.statusCode).toBe(403);
+    await expect(
+      tenancy.run({ workspaceId: A, companyIds: [], userId: child }, (c) =>
+        new InviteRepository(main.db).create(
+          c,
+          { email: 'sneaky@example.test', role: 'admin', tabs: [], companyIds: [] },
+          new Date(),
+        ),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    await server.close();
+  });
+
   it('[PERM-2] new ticks apply to the very next request', async () => {
     const server = app();
     const put = await server.inject({

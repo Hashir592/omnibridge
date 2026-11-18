@@ -55,6 +55,8 @@ export {
   type JobRecordPatch,
   type JobRecordStore,
   type JobState,
+  type PhasedHandler,
+  type PreparingJob,
   type RunningJob,
   type SendInput,
   type WorkTuning,

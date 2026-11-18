@@ -110,6 +110,20 @@ export interface RunningJob<T> {
 /** A handler resolves with its result: a plain object is stored for GET /jobs/:id, anything else as null. */
 export type JobHandler<T> = (job: RunningJob<T>) => Promise<unknown>;
 
+/** A job before its tenant transaction opens: no `ctx`, so no repository call can be made. */
+export type PreparingJob<T> = Omit<RunningJob<T>, 'ctx'>;
+
+/**
+ * A job that calls out over the network (the vault, SMTP) before it writes to db-main (invariant
+ * 3, F-M04h-05): `prepare` runs with no db-main transaction open, then `commit` runs in the
+ * job's one tenant transaction with what `prepare` returned. Either may throw for a retry, so
+ * both must be idempotent (invariant 19).
+ */
+export interface PhasedHandler<T, O> {
+  prepare(job: PreparingJob<T>): Promise<O>;
+  commit(job: RunningJob<T>, prepared: O): Promise<unknown>;
+}
+
 /** Options a caller may tune per worker; the rest is fixed by the job definition. */
 export type WorkTuning = Pick<WorkOptions, 'localConcurrency' | 'pollingIntervalSeconds'>;
 
@@ -207,10 +221,13 @@ export class JobQueue {
     return result;
   }
 
-  /** Runs jobs of one type. The handler's return value is stored as the job's result. */
-  async work<P extends z.ZodType>(
+  /**
+   * Runs jobs of one type. The handler's return value (a phased handler's `commit` value) is
+   * stored as the job's result.
+   */
+  async work<P extends z.ZodType, O = never>(
     def: JobDefinition<P>,
-    handler: JobHandler<z.infer<P>>,
+    handler: JobHandler<z.infer<P>> | PhasedHandler<z.infer<P>, O>,
     tuning: WorkTuning = {},
   ): Promise<string> {
     if (def.perAccountCap !== undefined && this.#limiter === undefined) {
@@ -238,9 +255,9 @@ export class JobQueue {
     );
   }
 
-  async #run<P extends z.ZodType>(
+  async #run<P extends z.ZodType, O>(
     def: JobDefinition<P>,
-    handler: JobHandler<z.infer<P>>,
+    handler: JobHandler<z.infer<P>> | PhasedHandler<z.infer<P>, O>,
     job: JobWithMetadata<unknown>,
   ): Promise<void> {
     let envelope: JobEnvelope<z.infer<P>>;
@@ -266,21 +283,30 @@ export class JobQueue {
     try {
       // Inside the try, so a failed update still releases the slot (F-M01-end-01).
       await this.#records.update(ctx, key, { state: 'active', attempt, errorCode: null });
-      const result = await this.#tenancy.runWorkspace(
-        { workspaceId: envelope.workspace_id },
-        (tenant) =>
-          handler({
-            envelope: { ...envelope, attempt },
-            payload: envelope.payload,
-            ctx: tenant,
-            attempt,
-            progress: (percent) =>
-              this.#records.update(ctx, key, {
-                state: 'active',
-                percent: Math.max(0, Math.min(100, Math.round(percent))),
-              }),
+      const base: PreparingJob<z.infer<P>> = {
+        envelope: { ...envelope, attempt },
+        payload: envelope.payload,
+        attempt,
+        progress: (percent) =>
+          this.#records.update(ctx, key, {
+            state: 'active',
+            percent: Math.max(0, Math.min(100, Math.round(percent))),
           }),
-      );
+      };
+      let result: unknown;
+      if (typeof handler === 'function') {
+        result = await this.#tenancy.runWorkspace(
+          { workspaceId: envelope.workspace_id },
+          (tenant) => handler({ ...base, ctx: tenant }),
+        );
+      } else {
+        // F-M04h-05: the network half first, with no db-main transaction open.
+        const prepared = await handler.prepare(base);
+        result = await this.#tenancy.runWorkspace(
+          { workspaceId: envelope.workspace_id },
+          (tenant) => handler.commit({ ...base, ctx: tenant }, prepared),
+        );
+      }
       await this.#records.update(ctx, key, {
         state: 'completed',
         percent: 100,

@@ -226,6 +226,22 @@ describe('deletion jobs, every trigger [DEL-1][DEL-2][DEL-3][AT-8]', () => {
     expect(first).toBe(1);
   });
 
+  // Before the closure test: after it, the vault refuses ingest for this workspace (ADR-065).
+  it('[DEL-3] a repeated request is the same run: nothing is deleted twice', async () => {
+    const ref = await ingest('w-twice');
+    const request: DeletionRequest = {
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [ref] },
+      idempotencyKey: 'req-twice',
+    };
+    const first = await requestDeletion(queue, ctx, request);
+    await waitFor(first.id);
+    const again = await requestDeletion(queue, ctx, request);
+    expect(again).toEqual({ id: first.id, created: false });
+    const runs = await new Tenancy(db.db).run(ctx, (c) => log.runs(c));
+    expect(runs.filter((r) => r.trigger === 'erasure' && r.recordsDeleted === 1)).toHaveLength(2);
+  });
+
   it('[DEL-1] workspace closure deletes every record left', async () => {
     const last = await ingest('w-last');
     const result = await run({
@@ -264,20 +280,5 @@ describe('deletion jobs, every trigger [DEL-1][DEL-2][DEL-3][AT-8]', () => {
     expect(cert.recordsDeleted).toBeGreaterThanOrEqual(1);
     expect(await scanDatabaseForMarkers(main)).toEqual([]);
     expect(scanTextForMarkers(logs)).toEqual([]);
-  });
-
-  it('[DEL-3] a repeated request is the same run: nothing is deleted twice', async () => {
-    const ref = await ingest('w-twice');
-    const request: DeletionRequest = {
-      trigger: 'erasure',
-      scope: { type: 'refs', pii_refs: [ref] },
-      idempotencyKey: 'req-twice',
-    };
-    const first = await requestDeletion(queue, ctx, request);
-    await waitFor(first.id);
-    const again = await requestDeletion(queue, ctx, request);
-    expect(again).toEqual({ id: first.id, created: false });
-    const runs = await new Tenancy(db.db).run(ctx, (c) => log.runs(c));
-    expect(runs.filter((r) => r.trigger === 'erasure' && r.recordsDeleted === 1)).toHaveLength(2);
   });
 });

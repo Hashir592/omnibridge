@@ -347,6 +347,58 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(days).toBeCloseTo(90, 3);
   });
 
+  it('[DEL-1][DP-6] delete_after is accepted only from now minus 1 day to now plus 90 days (F-M04h-02)', async () => {
+    const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+    const HOUR = 3_600_000;
+    const DAY = 24 * HOUR;
+    const status = (p: Promise<unknown>) =>
+      p.then(
+        () => 200,
+        (e: unknown) => (e instanceof VaultError ? e.status : 0),
+      );
+    const withExpiry = (subject: string, deleteAfter: string) =>
+      clients.web.ingest({
+        workspace_id: A,
+        kind: 'buyer_contact',
+        channel_account_id: account,
+        subject_type: 'order',
+        subject_id: subject,
+        delete_after: deleteAfter,
+        fields: contact('201'),
+      });
+    expect(await status(withExpiry('exp-late', at(90 * DAY + HOUR)))).toBe(400);
+    expect(await status(withExpiry('exp-early', at(-DAY - HOUR)))).toBe(400);
+    expect(await status(withExpiry('exp-9999', '9999-12-31T00:00:00Z'))).toBe(400);
+    const { pii_ref } = await withExpiry('exp-ok', at(90 * DAY - HOUR));
+    expect(await status(withExpiry('exp-past-ok', at(-DAY + HOUR)))).toBe(200);
+    const expiry = (deleteAfter: string) =>
+      clients.worker.setExpiry({ workspace_id: A, pii_refs: [pii_ref], delete_after: deleteAfter });
+    expect(await status(expiry(at(90 * DAY + HOUR)))).toBe(400);
+    expect(await status(expiry(at(-DAY - HOUR)))).toBe(400);
+    expect(await expiry(at(25 * DAY))).toEqual({ updated: 1 });
+  });
+
+  it('[DP-5] reads never make keys: an unknown workspace gets none and answers empty or 404 (F-M04h-04)', async () => {
+    const unknown = randomUUID();
+    const ref = randomUUID();
+    expect(await clients.web.mask(unknown, [ref])).toEqual({ records: [] });
+    expect(
+      await clients.web.search({
+        workspaceId: unknown,
+        purpose: 'order_search',
+        query: { postcode: 'G2 1AA' },
+      }),
+    ).toEqual({ matches: [], truncated: false });
+    const missing = await clients.web
+      .readFull({ workspaceId: unknown, piiRef: ref, purpose: 'order_detail' })
+      .catch((e: unknown) => e);
+    expect((missing as VaultError).status).toBe(404);
+    const matched = await clients.web.match(unknown, ref).catch((e: unknown) => e);
+    expect((matched as VaultError).status).toBe(404);
+    expect(await raw(ownerPool, unknown, 'SELECT 1 FROM vault.workspace_keys')).toEqual([]);
+    expect(await raw(ownerPool, unknown, 'SELECT 1 FROM vault.access_log')).toEqual([]);
+  });
+
   it('[DP-4] the vault holds the only db-pii credentials: web and worker cannot reach it', async () => {
     // The compose config test proves web and worker get no db-pii secret or network; here the
     // vault_app role itself can neither change keys nor rewrite the access log.

@@ -1,12 +1,6 @@
 import type { DeletionLog } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
-import {
-  deletionRunId,
-  piiExpiryJob,
-  type JobHandler,
-  type JobQueue,
-  type RunningJob,
-} from '@omnibridge/queue';
+import { deletionRunId, piiExpiryJob, type JobQueue, type PhasedHandler } from '@omnibridge/queue';
 import type {
   DeleteResponse,
   DeletionScope,
@@ -25,61 +19,90 @@ export interface DeletionDeps {
   now?: () => Date;
 }
 
+interface VaultRun {
+  runId: string;
+  startedAt: Date;
+  deleted: DeleteResponse['deleted'];
+  removed: number;
+}
+
 /**
- * One deletion run (DEL-1, DEL-2, DEL-3): the vault hard-deletes the scope and writes its
- * tombstones and journal; then db-main keeps the run log and its own copy of every tombstone.
- * The run id comes from the job's key, so a retry is the same run: the vault reports what it
- * already deleted and db-main adds whatever it missed. Logs and results hold counts only.
+ * One deletion run (DEL-1, DEL-2, DEL-3), in two phases (F-M04h-05, invariant 3): first the vault
+ * hard-deletes the scope and writes its tombstones and journal, with no db-main transaction open
+ * (each vault call journals, deletes and VACUUMs); then, in the job's short tenant transaction,
+ * db-main keeps the run log and its own copy of every tombstone. The run id comes from the job's
+ * key, so a retry is the same run: the vault reports what it already deleted and db-main adds
+ * whatever it missed. Logs and results hold counts only.
  */
-async function runDeletion(
+function deletionRun<T>(
   deps: DeletionDeps,
-  job: RunningJob<unknown>,
-  trigger: DeletionTrigger,
-  scope: DeletionScope,
-): Promise<{ records: number }> {
+  what: (payload: T) => { trigger: DeletionTrigger; scope: DeletionScope },
+): PhasedHandler<T, VaultRun> {
   const now = deps.now ?? (() => new Date());
-  const startedAt = now();
-  const { workspace_id: workspaceId, type, idempotency_key: key } = job.envelope;
-  const runId = deletionRunId(workspaceId, type, key);
-  let last: DeleteResponse | undefined;
-  let removed = 0;
-  for (let batch = 0; batch < MAX_BATCHES; batch += 1) {
-    last = await deps.vault.delete({ workspace_id: workspaceId, run_id: runId, trigger, scope });
-    removed += last.counts.records;
-    if (!last.more) break;
-  }
-  if (last?.more === true) throw new Error('deletion scope larger than one run: retrying');
-  const deleted = last?.deleted ?? [];
-  await deps.log.record(
-    job.ctx,
-    {
-      id: runId,
-      trigger,
-      scopeType: scope.type,
-      scope,
-      channelAccountId: scope.type === 'channel_account' ? scope.channel_account_id : null,
-      startedAt,
-      finishedAt: now(),
+  return {
+    prepare: async (job) => {
+      const { trigger, scope } = what(job.payload);
+      const startedAt = now();
+      const { workspace_id: workspaceId, type, idempotency_key: key } = job.envelope;
+      const runId = deletionRunId(workspaceId, type, key);
+      let last: DeleteResponse | undefined;
+      let removed = 0;
+      for (let batch = 0; batch < MAX_BATCHES; batch += 1) {
+        last = await deps.vault.delete({
+          workspace_id: workspaceId,
+          run_id: runId,
+          trigger,
+          scope,
+        });
+        removed += last.counts.records;
+        if (!last.more) break;
+      }
+      if (last?.more === true) throw new Error('deletion scope larger than one run: retrying');
+      return { runId, startedAt, deleted: last?.deleted ?? [], removed };
     },
-    deleted.map((d) => ({ piiRef: d.pii_ref, channelAccountId: d.channel_account_id })),
-  );
-  deps.logger.info(
-    { event: 'pii.deletion', workspaceId, trigger, runId, count: deleted.length, removed },
-    'deletion run done',
-  );
-  return { records: deleted.length };
+    commit: async (job, run) => {
+      const { trigger, scope } = what(job.payload);
+      await deps.log.record(
+        job.ctx,
+        {
+          id: run.runId,
+          trigger,
+          scopeType: scope.type,
+          scope,
+          channelAccountId: scope.type === 'channel_account' ? scope.channel_account_id : null,
+          startedAt: run.startedAt,
+          finishedAt: now(),
+        },
+        run.deleted.map((d) => ({ piiRef: d.pii_ref, channelAccountId: d.channel_account_id })),
+      );
+      deps.logger.info(
+        {
+          event: 'pii.deletion',
+          workspaceId: job.envelope.workspace_id,
+          trigger,
+          runId: run.runId,
+          count: run.deleted.length,
+          removed: run.removed,
+        },
+        'deletion run done',
+      );
+      return { records: run.deleted.length };
+    },
+  };
 }
 
 /** pii.delete: every event-triggered deletion (DEL-1 triggers 2 to 7). */
 export function piiDeleteHandler(
   deps: DeletionDeps,
-): JobHandler<{ trigger: DeletionTrigger; scope: DeletionScope }> {
-  return (job) => runDeletion(deps, job, job.payload.trigger, job.payload.scope);
+): PhasedHandler<{ trigger: DeletionTrigger; scope: DeletionScope }, VaultRun> {
+  return deletionRun(deps, (payload) => payload);
 }
 
 /** pii.expiry: this workspace's records past delete_after (DEL-1 trigger 1, AT-8). */
-export function piiExpiryHandler(deps: DeletionDeps): JobHandler<Record<string, never>> {
-  return (job) => runDeletion(deps, job, 'expiry', { type: 'expiry' });
+export function piiExpiryHandler(
+  deps: DeletionDeps,
+): PhasedHandler<Record<string, never>, VaultRun> {
+  return deletionRun(deps, () => ({ trigger: 'expiry', scope: { type: 'expiry' } }));
 }
 
 /**
