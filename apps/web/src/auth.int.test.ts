@@ -1025,6 +1025,54 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await server.close();
   });
 
+  it('[TEN-7] the platform creates a workspace and invites its first admin, who accepts (F-M04h-01)', async () => {
+    const server = app();
+    const operator = await makeUser({ workspaces: [A] });
+    expect(
+      await asRoot('UPDATE app.users SET platform_admin = true WHERE id = $1', [operator.id]),
+    ).toBe(1);
+    const { b } = await signedIn(server, operator);
+    expect((await b.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const created = await b.send('POST', '/api/platform/workspaces', { name: 'First admin test' });
+    expect(created.statusCode).toBe(201);
+    const workspaceId = created.json<{ id: string }>().id;
+    const email = `first-${randomUUID().slice(0, 8)}@example.test`;
+    const invite = await b.send('POST', `/api/platform/workspaces/${workspaceId}/invites`, {
+      email,
+    });
+    expect(invite.statusCode).toBe(201);
+    const inviteId = invite.json<{ id: string }>().id;
+    // The worker mails the link: it stores the token's hash, the person holds the token.
+    const raw = randomBytes(32).toString('base64url');
+    await tenancy.runWorkspace({ workspaceId }, (ctx) =>
+      new InviteRepository(main.db).setToken(
+        ctx,
+        inviteId,
+        createHash('sha256').update(raw).digest(),
+      ),
+    );
+    const anon = await new Browser(server).start();
+    const ok = await anon.send('POST', '/api/auth/invites/accept', {
+      token: raw,
+      name: 'Faye First',
+      password: 'lantern orchard copper 17',
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(
+      await asRoot(
+        `SELECT 1 FROM app.memberships m JOIN app.users u ON u.id = m.user_id
+          WHERE m.workspace_id = $1 AND u.email = $2 AND m.role = 'admin'`,
+        [workspaceId, email],
+      ),
+    ).toBe(1);
+    // PLAT-3: once the workspace has an admin, the operator cannot invite another (or themselves).
+    const again = await b.send('POST', `/api/platform/workspaces/${workspaceId}/invites`, {
+      email: operator.email,
+    });
+    expect(again.statusCode).toBe(409);
+    await server.close();
+  });
+
   it('[USR-5] a flood of sign-ins runs at most 4 hashes at once and keeps web under its memory limit', async () => {
     const gate = new HashGate(4, 16);
     const server = app(service(gate));

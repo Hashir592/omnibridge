@@ -13,7 +13,14 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import { CALLER_READ_PURPOSES, can, type ServiceTokens } from './auth.ts';
 import type { DeletionService } from './deletion.ts';
-import { NotFound, PurposeRefused, type Caller, type Vault } from './vault.ts';
+import {
+  BadExpiry,
+  NotFound,
+  PurposeRefused,
+  WorkspaceClosed,
+  type Caller,
+  type Vault,
+} from './vault.ts';
 
 export interface VaultAppOptions {
   logger: Logger;
@@ -89,6 +96,8 @@ export function buildVaultApp({
     if (err instanceof NotFound) return reply.code(404).send({ error: 'not_found' });
     if (err instanceof PurposeRefused)
       return reply.code(403).send({ error: 'purpose_not_allowed' });
+    if (err instanceof BadExpiry) return reply.code(400).send({ error: 'invalid_expiry' });
+    if (err instanceof WorkspaceClosed) return reply.code(409).send({ error: 'workspace_closed' });
     const status = (err as { statusCode?: number }).statusCode;
     if (status !== undefined && status >= 400 && status < 500) {
       return reply.code(status).send({ error: 'bad_request' });

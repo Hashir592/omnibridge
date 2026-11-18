@@ -34,6 +34,20 @@ export class MemberAccessRepository {
     this.#db = db;
   }
 
+  /** Whether the context's workspace has an admin yet (TEN-7: the platform invites only the first). */
+  async hasAdmin(ctx: TenantContext): Promise<boolean> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const row = await trx
+        .selectFrom('app.memberships')
+        .select('user_id')
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('role', '=', 'admin')
+        .limit(1)
+        .executeTakeFirst();
+      return row !== undefined;
+    });
+  }
+
   /** Every member of the context's workspace with their ticks, by name. */
   async list(ctx: TenantContext): Promise<Member[]> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {

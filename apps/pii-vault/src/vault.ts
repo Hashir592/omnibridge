@@ -36,9 +36,36 @@ export class NotFound extends Error {}
 /** The purpose does not cover this kind of record (DP-7): 403, and nothing is read or logged. */
 export class PurposeRefused extends Error {}
 
+/** delete_after outside now minus 1 day to now plus 90 days (ADR-065): 400. */
+export class BadExpiry extends Error {}
+
+/** Ingest for a workspace that was closed (ADR-065): 409, and no new keys. */
+export class WorkspaceClosed extends Error {}
+
+interface Keys {
+  data: DataKey;
+  index: IndexKey;
+}
+
+/** One transaction: keys it read or made are cached only once it commits. */
+interface Tx {
+  readonly c: PoolClient;
+  keys?: Keys;
+}
+
+/**
+ * The advisory lock key that orders ingest against workspace closure (ADR-065): a stable 64-bit
+ * number from the workspace id. Shared by ingest, exclusive in closure's last batch.
+ */
+export function workspaceLock(workspaceId: string): string {
+  return BigInt.asIntN(64, BigInt(`0x${workspaceId.replaceAll('-', '').slice(0, 16)}`)).toString();
+}
+
 const KEY_VERSION = 1;
 /** PRD 7.3: PII of an order never dispatched goes at most 90 days after it arrived. */
 export const HARD_LIMIT_MS = 90 * 24 * 60 * 60 * 1000;
+/** ADR-065: an expiry may lie at most a day in the past (a late caller), never further. */
+export const EXPIRY_PAST_MS = 24 * 60 * 60 * 1000;
 /** Search answers at most this many matches; `truncated` says when there were more. */
 const SEARCH_LIMIT = 5000;
 const FIELD_TABLE = 'record_fields';
@@ -53,7 +80,8 @@ export class Vault {
   readonly #pool: Pool;
   readonly #keyring: Keyring;
   readonly #now: () => Date;
-  readonly #keys = new Map<string, Promise<{ data: DataKey; index: IndexKey }>>();
+  /** Unwrapped keys per workspace, cached only after the transaction that read them commits. */
+  readonly #keys = new Map<string, Keys>();
 
   constructor(options: { pool: Pool; keyring: Keyring; now?: () => Date }) {
     this.#pool = options.pool;
@@ -67,9 +95,23 @@ export class Vault {
   }
 
   async ingest(req: IngestRequest): Promise<{ pii_ref: string }> {
-    const keys = await this.#keysFor(req.workspace_id);
+    this.#checkExpiry(req.delete_after);
     const index = indexValues(req.fields);
-    return this.#tx(req.workspace_id, async (c) => {
+    return this.#tx(req.workspace_id, async (c, tx) => {
+      // ADR-065 (F-M04h-04): a closed workspace takes no new PII and gets no new keys. The shared
+      // lock orders this ingest against closure's last batch (which takes it exclusively), so a
+      // record is either seen and deleted by closure, or refused here once the marker exists.
+      await c.query('SELECT pg_advisory_xact_lock_shared($1::bigint)', [
+        workspaceLock(req.workspace_id),
+      ]);
+      const closed = await c.query(
+        'SELECT 1 FROM vault.closed_workspaces WHERE workspace_id = $1',
+        [req.workspace_id],
+      );
+      if ((closed.rowCount ?? 0) > 0) throw new WorkspaceClosed();
+      // Keys are made here and only here, never by a read (F-M04h-04).
+      const keys = await this.#loadKeys(tx, req.workspace_id, true);
+      if (keys === undefined) throw new Error('keys were not created');
       // pii_ref defaults to uuidv7() (PostgreSQL 18): time-ordered, so the key index stays compact.
       const inserted = await c.query<{ pii_ref: string }>(
         `INSERT INTO vault.records (workspace_id, kind, channel_account_id, subject_type,
@@ -113,6 +155,7 @@ export class Vault {
 
   /** DEL-1: the caller sets delete_after once dispatch or delivery is known. */
   async setExpiry(req: ExpiryRequest): Promise<{ updated: number }> {
+    this.#checkExpiry(req.delete_after);
     return this.#tx(req.workspace_id, async (c) => {
       const res = await c.query(
         `UPDATE vault.records SET delete_after = $3 WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[])`,
@@ -128,10 +171,11 @@ export class Vault {
     purpose: ReadPurpose,
     actor: Actor,
   ): Promise<ReadFullResponse> {
-    const keys = await this.#keysFor(workspaceId);
-    return this.#tx(workspaceId, async (c) => {
+    return this.#tx(workspaceId, async (c, tx) => {
       const record = await this.#record(c, workspaceId, piiRef);
       if (!PURPOSE_KINDS[purpose].includes(record.kind)) throw new PurposeRefused();
+      const keys = await this.#loadKeys(tx, workspaceId, false);
+      if (keys === undefined) throw new NotFound();
       const fields = await this.#decryptFields(c, keys.data, workspaceId, piiRef);
       await this.#log(c, workspaceId, actor, 'read_full', purpose, piiRef, 1);
       return {
@@ -146,8 +190,9 @@ export class Vault {
 
   /** ORD-5: masked strings, computed now and never stored. Unknown refs are left out. */
   async mask(workspaceId: string, piiRefs: readonly string[]): Promise<MaskResponse> {
-    const keys = await this.#keysFor(workspaceId);
-    return this.#tx(workspaceId, async (c) => {
+    return this.#tx(workspaceId, async (c, tx) => {
+      const keys = await this.#loadKeys(tx, workspaceId, false);
+      if (keys === undefined) return { records: [] };
       const res = await c.query<{ pii_ref: string; field: string; ciphertext: Buffer }>(
         `SELECT pii_ref, field, ciphertext FROM vault.record_fields
           WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[]) ORDER BY pii_ref, field`,
@@ -181,13 +226,15 @@ export class Vault {
     purpose: string,
     actor: Actor,
   ): Promise<SearchResponse> {
-    const keys = await this.#keysFor(workspaceId);
     const values = queryValues(query);
-    return this.#tx(workspaceId, async (c) => {
+    return this.#tx(workspaceId, async (c, tx) => {
       const entries = Object.entries(values);
       let matches: SearchResponse['matches'] = [];
       let truncated = false;
-      if (entries.length > 0) {
+      const keys = entries.length > 0 ? await this.#loadKeys(tx, workspaceId, false) : undefined;
+      // A workspace with no keys holds no records: answer empty and write nothing (F-M04h-04).
+      if (entries.length > 0 && keys === undefined) return { matches, truncated };
+      if (keys !== undefined) {
         const fields = entries.map(([f]) => f);
         const macs = entries.map(([f, v]) => keys.index.mac(f, v));
         // Driven by the blind-index lookup (workspace, field, mac), never a scan of the records.
@@ -303,66 +350,78 @@ export class Vault {
     );
   }
 
-  /** The workspace's keys, made on first use; concurrent first uses agree on one stored pair. */
-  #keysFor(workspaceId: string): Promise<{ data: DataKey; index: IndexKey }> {
-    let keys = this.#keys.get(workspaceId);
-    if (keys === undefined) {
-      keys = this.#loadOrCreateKeys(workspaceId);
-      keys.catch(() => this.#keys.delete(workspaceId));
-      this.#keys.set(workspaceId, keys);
-    }
-    return keys;
+  /** ADR-065 (F-M04h-02): from now minus 1 day to now plus the 90-day hard limit; else 400. */
+  #checkExpiry(deleteAfter: string | undefined): void {
+    if (deleteAfter === undefined) return;
+    const at = Date.parse(deleteAfter);
+    const now = this.#now().getTime();
+    if (!(at >= now - EXPIRY_PAST_MS && at <= now + HARD_LIMIT_MS)) throw new BadExpiry();
   }
 
-  async #loadOrCreateKeys(workspaceId: string): Promise<{ data: DataKey; index: IndexKey }> {
-    return this.#tx(workspaceId, async (c) => {
+  /**
+   * The workspace's keys, in the caller's transaction. `create` (ingest only) stores a pair when
+   * there is none; concurrent first ingests agree on one stored pair. Without `create`, a
+   * workspace with no keys gives undefined and nothing is written (F-M04h-04).
+   */
+  async #loadKeys(tx: Tx, workspaceId: string, create: boolean): Promise<Keys | undefined> {
+    const cached = this.#keys.get(workspaceId);
+    if (cached !== undefined) return cached;
+    if (create) {
       const data = generateDataKey(this.#keyring, workspaceId, KEY_VERSION).wrapped;
       const index = generateIndexKey(this.#keyring, workspaceId, KEY_VERSION).wrapped;
       for (const [kind, w] of [
         ['data', data],
         ['index', index],
       ] as const) {
-        await c.query(
+        await tx.c.query(
           `INSERT INTO vault.workspace_keys (workspace_id, kind, version, kek_version, wrapped, created_at)
            VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
           [workspaceId, kind, w.version, w.kekVersion, w.wrapped, this.#now()],
         );
       }
-      const res = await c.query<{
-        kind: 'data' | 'index';
-        /** bigint columns: read as strings. */
-        version: string;
-        kek_version: string;
-        wrapped: Buffer;
-      }>(
-        `SELECT kind, version, kek_version, wrapped FROM vault.workspace_keys
-          WHERE workspace_id = $1 AND version = $2`,
-        [workspaceId, KEY_VERSION],
-      );
-      const stored = (kind: 'data' | 'index') => {
-        const row = res.rows.find((r) => r.kind === kind);
-        if (row === undefined) throw new Error(`missing ${kind} key`);
-        return {
-          workspaceId,
-          version: Number(row.version),
-          kekVersion: Number(row.kek_version),
-          wrapped: row.wrapped,
-        };
-      };
-      return {
-        data: unwrapDataKey(this.#keyring, stored('data')),
-        index: unwrapIndexKey(this.#keyring, stored('index')),
-      };
-    });
+    }
+    const res = await tx.c.query<{
+      kind: 'data' | 'index';
+      /** bigint columns: read as strings. */
+      version: string;
+      kek_version: string;
+      wrapped: Buffer;
+    }>(
+      `SELECT kind, version, kek_version, wrapped FROM vault.workspace_keys
+        WHERE workspace_id = $1 AND version = $2`,
+      [workspaceId, KEY_VERSION],
+    );
+    const stored = (kind: 'data' | 'index') => {
+      const row = res.rows.find((r) => r.kind === kind);
+      return row === undefined
+        ? undefined
+        : {
+            workspaceId,
+            version: Number(row.version),
+            kekVersion: Number(row.kek_version),
+            wrapped: row.wrapped,
+          };
+    };
+    const data = stored('data');
+    const index = stored('index');
+    if (data === undefined || index === undefined) return undefined;
+    tx.keys = {
+      data: unwrapDataKey(this.#keyring, data),
+      index: unwrapIndexKey(this.#keyring, index),
+    };
+    return tx.keys;
   }
 
-  async #tx<T>(workspaceId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
+  async #tx<T>(workspaceId: string, fn: (c: PoolClient, tx: Tx) => Promise<T>): Promise<T> {
     const c = await this.#pool.connect();
     try {
       await c.query('BEGIN');
       await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [workspaceId]);
-      const out = await fn(c);
+      const tx: Tx = { c };
+      const out = await fn(c, tx);
       await c.query('COMMIT');
+      // Keys this transaction read or made are committed now, so they may be cached.
+      if (tx.keys !== undefined) this.#keys.set(workspaceId, tx.keys);
       return out;
     } catch (err) {
       await c.query('ROLLBACK').catch(() => undefined);

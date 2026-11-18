@@ -249,10 +249,17 @@ export function peopleHandlers(
     },
 
     inviteFirstAdmin: async ({ platform, params, body, request }) => {
+      // A system write (F-M04h-01): the operator is not a member, so the transaction names no
+      // user and the database's admin-only rule lets it through; the audit row names the operator.
       const invite = await p.tenancy.run(
-        { workspaceId: params.workspaceId, companyIds: [], userId: platform.userId },
+        { workspaceId: params.workspaceId, companyIds: [] },
         async (ctx) => {
           if ((await p.workspaces.get(ctx)) === undefined) return undefined;
+          // Only the first admin (TEN-7): once a workspace has one, its admins invite everyone
+          // else, so an operator can never make themselves an admin of a live workspace (PLAT-3).
+          if (await p.members.hasAdmin(ctx)) {
+            throw new ApiError({ status: 409, code: 'conflict' });
+          }
           const created = await p.invites.create(
             ctx,
             { email: body.email, role: 'admin', tabs: [], companyIds: [] },

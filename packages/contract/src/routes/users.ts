@@ -6,6 +6,7 @@ import { defineRoute } from '../route.ts';
  * Users, invites and the access review (T-0204: USR-1, USR-8, USR-9, PERM-1 to PERM-7, TEN-7).
  * The shapes follow S2's proposed ones (PS-020): a member is `admin` or `child`. Errors:
  * - 409 conflict: the last admin cannot be removed or demoted (PERM-7)
+ * - 409 conflict: the platform invites only a workspace's first admin (TEN-7, PLAT-3)
  * - 404 not_found: no such member, invite or review in this workspace
  */
 

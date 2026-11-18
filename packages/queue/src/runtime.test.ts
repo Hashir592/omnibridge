@@ -200,4 +200,38 @@ describe('JobQueue tenant transactions (TEN-1)', () => {
       expect(ctx.workspaceId).toBe(WORKSPACE);
     }
   });
+
+  it('[TEN-1] a phased handler prepares outside any tenant transaction, then commits in one (F-M04h-05)', async () => {
+    const h = harness();
+    const order: string[] = [];
+    const committed: unknown[] = [];
+    await h.queue.work(plain, {
+      prepare: (job) => {
+        // Network work (the vault) runs here: no transaction is open yet, and no ctx is given.
+        order.push(`prepare:${String(h.opened.length)}`);
+        expect('ctx' in job).toBe(false);
+        return Promise.resolve({ removed: 3 });
+      },
+      commit: (job, prepared) => {
+        order.push(`commit:${String(h.opened.length)}`);
+        expect(job.ctx).toBe(h.contexts[0]);
+        committed.push(prepared);
+        return Promise.resolve({ records: prepared.removed });
+      },
+    });
+    await h.run([data({ workspace_id: WORKSPACE })]);
+    expect(order).toEqual(['prepare:0', 'commit:1']);
+    expect(committed).toEqual([{ removed: 3 }]);
+    expect(h.opened).toHaveLength(1);
+  });
+
+  it('[TEN-1] a failing prepare opens no transaction and fails the job for a retry', async () => {
+    const h = harness();
+    await h.queue.work(plain, {
+      prepare: () => Promise.reject(new Error('vault down')),
+      commit: () => Promise.resolve({}),
+    });
+    await expect(h.run([data({ workspace_id: WORKSPACE })])).rejects.toThrow(/vault down/);
+    expect(h.opened).toEqual([]);
+  });
 });
