@@ -181,6 +181,11 @@ const accessReviews = createRoute({
   path: '/users/access-reviews',
   component: lazyRouteComponent(usersFile, 'AccessReviewsPage'),
 });
+const buyerData = createRoute({
+  getParentRoute: () => root,
+  path: '/users/buyer-data',
+  component: lazyRouteComponent(() => import('./routes/buyer-data.tsx'), 'BuyerDataPage'),
+});
 const userDetail = createRoute({
   getParentRoute: () => root,
   path: '/users/$userId',
@@ -283,6 +288,7 @@ const preview = [
   accountHealth,
   users,
   accessReviews,
+  buyerData,
   userDetail,
   connections,
   customerService,

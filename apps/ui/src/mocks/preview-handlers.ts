@@ -6,6 +6,7 @@
 import { HttpResponse, http } from 'msw/http';
 import { adsOverview } from './ads.ts';
 import { connections, userHandlers } from './admin.ts';
+import { privacyHandlers } from './privacy.ts';
 import { auditPage } from './audit.ts';
 import { expensePage, pnl, vatFor } from './finance.ts';
 import { forecastPage } from './forecast.ts';
@@ -171,6 +172,8 @@ export const previewHandlers = [
 
   // The real route since T-0204 (GET /users); the mock answers it for the preview.
   ...userHandlers,
+  // The real T-0404 routes (erasure and access requests), the certificate and GET /jobs/:id.
+  ...privacyHandlers,
   http.get('*/api/mock/connections', () =>
     gate('admin')
       ? HttpResponse.json(connections.filter((c) => !c.channel || channelOn(c.channel)))

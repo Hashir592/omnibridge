@@ -124,6 +124,77 @@ export const usersApi = {
     ),
 };
 
+/* ---------- buyer data requests (T-0404 routes, T-0308 screens: DEL-3, DEL-4, DEL-5) ---------- */
+
+export type BuyerIdentifiers = components['schemas']['BuyerIdentifiers'];
+export type ErasureRequest = components['schemas']['ErasureRequest'];
+export type ErasureRequestCreated = components['schemas']['ErasureRequestCreated'];
+export type ErasureMatch = components['schemas']['ErasureMatch'];
+export type JobProgress = components['schemas']['JobProgress'];
+
+/**
+ * Hands a downloaded file to the browser's save dialog. The bytes live only in memory for this
+ * moment: nothing is written to localStorage, sessionStorage or IndexedDB (T-0308).
+ */
+export function saveFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  // Revoked later: some browsers start the download after click() returns.
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 10_000);
+}
+
+/**
+ * Erasure and subject access requests, admin only. The buyer's identifiers go only in request
+ * bodies, never in a URL (T-0404).
+ */
+export const privacyApi = {
+  list: async (): Promise<ErasureRequest[]> => {
+    const r = await reply<{ items: ErasureRequest[] }>(api.GET('/erasure-requests'));
+    if (!r.ok) throw new Error(String(r.status));
+    return (r.body as { items: ErasureRequest[] }).items;
+  },
+  /** DEL-4 step 1: find every record; nothing is deleted yet. */
+  startErasure: async (identifiers: BuyerIdentifiers) =>
+    reply<ErasureRequestCreated>(
+      api.POST('/erasure-requests', { body: { identifiers }, headers: await csrfHeaders() }),
+    ),
+  /** DEL-4 step 2: 202 with the deletion job; 409 `conflict` when already confirmed. */
+  confirmErasure: async (id: string) =>
+    reply<ErasureRequest>(
+      api.POST('/erasure-requests/{id}/confirm', {
+        params: { path: { id } },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  job: async (id: string): Promise<JobProgress> => {
+    const r = await reply<JobProgress>(api.GET('/jobs/{id}', { params: { path: { id } } }));
+    if (!r.ok) throw new Error(String(r.status));
+    return r.body as JobProgress;
+  },
+  /** DEL-5: a JSON file; 422 `validation_failed` when too many records match. */
+  exportAccess: async (identifiers: BuyerIdentifiers) =>
+    reply<Blob>(
+      api.POST('/access-requests/export', {
+        body: { identifiers },
+        headers: await csrfHeaders(),
+        parseAs: 'blob',
+      }),
+    ),
+  /** DEL-3: a text file per channel account. */
+  deletionCertificate: (channelAccountId: string) =>
+    reply<Blob>(
+      api.GET('/channel-accounts/{id}/deletion-certificate', {
+        params: { path: { id: channelAccountId } },
+        parseAs: 'blob',
+      }),
+    ),
+};
+
 export const authApi = {
   signIn: async (email: string, password: string) =>
     reply<SignInResult>(

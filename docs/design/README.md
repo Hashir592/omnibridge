@@ -27,6 +27,10 @@ Mock-ups on MSW synthetic data for every other tab, built from the kit only: Sto
 
 The client's seven changes (`docs/plan/client-changes-20261112.md`) on the same mock data: the Home quick view per channel (C1), the Orders SKU column (C2), same-buyer groups on Orders, the shipping desk and order detail with Ship together and Not the same buyer (C3), the order Profit table with Ex VAT, VAT and Inc VAT (C4), Amazon seller feedback and recovery estimates on Account Health (C5), Amazon buyer messages and the Buyer messages setup on Connections (C6), and manual stock allocation on the SKU detail (C7). Shared pieces: `components/sameBuyer.tsx` (rail, chip, notes, dialogs), `components/channelLogos.tsx` and the kit table's `rowAccent` and `rowTone` hooks. Tests: `apps/ui/e2e/preview.spec.ts` and `apps/ui/src/mocks/groups.test.ts`. The PNG set is in `client-preview/20261112/`.
 
+## Buyer data requests (T-0308)
+
+`/users/buyer-data`, linked from the Users header; admins only (`TabGate tab="admin"`, the Users item is already admin-only). On the real T-0404 routes through the typed client (`privacyApi` in `auth/api.ts`), mocked in `mocks/privacy.ts`. One "Find a buyer" form (name, email, phone, postcode, marketplace buyer ID): **Find records to delete** starts an erasure request and shows the masked matches (vault masking, ORD-5) with **Delete N records** behind a destructive confirm, then the deletion job's progress and the confirmation line; **Download a copy for the buyer** saves the DEL-5 JSON. Below: the erasure request list (open, overdue in danger, completed) and one deletion certificate per channel account (also on each channel card in Connections). The buyer's details stay in page memory only: `autocomplete="off"`, never in the URL or browser storage (tested). Tests: `e2e/buyer-data.spec.ts`, `mocks/privacy.test.ts`.
+
 ## Public site (M06, S2 with Hashir, 17 Nov 2026)
 
 - `apps/site`: same tokens as the app (petrol accent, graphite for the one dark band), Inter Variable self-hosted from `@fontsource-variable/inter` 5.3.0 (ADR-036, now also a site dependency) with the latin file preloaded. Page width 84rem; prose 42rem.
