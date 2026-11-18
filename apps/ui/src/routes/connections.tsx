@@ -3,6 +3,7 @@ import {
   Check,
   CircleCheck,
   Copy,
+  FileText,
   CirclePause,
   CircleSlash,
   KeyRound,
@@ -15,6 +16,7 @@ import {
 import { useState } from 'react';
 import { useAppState } from '../app/session.tsx';
 import { ChannelMark, CompanySwatch } from '../components/badges.tsx';
+import { useCertificateDownload } from '../components/deletionCertificate.ts';
 import { Card, DetailRow, PageHeader } from '../components/Card.tsx';
 import { TabGate } from '../components/TabGate.tsx';
 import { StatusLabel, type StatusTone } from '../kit/Badge.tsx';
@@ -121,6 +123,7 @@ function ConnectionCard({ c }: { c: Connection }) {
   const toast = useToast();
   const [kill, setKill] = useState(c.killSwitch);
   const [asking, setAsking] = useState(false);
+  const certificate = useCertificateDownload();
   const co = c.companyId ? company(c.companyId) : undefined;
   const s = STATUS[c.status];
   const usagePct =
@@ -251,6 +254,11 @@ function ConnectionCard({ c }: { c: Connection }) {
           <Button size="sm">Resume</Button>
         ) : (
           <Button size="sm">Pause</Button>
+        )}
+        {c.kind === 'channel' && (
+          <Button size="sm" icon={<FileText />} onClick={() => void certificate(c)}>
+            Deletion certificate
+          </Button>
         )}
         <Button size="sm" variant="danger">
           Disconnect

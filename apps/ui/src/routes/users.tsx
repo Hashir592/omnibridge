@@ -6,6 +6,7 @@ import {
   CircleAlert,
   CircleCheck,
   Clock,
+  FileLock,
   Mail,
   ShieldCheck,
   ShieldOff,
@@ -138,6 +139,10 @@ function UsersList() {
           sub="Admins see everything. Each child user sees only the tabs and companies ticked for them."
           actions={
             <>
+              <Link to="/users/buyer-data" className={buttonClass('secondary')}>
+                <FileLock className="size-4" aria-hidden />
+                Buyer data requests
+              </Link>
               <Link to="/users/access-reviews" className={buttonClass('secondary')}>
                 <CalendarCheck className="size-4" aria-hidden />
                 Access reviews

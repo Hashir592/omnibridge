@@ -31,6 +31,11 @@ export function formatInt(n: number): string {
 }
 
 /** UTC ISO → "18/10/2026" in London time. */
+/** Today's London calendar day as YYYY-MM-DD, for file names. */
+export function londonDayKey(now = new Date()): string {
+  return dayKeyFmt.format(now);
+}
+
 export function formatDate(iso: string): string {
   return dateFmt.format(new Date(iso));
 }
