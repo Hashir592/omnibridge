@@ -93,6 +93,50 @@ test('[DEL-4] an open request past its due date shows as overdue', async ({ page
   await expect(page.getByRole('row', { name: /Overdue/ })).toHaveCount(1);
 });
 
+test('[DEL-4] an admin withdraws an overdue request with a reason; nothing is deleted', async ({
+  page,
+}) => {
+  await open(page);
+  await expect(page.getByRole('row', { name: /Withdrawn/ })).toHaveCount(1);
+  const row = page.getByRole('row', { name: /Overdue/ });
+  await row.getByRole('button', { name: /^Withdraw/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Withdraw this request?' });
+  await expect(dialog).toContainText('Nothing is deleted');
+  await expectNoSeriousA11yIssues(page);
+  await dialog.getByRole('button', { name: 'Withdraw request' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Choose a reason.');
+  await dialog.getByRole('combobox', { name: 'Reason' }).click();
+  await page.getByRole('option', { name: 'Duplicate of another request' }).click();
+  await dialog.getByRole('button', { name: 'Withdraw request' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('Request withdrawn', { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('row', { name: /Withdrawn 21\/10\/2026 · Duplicate of another request/ }),
+  ).toHaveCount(1);
+  await expect(page.getByRole('row', { name: /Overdue/ })).toHaveCount(0);
+  await expect(page.getByText(/past its due date/)).toHaveCount(0);
+});
+
+test('[DEL-4] a wrong search is withdrawn from the matches card', async ({ page }) => {
+  await open(page);
+  await page.getByRole('textbox', { name: 'Email' }).fill('morgan.ellis@example.com');
+  await page.getByRole('button', { name: 'Find records to delete' }).click();
+  await expect(page.getByRole('table', { name: 'Matching records' })).toBeVisible();
+  await page
+    .getByRole('button', { name: /^Withdraw/ })
+    .first()
+    .click();
+  const dialog = page.getByRole('dialog', { name: 'Withdraw this request?' });
+  await dialog.getByRole('combobox', { name: 'Reason' }).click();
+  await page.getByRole('option', { name: 'The records found are not this buyer' }).click();
+  await dialog.getByRole('button', { name: 'Withdraw request' }).click();
+  await expect(
+    page.locator('#root').getByRole('heading', { name: 'Request withdrawn' }),
+  ).toBeVisible();
+  await expect(page.getByText('Nothing was deleted. The request is closed')).toBeVisible();
+  await expectNothingStored(page, 'morgan.ellis');
+});
+
 test('[DEL-4] confirming a request with nothing found marks it complete', async ({ page }) => {
   await open(page);
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Nobody Known');
