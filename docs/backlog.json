@@ -1171,6 +1171,34 @@
       "status": "todo"
     },
     {
+      "id": "T-0408",
+      "module": "M04",
+      "session": "S3",
+      "title": "Withdraw an erasure request (ADR-067)",
+      "goal": "A wrong or empty erasure search can be closed without deleting anything and never turns overdue.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-4",
+        "AUD-1"
+      ],
+      "scope": [
+        "POST /erasure-requests/:id/withdraw: admin only, open requests only (409 otherwise), reason required; withdrawn state never overdue; audit event without identifiers",
+        "Contract and MSW-ready shape for S2"
+      ],
+      "out_of_scope": [
+        "The UI button (S2)"
+      ],
+      "depends_on": [
+        "T-0404"
+      ],
+      "acceptance": [
+        "Tests first citing DEL-4: withdraw an open request; 409 on a confirmed one; a withdrawn request is not overdue; a non-admin gets 403",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
       "id": "T-0308",
       "module": "M03",
       "session": "S2",
@@ -1224,6 +1252,7 @@
       ],
       "depends_on": [
         "T-0407",
+        "T-0408",
         "T-0308"
       ],
       "acceptance": [
