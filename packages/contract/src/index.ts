@@ -66,6 +66,7 @@ export {
   exportSubjectAccess,
   listErasureRequests,
   privacyRoutes,
+  withdrawErasureRequest,
 } from './routes/privacy.ts';
 export {
   AuditEventSchema,

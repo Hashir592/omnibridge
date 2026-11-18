@@ -297,6 +297,92 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
     await server.close();
   });
 
+  it('[DEL-4] an admin withdraws an open request with a reason: nothing is deleted, it is never overdue, it cannot be confirmed (ADR-067)', async () => {
+    const server = app();
+    const kept = await ingest('order-w1', contact('Wren'), amazonAccount);
+    const start = (identifiers: Record<string, string>) =>
+      server.inject({
+        method: 'POST',
+        url: '/api/erasure-requests',
+        headers: headers(admin),
+        payload: { identifiers },
+      });
+    const withdraw = (id: string, userId: string, payload: unknown) =>
+      server.inject({
+        method: 'POST',
+        url: `/api/erasure-requests/${id}/withdraw`,
+        headers: headers(userId),
+        payload: payload as Record<string, unknown>,
+      });
+    const wrong = (await start({ email: `${PII_MARKER}wren@example.test` })).json<{ id: string }>();
+
+    // Admins only; a reason from the fixed list is required.
+    expect((await withdraw(wrong.id, child, { reason: 'wrong_identifiers' })).statusCode).toBe(403);
+    expect((await withdraw(wrong.id, admin, {})).statusCode).toBe(400);
+    expect((await withdraw(wrong.id, admin, { reason: 'typed by hand' })).statusCode).toBe(400);
+    expect((await withdraw(randomUUID(), admin, { reason: 'other' })).statusCode).toBe(404);
+
+    sent.length = 0;
+    const res = await withdraw(wrong.id, admin, { reason: 'wrong_identifiers' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: wrong.id,
+      state: 'withdrawn',
+      overdue: false,
+      withdrawReason: 'wrong_identifiers',
+      withdrawnAt: clock.toISOString(),
+      jobId: null,
+    });
+    expect(sent).toEqual([]);
+    expect(await alive(kept.pii_ref)).toBe(true);
+
+    // Never overdue, even long after its due date.
+    clock = new Date(clock.getTime() + 60 * DAY);
+    const listed = await server.inject({
+      method: 'GET',
+      url: '/api/erasure-requests',
+      headers: headers(admin),
+    });
+    expect(listed.json<{ items: { id: string }[] }>().items).toContainEqual(
+      expect.objectContaining({ id: wrong.id, state: 'withdrawn', overdue: false }),
+    );
+
+    // A withdrawn request can be neither withdrawn again nor confirmed.
+    expect((await withdraw(wrong.id, admin, { reason: 'other' })).statusCode).toBe(409);
+    const confirm = await server.inject({
+      method: 'POST',
+      url: `/api/erasure-requests/${wrong.id}/confirm`,
+      headers: headers(admin),
+    });
+    expect(confirm.statusCode).toBe(409);
+    expect(sent).toEqual([]);
+
+    // A confirmed request cannot be withdrawn.
+    const done = (await start({ email: `${PII_MARKER}nobody-w@example.test` })).json<{
+      id: string;
+    }>();
+    await server.inject({
+      method: 'POST',
+      url: `/api/erasure-requests/${done.id}/confirm`,
+      headers: headers(admin),
+    });
+    expect((await withdraw(done.id, admin, { reason: 'duplicate' })).statusCode).toBe(409);
+
+    // Audited with the reason code and the count only, never an identifier.
+    const audit = await tenancy.runWorkspace({ workspaceId: A }, (c) =>
+      new AuditLog(db.db).list(c, {}, { limit: 100 }),
+    );
+    const event = audit.items.find(
+      (e) =>
+        e.entityId === wrong.id &&
+        (e.after as { kind?: string } | null)?.kind === 'erasure_withdrawn',
+    );
+    expect(event?.after).toEqual({ kind: 'erasure_withdrawn', row_count: 1 });
+    expect(event?.reason).toBe('wrong_identifiers');
+    expect(JSON.stringify(audit.items)).not.toContain(PII_MARKER);
+    await server.close();
+  });
+
   it("[DEL-5] the access export holds that buyer's records only, streamed, every read logged", async () => {
     const server = app();
     const mine = await ingest('order-f1', contact('Fay'), amazonAccount);

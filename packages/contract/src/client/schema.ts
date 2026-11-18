@@ -478,6 +478,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/erasure-requests/{id}/withdraw': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Withdraw an open erasure request: nothing is deleted */
+    post: operations['withdrawErasureRequest'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/files/{id}': {
     parameters: {
       query?: never;
@@ -875,7 +892,10 @@ export interface components {
       /** Format: date-time */
       requestedAt: string;
       /** @enum {string} */
-      state: 'open' | 'confirmed';
+      state: 'open' | 'confirmed' | 'withdrawn';
+      withdrawnAt: string | null;
+      withdrawReason:
+        ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
     };
     ErasureRequestCreated: {
       confirmedAt: string | null;
@@ -890,8 +910,11 @@ export interface components {
       /** Format: date-time */
       requestedAt: string;
       /** @enum {string} */
-      state: 'open' | 'confirmed';
+      state: 'open' | 'confirmed' | 'withdrawn';
       truncated: boolean;
+      withdrawnAt: string | null;
+      withdrawReason:
+        ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
     };
     ErasureRequestCreatedInput: {
       confirmedAt: string | null;
@@ -906,8 +929,11 @@ export interface components {
       /** Format: date-time */
       requestedAt: string;
       /** @enum {string} */
-      state: 'open' | 'confirmed';
+      state: 'open' | 'confirmed' | 'withdrawn';
       truncated: boolean;
+      withdrawnAt: string | null;
+      withdrawReason:
+        ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
     };
     ErasureRequestInput: {
       confirmedAt: string | null;
@@ -921,7 +947,10 @@ export interface components {
       /** Format: date-time */
       requestedAt: string;
       /** @enum {string} */
-      state: 'open' | 'confirmed';
+      state: 'open' | 'confirmed' | 'withdrawn';
+      withdrawnAt: string | null;
+      withdrawReason:
+        ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
     };
     Health: {
       /** @enum {string} */
@@ -2593,6 +2622,53 @@ export interface operations {
       };
       /** @description Default Response */
       202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErasureRequest'];
+        };
+      };
+    };
+  };
+  withdrawErasureRequest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** @enum {string} */
+          reason: 'wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other';
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
         headers: {
           [name: string]: unknown;
         };

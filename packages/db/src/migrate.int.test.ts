@@ -83,6 +83,7 @@ describe('db-main roles and migrations', () => {
       '0023_drop_retired_functions',
       '0024_deletion',
       '0025_erasure_requests',
+      '0026_erasure_withdraw',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });
