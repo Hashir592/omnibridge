@@ -23,3 +23,6 @@ infra/compose/.local/
 # Early deploy secrets (T-0604): synthetic in the dry run, from the ops repo in production.
 infra/early-deploy/.secrets/
 infra/early-deploy/.env
+
+# Local restic repositories and dev passwords (infra/backup, T-0405).
+.backup/

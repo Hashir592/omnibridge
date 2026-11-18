@@ -93,6 +93,18 @@ export class DeletionService {
         channel_account_id: t.channel_account_id,
       })),
     );
+    if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
+      // The closure itself is journalled too, so a restore closes the workspace again (T-0405).
+      await this.#journal.append([
+        {
+          at: at.toISOString(),
+          workspace_id: ws,
+          run_id: req.run_id,
+          trigger: req.trigger,
+          type: 'workspace_closed',
+        },
+      ]);
+    }
     const refs = targets.map((t) => t.pii_ref);
     const result = await this.#tx(ws, async (c) => {
       // Closure's last batch: hold off any ingest for this workspace until it commits (ADR-065).
