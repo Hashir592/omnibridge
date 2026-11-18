@@ -172,6 +172,7 @@ describe('audit retention job (AUD-3)', () => {
         'audit.retention-sweep': () => Promise.resolve(),
         'users.access-review-sweep': () => Promise.resolve(),
         'housekeeping.daily-sweep': () => Promise.resolve(),
+        'pii.expiry-sweep': () => Promise.resolve(),
       },
       logger,
     );
@@ -190,6 +191,12 @@ describe('audit retention job (AUD-3)', () => {
         expect.objectContaining({
           name: 'housekeeping.daily-sweep',
           cron: '45 2 * * *',
+          timezone: 'Europe/London',
+        }),
+        // DEL-1: the PII expiry sweep runs every hour (ARCHITECTURE 6.2).
+        expect.objectContaining({
+          name: 'pii.expiry-sweep',
+          cron: '5 * * * *',
           timezone: 'Europe/London',
         }),
       ]),

@@ -19,6 +19,7 @@
   "dependencies": {
     "@omnibridge/core": "workspace:*",
     "@omnibridge/logger": "workspace:*",
+    "@omnibridge/vault-client": "workspace:*",
     "pg-boss": "12.38.0",
     "prom-client": "15.1.3",
     "zod": "4.6.7"

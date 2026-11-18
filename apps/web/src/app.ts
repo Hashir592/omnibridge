@@ -22,12 +22,15 @@ import {
   type AuditLog,
   type CompanyRepository,
   type WorkspaceRepository,
+  type ChannelAccountRepository,
+  type DeletionLog,
 } from '@omnibridge/db';
 import { FileNotReadable, verifyFileLink, type FileStore } from '@omnibridge/files';
 import type { Logger } from '@omnibridge/logger';
 import fastifyHelmet from '@fastify/helmet';
 import Fastify, { type FastifyRequest } from 'fastify';
 import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
+import { deletionCertificateText } from './deletion-certificate.ts';
 import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
@@ -94,6 +97,11 @@ export interface WebAppOptions {
   directory?: TenantDirectory;
   /** The audit log (AUD-1, AUD-4). */
   audit?: Pick<AuditLog, 'record' | 'list'>;
+  /** Deletion certificates (DEL-3, T-0403): the run log and the workspace's channel accounts. */
+  deletion?: {
+    log: Pick<DeletionLog, 'certificate'>;
+    accounts: Pick<ChannelAccountRepository, 'list'>;
+  };
   /** Overrides AUDIT_EXPORT_LIMITS; tests only. */
   auditExportLimits?: { rows: number; bytes: number };
   /**
@@ -139,6 +147,7 @@ export function buildWebApp({
   directory,
   audit,
   auditExportLimits,
+  deletion,
   auth,
   resolveSession,
   resolvePlatform,
@@ -349,6 +358,22 @@ export function buildWebApp({
         body: {
           items: page.items.map(auditBody),
           next_cursor: page.next === null ? null : encodeCursor(page.next),
+        },
+      };
+    },
+    getDeletionCertificate: async ({ params, tenant }) => {
+      if (deletion === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
+      const accounts = await deletion.accounts.list(tenant);
+      const account = accounts.find((a) => a.id === params.id);
+      if (account === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      const cert = await deletion.log.certificate(tenant, account.id);
+      const text = Buffer.from(deletionCertificateText(cert, account.provider), 'utf8');
+      return {
+        status: 200,
+        body: {
+          stream: Readable.from([text]),
+          contentType: 'text/plain; charset=utf-8',
+          sizeBytes: text.length,
         },
       };
     },

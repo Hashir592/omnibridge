@@ -10,6 +10,7 @@ import {
   AuditLog,
   AuthStore,
   ChannelAccountRepository,
+  DeletionLog,
   CompanyRepository,
   createMainDb,
   FileRepository,
@@ -56,7 +57,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
   const userB = randomUUID();
   const childA = randomUUID();
   const admin = randomUUID();
-  const b = { company: '', job: '', file: '', invite: '', review: '' };
+  const b = { company: '', job: '', file: '', invite: '', review: '', account: '' };
   const a = { company: '', job: '' };
 
   const repos = () => ({
@@ -149,7 +150,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         registeredAddress: address,
       }),
     );
-    await tenancy.runWorkspace({ workspaceId: B }, (ctx) =>
+    b.account = await tenancy.runWorkspace({ workspaceId: B }, (ctx) =>
       new ChannelAccountRepository(main.db).create(ctx, {
         companyId: b.company,
         provider: 'ebay',
@@ -210,6 +211,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       tenancy,
       directory: { workspaces: r.workspaces, companies: r.companies },
       audit: new AuditLog(main.db),
+      deletion: { log: new DeletionLog(main.db), accounts: new ChannelAccountRepository(main.db) },
       jobs: r.jobs,
       files: { store, linkKey },
       ...stubAuth(),
@@ -256,6 +258,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         // Plain lists as A's admin: only A's events may come back, never B's.
         listAuditEvents: {},
         exportAuditEvents: {},
+        getDeletionCertificate: { params: { id: b.account } },
         // Sign-in routes (T-0203): public ones may answer anything but must leak nothing of B;
         // the pre-MFA and signed-in ones refuse a workspace session.
         getCsrf: {},

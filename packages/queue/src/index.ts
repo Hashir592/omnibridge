@@ -72,5 +72,9 @@ export {
   auditRetentionSweepJob,
   filesScanJob,
   JOBS,
+  piiDeleteJob,
+  piiExpiryJob,
+  piiExpirySweepJob,
   PLATFORM_JOBS,
 } from './registry.ts';
+export { deletionRunId, requestDeletion, type DeletionRequest } from './deletion.ts';

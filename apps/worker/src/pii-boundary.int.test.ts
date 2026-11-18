@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createMainDb,
   createQueues,
@@ -57,6 +60,7 @@ describe('PII boundary marker scan [AT-9][DP-8]', () => {
       owner: pii.connection('vault_owner'),
       app: pii.connection('vault_app'),
       logger,
+      journalDir: mkdtempSync(join(tmpdir(), 'ob-journal-')),
     });
     db = createMainDb({ ...main.connection('ob_app'), max: 4 });
     await new Tenancy(db.db).run({ workspaceId: ws, companyIds: [] }, (ctx) =>

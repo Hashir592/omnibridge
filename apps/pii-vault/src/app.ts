@@ -1,5 +1,6 @@
 import type { Logger } from '@omnibridge/logger';
 import {
+  DeleteRequest,
   ExpiryRequest,
   IngestRequest,
   MaskRequest,
@@ -11,6 +12,7 @@ import {
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import { CALLER_READ_PURPOSES, can, type ServiceTokens } from './auth.ts';
+import type { DeletionService } from './deletion.ts';
 import { NotFound, PurposeRefused, type Caller, type Vault } from './vault.ts';
 
 export interface VaultAppOptions {
@@ -21,6 +23,7 @@ export interface VaultAppOptions {
   /** The API is served only when both are given (the healthcheck-only tests leave them out). */
   vault?: Vault;
   tokens?: ServiceTokens;
+  deletion?: DeletionService;
 }
 
 class HttpError extends Error {
@@ -39,7 +42,14 @@ class HttpError extends Error {
  * each request carries its caller's service token and the workspace, and the body never reaches
  * a log (request logging is off; errors carry a code only).
  */
-export function buildVaultApp({ logger, version, dbPii, vault, tokens }: VaultAppOptions) {
+export function buildVaultApp({
+  logger,
+  version,
+  dbPii,
+  vault,
+  tokens,
+  deletion,
+}: VaultAppOptions) {
   // disableRequestLogging: request lines would hold nothing personal, but errors would carry
   // bodies, so the vault logs only what it chooses to, with IDs and codes.
   const app = Fastify({
@@ -60,7 +70,7 @@ export function buildVaultApp({ logger, version, dbPii, vault, tokens }: VaultAp
       .send({ status: healthy ? 'ok' : 'degraded', db_pii: healthy ? 'ok' : 'error', version });
   });
 
-  if (vault === undefined || tokens === undefined) return app;
+  if (vault === undefined || tokens === undefined || deletion === undefined) return app;
 
   const authorise = (request: FastifyRequest, capability: Capability): Caller => {
     const caller = tokens.callerOf(request.headers.authorization);
@@ -133,6 +143,12 @@ export function buildVaultApp({ logger, version, dbPii, vault, tokens }: VaultAp
     const caller = authorise(request, 'match');
     const body = parse(MatchRequest, request.body);
     return vault.match(body.workspace_id, body.pii_ref, { caller });
+  });
+
+  // DEL-1: the deletion service, for the deletion jobs' token only.
+  app.post('/v1/delete', async (request) => {
+    authorise(request, 'delete');
+    return deletion.delete(parse(DeleteRequest, request.body));
   });
 
   return app;

@@ -61,6 +61,11 @@ export class Vault {
     this.#now = options.now ?? (() => new Date());
   }
 
+  /** A closed workspace's keys are deleted with it; the cached copies go too. */
+  forgetKeys(workspaceId: string): void {
+    this.#keys.delete(workspaceId);
+  }
+
   async ingest(req: IngestRequest): Promise<{ pii_ref: string }> {
     const keys = await this.#keysFor(req.workspace_id);
     const index = indexValues(req.fields);

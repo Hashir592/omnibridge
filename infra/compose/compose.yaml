@@ -336,11 +336,16 @@ services:
       VAULT_TOKEN_WEB_FILE: /run/secrets/vault_token_web
       VAULT_TOKEN_WORKER_FILE: /run/secrets/vault_token_worker
       VAULT_TOKEN_DELETION_FILE: /run/secrets/vault_token_deletion
+      # The off-site tombstone journal (invariant 10): IDs only; a local volume stands in for B2
+      # until the backup job ships it (T-0405).
+      DELETION_JOURNAL_DIR: /data/journal
       PORT: '8080'
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
       NODE_OPTIONS: --max-old-space-size=64
     secrets:
       [vault_app_password, pii_kek, vault_token_web, vault_token_worker, vault_token_deletion]
+    volumes:
+      - pii_journal:/data/journal
     networks: [ob_app, ob_pii]
     depends_on:
       migrate-pii: { condition: service_completed_successfully }
@@ -393,6 +398,7 @@ volumes:
   db_main_data:
   db_pii_data:
   files_data:
+  pii_journal:
 
 # Dev secret files are materialised by scripts/dev-secrets.sh from infra/secrets/dev.sops.yaml
 # (git-ignored, synthetic). Containers read them only as /run/secrets/<name> files (SEC-5). The two

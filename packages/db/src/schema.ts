@@ -207,6 +207,31 @@ export interface AuditEventsTable {
   ip: ColumnType<string | null, string | null, never>;
 }
 
+/** app.deletion_runs (T-0403, DEL-3): counts and IDs only. */
+export interface DeletionRunsTable {
+  workspace_id: string;
+  id: string;
+  trigger: string;
+  scope_type: string;
+  /** jsonb of IDs: written as JSON text, read as an object. */
+  scope: ColumnType<unknown, string, never>;
+  channel_account_id: string | null;
+  /** bigint: read as string. */
+  records_deleted: ColumnType<string, number, never>;
+  result: 'done';
+  started_at: ColumnType<Date, Date, never>;
+  finished_at: ColumnType<Date, Date, never>;
+}
+
+/** app.pii_tombstones (T-0403, invariant 10): the db-main copy, IDs only. */
+export interface PiiTombstonesTable {
+  workspace_id: string;
+  pii_ref: string;
+  run_id: string;
+  channel_account_id: string | null;
+  deleted_at: ColumnType<Date, Date, never>;
+}
+
 export interface MainDb {
   'app.workspaces': WorkspacesTable;
   'app.companies': CompaniesTable;
@@ -223,4 +248,6 @@ export interface MainDb {
   'app.membership_companies': MembershipCompaniesTable;
   'app.invites': InvitesTable;
   'app.access_reviews': AccessReviewsTable;
+  'app.deletion_runs': DeletionRunsTable;
+  'app.pii_tombstones': PiiTombstonesTable;
 }

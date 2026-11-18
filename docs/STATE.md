@@ -1,71 +1,47 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 17 Nov 2026 by S3 (T-0212).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Nov 2026 by S3 (M04 batch 1).
 
 ## Now
 
-- **Phase:** B, local Docker only. **Plan replaced on 12 Nov 2026** after the architecture audit (ADR-054): three releases, the order in `docs/plan/MODULES.md`. Release 1 = website + first approved marketplace + Evri: orders, stock, labels, tracking. The public site goes live early, deployed by Hashir's devops person.
-- **M01:** closed. **M02:** T-0201, T-0202, T-0203 done; halfway fixes merged (PR #47, carry-over `docs/reviews/M02-halfway-carryover.md`; **recreate the local db-main volume once, then run `scripts/dev-secrets.sh`**); T-0208 faster CI merged (PR #48). T-0204 merged (PR #52, ADR-058). T-0207 housekeeping in review: no-transaction migrations (ADR-047), job/session/reset retention (daily `housekeeping.daily-sweep`, 02:45 London), healthz 503 reason, petrol mail header, ui-refs fix, role connection caps (sum 37 < 40), audit teardown flake; plus ADR-058 (a): the eBay key read counts against a daily budget in governor-ebay before sending (412 when spent). **The caps apply only to a new volume: recreate the local db-main and db-pii volumes once (or `ALTER ROLE … CONNECTION LIMIT` as the roles scripts list).** Next: S2, then S5 T-0206, then S4 M02 end.
-- **M06 (site first):** T-0601 site + T-0603 terms acceptance merged (PR #49). T-0602 eBay deletion endpoint: PR #50. T-0604 early deploy pack: `infra/early-deploy/` and `docs/ops/runbooks/early-deploy.md`, dry run passes (`bash infra/early-deploy/dry-run.sh`). Waiting on the client: Operator legal details and the legal text review. S2: the SPA screen for `next: 'terms'`.
-- **M03:** T-0305 (PR #40), T-0306 client changes (PR #41) and the M03 end fixes (PR #42) merged. M03 end round 2: APPROVED (S4, 14 Nov). Next S2 task: T-0307 (generic Website mark, light).
-- **Client changes:** designs in `docs/plan/client-changes-20261112.md` (ADR-055, ADR-057). Real logic lands in M09, M10, M12 (Release 1) and M18, M20 (Release 3).
-- **Order now (one session at a time):** done: M02 halfway fixes #47, T-0208 #48, M06 #49–#51, T-0204 #52, T-0207 #55, S2 screens #60, worker test cap fix #63. **T-0209 (ADR-060) merged (#62):** every contract route under `/api` (one rule: `packages/contract/src/mount.ts`; `/healthz`, `/webhooks/**`, `/connect/**/callback|declined` stay at the root), web serves the built SPA (`index.html` no-cache, `/assets/` immutable, unknown `/api/**` JSON 404), MSW handlers and signed file links on `/api`. S5 T-0206 audit done (#65); rulings ADR-061. **T-0210 audit fixes merged (#67)**: migration 0018 (only sent reset mails use the platform cap; one failure call writes the audit row; lock notices 1/user/24 h + 100/day; IPv6 per /64; a password change voids reset links), `__Host-` cookies, no minimum age on an emailed reset, any `/api` segment in any case gets the JSON 404, `docs/ops/runbooks/support.md`. S5 re-check: -01 to -03 fixed (#71). **T-0211 module toggles merged (#68)**: `GET /auth/workspaces` entries carry `modules.website_connector` (migration 0019, `app.workspaces.modules`, set only by `app.workspace_set_module` as ob_ops; seed turns it on for the launch workspace; read through `auth_user_workspaces_modules`), invite accept `name` optional. **T-0212 (ADR-062): PR #72 on auto-merge**: `GET /api/auth/session` (new auth kind `any-session`: any live stage, no tenant) returns user, `next`, `platform`, current workspace or null, and its `modules`; `authApi.session()` and the MSW handler are ready for S2. Migration 0020 revokes EXECUTE on the rollout functions (not a DROP: squawk `ban-drop-function` has no ADR-045 waiver, **PS-025 open for S1**). **Next: S4 M02 end.** S2 next batch: CSP inline styles to classes (ADR-061 note 6).
-- **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; quiet output; short sessions; batches up to 5.
-- **Process (ADR-053, ADR-054, ADR-056):** sessions merge their own green PRs. CI is the only full gate; locally `--quick` (plus a task's integration tests for high risk). Halfway checkpoints only for M02, M04, M10, M12, M17, M18. Reviews do not block the next module.
-- **Hashir:** GitHub CLI must stay on the Hashir592 account (`gh auth switch -u Hashir592`). Dev machine to 16 GB in 1 to 2 weeks.
-- **Open questions:** PS-025 (S1): waiver for `DROP FUNCTION` on a contract step, or accept revoke-only.
-
-## What T-0203 delivered
-
-- **Migration 0011:** user-level auth tables (`user_auth`, `password_history`, `recovery_codes`, `sessions`, `login_counters`, `ip_counters`, `password_resets`, `platform_keys`). ob_app holds no grant on them; every access is one narrow SECURITY DEFINER function. Times come from the app clock.
-- **Passwords (USR-3):**
-  - argon2id 19 MiB / t=2 / p=1, at most 4 hashes at once per web process (a queue of 32, then 429).
-  - Rules: ≥12 characters; not the name or email local part; not on the committed list (`apps/web/data/common-passwords.txt`, 358 entries, case-insensitive, trailing digits and "!" stripped); not one of the last 10; minimum age 1 day.
-  - Older than 365 days: `next: password_change`, and that session can only change it.
-- **MFA (USR-4):** TOTP (@oslojs/otp) with one step of drift and no replay; the secret is sealed with a platform data key, which `rewrap-keys` re-wraps. The QR matrix comes from qrcode 1.5.4, server side. 10 recovery codes of 80 bits, stored as HMAC-SHA256 under `auth_hmac_key`.
-- **Lockout (USR-5):** counters per HMAC of the email, so the same answers for real and unknown emails and no plaintext stored. 10 failures in 15 minutes lock for 15 minutes (429 + Retry-After). Per-address delay of 1 s doubling to 30 s after 3 failures. The lock notice goes to the user and the workspace admins as a worker mail job (web never sends SMTP).
-- **Sessions (USR-6, SEC-1):** 256-bit token (SHA-256 stored), `ob_session` cookie HttpOnly/Secure/SameSite=Strict. Pre-MFA 10 minutes; then idle 30 minutes, absolute 12 hours; the token is replaced at every stage. Sign out, and sign out on all devices. Origin check plus a session-bound double-submit CSRF token on every state-changing route.
-- **Reset (USR-7):** the worker makes the 30-minute single-use link just before sending, so only its hash is stored. A reset ends every session; signing in again still needs MFA.
-- **Workspace picker (USR-2), platform path:** `GET /auth/workspaces`, `POST /auth/workspace`, `POST /auth/platform` (operators only, after MFA).
-- **Audit:** `auth.login`, `auth.login_failed`, `auth.locked`, `mfa.enrolled` and `auth.signed_out_everywhere`, written into every workspace of the user.
-- **SPA:** `apps/ui/src/auth/api.ts` on the typed client, with the CSRF header. Invites stay on the mock until T-0204.
-- **Dev seed:** a one-off `seed` service (compose.dev.yaml) loads the launch workspace and the DEV ONLY demo sign-in, and refuses unless OB_ENV is dev or test. Playwright `[AT-3] login with TOTP` signs in through the edge.
-- **Secrets:** new dev secrets `auth_hmac_key` (web and seed) and `ob_worker_password`. After pulling, run `scripts/dev-secrets.sh`; recreate the db-main volume once if it predates `ob_worker`.
+- **Phase:** B, local Docker only. Plan of 12 Nov 2026 (ADR-054): three releases, order in `docs/plan/MODULES.md`.
+- **Closed:** M01, M02 (S4 M02 end APPROVED, ADR-064), M03. M06 site pieces merged; waiting on the client's legal details.
+- **M04 batch 1 (S3) done, now at the halfway checkpoint (S4):** report `docs/reviews/M04-halfway-report.md`.
+  - picomatch audit: PR #80 merged. No fixed release exists, so there is a time-boxed exception in `scripts/lib/audit-exceptions.json` (GHSA-fc5q-39xc-vjpf only, **expires 1 Dec 2026**, then the gate goes red again). **PS-026 open for S1.**
+  - T-0401 M02 carry-overs: PR #81 merged. Migrations 0021 (admin-only member writes in the DB, job company scope, one-call invite + password), 0022, 0023 (drop of the 0020 functions, ADR-063). db-main max_connections 45; caps ≤ max − 5 on both clusters (vault_app cap 6).
+  - T-0402 vault core: PR #82 (auto-merge). db-pii 0002; pii-vault API (ingest, expiry, read-full, mask, search, match); `@omnibridge/vault-client`; tokens `vault_token_web|worker|deletion`; AT-9 marker scan in testkit.
+  - T-0403 deletion service: PR #83 (auto-merge, stacked on #82). Vault `/v1/delete`, journal volume `pii_journal`, db-pii 0003, db-main 0024, worker jobs `pii.delete`, `pii.expiry`, hourly `pii.expiry-sweep`, entry point `requestDeletion` (all seven DEL-1 triggers), deletion certificate route, terms acceptances deleted with the person.
+- **After pulling:** run `scripts/dev-secrets.sh` (three new vault tokens). For db-main max_connections 45, restart db-main (compose passes `-c max_connections=45`). An existing db-pii volume keeps vault_app's old cap 8: run `ALTER ROLE vault_app CONNECTION LIMIT 6` or recreate it.
+- **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; short sessions.
+- **Process (ADR-053, ADR-054):** sessions merge their own green PRs; CI is the only full gate.
+- **Hashir:** GitHub CLI on Hashir592. Dev machine to 16 GB in 1 to 2 weeks.
 
 ## M04 plan (S1, 17 Nov)
 
-- Batch 1 (S3, high): T-0401 M02 carry-overs, T-0402 vault core, T-0403 deletion service, then the S4 halfway checkpoint.
+- Batch 1 (S3): done (above). **Now: S4 M04 halfway checkpoint.**
 - Batch 2: T-0404 erasure/access requests and eBay deletion (S3, high), T-0405 backups, restore drill and marker scan (S3, high), T-0308 screens (S2), then T-0406 S5 audit, then the S4 M04 end review.
 
 ## Follow-ups noted
 
-- **M02 closed** (S4 M02 end APPROVED, 17 Nov; ADR-064). M04 first task carries: max_connections 45, F-M02e-01, the ADR-063 drop, the two load-failing integration tests, the other Minors in S4's M02 end file.
-
-- ADR-063: the next task that adds a migration (M04's first) drops the functions migration 0020 revoked, with the ban-drop-function waiver; before the first app deploy.
-
-- M05: audit event when the console switches a module (T-0211).
-- T-0212: the retired rollout functions are revoked, not dropped; DROP after PS-025. Browsers holding old `ob_session`/`ob_csrf` cookies just sign in again.
-
-- T-0209: web's CSP (`style-src 'self'`) blocks the SPA's inline `style=` attributes now that web serves the SPA; S1/S2 to pick nonce/hash, `style-src-attr`, or no inline styles. Route paths may not start with `/api` (the server adds it): WEB-3's `/api/v1/website/**` is declared as `/v1/website/**`.
-
-- S1 (ADR-058 b): the M04/M05 deletion task must hard-delete `app.terms_acceptances` with the user; no backlog note yet (S1 edits the backlog).
-- S2: `apps/ui/src/mocks/mocks.test.ts` page-size test now allows a page to finish a same-buyer group (the mock data is date-relative; main was red from 16 Nov).
-
-- T-0204: invites (accept sets the first password through `AuthStore.setPassword`), roles and ticks; user and permission audit events; the invite screens move off the mock. USR-8: today a workspace session does not re-check its membership, so a removed member keeps reading until the session ends; revoke with `session_revoke_user` on removal and check the membership in `resolveSession`.
-- T-0206 (S5 audit): a failed sign-in for a real account also writes audit rows, a few milliseconds that an unknown email skips. argon2 equalises the main cost (ADR-048); check whether the residual gap matters.
-- S2 (later task): the password-change screen for `next: password_change`.
-- M05: platform admins are made by platform tooling (no path yet); in-app lock alerts; a reset email for an operator with no workspace (skipped and logged today, since every job needs a workspace).
-- M22: production `APP_ORIGINS`, `APP_ORIGIN` and SMTP (Scaleway TEM with TLS). The compose defaults are dev values: `SMTP_ALLOW_PLAIN` defaults to 1 for Mailpit, so production must set it to 0. `TRUSTED_PROXIES` defaults to uniquelocal (only the private-network edge may name the client address).
-- T-0207: job retention can reuse `PLATFORM_JOBS`; plus the purge index, the /healthz 503 reason and the mail header colour.
-- Capacity: role connection caps (ob_app 30, ob_worker 20, ob_platform 4) exceed `max_connections` 40; real peak is about 31 (web 10 + 2 queue, worker 18, fan-out 1). Revisit pool sizes in T-0207 or M22.
-- Later: very large audit exports as a background job. M07: provider jobs must not hold a tenant transaction across network calls. M04: the AT-9 marker scan should cover `pgboss`. M12: carrier accounts of the launch seed.
+- **PS-026 (S1):** confirm the expiring audit exception mechanism; when picomatch ships a fix, bump it and delete the entry (before 1 Dec 2026).
+- **T-0404:** erasure and the eBay deletion notice resolve identifiers to refs with a logged vault `search` (web), then `requestDeletion` with `refs` (no PII in jobs, FA-14). The eBay webhook (`apps/web/src/webhooks/ebay.ts`) still only logs a receipt; EBAY-2 says "200", it answers 204.
+- **T-0405:** ship the `pii_journal` volume off-site; the restore runbook re-applies `app.pii_tombstones`, `vault.tombstones` and the journal; the marker scan (`scanDatabaseForMarkers`) runs on dumps.
+- **M10:** ingest is not idempotent per subject (a retried ingest makes a second record): key buyer records by order. Call `requestDeletion` on cancellation; set `delete_after` at dispatch/delivery + pii_expiry_days (the vault defaults to a 90-day backstop).
+- **M05:** workspace closure calls `requestDeletion({trigger:'workspace_closure'})`, then `DeletionLog.deleteUserTerms` for people left with no workspace. Audit event when the console switches a module (T-0211).
+- **M07 / M08:** Amazon revocation and eBay termination call `requestDeletion` with the channel account.
+- **M12:** the vault's `LabelFiles` hook deletes label files with their records.
+- **Queue runtime:** jobs that call out over the network (vault, SMTP) hold the job's db-main transaction meanwhile; consider a no-transaction handler option.
+- **PII key rotation:** decrypt by the stored `data_key_version`; a re-wrap job for the pii keyring.
+- F-M02e-01 residual: `MembershipRepository.add` is a system write (dev seed and tests only, guarded by a source-scan test).
+- Not reproduced: `auth.int.test.ts` flood test failure on S4's machine (passes under 8x CPU stress); the assertion now names any stray status.
+- M22: production `APP_ORIGINS`, `APP_ORIGIN`, SMTP (`SMTP_ALLOW_PLAIN=0`), `TRUSTED_PROXIES`. Role creation (`10-roles.sh`) is part of the deploy.
+- Later: very large audit exports as a background job. M07: provider jobs must not hold a tenant transaction across network calls.
 
 ## Next step
 
-1. If PR #72 is red, S3 fixes it (auto-merge stays on).
-2. S1 rules on PS-025.
-3. S2 wires the screens to `GET /auth/session` (on load, after each sign-in step and workspace switch).
-4. S4 M02 end checkpoint.
+1. S4: M04 halfway checkpoint (block in `docs/handoffs/`).
+2. S1: rule on PS-026.
+3. If #82 or #83 goes red, S3 fixes it (auto-merge stays on).
 
 ## Prerequisites outstanding (Hashir)
 

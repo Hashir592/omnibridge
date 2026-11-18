@@ -620,6 +620,9 @@ importers:
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../logger
+      '@omnibridge/vault-client':
+        specifier: workspace:*
+        version: link:../vault-client
       pg-boss:
         specifier: 12.38.0
         version: 12.38.0(@opentelemetry/api@1.9.1)

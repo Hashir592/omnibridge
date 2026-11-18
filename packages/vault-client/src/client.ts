@@ -1,11 +1,13 @@
 import type { z } from 'zod';
 import {
+  DeleteResponse,
   ExpiryResponse,
   IngestResponse,
   MaskResponse,
   MatchResponse,
   ReadFullResponse,
   SearchResponse,
+  type DeleteRequest,
   type ExpiryRequest,
   type IngestRequest,
   type ReadPurpose,
@@ -99,6 +101,11 @@ export class VaultClient {
       },
       SearchResponse,
     );
+  }
+
+  /** DEL-1: the deletion jobs only (the deletion token). */
+  delete(request: DeleteRequest): Promise<DeleteResponse> {
+    return this.#post('/v1/delete', request, DeleteResponse);
   }
 
   match(workspaceId: string, piiRef: string): Promise<MatchResponse> {

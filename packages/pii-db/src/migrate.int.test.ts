@@ -43,7 +43,11 @@ describe('db-pii roles and migrations', () => {
 
   it('[NFR-2] forward-only migrations apply once as vault_owner', async () => {
     const owner = cluster.connection('vault_owner');
-    expect((await migratePii(owner)).applied).toEqual(['0001_baseline', '0002_vault_core']);
+    expect((await migratePii(owner)).applied).toEqual([
+      '0001_baseline',
+      '0002_vault_core',
+      '0003_deletion',
+    ]);
     expect((await migratePii(owner)).applied).toEqual([]);
   });
 

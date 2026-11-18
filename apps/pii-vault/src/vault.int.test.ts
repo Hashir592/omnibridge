@@ -1,5 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { migratePii } from '@omnibridge/pii-db';
@@ -14,6 +17,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildVaultApp } from './app.ts';
 import { ServiceTokens } from './auth.ts';
+import { DeletionJournal, DeletionService } from './deletion.ts';
 import { Vault } from './vault.ts';
 
 // T-0402: the PII store and its capability-scoped API, against a real db-pii with the real roles.
@@ -90,6 +94,10 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       dbPii: () => Promise.resolve(true),
       vault,
       tokens: new ServiceTokens(tokens),
+      deletion: new DeletionService({
+        pool: appPool,
+        journal: new DeletionJournal(mkdtempSync(join(tmpdir(), 'ob-journal-'))),
+      }),
     });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const { port } = app.server.address() as AddressInfo;
