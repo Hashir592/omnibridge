@@ -20,7 +20,17 @@ const tokens = new ServiceTokens({
   worker: readSecretFile('VAULT_TOKEN_WORKER'),
   deletion: readSecretFile('VAULT_TOKEN_DELETION'),
 });
-const vault = new Vault({ pool, keyring: piiKeyring });
+// SEC-12: a canary read is an alarm; IDs only, at warn, for M05's alerts.
+const vault = new Vault({
+  pool,
+  keyring: piiKeyring,
+  onCanary: (event) => {
+    logger.warn(
+      { event: 'vault.canary_read', workspaceId: event.workspaceId },
+      'canary record read',
+    );
+  },
+});
 // DEL-1: tombstones are also journalled to this directory (invariant 10), a volume shipped
 // off-site by the backup job (T-0405).
 const deletion = new DeletionService({

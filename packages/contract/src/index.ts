@@ -61,6 +61,13 @@ export {
 } from './routes/webhooks.ts';
 export { getDeletionCertificate } from './routes/deletion.ts';
 export {
+  confirmErasureRequest,
+  createErasureRequest,
+  exportSubjectAccess,
+  listErasureRequests,
+  privacyRoutes,
+} from './routes/privacy.ts';
+export {
   AuditEventSchema,
   auditFilters,
   exportAuditEvents,

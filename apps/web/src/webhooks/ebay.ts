@@ -2,9 +2,11 @@
  * eBay Marketplace Account Deletion endpoint (EBAY-2, T-0602). Served by web and, for the early
  * public deploy, by the database-free ebay-endpoint server; the same handlers in both.
  *
- * No eBay data is held yet, so a verified notice leaves only a receipt in the log: the topic, the
- * time and that it was verified, never the user's id, name, token or the notification id. M04
- * wires the real deletion (FA-14: match in the vault, queue only on a hit).
+ * A verified notice (T-0404, AT-10, FA-14): the vault matches the eBay user in every workspace
+ * that holds PII, and each workspace with a hit gets one deletion job of those refs only (IDs,
+ * never the user's id or name, invariant 7a). No hit, no job. The receipt in the log holds the
+ * topic and counts only. Without the vault (the database-free early-deploy server) a notice
+ * leaves only the receipt.
  *
  * The signature check fetches eBay's public key through packages/providers (cached an hour per
  * kid). It is the one named exception to "web makes no provider calls" (invariant 15, ADR-058):
@@ -12,14 +14,18 @@
  * against the eBay governor's daily budget before it is sent (invariant 16); once the budget is
  * spent the notice is answered 412 and eBay sends it again later.
  */
-import { ApiError, readSecretFile, requireEnv } from '@omnibridge/core';
+import { randomUUID } from 'node:crypto';
+import { ApiError, readSecretFile, requireEnv, type TenantRunner } from '@omnibridge/core';
 import type {
   AnyRoute,
   ebayAccountDeletion,
   ebayAccountDeletionChallenge,
 } from '@omnibridge/contract';
 import { DailyCallBudget, EBAY_WEBHOOK_DAILY_BUDGET } from '@omnibridge/governor-ebay';
+import type { ChannelAccountRepository } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
+import { requestDeletion, type JobQueue } from '@omnibridge/queue';
+import type { VaultClient } from '@omnibridge/vault-client';
 import {
   challengeResponse,
   EbayBudgetExhausted,
@@ -40,9 +46,81 @@ export interface EbayWebhookOptions {
   /** eBay's public keys, cached (PublicKeyCache over ebayPublicKeyFetcher). */
   keys: PublicKeySource;
   logger: Logger;
+  /** AT-10: match in the vault and queue the deletion. Without it, a receipt only. */
+  deletion?: EbayDeletionDeps;
   /** Requests a minute from one address before 429 (default 60). */
   perMinute?: number;
   now?: () => number;
+}
+
+export interface EbayDeletionDeps {
+  vault: Pick<VaultClient, 'ebayUserMatch'>;
+  accounts: Pick<ChannelAccountRepository, 'list'>;
+  tenancy: TenantRunner;
+  queue: Pick<JobQueue, 'send'>;
+}
+
+/** The notice's own fields (eBay's schema): read here, never logged or stored. */
+function noticeUser(notification: Record<string, unknown>): {
+  notificationId: string | undefined;
+  userId: string | undefined;
+  username: string | undefined;
+} {
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  const data = (notification.data ?? {}) as Record<string, unknown>;
+  return {
+    notificationId: text(notification.notificationId),
+    userId: text(data.userId),
+    username: text(data.username),
+  };
+}
+
+/**
+ * Queues the deletion of one eBay user's records: per workspace, only records on that
+ * workspace's eBay accounts (an order contact) or eBay-only kinds (messages, feedback), so a
+ * same-named buyer on another channel is never touched. Returns counts for the receipt.
+ */
+async function queueEbayDeletion(
+  deps: EbayDeletionDeps,
+  notice: ReturnType<typeof noticeUser>,
+): Promise<{ workspaces: number; records: number }> {
+  if (notice.userId === undefined && notice.username === undefined) {
+    return { workspaces: 0, records: 0 };
+  }
+  const found = await deps.vault.ebayUserMatch({
+    ...(notice.userId === undefined ? {} : { user_id: notice.userId }),
+    ...(notice.username === undefined ? {} : { username: notice.username }),
+  });
+  const key = notice.notificationId ?? randomUUID();
+  let workspaces = 0;
+  let records = 0;
+  for (const hit of found.workspaces) {
+    const refs = await deps.tenancy.runWorkspace({ workspaceId: hit.workspace_id }, async (ctx) => {
+      const ebayAccounts = new Set(
+        (await deps.accounts.list(ctx)).filter((a) => a.provider === 'ebay').map((a) => a.id),
+      );
+      const mine = hit.matches
+        .filter(
+          (m) =>
+            m.kind !== 'buyer_contact' ||
+            (m.channel_account_id !== null && ebayAccounts.has(m.channel_account_id)),
+        )
+        .map((m) => m.pii_ref);
+      if (mine.length > 0) {
+        await requestDeletion(deps.queue, ctx, {
+          trigger: 'ebay_account_deletion',
+          scope: { type: 'refs', pii_refs: mine },
+          idempotencyKey: key,
+        });
+      }
+      return mine.length;
+    });
+    if (refs > 0) {
+      workspaces += 1;
+      records += refs;
+    }
+  }
+  return { workspaces, records };
 }
 
 export interface EbayWebhook {
@@ -146,13 +224,23 @@ export function ebayWebhook(options: EbayWebhookOptions): EbayWebhook {
           headers: { 'cache-control': 'no-store' },
         });
       },
-      ebayAccountDeletion: ({ body }) => {
+      ebayAccountDeletion: async ({ body }) => {
+        const queued =
+          options.deletion === undefined
+            ? undefined
+            : await queueEbayDeletion(options.deletion, noticeUser(body.notification));
         // The receipt: no identifier of the eBay user or of the notice (EBAY-2, invariant 5).
         options.logger.info(
-          { event: 'ebay.account_deletion.received', topic: body.metadata.topic, verified: true },
+          {
+            event: 'ebay.account_deletion.received',
+            topic: body.metadata.topic,
+            verified: true,
+            // Records queued for deletion (the logger keeps counts, never ids of the user).
+            ...(queued === undefined ? {} : { count: queued.records }),
+          },
           'eBay account deletion notice received',
         );
-        return Promise.resolve({ status: 204, body: null });
+        return { status: 200, body: null };
       },
     },
   };
@@ -183,7 +271,10 @@ export function webhookVerifier(ebay: EbayWebhook) {
  * Docker secrets (SEC-5); EBAY_ENDPOINT_URL is the URL as subscribed at eBay; EBAY_API_BASE is
  * https://api.ebay.com in production and the provider mocks in dev and CI (ADR-011).
  */
-export function ebayWebhookFromEnv(logger: Logger): EbayWebhook | undefined {
+export function ebayWebhookFromEnv(
+  logger: Logger,
+  deletion?: EbayDeletionDeps,
+): EbayWebhook | undefined {
   if (!process.env.EBAY_VERIFICATION_TOKEN_FILE) return undefined;
   const budget = new DailyCallBudget(EBAY_WEBHOOK_DAILY_BUDGET);
   const keys = new PublicKeyCache(
@@ -199,5 +290,6 @@ export function ebayWebhookFromEnv(logger: Logger): EbayWebhook | undefined {
     endpoint: requireEnv('EBAY_ENDPOINT_URL'),
     keys: keys.get,
     logger,
+    ...(deletion === undefined ? {} : { deletion }),
   });
 }

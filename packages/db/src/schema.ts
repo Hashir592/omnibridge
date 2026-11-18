@@ -223,6 +223,20 @@ export interface DeletionRunsTable {
   finished_at: ColumnType<Date, Date, never>;
 }
 
+/** app.erasure_requests (T-0404, DEL-4): the refs a search found, never the identifiers. */
+export interface ErasureRequestsTable {
+  workspace_id: string;
+  id: string;
+  requested_by: string;
+  requested_at: ColumnType<Date, Date, never>;
+  due_at: ColumnType<Date, Date, never>;
+  pii_refs: ColumnType<string[], string[], never>;
+  state: 'open' | 'confirmed';
+  confirmed_by: string | null;
+  confirmed_at: Date | null;
+  job_id: string | null;
+}
+
 /** app.pii_tombstones (T-0403, invariant 10): the db-main copy, IDs only. */
 export interface PiiTombstonesTable {
   workspace_id: string;
@@ -250,4 +264,5 @@ export interface MainDb {
   'app.access_reviews': AccessReviewsTable;
   'app.deletion_runs': DeletionRunsTable;
   'app.pii_tombstones': PiiTombstonesTable;
+  'app.erasure_requests': ErasureRequestsTable;
 }

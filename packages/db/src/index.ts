@@ -49,6 +49,7 @@ export {
 } from './channel-accounts.ts';
 export { MembershipRepository, UserRepository, type User } from './users.ts';
 export { DeletionLog, type DeletionCertificate, type DeletionRun } from './deletion.ts';
+export { erasureDueAt, ErasureRequestRepository, type ErasureRequest } from './erasure.ts';
 export {
   ACCESS_REVIEW_INTERVAL_MS,
   AccessReviewRepository,

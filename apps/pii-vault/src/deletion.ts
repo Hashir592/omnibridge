@@ -93,6 +93,18 @@ export class DeletionService {
         channel_account_id: t.channel_account_id,
       })),
     );
+    if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
+      // The closure itself is journalled too, so a restore closes the workspace again (T-0405).
+      await this.#journal.append([
+        {
+          at: at.toISOString(),
+          workspace_id: ws,
+          run_id: req.run_id,
+          trigger: req.trigger,
+          type: 'workspace_closed',
+        },
+      ]);
+    }
     const refs = targets.map((t) => t.pii_ref);
     const result = await this.#tx(ws, async (c) => {
       // Closure's last batch: hold off any ingest for this workspace until it commits (ADR-065).
@@ -139,6 +151,7 @@ export class DeletionService {
         // Closure: the keys go last, once no record is left that they could open. The marker
         // makes the vault refuse any later ingest for this workspace (ADR-065, F-M04h-04).
         await c.query('DELETE FROM vault.workspace_keys WHERE workspace_id = $1', [ws]);
+        await c.query('DELETE FROM vault.workspace_directory WHERE workspace_id = $1', [ws]);
         await c.query(
           `INSERT INTO vault.closed_workspaces (workspace_id, closed_at) VALUES ($1, $2)
            ON CONFLICT DO NOTHING`,

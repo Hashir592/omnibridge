@@ -54,6 +54,11 @@ export interface WalkCall {
   params?: Readonly<Record<string, string>>;
   query?: Readonly<Record<string, string | number>>;
   body?: unknown;
+  /**
+   * The body is search text the caller typed (a buyer's identifiers, T-0404), not an id of B's,
+   * so it cannot aim at B: any status is allowed and the leak check still runs on the answer.
+   */
+  searchText?: true;
 }
 
 export interface InjectRequest {
@@ -115,7 +120,7 @@ function expectedFor(route: AnyRoute, caller: WalkOutcome['caller'], call: WalkC
   const aimed =
     Object.keys(call.params ?? {}).length > 0 ||
     Object.keys(call.query ?? {}).length > 0 ||
-    call.body !== undefined;
+    (call.body !== undefined && call.searchText !== true);
   return aimed ? [403, 404] : [];
 }
 

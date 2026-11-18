@@ -48,7 +48,7 @@ SITE_URL=https://localhost:9444 WWW_URL=https://www.localhost:9444 APP_URL=https
   bash "$here/smoke.sh" --cacert "$ca"
 
 # The whole verify chain: eBay's own signed sample (its key is served by provider-mocks) is
-# accepted with 204. Only possible in the dry run; production notices come from eBay itself.
+# accepted with 200 (EBAY-2). Only possible in the dry run; production notices come from eBay itself.
 sample="$(node -e "import('./packages/providers/ebay/src/sample.ts').then(({ EBAY_SDK_SAMPLE: s }) => process.stdout.write(JSON.stringify({ body: JSON.stringify(s.message), sig: s.signature })))")"
 body="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).body)" "$sample")"
 sig="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).sig)" "$sample")"
@@ -57,8 +57,8 @@ if curl --help all 2>/dev/null | grep -q -- --ssl-no-revoke; then extra=(--ssl-n
 status="$(curl -sS --cacert "$ca" "${extra[@]}" -o /dev/null -w '%{http_code}' -X POST \
   -H 'content-type: application/json' -H "x-ebay-signature: $sig" --data "$body" \
   https://localhost:9443/webhooks/ebay/account-deletion)"
-if [[ "$status" != 204 ]]; then
+if [[ "$status" != 200 ]]; then
   echo "FAIL eBay's signed sample was not accepted ($status)" >&2
   exit 1
 fi
-echo "ok   eBay's signed sample is verified and accepted (204)"
+echo "ok   eBay's signed sample is verified and accepted (200)"

@@ -53,7 +53,16 @@ export function indexValues(fields: Readonly<Record<string, string>>): Record<st
   add('email', fields.email, normaliseEmail);
   add('phone', fields.phone, normalisePhone);
   add('postcode', fields.postcode, normalisePostcode);
-  add('buyer', fields.channel_buyer_id ?? fields.channel_username, normaliseBuyer);
+  // The channel's buyer: its ID, else its username (an eBay message or feedback has only that).
+  // An eBay deletion notice (AT-10) and DEL-4 erasure search by either.
+  add(
+    'buyer',
+    fields.channel_buyer_id ??
+      fields.channel_username ??
+      fields.buyer_username ??
+      fields.sender_username,
+    normaliseBuyer,
+  );
   // ORD-9: same buyer and same delivery address, exact after normalising.
   const name = fields.name === undefined ? '' : normaliseName(fields.name);
   const line1 = fields.address_line1 === undefined ? '' : normaliseName(fields.address_line1);

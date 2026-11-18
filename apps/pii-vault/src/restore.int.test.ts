@@ -1,0 +1,199 @@
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createLogger } from '@omnibridge/logger';
+import { PII_MARKER, startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
+import { VaultClient } from '@omnibridge/vault-client';
+import pg from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { startTestVault, type TestVault } from './testing.ts';
+
+// T-0405: a backup taken before a deletion, restored, then put right by re-applying every
+// tombstone (db-pii's own, db-main's copy and the off-site journal) and re-running expiry,
+// exactly as the restore drill does with infra/backup/apply-tombstones.sql (AT-8, DEL-2).
+
+const SQL = readFileSync(
+  new URL('../../../infra/backup/apply-tombstones.sql', import.meta.url),
+  'utf8',
+);
+/** psql runs the file statement by statement; here the part after this line runs on its own. */
+const VACUUM_SPLIT = '-- Outside the transaction: VACUUM cannot run inside one (invariant 10).';
+const DAY = 86_400_000;
+
+describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
+  let cluster: RoleCluster;
+  let vault: TestVault;
+  let clock = new Date('2026-11-18T09:00:00.000Z');
+  const journalDir = mkdtempSync(join(tmpdir(), 'ob-journal-'));
+  const clients = {} as Record<'web' | 'worker' | 'deletion', VaultClient>;
+  const A = randomUUID();
+  const C = randomUUID();
+
+  const ingest = async (workspace: string, subject: string, deleteAfter?: Date) =>
+    (
+      await clients.worker.ingest({
+        workspace_id: workspace,
+        kind: 'buyer_contact',
+        subject_type: 'order',
+        subject_id: subject,
+        ...(deleteAfter === undefined ? {} : { delete_after: deleteAfter.toISOString() }),
+        fields: { name: `${PII_MARKER}${subject}`, postcode: 'RE1 1ST' },
+      })
+    ).pii_ref;
+  const sh = async (cmd: string) => {
+    const res = await cluster.container.exec(['sh', '-c', cmd]);
+    if (res.exitCode !== 0) throw new Error(`${cmd}: ${res.output}`);
+    return res.output;
+  };
+  const superuser = (database: string) => {
+    const uri = new URL(cluster.container.getConnectionUri());
+    uri.pathname = `/${database}`;
+    return new pg.Client({ connectionString: uri.toString() });
+  };
+  /** What the drill does: load the journal and db-main's tombstones, then run the SQL file. */
+  const replay = async (
+    database: string,
+    mainTombstones: { workspace_id: string; pii_ref: string; run_id: string }[] = [],
+  ) => {
+    const c = superuser(database);
+    await c.connect();
+    try {
+      await c.query('CREATE TEMP TABLE replay_journal (line text)');
+      await c.query(
+        `CREATE TEMP TABLE replay_main (workspace_id uuid, pii_ref uuid, run_id uuid,
+                                        channel_account_id uuid, deleted_at timestamptz)`,
+      );
+      const lines = readdirSync(journalDir)
+        .flatMap((f) => readFileSync(join(journalDir, f), 'utf8').split('\n'))
+        .filter((l) => l !== '');
+      for (const line of lines) await c.query('INSERT INTO replay_journal VALUES ($1)', [line]);
+      for (const t of mainTombstones) {
+        await c.query(`INSERT INTO replay_main VALUES ($1, $2, $3, NULL, now())`, [
+          t.workspace_id,
+          t.pii_ref,
+          t.run_id,
+        ]);
+      }
+      await c.query(`SET restore.now = '${clock.toISOString()}'`);
+      const [inTx, vacuum] = SQL.split(VACUUM_SPLIT);
+      await c.query(inTx ?? '');
+      for (const stmt of (vacuum ?? '').split(';').map((s) => s.trim())) {
+        if (stmt !== '' && !stmt.startsWith('--')) await c.query(stmt);
+      }
+    } finally {
+      await c.end();
+    }
+  };
+  const rows = async (database: string, workspace: string, sql: string) => {
+    const c = superuser(database);
+    await c.connect();
+    try {
+      return (await c.query(sql, [workspace])).rows as Record<string, unknown>[];
+    } finally {
+      await c.end();
+    }
+  };
+
+  beforeAll(async () => {
+    cluster = await startRoleCluster('db-pii', 'omnibridge_pii', ['vault_owner', 'vault_app']);
+    vault = await startTestVault({
+      owner: cluster.connection('vault_owner'),
+      app: cluster.connection('vault_app'),
+      logger: createLogger({
+        service: 'pii-vault',
+        version: 'test',
+        destination: { write: () => true },
+      }),
+      journalDir,
+      now: () => clock,
+    });
+    for (const caller of ['web', 'worker', 'deletion'] as const) {
+      clients[caller] = new VaultClient({ baseUrl: vault.baseUrl, token: vault.tokens[caller] });
+    }
+  }, 300_000);
+
+  afterAll(async () => {
+    await vault.close();
+    await cluster.container.stop();
+  });
+
+  it('[AT-8] a backup from before a deletion, restored and replayed, shows the deleted records gone', async () => {
+    const keep = await ingest(A, 'keep');
+    const erased = await ingest(A, 'erased');
+    const fromMain = await ingest(A, 'main-only');
+    const expiring = await ingest(A, 'expiring', new Date(clock.getTime() + 25 * DAY));
+    await ingest(C, 'closing');
+    const user = cluster.container.getUsername();
+    await sh(`pg_dump -U ${user} -Fc -f /tmp/before.dump omnibridge_pii`);
+
+    // After the backup: an erasure, a workspace closure.
+    await clients.deletion.delete({
+      workspace_id: A,
+      run_id: randomUUID(),
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [erased] },
+    });
+    await clients.deletion.delete({
+      workspace_id: C,
+      run_id: randomUUID(),
+      trigger: 'workspace_closure',
+      scope: { type: 'workspace' },
+    });
+
+    // The restore brings them back...
+    await sh(`createdb -U ${user} restored && pg_restore -U ${user} -d restored /tmp/before.dump`);
+    const back = await rows(
+      'restored',
+      A,
+      'SELECT pii_ref FROM vault.records WHERE workspace_id = $1',
+    );
+    expect(back.map((r) => r.pii_ref)).toEqual(expect.arrayContaining([keep, erased, fromMain]));
+
+    // ...until the tombstones are re-applied, 26 days on (expiry re-runs too, FA-21).
+    clock = new Date(clock.getTime() + 26 * DAY);
+    await replay('restored', [{ workspace_id: A, pii_ref: fromMain, run_id: randomUUID() }]);
+    const left = await rows(
+      'restored',
+      A,
+      'SELECT pii_ref FROM vault.records WHERE workspace_id = $1 AND NOT canary',
+    );
+    expect(left.map((r) => r.pii_ref)).toEqual([keep]);
+    for (const gone of [erased, fromMain, expiring]) {
+      expect(
+        await rows(
+          'restored',
+          A,
+          `SELECT 1 FROM vault.record_fields WHERE pii_ref = '${gone}' AND workspace_id = $1`,
+        ),
+      ).toEqual([]);
+    }
+    // The closed workspace: no record, no key, no directory row; the marker is back.
+    expect(
+      await rows('restored', C, 'SELECT 1 FROM vault.records WHERE workspace_id = $1'),
+    ).toEqual([]);
+    expect(
+      await rows('restored', C, 'SELECT 1 FROM vault.workspace_keys WHERE workspace_id = $1'),
+    ).toEqual([]);
+    expect(
+      await rows('restored', C, 'SELECT 1 FROM vault.workspace_directory WHERE workspace_id = $1'),
+    ).toEqual([]);
+    expect(
+      await rows('restored', C, 'SELECT 1 FROM vault.closed_workspaces WHERE workspace_id = $1'),
+    ).toHaveLength(1);
+    // Every ref deleted is tombstoned in the restored copy, so a second replay changes nothing.
+    await replay('restored');
+    expect(
+      (
+        await rows(
+          'restored',
+          A,
+          'SELECT pii_ref FROM vault.records WHERE workspace_id = $1 AND NOT canary',
+        )
+      ).map((r) => r.pii_ref),
+    ).toEqual([keep]);
+    // A plain dump of the restored store holds ciphertext only: no marker in it (AT-9).
+    const plain = await sh(`pg_dump -U ${user} restored`);
+    expect(plain).not.toContain(PII_MARKER);
+  });
+});
