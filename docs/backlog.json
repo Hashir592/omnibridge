@@ -1140,6 +1140,37 @@
       "status": "review"
     },
     {
+      "id": "T-0407",
+      "module": "M04",
+      "session": "S3",
+      "title": "Exact match for channel buyer IDs (ADR-066)",
+      "goal": "An eBay deletion notice can never delete a different buyer whose ID differs only in case.",
+      "prd_ids": [],
+      "supports": [
+        "AT-10",
+        "DEL-1",
+        "EBAY-2"
+      ],
+      "scope": [
+        "New case-sensitive blind-index field for channel buyer IDs and usernames (trim only, no lowercasing), written at ingest",
+        "POST /v1/ebay-user-match uses the exact field",
+        "blind_index.field constraint change as expand/contract with the ADR-045 ban-drop-constraint waiver",
+        "Backfill existing rows in the same task (dev data only today)"
+      ],
+      "out_of_scope": [
+        "Other search fields stay case-folded"
+      ],
+      "depends_on": [
+        "T-0404"
+      ],
+      "acceptance": [
+        "Test first: [AT-10] a notice for 'AbC' deletes 'AbC' and leaves 'abc'",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
       "id": "T-0308",
       "module": "M03",
       "session": "S2",
@@ -1186,13 +1217,13 @@
         "AT-9"
       ],
       "scope": [
-        "Audit T-0402 to T-0405: capabilities, cross-workspace access, key handling, access log, deletion completeness, tombstones, restore, marker-scan coverage, the access export"
+        "Audit T-0402 to T-0405 and T-0407 (incl. the eBay fan-out, ADR-066): capabilities, cross-workspace access, key handling, access log, deletion completeness, tombstones, restore, marker-scan coverage, the access export"
       ],
       "out_of_scope": [
         "Fixing (S3 does it)"
       ],
       "depends_on": [
-        "T-0405",
+        "T-0407",
         "T-0308"
       ],
       "acceptance": [
