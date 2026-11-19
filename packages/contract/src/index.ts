@@ -70,6 +70,19 @@ export {
   withdrawErasureRequest,
 } from './routes/privacy.ts';
 export {
+  countUnreadNotifications,
+  countUnreadPlatformNotifications,
+  listNotifications,
+  listPlatformNotifications,
+  markAllNotificationsRead,
+  markAllPlatformNotificationsRead,
+  markNotificationRead,
+  markPlatformNotificationRead,
+  notificationRoutes,
+  NotificationSchema,
+  type Notification,
+} from './routes/notifications.ts';
+export {
   AuditEventSchema,
   auditFilters,
   exportAuditEvents,

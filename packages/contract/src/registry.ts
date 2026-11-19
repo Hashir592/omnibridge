@@ -4,6 +4,7 @@ import { getDeletionCertificate } from './routes/deletion.ts';
 import { getHealth } from './routes/health.ts';
 import { getFile } from './routes/files.ts';
 import { getJob } from './routes/jobs.ts';
+import { notificationRoutes } from './routes/notifications.ts';
 import { privacyRoutes } from './routes/privacy.ts';
 import { createCompany, createWorkspace, listCompanies } from './routes/tenancy.ts';
 import { userRoutes } from './routes/users.ts';
@@ -27,6 +28,7 @@ export const contractRoutes = [
   ...webhookRoutes,
   ...userRoutes,
   ...privacyRoutes,
+  ...notificationRoutes,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;

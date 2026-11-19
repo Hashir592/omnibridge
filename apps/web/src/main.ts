@@ -6,6 +6,7 @@ import {
   ChannelAccountRepository,
   DeletionLog,
   ErasureRequestRepository,
+  NotificationRepository,
   AuditLog,
   AuthStore,
   CompanyRepository,
@@ -144,6 +145,8 @@ const app = buildWebApp({
     queue,
     audit: new AuditLog(main.db),
   },
+  // The notification centre (NTF-1, NTF-2).
+  notifications: { notifications: new NotificationRepository(main.db) },
   jobs: new JobRecordRepository(main.db),
   files: { store: fileStore, linkKey },
   // The eBay account deletion endpoint (EBAY-2), when its secrets are mounted.
