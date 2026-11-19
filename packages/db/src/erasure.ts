@@ -1,7 +1,48 @@
-import type { ErasureState, ErasureWithdrawReason, TenantContext } from '@omnibridge/core';
+import {
+  PII_DELETE_JOB_TYPE,
+  type ErasureState,
+  type ErasureWithdrawReason,
+  type TenantContext,
+} from '@omnibridge/core';
 import { sql, type Kysely, type Selectable } from 'kysely';
 import type { ErasureRequestsTable, MainDb } from './schema.ts';
 import { withOwnTenantTransaction, withTenantTransaction } from './tenant.ts';
+
+/**
+ * ADR-070: a claimed request with no job yet is stuck only after this long, so a confirm that is
+ * still between its claim and its queue call never shows as stuck.
+ */
+export const STUCK_GRACE_MS = 2 * 60_000;
+
+/** pg-boss job states in which a deletion job will still run (or is running). */
+const LIVE_JOB_STATES = ['created', 'retry', 'active'] as const;
+
+/**
+ * ADR-070 (F-M04e-01, F-M04e-02): a confirmed request that will never finish on its own. Either
+ * its claim has no job (the queue call failed after the claim committed) once the grace period
+ * is over, or its pii.delete job is no longer live: failed (including a last attempt that
+ * expired because the worker died, which pg-boss records as failed and no hook sees), cancelled,
+ * or gone. Only confirmed requests with records to delete count, so a completed request whose job
+ * row retention has removed is never stuck. pgboss has no RLS: the job is matched by id, queue
+ * and workspace.
+ */
+function stuckCondition(now: Date) {
+  const graceEnd = new Date(now.getTime() - STUCK_GRACE_MS);
+  return sql<boolean>`(
+    r.state = 'confirmed'
+    AND cardinality(r.pii_refs) > 0
+    AND CASE
+      WHEN r.job_id IS NULL THEN r.confirmed_at < ${graceEnd}
+      ELSE NOT EXISTS (
+        SELECT 1 FROM pgboss.job j
+         WHERE j.id = r.job_id
+           AND j.name = ${PII_DELETE_JOB_TYPE}
+           AND j.data ->> 'workspace_id' = r.workspace_id::text
+           AND j.state::text IN (${sql.join(LIVE_JOB_STATES.map((st) => sql.lit(st)))})
+      )
+    END
+  )`;
+}
 
 /** DEL-4: an erasure request is due one calendar month after it was made. */
 export function erasureDueAt(requestedAt: Date): Date {
@@ -220,27 +261,42 @@ export class ErasureRequestRepository {
   }
 
   /**
-   * A-006: an admin retries a failed request. In the request's own transaction: it goes back to
-   * confirmed with no job (the caller queues a new run of the same refs and records it with
-   * `setJob`), and the retry is counted. The row lock makes a second retry wait, then find it no
-   * longer failed. Undefined when it is not failed.
+   * A-006, ADR-070: an admin retries a failed or stuck request. In the request's own transaction:
+   * it goes back to confirmed with no job (the caller queues a new run of the same refs, under a
+   * new key, and records it with `setJob`), and the retry is counted. The row lock makes a second
+   * retry wait, then find it neither failed nor stuck (its new job is live). Undefined otherwise.
    */
-  async retry(ctx: TenantContext, id: string): Promise<ErasureRequest | undefined> {
+  async retry(ctx: TenantContext, id: string, now: Date): Promise<ErasureRequest | undefined> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const row = await trx
-        .updateTable('app.erasure_requests')
+        .updateTable('app.erasure_requests as r')
         .set({
           state: 'confirmed',
           failed_at: null,
           job_id: null,
-          retry_count: sql<number>`retry_count + 1`,
+          retry_count: sql<number>`r.retry_count + 1`,
         })
-        .where('workspace_id', '=', ctx.workspaceId)
-        .where('id', '=', id)
-        .where('state', '=', 'failed')
+        .where('r.workspace_id', '=', ctx.workspaceId)
+        .where('r.id', '=', id)
+        .where((eb) => eb.or([eb('r.state', '=', 'failed'), stuckCondition(now)]))
         .returningAll()
         .executeTakeFirst();
       return row === undefined ? undefined : toRequest(row);
+    });
+  }
+
+  /** ADR-070: which of these requests are stuck (see `stuckCondition`). */
+  async stuckIds(ctx: TenantContext, ids: readonly string[], now: Date): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const rows = await trx
+        .selectFrom('app.erasure_requests as r')
+        .select('r.id')
+        .where('r.workspace_id', '=', ctx.workspaceId)
+        .where('r.id', 'in', [...ids])
+        .where(stuckCondition(now))
+        .execute();
+      return new Set(rows.map((r) => r.id));
     });
   }
 

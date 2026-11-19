@@ -4,6 +4,7 @@ export {
   ERASURE_STATES,
   ERASURE_WITHDRAW_REASONS,
   erasureClosed,
+  PII_DELETE_JOB_TYPE,
   type ErasureState,
   type ErasureWithdrawReason,
 } from './erasure.ts';
