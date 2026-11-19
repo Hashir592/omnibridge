@@ -1,4 +1,5 @@
 import { DELETION_TRIGGERS, DeletionScope } from '@omnibridge/vault-client/schemas';
+import { PII_DELETE_JOB_TYPE } from '@omnibridge/core';
 import { z } from 'zod';
 import {
   defineJob,
@@ -91,7 +92,7 @@ export const jobsRetentionJob = defineJob({
  * Sent through `requestDeletion`, which checks the trigger and scope fit.
  */
 export const piiDeleteJob = defineJob({
-  type: 'pii.delete',
+  type: PII_DELETE_JOB_TYPE,
   payload: z.object({ trigger: z.enum(DELETION_TRIGGERS), scope: DeletionScope }).strict(),
   retry: { limit: 10, delaySeconds: 30, backoff: true, maxDelaySeconds: 3_600 },
   expireInSeconds: 900,

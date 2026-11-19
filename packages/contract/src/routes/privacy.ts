@@ -82,8 +82,14 @@ export const ErasureRequestSchema = z
     completedAt: z.iso.datetime().nullable(),
     /** When its last attempt failed (state failed); cleared by a retry. */
     failedAt: z.iso.datetime().nullable(),
-    /** How often an admin has retried a failed deletion. */
+    /** How often an admin has retried a failed or stuck deletion. */
     retryCount: z.number().int().min(0),
+    /**
+     * PROPOSED SHAPE for S2 (T-0311, ADR-070): confirmed, but the deletion will not finish on its
+     * own (its job died, was cancelled, or was never queued). Show Retry, as for failed. Only the
+     * list works it out; every other answer says false.
+     */
+    stuck: z.boolean(),
     withdrawnAt: z.iso.datetime().nullable(),
     withdrawReason: z.enum(ERASURE_WITHDRAW_REASONS).nullable(),
     /** The deletion job (GET /jobs/:id shows its progress), once confirmed. */
@@ -146,13 +152,13 @@ export const withdrawErasureRequest = defineRoute({
 /**
  * A-006 (ADR-069): run a failed request's deletion again: the same records, as a new deletion
  * run. The request goes back to confirmed (in progress) and stays overdue until it completes.
- * Audited. 409 unless the request is failed.
+ * Audited. ADR-070: a stuck request can be retried too. 409 unless the request is failed or stuck.
  */
 export const retryErasureRequest = defineRoute({
   id: 'retryErasureRequest',
   method: 'POST',
   path: '/erasure-requests/:id/retry',
-  summary: 'Retry the deletion of a failed erasure request',
+  summary: 'Retry the deletion of a failed or stuck erasure request',
   params: z.object({ id: z.uuid() }),
   responses: { 202: ErasureRequestSchema },
   ...privacy,

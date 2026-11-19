@@ -55,6 +55,8 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
   let tenancy: Tenancy;
   let vault: TestVault;
   let owner: pg.Pool;
+  /** db-main as ob_owner: plays pg-boss's part for the jobs the fake queue sends (ADR-070). */
+  let mainOwner: pg.Pool;
   const clients = {} as Record<'web' | 'worker' | 'deletion', VaultClient>;
   const logs: string[] = [];
   const sent: Sent[] = [];
@@ -76,16 +78,30 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
   let beforeSend: (() => Promise<void>) | undefined;
   /** Stands in for the queue: what web would enqueue, checked and then run by hand. */
   const queue: Pick<JobQueue, 'send'> = {
-    send: async (_def, input) => {
+    send: async (def, input) => {
       await beforeSend?.();
       sent.push({
         workspaceId: input.ctx.workspaceId,
         payload: input.payload as Sent['payload'],
         key: input.idempotencyKey,
       });
-      return { id: randomUUID(), created: true };
+      const id = randomUUID();
+      // The pg-boss row a real send writes. No worker runs here, so it stays created (live)
+      // until a test moves it on (ADR-070: the stuck rule reads it).
+      await mainOwner.query('INSERT INTO pgboss.job (id, name, data) VALUES ($1, $2, $3)', [
+        id,
+        def.type,
+        { workspace_id: input.ctx.workspaceId },
+      ]);
+      return { id, created: true };
     },
   };
+  /** What pg-boss does to a job: fails it (a last attempt that expired) or cancels it. */
+  const setJobState = (jobId: string, state: 'failed' | 'cancelled') =>
+    mainOwner.query('UPDATE pgboss.job SET state = $2 WHERE id = $1', [jobId, state]);
+  /** What pg-boss retention does to an old job row. */
+  const dropJob = (jobId: string) =>
+    mainOwner.query('DELETE FROM pgboss.job WHERE id = $1', [jobId]);
 
   const contact = (who: string, extra: Record<string, string> = {}) => ({
     name: `${PII_MARKER}${who} Buyer`,
@@ -162,6 +178,7 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
       startRoleCluster('db-pii', 'omnibridge_pii', ['vault_owner', 'vault_app']),
     ]);
     await migrateMain(main.connection('ob_owner'));
+    mainOwner = new pg.Pool({ ...main.connection('ob_owner'), max: 2 });
     db = createMainDb({ ...main.connection('ob_app'), max: 4 });
     tenancy = new Tenancy(db.db);
     vault = await startTestVault({
@@ -205,6 +222,7 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
   afterAll(async () => {
     await vault.close();
     await owner.end();
+    await mainOwner.end();
     await db.destroy();
     await Promise.all([main.container.stop(), pii.container.stop()]);
   });
@@ -583,6 +601,117 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
       ).toEqual(expect.arrayContaining(['erasure_confirmed', 'erasure_retried']));
     } finally {
       clock = savedClock;
+      await server.close();
+    }
+  });
+
+  // ADR-070 (F-M04e-01, F-M04e-02): a confirmed request whose deletion will never finish on its
+  // own is stuck: the list says so and an admin can retry it. A request with a live job is not.
+  const startRequest = async (server: ReturnType<typeof app>, who: string) => {
+    await ingest(`order-${who}`, contact(who), amazonAccount);
+    const created = (
+      await server.inject({
+        method: 'POST',
+        url: '/api/erasure-requests',
+        headers: headers(admin),
+        payload: { identifiers: { email: `${PII_MARKER}${who.toLowerCase()}@example.test` } },
+      })
+    ).json<{ id: string }>();
+    return created.id;
+  };
+  const confirmAs = (server: ReturnType<typeof app>, id: string) =>
+    server.inject({
+      method: 'POST',
+      url: `/api/erasure-requests/${id}/confirm`,
+      headers: headers(admin),
+    });
+  const listedIn = async (server: ReturnType<typeof app>, id: string) =>
+    (await server.inject({ method: 'GET', url: '/api/erasure-requests', headers: headers(admin) }))
+      .json<{ items: { id: string; state: string; stuck: boolean; jobId: string | null }[] }>()
+      .items.find((r) => r.id === id);
+  const retryAs = (server: ReturnType<typeof app>, id: string) =>
+    server.inject({
+      method: 'POST',
+      url: `/api/erasure-requests/${id}/retry`,
+      headers: headers(admin),
+    });
+
+  it('[DEL-4] a claimed request whose queue call failed shows stuck once the grace period is over; retry queues it as a new run', async () => {
+    const server = app();
+    const savedClock = clock;
+    try {
+      const id = await startRequest(server, 'Stella');
+      beforeSend = () => {
+        beforeSend = undefined;
+        return Promise.reject(new Error('queue down'));
+      };
+      expect((await confirmAs(server, id)).statusCode).toBe(500);
+      // Within the grace period the confirm may still be on its way: not stuck, no retry.
+      expect(await listedIn(server, id)).toMatchObject({ state: 'confirmed', stuck: false });
+      expect((await retryAs(server, id)).statusCode).toBe(409);
+      clock = new Date(clock.getTime() + 3 * 60_000);
+      expect(await listedIn(server, id)).toMatchObject({
+        state: 'confirmed',
+        stuck: true,
+        jobId: null,
+      });
+      sent.length = 0;
+      const retried = await retryAs(server, id);
+      expect(retried.statusCode).toBe(202);
+      expect(retried.json()).toMatchObject({ state: 'confirmed', retryCount: 1, stuck: false });
+      expect(sent.map((x) => x.key)).toEqual([`erasure:${id}:retry1`]);
+      expect(await listedIn(server, id)).toMatchObject({ stuck: false });
+      expect((await retryAs(server, id)).statusCode).toBe(409);
+    } finally {
+      beforeSend = undefined;
+      clock = savedClock;
+      await server.close();
+    }
+  });
+
+  it('[DEL-4] a request whose job is live is not stuck (retry 409); once its job failed on an expired last attempt, was cancelled or is gone, it is stuck and retry re-queues it', async () => {
+    const server = app();
+    const endings: [string, (jobId: string) => Promise<unknown>][] = [
+      ['Tess', (j) => setJobState(j, 'failed')],
+      ['Uma', (j) => setJobState(j, 'cancelled')],
+      ['Vic', (j) => dropJob(j)],
+    ];
+    try {
+      for (const [who, end] of endings) {
+        const id = await startRequest(server, who);
+        const confirmed = await confirmAs(server, id);
+        expect(confirmed.statusCode).toBe(202);
+        const jobId = confirmed.json<{ jobId: string }>().jobId;
+        expect(await listedIn(server, id)).toMatchObject({ state: 'confirmed', stuck: false });
+        expect((await retryAs(server, id)).statusCode).toBe(409);
+
+        // The worker died on the last attempt (or the job was cancelled or removed): no hook ran.
+        await end(jobId);
+        expect(await listedIn(server, id)).toMatchObject({ state: 'confirmed', stuck: true });
+        sent.length = 0;
+        const retried = await retryAs(server, id);
+        expect(retried.statusCode).toBe(202);
+        expect(retried.json<{ jobId: string }>().jobId).not.toBe(jobId);
+        expect(sent.map((x) => x.key)).toEqual([`erasure:${id}:retry1`]);
+        expect(await listedIn(server, id)).toMatchObject({ state: 'confirmed', stuck: false });
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('[DEL-4] a completed request whose job row retention has deleted is never stuck and cannot be retried', async () => {
+    const server = app();
+    try {
+      const id = await startRequest(server, 'Wren');
+      const jobId = (await confirmAs(server, id)).json<{ jobId: string }>().jobId;
+      await tenancy.runWorkspace({ workspaceId: A }, (c) =>
+        new ErasureRequestRepository(db.db).complete(c, jobId, clock),
+      );
+      await dropJob(jobId);
+      expect(await listedIn(server, id)).toMatchObject({ state: 'completed', stuck: false });
+      expect((await retryAs(server, id)).statusCode).toBe(409);
+    } finally {
       await server.close();
     }
   });

@@ -416,6 +416,7 @@
             ]
           },
           "retryCount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "stuck": { "type": "boolean" },
           "withdrawnAt": {
             "anyOf": [
               {
@@ -457,6 +458,7 @@
           "completedAt",
           "failedAt",
           "retryCount",
+          "stuck",
           "withdrawnAt",
           "withdrawReason",
           "jobId"
@@ -517,6 +519,7 @@
             ]
           },
           "retryCount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "stuck": { "type": "boolean" },
           "withdrawnAt": {
             "anyOf": [
               {
@@ -563,6 +566,7 @@
           "completedAt",
           "failedAt",
           "retryCount",
+          "stuck",
           "withdrawnAt",
           "withdrawReason",
           "jobId",
@@ -1234,6 +1238,7 @@
             ]
           },
           "retryCount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "stuck": { "type": "boolean" },
           "withdrawnAt": {
             "anyOf": [
               {
@@ -1275,6 +1280,7 @@
           "completedAt",
           "failedAt",
           "retryCount",
+          "stuck",
           "withdrawnAt",
           "withdrawReason",
           "jobId"
@@ -1336,6 +1342,7 @@
             ]
           },
           "retryCount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "stuck": { "type": "boolean" },
           "withdrawnAt": {
             "anyOf": [
               {
@@ -1379,6 +1386,7 @@
           "completedAt",
           "failedAt",
           "retryCount",
+          "stuck",
           "withdrawnAt",
           "withdrawReason",
           "jobId",
@@ -3719,7 +3727,7 @@
     "/erasure-requests/{id}/retry": {
       "post": {
         "operationId": "retryErasureRequest",
-        "summary": "Retry the deletion of a failed erasure request",
+        "summary": "Retry the deletion of a failed or stuck erasure request",
         "parameters": [
           {
             "schema": {

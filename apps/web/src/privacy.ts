@@ -17,7 +17,15 @@ export interface PrivacyOptions {
   vault: Pick<VaultClient, 'search' | 'mask' | 'readFull'>;
   erasures: Pick<
     ErasureRequestRepository,
-    'create' | 'get' | 'list' | 'claim' | 'setJob' | 'withdraw' | 'completeEmpty' | 'retry'
+    | 'create'
+    | 'get'
+    | 'list'
+    | 'claim'
+    | 'setJob'
+    | 'withdraw'
+    | 'completeEmpty'
+    | 'retry'
+    | 'stuckIds'
   >;
   queue: Pick<JobQueue, 'send'>;
   audit: Pick<AuditLog, 'record'>;
@@ -38,7 +46,8 @@ const MASK_BATCH = 200;
 const unavailable = () =>
   Promise.reject(new ApiError({ status: 503, code: 'service_unavailable' }));
 
-function requestBody(request: ErasureRequest, now: Date) {
+/** `stuck` (ADR-070) is worked out for the list; every other answer has just acted on the row. */
+function requestBody(request: ErasureRequest, now: Date, stuck = false) {
   return {
     id: request.id,
     requestedAt: request.requestedAt.toISOString(),
@@ -51,6 +60,7 @@ function requestBody(request: ErasureRequest, now: Date) {
     completedAt: request.completedAt?.toISOString() ?? null,
     failedAt: request.failedAt?.toISOString() ?? null,
     retryCount: request.retryCount,
+    stuck,
     jobId: request.jobId,
     withdrawnAt: request.withdrawnAt?.toISOString() ?? null,
     withdrawReason: request.withdrawReason,
@@ -131,7 +141,15 @@ export function privacyHandlers(
     listErasureRequests: async ({ tenant }) => {
       const at = now();
       const items = await o.erasures.list(tenant);
-      return { status: 200, body: { items: items.map((r) => requestBody(r, at)) } };
+      const stuck = await o.erasures.stuckIds(
+        tenant,
+        items.filter((r) => r.state === 'confirmed').map((r) => r.id),
+        at,
+      );
+      return {
+        status: 200,
+        body: { items: items.map((r) => requestBody(r, at, stuck.has(r.id))) },
+      };
     },
 
     // S5-20261118-02: claim first (committed), then queue, then record the job. A withdraw that
@@ -188,19 +206,22 @@ export function privacyHandlers(
     },
 
     // A-006 (ADR-069): a failed deletion is run again for the same refs, as a new run (a new key,
-    // so a new run id). One request transaction: the state change, the job (A-002: visible only
+    // so a new run id). ADR-070: so is a stuck one (confirmed, but its job died or was never
+    // queued); a request whose job is still live is a conflict. One request transaction: the state change, the job (A-002: visible only
     // on commit), its id and the audit row commit together, or none does.
     retryErasureRequest: async ({ params, session, tenant, request }) => {
       const existing = await o.erasures.get(tenant, params.id);
       if (existing === undefined) throw new ApiError({ status: 404, code: 'not_found' });
       const at = now();
       const retried =
-        existing.state === 'failed' ? await o.erasures.retry(tenant, existing.id) : undefined;
+        existing.state === 'failed' || existing.state === 'confirmed'
+          ? await o.erasures.retry(tenant, existing.id, at)
+          : undefined;
       if (retried === undefined) {
         throw new ApiError({
           status: 409,
           code: 'conflict',
-          detail: 'Only a failed erasure request can be retried.',
+          detail: 'Only a failed or stuck erasure request can be retried.',
         });
       }
       const job = await requestDeletion(o.queue, tenant, {

@@ -200,6 +200,8 @@ const asBody = (r: StoredRequest): ErasureRequest => {
     completedAt: r.completedAt ?? null,
     failedAt: r.failedAt ?? null,
     retryCount: r.retryCount ?? 0,
+    // ADR-070: the server's stuck flag; the mock's jobs never die (T-0311 adds a stuck seed).
+    stuck: false,
     jobId: r.jobId,
     withdrawnAt: r.withdrawnAt ?? null,
     withdrawReason: r.withdrawReason ?? null,

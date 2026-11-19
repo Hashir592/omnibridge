@@ -26,3 +26,6 @@ export type ErasureState = (typeof ERASURE_STATES)[number];
 export function erasureClosed(state: ErasureState): boolean {
   return state === 'completed' || state === 'withdrawn';
 }
+
+/** The deletion job's queue (packages/queue registry); db-main's stuck rule reads its pg-boss rows. */
+export const PII_DELETE_JOB_TYPE = 'pii.delete';

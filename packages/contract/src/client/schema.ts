@@ -487,7 +487,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Retry the deletion of a failed erasure request */
+    /** Retry the deletion of a failed or stuck erasure request */
     post: operations['retryErasureRequest'];
     delete?: never;
     options?: never;
@@ -913,6 +913,7 @@ export interface components {
       retryCount: number;
       /** @enum {string} */
       state: 'open' | 'confirmed' | 'completed' | 'failed' | 'withdrawn';
+      stuck: boolean;
       withdrawnAt: string | null;
       withdrawReason:
         ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
@@ -934,6 +935,7 @@ export interface components {
       retryCount: number;
       /** @enum {string} */
       state: 'open' | 'confirmed' | 'completed' | 'failed' | 'withdrawn';
+      stuck: boolean;
       truncated: boolean;
       withdrawnAt: string | null;
       withdrawReason:
@@ -956,6 +958,7 @@ export interface components {
       retryCount: number;
       /** @enum {string} */
       state: 'open' | 'confirmed' | 'completed' | 'failed' | 'withdrawn';
+      stuck: boolean;
       truncated: boolean;
       withdrawnAt: string | null;
       withdrawReason:
@@ -977,6 +980,7 @@ export interface components {
       retryCount: number;
       /** @enum {string} */
       state: 'open' | 'confirmed' | 'completed' | 'failed' | 'withdrawn';
+      stuck: boolean;
       withdrawnAt: string | null;
       withdrawReason:
         ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
