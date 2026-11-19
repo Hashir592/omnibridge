@@ -173,6 +173,7 @@ describe('audit retention job (AUD-3)', () => {
         'users.access-review-sweep': () => Promise.resolve(),
         'housekeeping.daily-sweep': () => Promise.resolve(),
         'pii.expiry-sweep': () => Promise.resolve(),
+        'notify.platform-email-sweep': () => Promise.resolve(),
       },
       logger,
     );

@@ -1,4 +1,13 @@
-import { ApiError, notificationType } from '@omnibridge/core';
+import {
+  ApiError,
+  emailDefaultOn,
+  emailLockedOn,
+  NOTIFICATION_SEVERITIES,
+  NOTIFICATION_TYPES,
+  notificationType,
+  type MemberAccess,
+  type NotificationType,
+} from '@omnibridge/core';
 import type { notificationRoutes } from '@omnibridge/contract';
 import type { Notification, NotificationCursor, NotificationRepository } from '@omnibridge/db';
 import type { Handlers } from './contract.ts';
@@ -17,6 +26,8 @@ export interface NotificationOptions {
     | 'listPlatform'
     | 'platformUnreadCount'
     | 'markPlatformRead'
+    | 'emailPreferences'
+    | 'setEmailPreferences'
   >;
   now?: () => Date;
 }
@@ -64,6 +75,34 @@ const page = (p: { items: Notification[]; next: NotificationCursor | null }) => 
 
 const notFound = () => new ApiError({ status: 404, code: 'not_found' });
 
+/** NTF-4: the workspace types this member can receive (a child: those of a ticked tab). */
+function receivable(access: MemberAccess): NotificationType[] {
+  return NOTIFICATION_TYPES.filter(
+    (t) =>
+      t.scope === 'workspace' &&
+      (access.tabs === 'all' || (t.tab !== undefined && access.tabs.includes(t.tab))),
+  );
+}
+
+/** The most serious severity a type can have. */
+const topSeverity = (t: NotificationType) =>
+  NOTIFICATION_SEVERITIES.find((s) => t.severities.includes(s)) ?? 'info';
+
+function preferences(access: MemberAccess, chosen: Map<string, boolean>) {
+  return {
+    items: receivable(access).map((t) => {
+      const locked = emailLockedOn(t, access.role);
+      return {
+        type: t.code,
+        title: t.title,
+        severity: topSeverity(t),
+        email: locked || (chosen.get(t.code) ?? emailDefaultOn(t)),
+        locked,
+      };
+    }),
+  };
+}
+
 export function notificationHandlers(
   options: NotificationOptions | undefined,
 ): Handlers<typeof notificationRoutes> {
@@ -77,6 +116,8 @@ export function notificationHandlers(
       countUnreadPlatformNotifications: unavailable,
       markPlatformNotificationRead: unavailable,
       markAllPlatformNotificationsRead: unavailable,
+      getEmailPreferences: unavailable,
+      setEmailPreferences: unavailable,
     };
   }
   const o = options;
@@ -145,5 +186,34 @@ export function notificationHandlers(
       status: 200,
       body: { marked: await o.notifications.markPlatformRead(platform.userId, null, now()) },
     }),
+    getEmailPreferences: async ({ session, tenant, access }) => ({
+      status: 200,
+      body: preferences(access, await o.notifications.emailPreferences(tenant, session.userId)),
+    }),
+    setEmailPreferences: async ({ body, session, tenant, access }) => {
+      const allowed = new Map(receivable(access).map((t) => [t.code, t]));
+      for (const item of body.items) {
+        const type = allowed.get(item.type);
+        if (type === undefined) {
+          throw new ApiError({
+            status: 400,
+            code: 'validation_failed',
+            detail: `You do not receive notifications of type ${item.type}.`,
+          });
+        }
+        if (!item.email && emailLockedOn(type, access.role)) {
+          throw new ApiError({
+            status: 400,
+            code: 'validation_failed',
+            detail: 'Critical alerts cannot be switched off for admins.',
+          });
+        }
+      }
+      await o.notifications.setEmailPreferences(tenant, session.userId, body.items, now());
+      return {
+        status: 200,
+        body: preferences(access, await o.notifications.emailPreferences(tenant, session.userId)),
+      };
+    },
   };
 }

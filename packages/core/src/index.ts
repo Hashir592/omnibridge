@@ -20,6 +20,9 @@ export { runHttpHealthcheck } from './healthcheck.ts';
 export { pence, type Pence } from './money.ts';
 export {
   checkRaise,
+  emailDefaultOn,
+  emailDefaultOnTypes,
+  emailLockedOn,
   InvalidNotification,
   NOTIFICATION_SEVERITIES,
   NOTIFICATION_SIGNALS,

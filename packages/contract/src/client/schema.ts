@@ -563,6 +563,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/me/notification-email-preferences': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get my notification email preferences */
+    get: operations['getEmailPreferences'];
+    /** Set my notification email preferences */
+    put: operations['setEmailPreferences'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/notifications': {
     parameters: {
       query?: never;
@@ -1008,6 +1026,28 @@ export interface components {
     };
     EbayChallengeResponseInput: {
       challengeResponse: string;
+    };
+    EmailPreference: {
+      email: boolean;
+      locked: boolean;
+      /** @enum {string} */
+      severity: 'critical' | 'warning' | 'info';
+      title: string;
+      type: string;
+    };
+    EmailPreferenceInput: {
+      email: boolean;
+      locked: boolean;
+      /** @enum {string} */
+      severity: 'critical' | 'warning' | 'info';
+      title: string;
+      type: string;
+    };
+    EmailPreferences: {
+      items: components['schemas']['EmailPreference'][];
+    };
+    EmailPreferencesInput: {
+      items: components['schemas']['EmailPreferenceInput'][];
     };
     ErasureMatch: {
       channelAccountId: string | null;
@@ -3080,6 +3120,91 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['JobProgress'];
+        };
+      };
+    };
+  };
+  getEmailPreferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EmailPreferences'];
+        };
+      };
+    };
+  };
+  setEmailPreferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          items: {
+            email: boolean;
+            type: string;
+          }[];
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EmailPreferences'];
         };
       };
     };

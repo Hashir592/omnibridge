@@ -213,6 +213,24 @@ export function notificationType(code: string): NotificationType | undefined {
   return BY_CODE.get(code);
 }
 
+/**
+ * NTF-4: a type that can be critical is emailed by default; any other type is not until the user
+ * turns it on.
+ */
+export function emailDefaultOn(type: NotificationType): boolean {
+  return type.severities.includes('critical');
+}
+
+/** The codes of the types emailed by default (NTF-4). */
+export function emailDefaultOnTypes(): string[] {
+  return NOTIFICATION_TYPES.filter(emailDefaultOn).map((x) => x.code);
+}
+
+/** NTF-4: critical alerts cannot be switched off for admins. */
+export function emailLockedOn(type: NotificationType, role: 'admin' | 'member'): boolean {
+  return role === 'admin' && emailDefaultOn(type);
+}
+
 /** The record a notification is about (NTF-1 "linked record"), by kind and ID. */
 export interface NotificationRecord {
   /** e.g. `order`, `listing`, `channel_account`, `user`. */

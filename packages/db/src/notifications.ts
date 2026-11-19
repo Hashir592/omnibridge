@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  emailDefaultOnTypes,
   isUuid,
   type CheckedRaise,
   type NotificationParams,
@@ -371,4 +372,163 @@ export class NotificationRepository implements NotificationStore {
       SELECT app.platform_notice_mark_read(${userId}, ${id}::uuid, ${now}) AS n`.execute(this.#db);
     return Number(rows[0]?.n ?? 0);
   }
+
+  // Email (T-0502: NTF-3, NTF-4). One job per recipient; a sent record per notification version.
+
+  /** Who gets an email about this notification now (0031 definer: admins always for critical). */
+  async emailRecipients(ctx: TenantContext, id: string): Promise<string[]> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{ user_id: string }>`
+        SELECT user_id
+          FROM app.notification_email_recipients(${id}::uuid, ${emailDefaultOnTypes()}::text[])`.execute(
+        trx,
+      );
+      return rows.map((r) => r.user_id);
+    });
+  }
+
+  /** The user's own choices; a type with no row takes its default. */
+  async emailPreferences(ctx: TenantContext, userId: string): Promise<Map<string, boolean>> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{ type: string; email: boolean }>`
+        SELECT type, email FROM app.notification_email_prefs
+         WHERE workspace_id = ${ctx.workspaceId} AND user_id = ${userId}`.execute(trx);
+      return new Map(rows.map((r) => [r.type, r.email]));
+    });
+  }
+
+  async setEmailPreferences(
+    ctx: TenantContext,
+    userId: string,
+    prefs: readonly { type: string; email: boolean }[],
+    now: Date,
+  ): Promise<void> {
+    if (prefs.length === 0) return;
+    await withTenantTransaction(this.#db, ctx, async (trx) => {
+      await sql`
+        INSERT INTO app.notification_email_prefs (workspace_id, user_id, type, email, updated_at)
+        SELECT ${ctx.workspaceId}, ${userId}, p.type, p.email, ${now}
+          FROM unnest(${prefs.map((p) => p.type)}::text[], ${prefs.map((p) => p.email)}::boolean[])
+               AS p(type, email)
+        ON CONFLICT (workspace_id, user_id, type) DO UPDATE
+          SET email = excluded.email, updated_at = excluded.updated_at`.execute(trx);
+    });
+  }
+
+  /**
+   * What an email job needs, read just before it sends: the notification as it is now, the
+   * recipient's address, whether they still get it, and whether it was already sent.
+   */
+  async emailJob(
+    ctx: TenantContext,
+    input: { notificationId: string; userId: string; version: number },
+  ): Promise<EmailJobView | undefined> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{
+        type: string;
+        severity: NotificationSeverity;
+        version: string;
+        resolved: boolean;
+        company_name: string | null;
+        email: string;
+        name: string;
+        recipient: boolean;
+        sent: boolean;
+      }>`
+        SELECT n.type, n.severity, n.version, n.resolved_at IS NOT NULL AS resolved,
+               c.trading_name AS company_name, u.email, u.name,
+               EXISTS (SELECT 1
+                         FROM app.notification_email_recipients(n.id, ${emailDefaultOnTypes()}::text[]) x
+                        WHERE x.user_id = u.id) AS recipient,
+               EXISTS (SELECT 1 FROM app.notification_emails e
+                        WHERE e.workspace_id = n.workspace_id AND e.notification_id = n.id
+                          AND e.user_id = u.id AND e.version = ${input.version}) AS sent
+          FROM app.notifications n
+          JOIN app.users u ON u.id = ${input.userId}::uuid
+          LEFT JOIN app.companies c ON c.workspace_id = n.workspace_id AND c.id = n.company_id
+         WHERE n.workspace_id = ${ctx.workspaceId} AND n.id = ${input.notificationId}::uuid`.execute(
+        trx,
+      );
+      const r = rows[0];
+      if (r === undefined) return undefined;
+      return {
+        type: r.type,
+        severity: r.severity,
+        version: Number(r.version),
+        resolved: r.resolved,
+        companyName: r.company_name,
+        email: r.email,
+        name: r.name,
+        recipient: r.recipient,
+        sent: r.sent,
+      };
+    });
+  }
+
+  async recordEmailSent(
+    ctx: TenantContext,
+    input: { notificationId: string; userId: string; version: number },
+    now: Date,
+  ): Promise<void> {
+    await withTenantTransaction(this.#db, ctx, async (trx) => {
+      await sql`
+        INSERT INTO app.notification_emails (workspace_id, notification_id, user_id, version, sent_at)
+        VALUES (${ctx.workspaceId}, ${input.notificationId}, ${input.userId}, ${input.version},
+                ${now})
+        ON CONFLICT DO NOTHING`.execute(trx);
+    });
+  }
+
+  /** Critical platform notices still to email, one row per notice and platform admin (worker). */
+  async pendingPlatformEmails(limit: number): Promise<PlatformEmail[]> {
+    const { rows } = await sql<{
+      notification_id: string;
+      version: string;
+      type: string;
+      severity: NotificationSeverity;
+      user_id: string;
+      email: string;
+      name: string;
+    }>`SELECT * FROM app.platform_notice_pending_emails(${limit})`.execute(this.#db);
+    return rows.map((r) => ({
+      notificationId: r.notification_id,
+      version: Number(r.version),
+      type: r.type,
+      severity: r.severity,
+      userId: r.user_id,
+      email: r.email,
+      name: r.name,
+    }));
+  }
+
+  async platformEmailSent(input: PlatformEmail, now: Date): Promise<void> {
+    await sql`
+      SELECT app.platform_notice_email_sent(${input.notificationId}::uuid, ${input.userId}::uuid,
+                                            ${input.version}, ${now})`.execute(this.#db);
+  }
+}
+
+export interface EmailJobView {
+  type: string;
+  severity: NotificationSeverity;
+  version: number;
+  resolved: boolean;
+  /** The company's trading name (business data, never buyer PII); null when workspace-wide. */
+  companyName: string | null;
+  email: string;
+  name: string;
+  /** Still a recipient now (preference, ticks, role). */
+  recipient: boolean;
+  /** Already sent for this version. */
+  sent: boolean;
+}
+
+export interface PlatformEmail {
+  notificationId: string;
+  version: number;
+  type: string;
+  severity: NotificationSeverity;
+  userId: string;
+  email: string;
+  name: string;
 }

@@ -49,6 +49,7 @@ export async function startPlatformJobs({
   auth,
   logger,
   onDbError,
+  sendPlatformEmails,
 }: {
   boss: PgBoss;
   queue: Pick<JobQueue, 'send'>;
@@ -56,6 +57,8 @@ export async function startPlatformJobs({
   auth: Pick<AuthStore, 'purgeExpired'>;
   logger: Logger;
   onDbError: PoolErrorHandler;
+  /** Emails critical platform notices to platform admins (T-0502); returns how many were sent. */
+  sendPlatformEmails: () => Promise<number>;
 }): Promise<() => Promise<void>> {
   const platformDb = createMainDb(platformDbConfig('omnibridge-worker-fanout'), onDbError);
   const directory = new WorkspaceDirectory(platformDb.db);
@@ -77,6 +80,10 @@ export async function startPlatformJobs({
       'housekeeping.daily-sweep': async () => {
         const workspaces = await sweepHousekeeping({ auth, directory, queue, logger });
         logger.info({ event: 'housekeeping.sweep', count: workspaces }, 'job retention sent');
+      },
+      'notify.platform-email-sweep': async () => {
+        const sent = await sendPlatformEmails();
+        if (sent > 0) logger.info({ event: 'notify.platform_emails', count: sent }, 'sent');
       },
     },
     logger,

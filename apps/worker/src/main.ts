@@ -13,6 +13,7 @@ import {
   JobRecordRepository,
   mainDbConfig,
   MembershipRepository,
+  NotificationRepository,
   Tenancy,
   UserRepository,
   WorkspaceRepository,
@@ -26,6 +27,7 @@ import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
 import { piiDeleteHandler, piiExpiryHandler } from './deletion.ts';
 import { jobsRetentionHandler } from './housekeeping.ts';
+import { notifyEmailHandler, sweepPlatformEmails } from './notify-mail.ts';
 import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
 import { workerHandlerDbConfig } from './db.ts';
 import { registerHandlers } from './handlers.ts';
@@ -97,6 +99,9 @@ const mailer = new Mailer({
   allowPlain: process.env.SMTP_ALLOW_PLAIN === '1',
 });
 const users = new UserRepository(handlerDb.db);
+const appOrigin = requireEnv('APP_ORIGIN');
+// Notification emails (T-0502): one job per recipient, plus the minute sweep of platform notices.
+const notifications = new NotificationRepository(handlerDb.db);
 // DEL-1: the deletion jobs reach pii-vault with the deletion token, the only one that may delete.
 const deletionDeps = {
   vault: new VaultClient({
@@ -125,7 +130,7 @@ await registerHandlers(queue, {
     store: new AuthStore(handlerDb.db),
     users,
     mailer,
-    appOrigin: requireEnv('APP_ORIGIN'),
+    appOrigin,
     logger: log,
   }),
   'auth.invite': inviteHandler({
@@ -133,7 +138,7 @@ await registerHandlers(queue, {
     users,
     workspaces: new WorkspaceRepository(handlerDb.db),
     mailer,
-    appOrigin: requireEnv('APP_ORIGIN'),
+    appOrigin,
     logger: log,
   }),
   'users.access_review': accessReviewHandler({
@@ -146,6 +151,13 @@ await registerHandlers(queue, {
   }),
   'pii.delete': piiDeleteHandler(deletionDeps),
   'pii.expiry': piiExpiryHandler(deletionDeps),
+  'notify.email': notifyEmailHandler({
+    tenancy: new Tenancy(handlerDb.db),
+    notifications,
+    mailer,
+    appOrigin,
+    logger: log,
+  }),
 });
 // The scheduled fan-out, the worker's only use of ob_platform (invariant 2).
 const closePlatformJobs = await startPlatformJobs({
@@ -154,6 +166,7 @@ const closePlatformJobs = await startPlatformJobs({
   auth: new AuthStore(bookkeepingDb.db),
   logger: log,
   onDbError,
+  sendPlatformEmails: () => sweepPlatformEmails({ notifications, mailer, appOrigin, logger: log }),
 });
 const metrics = await startMetricsServer(
   queueMetrics({ boss, types: JOBS.map((def) => def.type) }),

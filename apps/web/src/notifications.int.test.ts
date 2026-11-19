@@ -511,4 +511,60 @@ describe('notification centre [NTF-1][NTF-2][NTF-5]', () => {
     expect(bad.statusCode).toBe(400);
     await s.close();
   });
+  it('[NTF-4] each user chooses email per type: critical on by default and locked on for admins, others off until turned on', async () => {
+    const s = server();
+    type Pref = { type: string; email: boolean; locked: boolean; severity: string };
+    const prefs = async (headers: Record<string, string>) =>
+      (
+        await s.inject({ method: 'GET', url: '/api/me/notification-email-preferences', headers })
+      ).json<{ items: Pref[] }>().items;
+    const put = (headers: Record<string, string>, items: { type: string; email: boolean }[]) =>
+      s.inject({
+        method: 'PUT',
+        url: '/api/me/notification-email-preferences',
+        headers,
+        payload: { items },
+      });
+
+    const adminPrefs = await prefs(as(admin));
+    expect(adminPrefs.find((p) => p.type === 'inventory.oversold')).toMatchObject({
+      email: true,
+      locked: true,
+      severity: 'critical',
+    });
+    expect(adminPrefs.find((p) => p.type === 'finance.bill_due')).toMatchObject({
+      email: false,
+      locked: false,
+    });
+    // Platform types are never offered in a workspace.
+    expect(adminPrefs.some((p) => p.type === 'ebay.api_usage_high')).toBe(false);
+    expect((await put(as(admin), [{ type: 'inventory.oversold', email: false }])).statusCode).toBe(
+      400,
+    );
+    const set = await put(as(admin), [{ type: 'finance.bill_due', email: true }]);
+    expect(set.statusCode).toBe(200);
+    expect(
+      set.json<{ items: Pref[] }>().items.find((p) => p.type === 'finance.bill_due')?.email,
+    ).toBe(true);
+
+    // A child sees only the types of their ticked tab, and may switch a critical one off.
+    const childPrefs = await prefs(as(child));
+    expect([...new Set(childPrefs.map((p) => p.type.split('.')[0]))]).toEqual(
+      expect.arrayContaining(['inventory']),
+    );
+    expect(childPrefs.some((p) => p.type === 'finance.bill_due')).toBe(false);
+    expect((await put(as(child), [{ type: 'finance.bill_due', email: true }])).statusCode).toBe(
+      400,
+    );
+    expect((await put(as(child), [{ type: 'inventory.oversold', email: false }])).statusCode).toBe(
+      200,
+    );
+    expect((await prefs(as(child))).find((p) => p.type === 'inventory.oversold')).toMatchObject({
+      email: false,
+      locked: false,
+    });
+    // Each user's choices are their own.
+    expect((await prefs(as(admin))).find((p) => p.type === 'inventory.oversold')?.email).toBe(true);
+    await s.close();
+  });
 });
