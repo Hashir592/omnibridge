@@ -1,53 +1,41 @@
 import { Popover } from '@base-ui/react/popover';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import {
-  Bell,
-  CircleCheck,
-  Info,
-  OctagonAlert,
-  TriangleAlert,
-  type LucideIcon,
-} from 'lucide-react';
+import { Bell, CircleAlert, CircleCheck } from 'lucide-react';
 import { useState } from 'react';
+import { useMarkAllRead, useMarkRead, useUnreadCount } from '../app/notifications.ts';
 import { useAppState } from '../app/session.tsx';
-import { SignalLabel } from '../kit/Badge.tsx';
+import { notificationApi } from '../auth/api.ts';
 import { cn } from '../lib/cn.ts';
-import { daysFromToday, formatDate, formatTime } from '../lib/format.ts';
-import { mockApi } from '../mocks/api.ts';
-import type { Notification } from '../mocks/notifications.ts';
-import { CompanySwatch } from './badges.tsx';
+import { NotificationRow } from './NotificationRow.tsx';
 
-const SEV: Record<Notification['severity'], { icon: LucideIcon; tone: string; label: string }> = {
-  critical: { icon: OctagonAlert, tone: 'text-danger', label: 'Critical' },
-  warning: { icon: TriangleAlert, tone: 'text-warning', label: 'Warning' },
-  info: { icon: Info, tone: 'text-brand-600', label: 'Info' },
-};
-
-const when = (iso: string) => {
-  const d = daysFromToday(iso);
-  return d === 0 ? formatTime(iso) : d === -1 ? `Yesterday, ${formatTime(iso)}` : formatDate(iso);
-};
+/** The popover shows the newest ones; the centre page (see all) has filters and every page. */
+const POPOVER_LIMIT = 20;
 
 /**
- * The notification centre behind the bell (section 6). Unread first; opening one marks it read
- * (optimistic) and goes to the record. A notification resolves itself when its condition clears.
+ * The bell and its popover (section 6, NTF-1). The number comes from the server's unread count.
+ * Opening a notification marks it read and goes to the record; the server resolves it when its
+ * condition clears.
  */
 export function NotificationBell() {
   const { session, persona, company } = useAppState();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'all' | 'unread'>('all');
-  const [read, setRead] = useState<Set<string>>(new Set());
-  const q = useQuery({
-    queryKey: ['notifications', persona],
-    queryFn: mockApi.notifications,
-    enabled: !!session,
+  const count = useUnreadCount();
+  const unread = count.data ?? 0;
+  const list = useQuery({
+    queryKey: ['notifications', persona, 'popover', view],
+    queryFn: () =>
+      notificationApi.list(
+        { state: view === 'unread' ? 'unread' : undefined },
+        undefined,
+        POPOVER_LIMIT,
+      ),
+    enabled: open && !!session,
   });
-  const items = (q.data ?? []).map((n) =>
-    n.state === 'unread' && read.has(n.id) ? { ...n, state: 'read' as const } : n,
-  );
-  const unread = items.filter((n) => n.state === 'unread').length;
-  const shown = view === 'unread' ? items.filter((n) => n.state === 'unread') : items;
+  const markRead = useMarkRead();
+  const markAll = useMarkAllRead();
+  const shown = list.data?.items ?? [];
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -58,7 +46,7 @@ export function NotificationBell() {
         <Bell className="size-[18px]" aria-hidden />
         {unread > 0 && (
           <span className="num absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-brand-700 px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-card">
-            {unread}
+            {unread > 99 ? '99+' : unread}
           </span>
         )}
       </Popover.Trigger>
@@ -87,9 +75,10 @@ export function NotificationBell() {
               </div>
               {unread > 0 && (
                 <button
-                  className="ml-auto text-xs font-medium text-brand-600 hover:underline"
+                  className="ml-auto text-xs font-medium text-brand-600 hover:underline disabled:opacity-50"
+                  disabled={markAll.isPending}
                   onClick={() => {
-                    setRead(new Set(items.map((n) => n.id)));
+                    markAll.mutate();
                   }}
                 >
                   Mark all read
@@ -99,90 +88,72 @@ export function NotificationBell() {
             <Popover.Description className="sr-only">
               Alerts for your tabs and companies, newest first.
             </Popover.Description>
-            {shown.length === 0 ? (
+            {list.isError ? (
+              <div
+                role="alert"
+                className="flex flex-col items-center gap-1.5 px-6 py-10 text-center"
+              >
+                <CircleAlert className="size-5 text-danger" aria-hidden />
+                <p className="text-13 text-ink-muted">Notifications could not be loaded.</p>
+                <button
+                  className="text-13 font-medium text-brand-600 hover:underline"
+                  onClick={() => {
+                    void list.refetch();
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            ) : list.isPending ? (
+              <p className="px-6 py-10 text-center text-13 text-ink-muted" aria-busy>
+                Loading…
+              </p>
+            ) : shown.length === 0 ? (
               <div className="flex flex-col items-center gap-1.5 px-6 py-10 text-center">
                 <CircleCheck className="size-5 text-success" aria-hidden />
                 <p className="text-13 text-ink-muted">
-                  Nothing unread. New alerts appear here as they happen.
+                  {view === 'unread'
+                    ? 'Nothing unread. New alerts appear here as they happen.'
+                    : 'No notifications yet. Alerts appear here as they happen.'}
                 </p>
               </div>
             ) : (
               <ul className="min-h-0 overflow-y-auto">
-                {shown.map((n) => {
-                  const s = SEV[n.severity];
-                  const Icon = n.state === 'resolved' ? CircleCheck : s.icon;
-                  const c = n.companyId ? company(n.companyId) : undefined;
-                  return (
-                    <li key={n.id} className="border-b border-divider last:border-0">
-                      <Link
-                        to={n.to}
-                        search={n.search as never}
-                        onClick={() => {
-                          setRead(new Set(read).add(n.id));
-                          setOpen(false);
-                        }}
-                        className={cn(
-                          'flex gap-3 px-4 py-3 hover:bg-hover',
-                          n.state === 'unread' && 'bg-[#f8fafc]',
-                        )}
-                      >
-                        <Icon
-                          className={cn(
-                            'mt-0.5 size-4 shrink-0',
-                            n.state === 'resolved' ? 'text-success' : s.tone,
-                          )}
-                          aria-hidden
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span
-                            className={cn(
-                              'block text-13',
-                              n.state === 'unread' ? 'font-semibold' : 'font-medium text-ink-muted',
-                            )}
-                          >
-                            <span className="sr-only">
-                              {n.state === 'resolved' ? 'Resolved' : s.label}:{' '}
-                            </span>
-                            {n.title}
-                          </span>
-                          <span className="mt-0.5 block text-xs text-ink-muted">{n.detail}</span>
-                          <span className="num mt-1.5 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-                            {when(n.at)}
-                            {c && (
-                              <span className="flex items-center gap-1">
-                                <CompanySwatch company={c} /> {c.tradingName}
-                              </span>
-                            )}
-                            {n.signal && <SignalLabel signal={n.signal} />}
-                            {n.state === 'resolved' && <span>Resolved itself</span>}
-                          </span>
-                        </span>
-                        {n.state === 'unread' && (
-                          <span
-                            className="mt-1.5 size-2 shrink-0 rounded-full bg-brand-600"
-                            aria-label="Unread"
-                          />
-                        )}
-                      </Link>
-                    </li>
-                  );
-                })}
+                {shown.map((n) => (
+                  <li key={n.id} className="border-b border-divider last:border-0">
+                    <NotificationRow
+                      n={n}
+                      company={n.companyId ? company(n.companyId) : undefined}
+                      onOpen={() => {
+                        if (n.state === 'unread') markRead.mutate(n.id);
+                        setOpen(false);
+                      }}
+                    />
+                  </li>
+                ))}
               </ul>
             )}
-            <div className="shrink-0 border-t border-divider px-4 py-2.5 text-xs text-ink-muted">
-              Critical alerts are also emailed.{' '}
-              {session?.user.isAdmin && (
-                <Link
-                  to="/settings"
-                  search={{ section: 'notifications' }}
-                  onClick={() => {
-                    setOpen(false);
-                  }}
-                  className="font-medium text-brand-600 hover:underline"
-                >
-                  Email settings
-                </Link>
-              )}
+            <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-divider px-4 py-2.5 text-xs text-ink-muted">
+              <span>Critical alerts are also emailed.</span>
+              <Link
+                to="/notifications"
+                onClick={() => {
+                  setOpen(false);
+                }}
+                className="ml-auto font-medium text-brand-600 hover:underline"
+              >
+                All notifications
+              </Link>
+              <Link
+                to="/notifications"
+                search={{ view: 'email' }}
+                onClick={() => {
+                  setOpen(false);
+                }}
+                className="font-medium text-brand-600 hover:underline"
+              >
+                Email settings
+              </Link>
             </div>
           </Popover.Popup>
         </Popover.Positioner>

@@ -18,6 +18,7 @@ import type { CsSearch } from './routes/customer-service.tsx';
 import type { FinanceSearch } from './routes/finance.tsx';
 import type { ForecastSearch } from './routes/forecasting.tsx';
 import type { NotesSearch } from './routes/notes.tsx';
+import type { NotificationsSearch } from './routes/notifications.tsx';
 import type { SettingsSearch } from './routes/settings.tsx';
 import type { SalesProfitSearch } from './routes/sales-profit.tsx';
 import type { StockSearch } from './routes/stock.tsx';
@@ -280,6 +281,34 @@ const settings = createRoute({
   component: lazyRouteComponent(() => import('./routes/settings.tsx'), 'SettingsPage'),
 });
 
+// The notification centre (T-0312): every member has it, whatever tabs they have ticked. The id
+// route is the link in an email (PS-031): it opens the centre on that notification.
+const notificationsSearch = (s: Record<string, unknown>): NotificationsSearch => {
+  const out: NotificationsSearch = {};
+  if (s.view === 'email') out.view = 'email';
+  const state = oneOf(s.state, ['unread', 'read', 'resolved'] as const);
+  if (state) out.state = state;
+  const severity = oneOf(s.severity, ['critical', 'warning', 'info'] as const);
+  if (severity) out.severity = severity;
+  return out;
+};
+const notificationCentre = lazyRouteComponent(
+  () => import('./routes/notifications.tsx'),
+  'NotificationsPage',
+);
+const notifications = createRoute({
+  getParentRoute: () => root,
+  path: '/notifications',
+  validateSearch: notificationsSearch,
+  component: notificationCentre,
+});
+const notificationLink = createRoute({
+  getParentRoute: () => root,
+  path: '/notifications/$notificationId',
+  validateSearch: notificationsSearch,
+  component: notificationCentre,
+});
+
 const preview = [
   stock,
   stockDetail,
@@ -298,6 +327,8 @@ const preview = [
   notes,
   auditLog,
   settings,
+  notifications,
+  notificationLink,
 ];
 
 const others = NAV.filter((n) => !BUILT.has(n.path)).map((n) =>
