@@ -203,6 +203,13 @@ Adapters implement `ChannelAdapter`, `AdsAdapter` and `ShippingProvider` (SHIP-3
 - **Provider tokens and app secrets** (PLAT-4) are envelope-encrypted in db-main under the secrets master key. They have `current` and `next` slots (AMZ-10, AMZ-8).
 - **Register:** `docs/ops/secrets-register.md` lists each secret's owner and rotation date (SEC-5, SEC-6).
 
+
+### 6.8 Notifications and security alerts (M05, ADR-071)
+
+- `app.notifications` (tenant, forced RLS, one row per workspace, type and linked record; NTF-5) and `app.notification_reads` (a row means read). A severity rise or reopen deletes the read rows.
+- Platform notices live in `app.platform_notifications` with owner-only RLS, reached only through definer functions: `platform_notice_raise` and `_resolve` (ob_tenant_rw); `platform_notice_list`, `_unread_count` and `_mark_read` (ob_auth, platform admins only); `platform_notice_pending_emails` and `_email_sent` (ob_worker).
+- Email: `notification_email_recipients` (ob_tenant_rw); one `notify.email` job per recipient per notification version, a phased handler, at-least-once.
+- Security signals: `security_login_failures` and `security_locks` (ob_worker); the vault's `signals` capability (worker token only) returns read-full counts and canary reads, IDs and counts only.
 ## 7. Shared server and deployment (ADR-015, ADR-024)
 
 ### Isolation (OPS-8, OPS-9)

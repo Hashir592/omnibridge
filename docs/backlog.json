@@ -1586,7 +1586,8 @@
         "API usage per provider and account, and the credential-expiry calendar: tables and views now, fed by M07 onwards; seed rows prove them",
         "System health (the /healthz checks per service) and an incident banner shown to every signed-in user",
         "OPS-6: a daily digest email to platform admins: jobs failed, API usage, credentials expiring in 30 days, deletion runs (counts only)",
-        "Route walker: no /platform route returns tenant orders, customers, finance or messages (PLAT-3); no impersonation"
+        "Route walker: no /platform route returns tenant orders, customers, finance or messages (PLAT-3); no impersonation",
+        "Notification retention: a daily job hard-deletes notifications resolved more than 90 days ago, with their read and email rows (ADR-071)"
       ],
       "out_of_scope": [
         "App secrets (T-0505)",
@@ -1654,7 +1655,8 @@
       "scope": [
         "Bell with unread count and the notification centre against T-0501's PROPOSED SHAPE (MSW first); reuse NotificationPanel and its mock",
         "Severity, signal label, company, linked record link, state; mark read and mark all read",
-        "Settings: email on or off per type; critical shown locked on for admins"
+        "Settings: email on or off per type; critical shown locked on for admins",
+        "A /notifications/:id SPA route that opens the centre on that notice (email links, ADR-071)"
       ],
       "out_of_scope": [
         "Server logic"
@@ -1729,6 +1731,216 @@
         "Findings file in docs/reviews/security/; every Blocker and Major fixed before the M05 end review"
       ],
       "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0701",
+      "module": "M07",
+      "session": "S3",
+      "title": "Adapter interfaces, versioned parsers, origin tags and sync cursors",
+      "goal": "Every provider sits behind one interface, every response is checked, and every record knows where it came from.",
+      "prd_ids": [
+        "INT-1",
+        "INT-5",
+        "INT-6",
+        "INT-8"
+      ],
+      "supports": [
+        "SHIP-3"
+      ],
+      "scope": [
+        "ChannelAdapter, AdsAdapter and ShippingProvider interfaces in packages/providers (shared types only; no provider code in business modules, dependency-cruiser rule)",
+        "Versioned Zod parsers per response: unknown fields ignored; a missing required field raises a provider.parser_failed platform notice (INT-5 type, T-0501) with provider, parser version and field path, never values, and the job fails cleanly",
+        "Origin tag enum (amazon, amazon_ads, ebay, website, evri, dpd, manual) plus channel_account_id as a required pair on every provider-sourced table from M08 on; a shared migration helper and a test that lists any provider table without them",
+        "Sync cursors per account and stream (app.sync_cursors, tenant RLS): 'updated since' with a 5-minute overlap and de-duplication by external ID (INT-8)",
+        "One reference adapter against provider-mocks (eBay or Evri, whichever is smaller) proving the whole path: job, governor, parser, cursor"
+      ],
+      "out_of_scope": [
+        "Real provider calls (never)",
+        "Catalogue or order logic (M08, M10)"
+      ],
+      "depends_on": [
+        "T-0504"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: a missing field raises one parser notice and no crash; an unknown field is ignored; a re-poll inside the overlap creates no duplicate; a business module importing a provider package fails the architecture check",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0702",
+      "module": "M07",
+      "session": "S3",
+      "title": "Outbound pipeline: kill switch, maintenance switch, bulk confirmation",
+      "goal": "No automated write leaves OmniBridge for a paused account or during maintenance, and a bulk write names every account it touches.",
+      "prd_ids": [
+        "SAFE-1",
+        "SAFE-2",
+        "SAFE-3",
+        "INT-2"
+      ],
+      "supports": [
+        "PLAT-2"
+      ],
+      "scope": [
+        "One outbound send path in packages/providers that every write job uses; it checks the account's kill switch and the global maintenance switch just before each write (invariant 15), and requeues paused work without spending an attempt",
+        "Kill switch per channel account (admin only, audited): pauses stock, tracking, ads and review-request writes; reads continue",
+        "Global maintenance switch (platform admin, /platform, audited)",
+        "Bulk write routes (more than one channel account) take a confirmation token issued by a preview call that lists every affected account; without it they answer 409 (SAFE-1)",
+        "Web handlers make no provider calls except OAuth exchanges (route walker or source-scan test)"
+      ],
+      "out_of_scope": [
+        "The screens (T-0314)"
+      ],
+      "depends_on": [
+        "T-0701"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: a write job for a paused account does not send and resumes after unpause; maintenance stops writes in every workspace while reads continue; a bulk write without a valid preview token is refused",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0703",
+      "module": "M07",
+      "session": "S3",
+      "title": "Rate governors and concurrency caps",
+      "goal": "Amazon and eBay limits are respected by two separate governors, and carriers and websites never get more than 4 parallel requests per account.",
+      "prd_ids": [
+        "RL-3",
+        "RL-4",
+        "RL-5"
+      ],
+      "supports": [
+        "INT-2",
+        "EBAY-8",
+        "PLAT-2"
+      ],
+      "scope": [
+        "Amazon governor: token buckets per seller and operation in PostgreSQL; on 429 full-jitter backoff (base 1 s, max 60 s, 8 attempts) then requeue; honours x-amzn-RateLimit-Limit",
+        "eBay governor: atomic budget reservation (UPDATE ... WHERE calls + n <= cap) per API and US/Pacific day before every send; non-urgent work stops at 80%, everything at 95%; eBay usage above 80% raises the platform notice",
+        "The two governors share no retry helper; a lint or dependency-cruiser rule fails the build if they do (RL-3)",
+        "Carrier and website concurrency: a PostgreSQL semaphore, default 4 per account, backoff on 429 or 5xx",
+        "Usage written to the T-0504 API usage tables in real time (RL-5)"
+      ],
+      "out_of_scope": [
+        "Listing revision counters (M15)"
+      ],
+      "depends_on": [
+        "T-0701"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: a 429 storm from the mock backs off and recovers; the eBay cap is reserved before send and never exceeded under concurrency; a fifth parallel carrier request waits; the shared-helper rule fails on a planted import",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0704",
+      "module": "M07",
+      "session": "S3",
+      "title": "Provider mocks with scenarios and the egress allowlist",
+      "goal": "Dev and CI can only reach the mocks, and every failure mode a provider can throw is one switch away.",
+      "prd_ids": [
+        "INT-7"
+      ],
+      "supports": [
+        "INT-2",
+        "SEC-11"
+      ],
+      "scope": [
+        "mocks/provider-mocks: Amazon, Ads, eBay, Evri, DPD and website endpoints the Release 1 modules need, written from the official specs and checked against official OpenAPI models where they exist",
+        "Scenario switches: 429 storm, INVALID parcel, invalid_grant, revocation, eBay cap exhaustion",
+        "Egress allowlist: worker and web can reach only the mocks in dev and CI (compose network plus an outbound host allowlist in the HTTP client); production hosts are listed in config for M22",
+        "INT-7: a source-scan test fails on headless-browser or scraping libraries"
+      ],
+      "out_of_scope": [
+        "Production hosts (M22)"
+      ],
+      "depends_on": [
+        "T-0701"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: each scenario switch produces its error at the adapter; a call to a host outside the allowlist is refused; the scraping-library scan fails on a planted dependency",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0705",
+      "module": "M07",
+      "session": "S3",
+      "title": "Channel account tokens and Connections data",
+      "goal": "Provider tokens are stored encrypted per account, and the Connections page has every status field it needs.",
+      "prd_ids": [
+        "INT-3",
+        "INT-4"
+      ],
+      "supports": [
+        "PLAT-4",
+        "AMZ-12",
+        "EBAY-5"
+      ],
+      "scope": [
+        "Per-account provider tokens envelope-encrypted in db-main under the secrets master key (T-0505's store), current and next slots; never logged or returned",
+        "OAuth code-exchange skeleton in web (the one allowed provider call) against the mocks",
+        "Connections route (PROPOSED SHAPE for S2): provider, company, status (Active, Needs re-authorisation, Paused, Error, Disconnected), last successful call, last token refresh, consecutive auth failures, API usage today vs limit, kill switch state",
+        "Auth failures raise the 'Channel authorisation lost' critical notice (T-0501) and resolve on success",
+        "Test and production credentials kept apart by environment (INT-3)"
+      ],
+      "out_of_scope": [
+        "Provider-specific connect flows (M11, M12, M15, M18)"
+      ],
+      "depends_on": [
+        "T-0702",
+        "T-0703",
+        "T-0505"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: a raw SQL read shows ciphertext only; the marker scan finds no token; three auth failures set Needs re-authorisation and raise one notice; a success resolves it",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0314",
+      "module": "M03",
+      "session": "S2",
+      "title": "Connections page, kill switch and bulk confirmation",
+      "goal": "Admins see every channel account's health on one page, can pause one, and confirm bulk writes knowingly.",
+      "prd_ids": [],
+      "supports": [
+        "INT-4",
+        "SAFE-1",
+        "SAFE-2",
+        "SAFE-3",
+        "RL-5"
+      ],
+      "scope": [
+        "Connections page from T-0705's PROPOSED SHAPE (MSW first)",
+        "Kill switch with confirmation; a paused account shows a red banner everywhere it appears",
+        "Bulk confirmation dialog that names each affected account (from T-0702's preview call)",
+        "Maintenance switch and real-time usage on the platform console (extends T-0313)"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-0705",
+        "T-0313"
+      ],
+      "acceptance": [
+        "Tests cite INT-4 and SAFE-2",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
       "status": "todo"
     },
     {
