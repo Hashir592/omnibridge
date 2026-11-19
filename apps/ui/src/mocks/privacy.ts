@@ -3,8 +3,11 @@
  * (T-0403) and GET /jobs/:id, for the T-0308 screens. The handlers behave as the server does:
  * admin only (403 to a child), identifiers in the body only, masked matches (the vault's ORD-5
  * rules), a one-month due date (DEL-4), 409 when a request is no longer open (confirmed or
- * withdrawn, ADR-067), 400 for a missing or unknown withdraw reason, 422 when the export matches
- * too much. Synthetic buyers only: example.com addresses and Ofcom drama numbers (07700 900xxx).
+ * withdrawn, ADR-067), 400 for a missing or unknown withdraw reason, 400 for identifiers that do
+ * not pin one buyer (ADR-068), 422 `too_many_matches` when a search matches too much (nothing is
+ * stored, A-001) and 422 when the export does. The outcome states of A-006 (ADR-069): confirmed
+ * (in progress), completed when the job ends, failed (seeded), and retry (202/403/404/409).
+ * Synthetic buyers only: example.com addresses and Ofcom drama numbers (07700 900xxx).
  */
 import { HttpResponse, http } from 'msw/http';
 import type {
@@ -90,6 +93,17 @@ const SEED_RECORDS: VaultRecord[] = [
       city: 'Manchester',
     }),
   ),
+  // A repeat buyer with more orders than one answer holds: a search on them is refused (422).
+  ...[0, 1, 2, 3, 4].map((i) =>
+    contact(301 + i, `ord_02${String(10 + i)}`, 'ca_1', {
+      name: 'Drew Parker',
+      email: 'drew.parker@example.com',
+      phone: '07700 900301',
+      postcode: 'BS1 5TR',
+      line1: '9 Demo Lane',
+      city: 'Bristol',
+    }),
+  ),
 ];
 
 /** One answer holds at most this many matches in the mock (the server's limit is larger). */
@@ -146,6 +160,9 @@ interface StoredRequest {
   piiRefs: string[];
   confirmedAt: string | null;
   jobId: string | null;
+  completedAt?: string;
+  failedAt?: string;
+  retryCount?: number;
   withdrawnAt?: string;
   withdrawReason?: WithdrawReason;
 }
@@ -166,20 +183,23 @@ function oneMonthAfter(iso: string): string {
   return d.toISOString();
 }
 
+/** Overdue until the deletion is done (A-006): open, confirmed and failed requests count. */
+const PENDING: ReadonlyArray<ErasureRequest['state']> = ['open', 'confirmed', 'failed'];
+
 const asBody = (r: StoredRequest): ErasureRequest => {
+  settle(r);
   const dueAt = oneMonthAfter(r.requestedAt);
   return {
     id: r.id,
     requestedAt: r.requestedAt,
     dueAt,
-    overdue: r.state === 'open' && Date.now() > Date.parse(dueAt),
+    overdue: PENDING.includes(r.state) && Date.now() > Date.parse(dueAt),
     state: r.state,
     matchCount: r.piiRefs.length,
     confirmedAt: r.confirmedAt,
-    // T-0410 contract fields; the states they drive come with T-0310 (S2).
-    completedAt: null,
-    failedAt: null,
-    retryCount: 0,
+    completedAt: r.completedAt ?? null,
+    failedAt: r.failedAt ?? null,
+    retryCount: r.retryCount ?? 0,
     jobId: r.jobId,
     withdrawnAt: r.withdrawnAt ?? null,
     withdrawReason: r.withdrawReason ?? null,
@@ -214,11 +234,21 @@ const seedRequests = (): StoredRequest[] => [
     jobId: null,
   },
   {
+    id: uuid(905),
+    requestedAt: ago(40 * DAY),
+    state: 'failed',
+    piiRefs: [uuid(307), uuid(308)],
+    confirmedAt: ago(39 * DAY),
+    jobId: uuid(802),
+    failedAt: ago(2 * DAY),
+  },
+  {
     id: uuid(901),
     requestedAt: ago(52 * DAY),
-    state: 'confirmed',
+    state: 'completed',
     piiRefs: [uuid(304), uuid(305), uuid(306)],
     confirmedAt: ago(51 * DAY),
+    completedAt: ago(51 * DAY),
     jobId: uuid(801),
   },
 ];
@@ -228,15 +258,17 @@ export const MOCK_JOB_MS = 3_000;
 
 let records: VaultRecord[] = SEED_RECORDS.map((r) => ({ ...r }));
 let requests: StoredRequest[] = seedRequests();
-let jobs = new Map<string, { startedAt: number; refs: string[] }>([
-  [uuid(801), { startedAt: Date.now() - 51 * DAY, refs: [] }],
-]);
+const seedJobs = () =>
+  new Map<string, { startedAt: number; refs: string[] }>([
+    [uuid(801), { startedAt: Date.now() - 51 * DAY, refs: [] }],
+  ]);
+let jobs = seedJobs();
 let seq = 0;
 
 export function resetPrivacyMock(): void {
   records = SEED_RECORDS.map((r) => ({ ...r }));
   requests = seedRequests();
-  jobs = new Map([[uuid(801), { startedAt: Date.now() - 51 * DAY, refs: [] }]]);
+  jobs = seedJobs();
   seq = 0;
 }
 
@@ -259,6 +291,15 @@ function jobBody(id: string): JobProgress | undefined {
   };
 }
 
+/** A confirmed request completes when its deletion job ends, as the pii.delete job does. */
+function settle(r: StoredRequest): void {
+  if (r.state !== 'confirmed' || r.jobId === null) return;
+  const j = jobBody(r.jobId);
+  if (j?.state !== 'completed') return;
+  r.state = 'completed';
+  r.completedAt = j.updated_at;
+}
+
 /* ---------- handlers ---------- */
 
 const problem = (status: number, code: string, detail?: string) =>
@@ -269,7 +310,10 @@ const problem = (status: number, code: string, detail?: string) =>
 const forbidden = () => problem(403, 'forbidden');
 const isAdmin = () => currentSession().user.isAdmin;
 
-/** The body's identifiers, trimmed; undefined when none is given (the contract's 422). */
+/**
+ * The body's identifiers, trimmed; undefined unless they pin one buyer (the contract's 400): an
+ * email, a phone, a marketplace ID, or a name with a postcode (ADR-068).
+ */
 async function identifiersOf(request: Request): Promise<BuyerIdentifiers | undefined> {
   const body = (await request.json()) as { identifiers?: Record<string, unknown> };
   const out: BuyerIdentifiers = {};
@@ -277,7 +321,8 @@ async function identifiersOf(request: Request): Promise<BuyerIdentifiers | undef
     const v = body.identifiers?.[k];
     if (typeof v === 'string' && v.trim() !== '') out[k] = v.trim();
   }
-  return Object.keys(out).length === 0 ? undefined : out;
+  const pins = out.email ?? out.phone ?? out.buyer ?? (out.name && out.postcode);
+  return pins ? out : undefined;
 }
 
 const noIdentifier = () =>
@@ -285,11 +330,16 @@ const noIdentifier = () =>
     {
       type: 'about:blank',
       title: '',
-      status: 422,
+      status: 400,
       code: 'validation_failed',
-      errors: [{ path: 'identifiers', message: 'at least one identifier' }],
+      errors: [
+        {
+          path: 'identifiers',
+          message: "Add the buyer's email, phone or marketplace ID, or their name and postcode",
+        },
+      ],
     },
-    { status: 422, headers: { 'content-type': 'application/problem+json' } },
+    { status: 400, headers: { 'content-type': 'application/problem+json' } },
   );
 
 export const privacyHandlers = [
@@ -308,20 +358,21 @@ export const privacyHandlers = [
     const q = await identifiersOf(request);
     if (!q) return noIdentifier();
     const found = search(q);
-    const kept = found.slice(0, MOCK_MATCH_LIMIT);
+    // A-001: a search that matches more than one request holds is refused; nothing is stored.
+    if (found.length > MOCK_MATCH_LIMIT) return problem(422, 'too_many_matches');
     seq += 1;
     const stored: StoredRequest = {
       id: uuid(1000 + seq),
       requestedAt: new Date().toISOString(),
       state: 'open',
-      piiRefs: kept.map((r) => r.piiRef),
+      piiRefs: found.map((r) => r.piiRef),
       confirmedAt: null,
       jobId: null,
     };
     requests = [stored, ...requests];
     const body: ErasureRequestCreated = {
       ...asBody(stored),
-      matches: kept.map((r) => ({
+      matches: found.map((r) => ({
         piiRef: r.piiRef,
         kind: r.kind,
         subjectType: r.subjectType,
@@ -329,7 +380,7 @@ export const privacyHandlers = [
         channelAccountId: r.channelAccountId,
         masked: mask(r.fields),
       })),
-      truncated: found.length > kept.length,
+      truncated: false,
     };
     return HttpResponse.json(body, { status: 201 });
   }),
@@ -345,9 +396,28 @@ export const privacyHandlers = [
       jobId = uuid(2000 + seq);
       jobs.set(jobId, { startedAt: Date.now(), refs: r.piiRefs });
     }
-    r.state = 'confirmed';
-    r.confirmedAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    // Nothing to delete: the request completes at once, with no job.
+    r.state = jobId === null ? 'completed' : 'confirmed';
+    r.confirmedAt = now;
+    if (jobId === null) r.completedAt = now;
     r.jobId = jobId;
+    return HttpResponse.json(asBody(r), { status: 202 });
+  }),
+
+  http.post('*/api/erasure-requests/:id/retry', ({ params }) => {
+    if (!isAdmin()) return forbidden();
+    const r = requests.find((x) => x.id === params.id);
+    if (!r) return problem(404, 'not_found');
+    if (r.state !== 'failed')
+      return problem(409, 'conflict', 'This erasure request is not failed.');
+    seq += 1;
+    const jobId = uuid(2000 + seq);
+    jobs.set(jobId, { startedAt: Date.now(), refs: r.piiRefs });
+    r.state = 'confirmed';
+    r.jobId = jobId;
+    delete r.failedAt;
+    r.retryCount = (r.retryCount ?? 0) + 1;
     return HttpResponse.json(asBody(r), { status: 202 });
   }),
 

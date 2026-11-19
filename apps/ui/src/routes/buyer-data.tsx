@@ -2,9 +2,10 @@
  * Buyer data requests (T-0308): erasure (DEL-4), subject access export (DEL-5) and the deletion
  * certificate per channel account (DEL-3), on the T-0404 routes. Admins only. The buyer's details
  * live in this page's memory while it is open: never in the URL, never in browser storage, and
- * the screen shows only the masked values the server returns (ORD-5).
+ * the screen shows only the masked values the server returns (ORD-5). A request shows the real
+ * outcome of its deletion (T-0310, A-006): in progress, deleted, or failed with a Retry.
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import {
   ChevronLeft,
@@ -14,6 +15,7 @@ import {
   Download,
   FileText,
   LoaderCircle,
+  RotateCcw,
   Search,
   TriangleAlert,
   Undo2,
@@ -67,12 +69,18 @@ function Inline({ tone, children }: { tone: 'danger' | 'warning'; children: Reac
   );
 }
 
+const PIN_BUYER =
+  'Add the buyer’s email, phone or marketplace ID, or their name and postcode. One detail such as a postcode matches many buyers.';
+const TOO_MANY =
+  'These identifiers match too many records. Add another identifier and search again.';
+
 /** What the server's refusal means to an admin. */
 function problemText(r: ApiReply<unknown>, fallback: string): string {
   const p = r.body as ApiProblem | undefined;
   if (r.status === 503) return 'The buyer data store is not reachable. Try again in a few minutes.';
+  if (r.status === 422 && p?.code === 'too_many_matches') return TOO_MANY;
   if (r.status === 422 && p?.detail) return p.detail;
-  if (r.status === 422) return 'Enter at least one detail of the buyer.';
+  if (r.status === 400 && p?.errors?.some((e) => e.path === 'identifiers')) return PIN_BUYER;
   if (r.status === 409) return 'This request is no longer open: it was completed or withdrawn.';
   if (r.status === 404) return 'This request no longer exists. Refresh the page.';
   return fallback;
@@ -113,12 +121,21 @@ const MASKED_ORDER = ['name', 'email', 'phone', 'postcode', 'country'];
 
 const plural = (n: number, one: string) => `${formatInt(n)} ${one}${n === 1 ? '' : 's'}`;
 
+/** The server's rule (ADR-068): an email, a phone, a marketplace ID, or a name with a postcode. */
+const pinsOneBuyer = (q: BuyerIdentifiers) =>
+  q.email !== undefined ||
+  q.phone !== undefined ||
+  q.buyer !== undefined ||
+  (q.name !== undefined && q.postcode !== undefined);
+
 const useRequests = () => {
   const { session, persona } = useAppState();
   return useQuery({
     queryKey: ['erasure-requests', persona],
     queryFn: privacyApi.list,
     enabled: !!session,
+    // While a deletion runs, follow it to completed or failed (the request's state is the truth).
+    refetchInterval: (q) => (q.state.data?.some((r) => r.state === 'confirmed') ? 2000 : false),
   });
 };
 
@@ -148,6 +165,8 @@ function BuyerData() {
 
   const start = useMutation({
     mutationFn: privacyApi.startErasure,
+    // The identifiers are buyer PII: drop them from the mutation cache at once (ADR-068).
+    gcTime: 0,
     onSuccess: async (r) => {
       if (r.ok) {
         setError(undefined);
@@ -162,6 +181,8 @@ function BuyerData() {
 
   const exportAccess = useMutation({
     mutationFn: privacyApi.exportAccess,
+    // The identifiers and the export hold buyer PII: never kept in the mutation cache (ADR-068).
+    gcTime: 0,
     onSuccess: (r) => {
       if (!r.ok) {
         setError(problemText(r, 'The export could not be made. Try again.'));
@@ -183,24 +204,26 @@ function BuyerData() {
 
   const busy = start.isPending || exportAccess.isPending;
 
+  /** The identifiers to send, or undefined after saying what is missing. */
+  const checked = (): BuyerIdentifiers | undefined => {
+    const q = given();
+    if (!q) setError('Enter at least one detail of the buyer.');
+    else if (!pinsOneBuyer(q)) setError(PIN_BUYER);
+    else return q;
+    return undefined;
+  };
+
   const onFind = (e: SyntheticEvent) => {
     e.preventDefault();
-    const q = given();
-    if (!q) {
-      setError('Enter at least one detail of the buyer.');
-      return;
-    }
+    const q = checked();
+    if (!q) return;
     setResult(undefined);
     start.mutate(q);
   };
 
   const onExport = () => {
-    const q = given();
-    if (!q) {
-      setError('Enter at least one detail of the buyer.');
-      return;
-    }
-    exportAccess.mutate(q);
+    const q = checked();
+    if (q) exportAccess.mutate(q);
   };
 
   return (
@@ -230,8 +253,8 @@ function BuyerData() {
         <Card title="Find a buyer" className="mt-5">
           <form onSubmit={onFind} className="px-5 py-4" noValidate>
             <p className="mb-4 text-13 text-ink-muted">
-              Enter what the buyer gave you. A record must match every detail you enter, so start
-              with one or two.
+              Enter what the buyer gave you: their email, phone or marketplace ID, or their name and
+              postcode. A record must match every detail you enter.
             </p>
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
               {FIELDS.map((f) => (
@@ -305,31 +328,30 @@ function MatchResult({
   listed,
 }: {
   result: ErasureRequestCreated;
-  /** The same request in the list: confirmed or withdrawn there, the card follows. */
+  /** The same request in the list: once it moves on there, the card follows it. */
   listed: ErasureRequest | undefined;
 }) {
   const { session } = useAppState();
   const [justClosed, setClosed] = useState<ErasureRequest>();
-  const closed = justClosed ?? (listed && listed.state !== 'open' ? listed : undefined);
-  const confirmed = closed?.state === 'confirmed' ? closed : undefined;
+  // The list is refreshed after every action and while a deletion runs, so it is the newer.
+  const closed = listed && listed.state !== 'open' ? listed : justClosed;
   const withdrawn = closed?.state === 'withdrawn' ? closed : undefined;
+  const outcome = closed && closed.state !== 'withdrawn' ? closed : undefined;
   const n = result.matches.length;
   const account = (id: string | null) => session?.channelAccounts.find((a) => a.id === id);
+
+  let title: string;
+  if (withdrawn) title = 'Request withdrawn';
+  else if (outcome?.state === 'completed')
+    title = n === 0 ? 'Request completed' : `${plural(n, 'record')} deleted`;
+  else if (outcome?.state === 'failed') title = 'Deletion failed';
+  else if (outcome) title = `Deleting ${plural(n, 'record')}`;
+  else title = n === 0 ? 'No records match' : `${plural(n, 'record')} found`;
 
   return (
     <Card
       className="mt-5"
-      title={
-        withdrawn
-          ? 'Request withdrawn'
-          : confirmed
-            ? n === 0
-              ? 'Request completed'
-              : `${plural(n, 'record')} deleted`
-            : n === 0
-              ? 'No records match'
-              : `${plural(n, 'record')} found`
-      }
+      title={title}
       aside={
         <span className="text-ink-muted">
           Requested {formatDate(result.requestedAt)} · due {formatDate(result.dueAt)}
@@ -343,8 +365,8 @@ function MatchResult({
             Nothing was deleted. The request is closed and recorded in the audit log.
           </p>
         </div>
-      ) : confirmed ? (
-        <Confirmed request={confirmed} />
+      ) : outcome ? (
+        <Outcome request={outcome} />
       ) : (
         <>
           {n === 0 ? (
@@ -618,13 +640,20 @@ function WithdrawButton({
   );
 }
 
-/** After the confirmation: the deletion job's progress, then the admin's confirmation. */
-function Confirmed({ request }: { request: ErasureRequest }) {
+/** "21/10/2026 at 10:00" */
+const at = (iso: string) => `${formatDate(iso)} at ${formatTime(iso)}`;
+
+/**
+ * After the confirmation: the request's own state says what happened (A-006). While it runs, the
+ * deletion job's progress; then the admin's confirmation, or the failure and a Retry.
+ */
+function Outcome({ request }: { request: ErasureRequest }) {
+  const running = request.state === 'confirmed' && request.jobId !== null;
   const job = useQuery({
     queryKey: ['job', request.jobId],
     queryFn: () => privacyApi.job(request.jobId ?? ''),
-    enabled: request.jobId !== null,
-    // Stops when the job ends, and on an error (the line below says so; no endless polling).
+    enabled: running,
+    // Progress only; stops when the job ends or on an error (no endless polling).
     refetchInterval: (q) =>
       q.state.status === 'error' ||
       q.state.data?.state === 'completed' ||
@@ -632,34 +661,34 @@ function Confirmed({ request }: { request: ErasureRequest }) {
         ? false
         : 1000,
   });
-  const at = request.confirmedAt ?? new Date().toISOString();
-  const when = `${formatDate(at)} at ${formatTime(at)}`;
 
   let line: ReactNode;
-  if (request.jobId === null) {
+  if (request.state === 'completed') {
+    const when = at(request.completedAt ?? request.confirmedAt ?? request.requestedAt);
+    line =
+      request.matchCount === 0 ? (
+        <StatusLabel tone="success" icon={CircleCheck}>
+          Request completed on {when}. Nothing was held for these details.
+        </StatusLabel>
+      ) : (
+        <StatusLabel tone="success" icon={CircleCheck}>
+          {plural(request.matchCount, 'record')} deleted on {when}. This is your confirmation; it is
+          in the audit log.
+        </StatusLabel>
+      );
+  } else if (request.state === 'failed') {
     line = (
-      <StatusLabel tone="success" icon={CircleCheck}>
-        Request completed on {when}. Nothing was held for these details.
-      </StatusLabel>
-    );
-  } else if (job.data?.state === 'completed') {
-    line = (
-      <StatusLabel tone="success" icon={CircleCheck}>
-        {plural(request.matchCount, 'record')} deleted on {when}. This is your confirmation; it is
-        in the audit log.
-      </StatusLabel>
-    );
-  } else if (job.data?.state === 'failed' || job.isError) {
-    line = (
-      <StatusLabel tone="danger" icon={CircleAlert}>
-        The deletion did not finish. It is retried automatically; if this stays, check Status.
-      </StatusLabel>
+      <span className="flex flex-wrap items-center justify-between gap-3">
+        <FailedLabel r={request} late={request.overdue ? ' · overdue' : ''} />
+        <RetryButton request={request} />
+      </span>
     );
   } else {
     line = (
-      <StatusLabel tone="info" icon={LoaderCircle}>
+      <StatusLabel tone={request.overdue ? 'danger' : 'info'} icon={LoaderCircle}>
         Deleting {plural(request.matchCount, 'record')}…{' '}
-        {job.data ? `${String(job.data.percent)}%` : ''}
+        {running && job.data ? `${String(job.data.percent)}%` : ''}
+        {request.overdue ? ' · overdue' : ''}
       </StatusLabel>
     );
   }
@@ -667,6 +696,65 @@ function Confirmed({ request }: { request: ErasureRequest }) {
     <div className="px-5 py-4" role="status">
       {line}
     </div>
+  );
+}
+
+function FailedLabel({ r, late = '' }: { r: ErasureRequest; late?: string }) {
+  return (
+    <StatusLabel tone="danger" icon={CircleAlert}>
+      Deletion failed{r.failedAt ? ` ${formatDate(r.failedAt)}` : ''}: an admin must retry{late}
+    </StatusLabel>
+  );
+}
+
+/** A-006: runs a failed deletion again. The request goes back to in progress. */
+function RetryButton({ request, compact }: { request: ErasureRequest; compact?: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [error, setError] = useState<string>();
+  // The card and the list row each show a Retry: one key, so a retry in either disables both.
+  const mutationKey = ['erasure-retry', request.id];
+  const pending = useIsMutating({ mutationKey }) > 0;
+  const retry = useMutation({
+    mutationKey,
+    mutationFn: () => privacyApi.retryErasure(request.id),
+    onSuccess: async (r) => {
+      if (r.ok) {
+        setError(undefined);
+        toast({
+          title: 'Deletion restarted',
+          description: 'Your retry is in the audit log.',
+          tone: 'success',
+        });
+      } else if (r.status === 409) {
+        toast({
+          title: 'Not retried',
+          description: 'This deletion is no longer failed. The list is refreshed.',
+          tone: 'error',
+        });
+      } else setError(problemText(r, 'The deletion could not be restarted. Try again.'));
+      await qc.invalidateQueries({ queryKey: ['erasure-requests'] });
+    },
+    onError: () => {
+      setError('The deletion could not be restarted. Try again.');
+    },
+  });
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Button
+        size={compact ? 'sm' : 'md'}
+        variant="primary"
+        icon={<RotateCcw />}
+        disabled={pending}
+        onClick={() => {
+          retry.mutate();
+        }}
+      >
+        Retry
+        <span className="sr-only"> the deletion of {formatDateTime(request.requestedAt)}</span>
+      </Button>
+      {error && <Inline tone="danger">{error}</Inline>}
+    </span>
   );
 }
 
@@ -680,10 +768,18 @@ function RequestState({ r }: { r: ErasureRequest }) {
         {r.withdrawReason ? ` · ${WITHDRAW_REASON[r.withdrawReason]}` : ''}
       </StatusLabel>
     );
-  if (r.state === 'confirmed')
+  if (r.state === 'completed')
     return (
       <StatusLabel tone="success" icon={CircleCheck}>
-        Completed {r.confirmedAt ? formatDate(r.confirmedAt) : ''}
+        Deleted {r.completedAt ? formatDate(r.completedAt) : ''}
+      </StatusLabel>
+    );
+  const late = r.overdue ? ' · overdue' : '';
+  if (r.state === 'failed') return <FailedLabel r={r} late={late} />;
+  if (r.state === 'confirmed')
+    return (
+      <StatusLabel tone={r.overdue ? 'danger' : 'info'} icon={LoaderCircle}>
+        Deletion in progress{late}
       </StatusLabel>
     );
   if (r.overdue)
@@ -745,6 +841,7 @@ function RequestList({ requests }: { requests: ReturnType<typeof useRequests> })
                     compact
                   />
                 )}
+                {r.state === 'failed' && <RetryButton request={r} compact />}
               </Td>
             </Tr>
           ))}
