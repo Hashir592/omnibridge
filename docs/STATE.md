@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 19 Nov 2026 by S3 (T-0410).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 19 Nov 2026 by S2 (T-0310).
 
 ## Now
 
@@ -32,14 +32,14 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## M04 plan (S1, 17 Nov)
 
-- Batch 1 and 2 (S3): done. T-0407 to T-0410 (S3): PRs, auto-merge. **Next: S2 T-0310 (handoff 20261119-1600-S3-to-S2), then the S4 M04 end review.**
+- Batch 1 and 2 (S3): done. T-0407 to T-0410 (S3): PRs, auto-merge. S2 T-0310: PR on `task/T-0310-erasure-states` (auto-merge). **Next: the S4 M04 end review.**
 - Batch 2: T-0404 erasure/access requests and eBay deletion (S3, high), T-0405 backups, restore drill and marker scan (S3, high), T-0308 screens (S2), then T-0406 S5 audit, then the S4 M04 end review.
 
 ## Follow-ups noted
 
 - T-0410: the `failed` hook runs when the last attempt throws; a last attempt that ends by pg-boss expiry or a worker crash leaves the erasure request `confirmed` (still shown overdue). A sweep of dead-lettered pii.delete jobs would close it (S1 to decide). The eBay key fetch cap (5 a minute) is global to one web process. M05: alert on `pii.erasure_failed` and `ebay.public_key_throttled`.
 
-- T-0409: **S1** to update ARCHITECTURE §6 and the networks line (vault on `ob_vault`, not `ob_app`). **S2** (with the gcTime trivial fix): the buyer-data screen and its mock should send a strong identifier and show the 400 message; the mock still answers 422 for empty and accepts a postcode alone. S5 asked to lower `MAX_EXPORT_RECORDS` to 100; the ruling did not include it, so it stays 500 (S1 to decide). Accepted after review: two simultaneous confirms each write an audit row; the claim takes a second web-pool connection.
+- T-0409: **S1** to update ARCHITECTURE §6 and the networks line (vault on `ob_vault`, not `ob_app`). S5 asked to lower `MAX_EXPORT_RECORDS` to 100; the ruling did not include it, so it stays 500 (S1 to decide). Accepted after review: two simultaneous confirms each write an audit row; the claim takes a second web-pool connection.
 
 - ADR-068: when S1 writes M07, M08 and M10 tasks: expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first. M22: host timer for the 15-minute journal run.
 
@@ -63,7 +63,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 ## Next step
 
 1. S3: the T-0410 PR merges itself on green (if red, S3 fixes it).
-2. S2: T-0310 (screens for the new states and Retry).
+2. S2: T-0310 PR merges itself on green (buyer-data screen: in progress, deleted, failed + Retry, 422 and 400 messages, gcTime 0).
 3. S4: the M04 end review (with the carry-over file).
 
 ## Prerequisites outstanding (Hashir)

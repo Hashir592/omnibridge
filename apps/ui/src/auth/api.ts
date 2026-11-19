@@ -160,7 +160,10 @@ export const privacyApi = {
     if (!r.ok) throw new Error(String(r.status));
     return (r.body as { items: ErasureRequest[] }).items;
   },
-  /** DEL-4 step 1: find every record; nothing is deleted yet. */
+  /**
+   * DEL-4 step 1: find every record; nothing is deleted yet. 400 when the identifiers do not pin
+   * one buyer; 422 `too_many_matches` when they match too much (nothing is stored).
+   */
   startErasure: async (identifiers: BuyerIdentifiers) =>
     reply<ErasureRequestCreated>(
       api.POST('/erasure-requests', { body: { identifiers }, headers: await csrfHeaders() }),
@@ -179,6 +182,14 @@ export const privacyApi = {
       api.POST('/erasure-requests/{id}/withdraw', {
         params: { path: { id } },
         body: { reason },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** A-006: runs a failed deletion again; 202 confirmed with a new job, 409 unless failed. */
+  retryErasure: async (id: string) =>
+    reply<ErasureRequest>(
+      api.POST('/erasure-requests/{id}/retry', {
+        params: { path: { id } },
         headers: await csrfHeaders(),
       }),
     ),

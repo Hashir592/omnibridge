@@ -1,13 +1,14 @@
 import { getResponse } from 'msw';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErasureRequest, ErasureRequestCreated } from '../auth/api.ts';
 import { handlers } from './handlers.ts';
-import { MOCK_MATCH_LIMIT, resetPrivacyMock } from './privacy.ts';
+import { MOCK_JOB_MS, resetPrivacyMock } from './privacy.ts';
 import { setPersona } from './session.ts';
 
 // The mock stands in for the T-0404 routes in the T-0308 screens, so it must behave as the
-// server does: admin only, masked matches, a one-month due date, one confirmation, and the 422
-// when an export matches too much.
+// server does: admin only, masked matches, a one-month due date, one confirmation, the outcome
+// states and retry (A-006), the 400 for identifiers that do not pin one buyer, and the 422s when a
+// search or an export matches too much.
 
 async function call(method: string, path: string, body?: unknown) {
   const res = await getResponse(
@@ -23,6 +24,17 @@ async function call(method: string, path: string, body?: unknown) {
 }
 
 const MORGAN = { email: 'morgan.ellis@example.com' };
+/** A repeat buyer with more orders than one mock answer holds. */
+const MANY = { email: 'drew.parker@example.com' };
+const OPEN = '00000000-0000-4000-8000-000000000903';
+const COMPLETED = '00000000-0000-4000-8000-000000000901';
+const FAILED = '00000000-0000-4000-8000-000000000905';
+
+async function all(): Promise<ErasureRequest[]> {
+  const res = await call('GET', '/api/erasure-requests');
+  return ((await res.json()) as { items: ErasureRequest[] }).items;
+}
+const listed = async (id: string) => (await all()).find((r) => r.id === id);
 
 afterEach(() => {
   setPersona('admin');
@@ -46,21 +58,27 @@ describe('mock erasure requests', () => {
     expect(body.matches[0]?.masked).toMatchObject({ name: 'M. E***', email: 'm***@e***' });
   });
 
-  it('[DEL-4] every identifier given must match, and none given is a 422', async () => {
+  it('[DEL-4] every identifier given must match; identifiers that do not pin one buyer are a 400', async () => {
     const both = await call('POST', '/api/erasure-requests', {
       identifiers: { ...MORGAN, postcode: 'M1 1AE' },
     });
     expect(((await both.json()) as ErasureRequestCreated).matches).toHaveLength(0);
-    expect((await call('POST', '/api/erasure-requests', { identifiers: {} })).status).toBe(422);
+    expect((await call('POST', '/api/erasure-requests', { identifiers: {} })).status).toBe(400);
+    const weak = await call('POST', '/api/erasure-requests', {
+      identifiers: { postcode: 'M1 1AE' },
+    });
+    expect(weak.status).toBe(400);
+    expect((await call('POST', '/api/access-requests/export', { identifiers: {} })).status).toBe(
+      400,
+    );
   });
 
-  it('[DEL-4] a broad search is cut short and says so', async () => {
-    const res = await call('POST', '/api/erasure-requests', {
-      identifiers: { postcode: 'm11ae' },
-    });
-    const body = (await res.json()) as ErasureRequestCreated;
-    expect(body.matches).toHaveLength(MOCK_MATCH_LIMIT);
-    expect(body.truncated).toBe(true);
+  it('[DEL-4] a search that matches too many records is a 422 too_many_matches and stores nothing', async () => {
+    const before = await all();
+    const res = await call('POST', '/api/erasure-requests', { identifiers: MANY });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe('too_many_matches');
+    expect(await all()).toHaveLength(before.length);
   });
 
   it('[DEL-4] confirms once (202 with a job), then answers 409', async () => {
@@ -74,6 +92,65 @@ describe('mock erasure requests', () => {
     expect(confirmed.jobId).not.toBeNull();
     const again = await call('POST', `/api/erasure-requests/${created.id}/confirm`);
     expect(again.status).toBe(409);
+  });
+
+  it('[DEL-4] a confirmed request is in progress, then completed with completedAt when its job ends', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const created = (await (
+        await call('POST', '/api/erasure-requests', { identifiers: MORGAN })
+      ).json()) as ErasureRequestCreated;
+      await call('POST', `/api/erasure-requests/${created.id}/confirm`);
+      expect(await listed(created.id)).toMatchObject({ state: 'confirmed', completedAt: null });
+      vi.setSystemTime(Date.now() + MOCK_JOB_MS + 1);
+      const done = await listed(created.id);
+      expect(done?.state).toBe('completed');
+      expect(done?.completedAt).not.toBeNull();
+      expect(done?.overdue).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('[DEL-4] a confirm with no matches answers 202 completed, with no job', async () => {
+    const created = (await (
+      await call('POST', '/api/erasure-requests', {
+        identifiers: { name: 'Nobody Known', postcode: 'ZZ1 1ZZ' },
+      })
+    ).json()) as ErasureRequestCreated;
+    const res = await call('POST', `/api/erasure-requests/${created.id}/confirm`);
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as ErasureRequest;
+    expect(body).toMatchObject({ state: 'completed', jobId: null });
+    expect(body.completedAt).not.toBeNull();
+  });
+
+  it('[DEL-4] overdue holds for open, confirmed and failed past due; never for completed', async () => {
+    const failed = await listed(FAILED);
+    expect(failed).toMatchObject({ state: 'failed', overdue: true });
+    expect(failed?.failedAt).not.toBeNull();
+    const completed = await listed(COMPLETED);
+    expect(completed).toMatchObject({ state: 'completed', overdue: false });
+    expect(Date.parse(completed?.dueAt ?? '')).toBeLessThan(Date.now());
+  });
+
+  it('[DEL-4] retry runs a failed deletion again: 202 confirmed, a new job, retryCount + 1', async () => {
+    const before = await listed(FAILED);
+    const res = await call('POST', `/api/erasure-requests/${FAILED}/retry`);
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as ErasureRequest;
+    expect(body.state).toBe('confirmed');
+    expect(body.jobId).not.toBeNull();
+    expect(body.jobId).not.toBe(before?.jobId);
+    expect(body.retryCount).toBe((before?.retryCount ?? 0) + 1);
+    expect(body.failedAt).toBeNull();
+    expect(body.overdue).toBe(true);
+    // Only a failed request can be retried: 409 otherwise, 404 for an unknown one.
+    expect((await call('POST', `/api/erasure-requests/${FAILED}/retry`)).status).toBe(409);
+    expect((await call('POST', `/api/erasure-requests/${OPEN}/retry`)).status).toBe(409);
+    expect((await call('POST', `/api/erasure-requests/${COMPLETED}/retry`)).status).toBe(409);
+    const unknown = '00000000-0000-4000-8000-000000009999';
+    expect((await call('POST', `/api/erasure-requests/${unknown}/retry`)).status).toBe(404);
   });
 
   it('[DEL-4] lists requests newest first and marks an open one past its due date overdue', async () => {
@@ -105,7 +182,7 @@ describe('mock erasure requests', () => {
   });
 
   it('[DEL-4] a withdraw needs a reason from the fixed list (400), on a known request (404)', async () => {
-    const open = '00000000-0000-4000-8000-000000000903';
+    const open = OPEN;
     expect((await call('POST', `/api/erasure-requests/${open}/withdraw`, {})).status).toBe(400);
     expect(
       (await call('POST', `/api/erasure-requests/${open}/withdraw`, { reason: 'free text' }))
@@ -115,9 +192,8 @@ describe('mock erasure requests', () => {
     expect(
       (await call('POST', `/api/erasure-requests/${unknown}/withdraw`, { reason: 'other' })).status,
     ).toBe(404);
-    const confirmed = '00000000-0000-4000-8000-000000000901';
     expect(
-      (await call('POST', `/api/erasure-requests/${confirmed}/withdraw`, { reason: 'other' }))
+      (await call('POST', `/api/erasure-requests/${COMPLETED}/withdraw`, { reason: 'other' }))
         .status,
     ).toBe(409);
   });
@@ -134,9 +210,7 @@ describe('mock subject access export', () => {
   });
 
   it('[DEL-5] answers 422 when too many records match', async () => {
-    const res = await call('POST', '/api/access-requests/export', {
-      identifiers: { postcode: 'M1 1AE' },
-    });
+    const res = await call('POST', '/api/access-requests/export', { identifiers: MANY });
     expect(res.status).toBe(422);
     expect(((await res.json()) as { detail: string }).detail).toMatch(/Too many records/);
   });
@@ -152,10 +226,11 @@ describe('admin only', () => {
       call('POST', '/api/erasure-requests/00000000-0000-4000-8000-000000000903/withdraw', {
         reason: 'other',
       }),
+      call('POST', `/api/erasure-requests/${FAILED}/retry`),
       call('POST', '/api/access-requests/export', { identifiers: MORGAN }),
       call('GET', '/api/channel-accounts/ca_1/deletion-certificate'),
     ]);
-    expect(statuses.map((r) => r.status)).toEqual([403, 403, 403, 403, 403, 403]);
+    expect(statuses.map((r) => r.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
   });
 
   it('[DEL-3] the deletion certificate holds counts and IDs, never a buyer value', async () => {
