@@ -1,4 +1,3 @@
-import { createErasureRequest } from '@omnibridge/contract';
 import { getResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErasureRequest, ErasureRequestCreated } from '../auth/api.ts';
@@ -170,23 +169,24 @@ describe('mock erasure requests', () => {
     expect((await call('POST', `/api/erasure-requests/${STUCK}/retry`)).status).toBe(409);
   });
 
-  it('[DEL-4] the screen rule, the mock and the contract agree on which identifiers pin one buyer', async () => {
-    const cases: Array<Record<string, string>> = [
-      {},
-      { name: 'Morgan Ellis' },
-      { postcode: 'SW1A 1AA' },
-      { name: 'Morgan Ellis', postcode: 'SW1A 1AA' },
-      { email: 'morgan.ellis@example.com' },
-      { phone: '07700900111' },
-      { buyer: 'morgan_e' },
-      { name: 'Morgan Ellis', email: 'morgan.ellis@example.com' },
-      { postcode: 'SW1A 1AA', phone: '07700900111' },
+  // The contract's rule (BuyerIdentifiersSchema, ADR-068). The SPA may not import the Zod registry
+  // (ui-uses-contract-client-only), so the cases and their answers are written out here.
+  it('[DEL-4] the screen rule and the mock agree with the contract on which identifiers pin one buyer', async () => {
+    const cases: Array<[Record<string, string>, boolean]> = [
+      [{}, false],
+      [{ name: 'Morgan Ellis' }, false],
+      [{ postcode: 'SW1A 1AA' }, false],
+      [{ name: 'Morgan Ellis', postcode: 'SW1A 1AA' }, true],
+      [{ email: 'morgan.ellis@example.com' }, true],
+      [{ phone: '07700900111' }, true],
+      [{ buyer: 'morgan_e' }, true],
+      [{ name: 'Morgan Ellis', email: 'morgan.ellis@example.com' }, true],
+      [{ postcode: 'SW1A 1AA', phone: '07700900111' }, true],
     ];
-    for (const identifiers of cases) {
-      const contract = createErasureRequest.body.safeParse({ identifiers }).success;
-      expect(pinsOneBuyer(identifiers), JSON.stringify(identifiers)).toBe(contract);
+    for (const [identifiers, pins] of cases) {
+      expect(pinsOneBuyer(identifiers), JSON.stringify(identifiers)).toBe(pins);
       const status = (await call('POST', '/api/erasure-requests', { identifiers })).status;
-      expect(status === 400, JSON.stringify(identifiers)).toBe(!contract);
+      expect(status === 400, JSON.stringify(identifiers)).toBe(!pins);
       resetPrivacyMock();
     }
   });
