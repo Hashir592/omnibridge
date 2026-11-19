@@ -22,7 +22,7 @@ import {
   reviewRequests,
   thread,
 } from './inbox.ts';
-import { notificationsFor } from './notifications.ts';
+import { notificationHandlers } from './notifications.ts';
 import { profitSummary } from './profit.ts';
 import { channelOn, currentSession } from './session.ts';
 import { skuDetail, skuPage } from './stock.ts';
@@ -165,13 +165,14 @@ export const previewHandlers = [
     gate('reminders') ? HttpResponse.json(reminders) : forbidden(),
   ),
   http.get('*/api/mock/notes', () => (gate('notes') ? HttpResponse.json(notes) : forbidden())),
-  http.get('*/api/mock/notifications', () => HttpResponse.json(notificationsFor(currentSession()))),
   http.get('*/api/mock/audit-log', ({ request }) =>
     gate('admin') ? HttpResponse.json(auditPage(params(request))) : forbidden(),
   ),
 
   // The real route since T-0204 (GET /users); the mock answers it for the preview.
   ...userHandlers,
+  // The real notification routes (T-0501, T-0502): the bell, the centre and the email choices.
+  ...notificationHandlers,
   // The real T-0404 routes (erasure and access requests), the certificate and GET /jobs/:id.
   ...privacyHandlers,
   http.get('*/api/mock/connections', () =>

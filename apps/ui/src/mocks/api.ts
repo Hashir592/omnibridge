@@ -16,7 +16,6 @@ import type {
   ReviewRequests,
   Thread,
 } from './inbox.ts';
-import type { Notification } from './notifications.ts';
 import type { Note, Reminder } from './tools.ts';
 import type { ExpensePage, Pnl, VatCompany } from './finance.ts';
 import type { AmazonHealth, EbayHealth } from './health.ts';
@@ -75,7 +74,6 @@ export const mockApi = {
   forecast: (params: Params) => getJson<ForecastPage>(`/api/mock/forecasting?${qs(params)}`),
   reminders: () => getJson<Reminder[]>('/api/mock/reminders'),
   notes: () => getJson<Note[]>('/api/mock/notes'),
-  notifications: () => getJson<Notification[]>('/api/mock/notifications'),
   audit: (params: Params) => getJson<AuditPage>(`/api/mock/audit-log?${qs(params)}`),
 
   // T-0306 client changes (PROPOSED SHAPES).

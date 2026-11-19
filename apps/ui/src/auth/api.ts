@@ -217,6 +217,67 @@ export const privacyApi = {
     ),
 };
 
+/* ---------- notifications (T-0501, T-0502 routes; T-0312 screens: NTF-1, NTF-4, NTF-5) ---------- */
+
+export type Notification = components['schemas']['Notification'];
+export type EmailPreference = components['schemas']['EmailPreference'];
+export interface NotificationFilter {
+  state?: Notification['state'] | undefined;
+  severity?: Notification['severity'] | undefined;
+}
+
+/** The bell and the centre. The server shows each user only what their tabs and companies allow. */
+export const notificationApi = {
+  list: async (filter: NotificationFilter, cursor: string | undefined, limit = 50) => {
+    const r = await reply<{ items: Notification[]; next_cursor: string | null }>(
+      api.GET('/notifications', {
+        params: {
+          query: {
+            limit,
+            ...(cursor === undefined ? {} : { cursor }),
+            ...(filter.state === undefined ? {} : { state: filter.state }),
+            ...(filter.severity === undefined ? {} : { severity: filter.severity }),
+          },
+        },
+      }),
+    );
+    if (!r.ok) throw new Error(String(r.status));
+    return r.body as { items: Notification[]; next_cursor: string | null };
+  },
+  unreadCount: async (): Promise<number> => {
+    const r = await reply<{ unread: number }>(api.GET('/notifications/unread-count'));
+    if (!r.ok) throw new Error(String(r.status));
+    return (r.body as { unread: number }).unread;
+  },
+  /** 404 when it does not exist or this user may not see it. */
+  markRead: async (id: string) =>
+    reply<{ marked: number }>(
+      api.POST('/notifications/{id}/read', {
+        params: { path: { id } },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  markAllRead: async () =>
+    reply<{ marked: number }>(
+      api.POST('/notifications/read-all', { headers: await csrfHeaders() }),
+    ),
+  emailPreferences: async (): Promise<EmailPreference[]> => {
+    const r = await reply<{ items: EmailPreference[] }>(
+      api.GET('/me/notification-email-preferences'),
+    );
+    if (!r.ok) throw new Error(String(r.status));
+    return (r.body as { items: EmailPreference[] }).items;
+  },
+  /** NTF-4: the full list back; 400 for a type this user cannot receive or a locked one. */
+  setEmailPreference: async (type: string, email: boolean) =>
+    reply<{ items: EmailPreference[] }>(
+      api.PUT('/me/notification-email-preferences', {
+        body: { items: [{ type, email }] },
+        headers: await csrfHeaders(),
+      }),
+    ),
+};
+
 export const authApi = {
   signIn: async (email: string, password: string) =>
     reply<SignInResult>(

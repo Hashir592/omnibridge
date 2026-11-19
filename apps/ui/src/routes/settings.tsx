@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAppState } from '../app/session.tsx';
 import { ChannelMark, CompanySwatch } from '../components/badges.tsx';
 import { Card, DetailRow, PageHeader, SimpleTable, Stack, Td, Tr } from '../components/Card.tsx';
+import { EmailPreferences } from '../components/EmailPreferences.tsx';
 import { TabGate } from '../components/TabGate.tsx';
 import { Badge, StatusLabel } from '../kit/Badge.tsx';
 import { Button, buttonClass } from '../kit/Button.tsx';
@@ -49,7 +50,7 @@ function Settings() {
             items={[
               { value: 'workspace', label: 'Workspace', content: <Workspace /> },
               { value: 'companies', label: 'Companies', content: <Companies /> },
-              { value: 'notifications', label: 'Notifications', content: <Notifications /> },
+              { value: 'notifications', label: 'Notifications', content: <EmailPreferences /> },
               { value: 'stock', label: 'Stock sync', content: <StockSync /> },
               { value: 'security', label: 'My account', content: <Security /> },
             ]}
@@ -139,78 +140,6 @@ function Companies() {
       <p className="border-t border-divider px-5 py-3 text-xs text-ink-muted">
         A channel account cannot move to another company once it has orders. Archive it instead.
       </p>
-    </Card>
-  );
-}
-
-const TYPES: Array<{ type: string; severity: 'Critical' | 'Warning' | 'Info' }> = [
-  { type: 'Channel authorisation lost', severity: 'Critical' },
-  { type: 'Oversold', severity: 'Critical' },
-  { type: 'Tracking not confirmed in 4 hours', severity: 'Critical' },
-  { type: 'Account status or seller level change', severity: 'Critical' },
-  { type: 'Health metric changed band', severity: 'Warning' },
-  { type: 'Stock sync failed or drift', severity: 'Warning' },
-  { type: 'Neutral or negative feedback', severity: 'Warning' },
-  { type: 'Unpaid bill due or overdue', severity: 'Info' },
-  { type: 'Low stock and reorder', severity: 'Info' },
-  { type: 'New eBay message', severity: 'Info' },
-  { type: 'Reminder due', severity: 'Info' },
-];
-
-function Notifications() {
-  const toast = useToast();
-  const [email, setEmail] = useState<Record<string, boolean>>({});
-  return (
-    <Card
-      title="Email me about"
-      aside={<span className="text-xs text-ink-muted">Everything also appears under the bell</span>}
-    >
-      <SimpleTable
-        label="Notification emails"
-        head={[{ label: 'Type' }, { label: 'Severity' }, { label: 'Email' }]}
-      >
-        {TYPES.map((t) => {
-          const locked = t.severity === 'Critical';
-          const on = locked || (email[t.type] ?? t.severity === 'Warning');
-          return (
-            <Tr key={t.type}>
-              <Td className="font-medium">{t.type}</Td>
-              <Td>
-                <StatusLabel
-                  tone={
-                    t.severity === 'Critical'
-                      ? 'danger'
-                      : t.severity === 'Warning'
-                        ? 'warning'
-                        : 'info'
-                  }
-                >
-                  {t.severity}
-                </StatusLabel>
-              </Td>
-              <Td>
-                <label className="flex items-center gap-2 text-13">
-                  <input
-                    type="checkbox"
-                    className="size-4"
-                    checked={on}
-                    disabled={locked}
-                    onChange={(e) => {
-                      setEmail({ ...email, [t.type]: e.target.checked });
-                      toast({
-                        title: e.target.checked ? 'Emails on' : 'Emails off',
-                        description: t.type,
-                        tone: 'success',
-                      });
-                    }}
-                  />
-                  {locked ? 'Always on for admins' : on ? 'On' : 'Off'}
-                </label>
-              </Td>
-            </Tr>
-          );
-        })}
-      </SimpleTable>
     </Card>
   );
 }
