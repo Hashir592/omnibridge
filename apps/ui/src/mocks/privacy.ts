@@ -163,6 +163,8 @@ interface StoredRequest {
   completedAt?: string;
   failedAt?: string;
   retryCount?: number;
+  /** ADR-070: confirmed, but its deletion job died or was never queued. */
+  stuck?: boolean;
   withdrawnAt?: string;
   withdrawReason?: WithdrawReason;
 }
@@ -200,8 +202,8 @@ const asBody = (r: StoredRequest): ErasureRequest => {
     completedAt: r.completedAt ?? null,
     failedAt: r.failedAt ?? null,
     retryCount: r.retryCount ?? 0,
-    // ADR-070: the server's stuck flag; the mock's jobs never die (T-0311 adds a stuck seed).
-    stuck: false,
+    // ADR-070: only a confirmed request can be stuck; every other answer says false.
+    stuck: r.state === 'confirmed' && r.stuck === true,
     jobId: r.jobId,
     withdrawnAt: r.withdrawnAt ?? null,
     withdrawReason: r.withdrawReason ?? null,
@@ -243,6 +245,15 @@ const seedRequests = (): StoredRequest[] => [
     confirmedAt: ago(39 * DAY),
     jobId: uuid(802),
     failedAt: ago(2 * DAY),
+  },
+  {
+    id: uuid(906),
+    requestedAt: ago(5 * DAY),
+    state: 'confirmed',
+    piiRefs: [uuid(309)],
+    confirmedAt: ago(4 * DAY),
+    jobId: null,
+    stuck: true,
   },
   {
     id: uuid(901),
@@ -411,14 +422,15 @@ export const privacyHandlers = [
     if (!isAdmin()) return forbidden();
     const r = requests.find((x) => x.id === params.id);
     if (!r) return problem(404, 'not_found');
-    if (r.state !== 'failed')
-      return problem(409, 'conflict', 'This erasure request is not failed.');
+    if (r.state !== 'failed' && !(r.state === 'confirmed' && r.stuck))
+      return problem(409, 'conflict', 'This erasure request is not failed or stuck.');
     seq += 1;
     const jobId = uuid(2000 + seq);
     jobs.set(jobId, { startedAt: Date.now(), refs: r.piiRefs });
     r.state = 'confirmed';
     r.jobId = jobId;
     delete r.failedAt;
+    delete r.stuck;
     r.retryCount = (r.retryCount ?? 0) + 1;
     return HttpResponse.json(asBody(r), { status: 202 });
   }),

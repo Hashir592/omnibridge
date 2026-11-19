@@ -45,6 +45,7 @@ import { Select } from '../kit/Select.tsx';
 import { EmptyState, ErrorState } from '../kit/states.tsx';
 import { useToast } from '../kit/Toast.tsx';
 import { formatDate, formatDateTime, formatInt, formatTime, londonDayKey } from '../lib/format.ts';
+import { pinsOneBuyer } from '../lib/pinsOneBuyer.ts';
 import type { ChannelAccount } from '../mocks/types.ts';
 
 export function BuyerDataPage() {
@@ -120,13 +121,6 @@ const WITHDRAW_REASON: Record<WithdrawReason, string> = {
 const MASKED_ORDER = ['name', 'email', 'phone', 'postcode', 'country'];
 
 const plural = (n: number, one: string) => `${formatInt(n)} ${one}${n === 1 ? '' : 's'}`;
-
-/** The server's rule (ADR-068): an email, a phone, a marketplace ID, or a name with a postcode. */
-const pinsOneBuyer = (q: BuyerIdentifiers) =>
-  q.email !== undefined ||
-  q.phone !== undefined ||
-  q.buyer !== undefined ||
-  (q.name !== undefined && q.postcode !== undefined);
 
 const useRequests = () => {
   const { session, persona } = useAppState();
@@ -379,14 +373,6 @@ function MatchResult({
               <p className="px-5 pt-4 text-13 text-ink-muted">
                 Check these are the right buyer. Details are masked.
               </p>
-              {result.truncated && (
-                <div className="px-5 pt-3">
-                  <Inline tone="warning">
-                    More records match than are shown. Add more details to narrow the search, or
-                    delete these and search again.
-                  </Inline>
-                </div>
-              )}
               <SimpleTable
                 className="mt-3"
                 label="Matching records"
@@ -648,7 +634,7 @@ const at = (iso: string) => `${formatDate(iso)} at ${formatTime(iso)}`;
  * deletion job's progress; then the admin's confirmation, or the failure and a Retry.
  */
 function Outcome({ request }: { request: ErasureRequest }) {
-  const running = request.state === 'confirmed' && request.jobId !== null;
+  const running = request.state === 'confirmed' && request.jobId !== null && !request.stuck;
   const job = useQuery({
     queryKey: ['job', request.jobId],
     queryFn: () => privacyApi.job(request.jobId ?? ''),
@@ -676,10 +662,10 @@ function Outcome({ request }: { request: ErasureRequest }) {
           in the audit log.
         </StatusLabel>
       );
-  } else if (request.state === 'failed') {
+  } else if (needsRetry(request)) {
     line = (
       <span className="flex flex-wrap items-center justify-between gap-3">
-        <FailedLabel r={request} late={request.overdue ? ' · overdue' : ''} />
+        <RetryLabel r={request} late={request.overdue ? ' · overdue' : ''} />
         <RetryButton request={request} />
       </span>
     );
@@ -699,6 +685,19 @@ function Outcome({ request }: { request: ErasureRequest }) {
   );
 }
 
+/** ADR-070: a failed request, or a confirmed one whose deletion job died or never started. */
+const needsRetry = (r: ErasureRequest) => r.state === 'failed' || r.stuck;
+
+function RetryLabel({ r, late = '' }: { r: ErasureRequest; late?: string }) {
+  return r.state === 'failed' ? (
+    <FailedLabel r={r} late={late} />
+  ) : (
+    <StatusLabel tone="danger" icon={CircleAlert}>
+      Deletion stopped before it finished: an admin must retry{late}
+    </StatusLabel>
+  );
+}
+
 function FailedLabel({ r, late = '' }: { r: ErasureRequest; late?: string }) {
   return (
     <StatusLabel tone="danger" icon={CircleAlert}>
@@ -707,7 +706,7 @@ function FailedLabel({ r, late = '' }: { r: ErasureRequest; late?: string }) {
   );
 }
 
-/** A-006: runs a failed deletion again. The request goes back to in progress. */
+/** A-006, ADR-070: runs a failed or stuck deletion again. The request goes back to in progress. */
 function RetryButton({ request, compact }: { request: ErasureRequest; compact?: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -729,7 +728,7 @@ function RetryButton({ request, compact }: { request: ErasureRequest; compact?: 
       } else if (r.status === 409) {
         toast({
           title: 'Not retried',
-          description: 'This deletion is no longer failed. The list is refreshed.',
+          description: 'This deletion no longer needs a retry. The list is refreshed.',
           tone: 'error',
         });
       } else setError(problemText(r, 'The deletion could not be restarted. Try again.'));
@@ -775,7 +774,7 @@ function RequestState({ r }: { r: ErasureRequest }) {
       </StatusLabel>
     );
   const late = r.overdue ? ' · overdue' : '';
-  if (r.state === 'failed') return <FailedLabel r={r} late={late} />;
+  if (needsRetry(r)) return <RetryLabel r={r} late={late} />;
   if (r.state === 'confirmed')
     return (
       <StatusLabel tone={r.overdue ? 'danger' : 'info'} icon={LoaderCircle}>
@@ -841,7 +840,7 @@ function RequestList({ requests }: { requests: ReturnType<typeof useRequests> })
                     compact
                   />
                 )}
-                {r.state === 'failed' && <RetryButton request={r} compact />}
+                {needsRetry(r) && <RetryButton request={r} compact />}
               </Td>
             </Tr>
           ))}

@@ -1,6 +1,8 @@
+import { createErasureRequest } from '@omnibridge/contract';
 import { getResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErasureRequest, ErasureRequestCreated } from '../auth/api.ts';
+import { pinsOneBuyer } from '../lib/pinsOneBuyer.ts';
 import { handlers } from './handlers.ts';
 import { MOCK_JOB_MS, resetPrivacyMock } from './privacy.ts';
 import { setPersona } from './session.ts';
@@ -29,6 +31,7 @@ const MANY = { email: 'drew.parker@example.com' };
 const OPEN = '00000000-0000-4000-8000-000000000903';
 const COMPLETED = '00000000-0000-4000-8000-000000000901';
 const FAILED = '00000000-0000-4000-8000-000000000905';
+const STUCK = '00000000-0000-4000-8000-000000000906';
 
 async function all(): Promise<ErasureRequest[]> {
   const res = await call('GET', '/api/erasure-requests');
@@ -151,6 +154,41 @@ describe('mock erasure requests', () => {
     expect((await call('POST', `/api/erasure-requests/${COMPLETED}/retry`)).status).toBe(409);
     const unknown = '00000000-0000-4000-8000-000000009999';
     expect((await call('POST', `/api/erasure-requests/${unknown}/retry`)).status).toBe(404);
+  });
+
+  it('[DEL-4] a stuck request lists stuck: true, retries with 202 and is then no longer stuck', async () => {
+    const stuck = await listed(STUCK);
+    expect(stuck).toMatchObject({ state: 'confirmed', stuck: true, jobId: null });
+    // Every other answer says false.
+    const others = (await all()).filter((r) => r.id !== STUCK);
+    expect(others.every((r) => !r.stuck)).toBe(true);
+    const res = await call('POST', `/api/erasure-requests/${STUCK}/retry`);
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as ErasureRequest;
+    expect(body).toMatchObject({ state: 'confirmed', stuck: false, retryCount: 1 });
+    expect(body.jobId).not.toBeNull();
+    expect((await call('POST', `/api/erasure-requests/${STUCK}/retry`)).status).toBe(409);
+  });
+
+  it('[DEL-4] the screen rule, the mock and the contract agree on which identifiers pin one buyer', async () => {
+    const cases: Array<Record<string, string>> = [
+      {},
+      { name: 'Morgan Ellis' },
+      { postcode: 'SW1A 1AA' },
+      { name: 'Morgan Ellis', postcode: 'SW1A 1AA' },
+      { email: 'morgan.ellis@example.com' },
+      { phone: '07700900111' },
+      { buyer: 'morgan_e' },
+      { name: 'Morgan Ellis', email: 'morgan.ellis@example.com' },
+      { postcode: 'SW1A 1AA', phone: '07700900111' },
+    ];
+    for (const identifiers of cases) {
+      const contract = createErasureRequest.body.safeParse({ identifiers }).success;
+      expect(pinsOneBuyer(identifiers), JSON.stringify(identifiers)).toBe(contract);
+      const status = (await call('POST', '/api/erasure-requests', { identifiers })).status;
+      expect(status === 400, JSON.stringify(identifiers)).toBe(!contract);
+      resetPrivacyMock();
+    }
   });
 
   it('[DEL-4] lists requests newest first and marks an open one past its due date overdue', async () => {

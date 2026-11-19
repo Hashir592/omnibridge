@@ -116,10 +116,28 @@ test('[DEL-4] a failed deletion says an admin must retry; Retry runs it again to
   await expect(page.getByText('Deletion restarted')).toBeVisible();
   const running = page.getByRole('row', { name: /Deletion in progress · overdue/ });
   await expect(running).toHaveCount(1);
-  await expect(page.getByRole('button', { name: /^Retry/ })).toHaveCount(0);
+  await expect(running.getByRole('button', { name: /^Retry/ })).toHaveCount(0);
   await page.clock.runFor(6_000);
   await expect(page.getByRole('row', { name: /Deleted 21\/10\/2026/ })).toHaveCount(1);
   await expect(page.getByText('1 erasure request is past its due date.')).toBeVisible();
+});
+
+test('[DEL-4] a stuck deletion offers Retry too, and runs again to completion', async ({
+  page,
+}) => {
+  await page.clock.install({ time: NOW });
+  await page.goto(PATH);
+  const stuck = page.getByRole('row', {
+    name: /Deletion stopped before it finished: an admin must retry/,
+  });
+  await expect(stuck).toHaveCount(1);
+  await stuck.getByRole('button', { name: /^Retry/ }).click();
+  await expect(page.getByText('Deletion restarted')).toBeVisible();
+  await expect(page.getByRole('row', { name: /Deletion stopped before it finished/ })).toHaveCount(
+    0,
+  );
+  await page.clock.runFor(6_000);
+  await expect(page.getByRole('row', { name: /Deleted 21\/10\/2026/ })).toHaveCount(1);
 });
 
 test('[DEL-4] a search that matches too many records asks for another identifier', async ({
