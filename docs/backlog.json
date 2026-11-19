@@ -1239,6 +1239,43 @@
       "status": "review"
     },
     {
+      "id": "T-0410",
+      "module": "M04",
+      "session": "S3",
+      "title": "Fixes from the external audit (ADR-069)",
+      "goal": "Deletions are complete, jobs never run ahead of their data, and the eBay key budget and PII backups hold under abuse and outages.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-1",
+        "DEL-2",
+        "DEL-4",
+        "AT-10",
+        "EBAY-2",
+        "TEN-7"
+      ],
+      "scope": [
+        "A-001: eBay user match pages through every matching record and queues every batch before the 200; no silent LIMIT in a deletion path",
+        "A-002: jobs enqueued from a request use the request's transaction (every notifier call); test delivery at the commit boundary",
+        "A-003: limiter counts before any key fetch; unknown key IDs negative-cached 1 h; global cap on uncached key fetches per minute",
+        "A-004: db-pii snapshots older than 3 days by their own time are forgotten regardless of count; test with a long backup gap",
+        "A-005: db-pii pool and client error handlers as db-main; recovery test after a terminated connection",
+        "A-006 server side: erasure request states completed and failed set from the deletion job outcome; overdue until completed; retry route re-queues a failed request (admin only, audited)"
+      ],
+      "out_of_scope": [
+        "The screens (T-0310)"
+      ],
+      "depends_on": [
+        "T-0409"
+      ],
+      "acceptance": [
+        "Tests first, each citing an ID, reproducing Astra's proof: 5,001 matches all deleted; job not visible before commit; 501 unknown-key requests spend at most the cap; a 40-day gap leaves no snapshot older than 3 days; vault survives a terminated connection; a failed job leaves the request failed and overdue",
+        "PR lists each A- ID with its test",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
       "id": "T-0308",
       "module": "M03",
       "session": "S2",
@@ -1294,6 +1331,33 @@
       "risk": "normal",
       "status": "done",
       "notes": "Recorded after the fact by S1: PR #94."
+    },
+    {
+      "id": "T-0310",
+      "module": "M03",
+      "session": "S2",
+      "title": "Buyer-data screen shows the real deletion outcome (ADR-069, ADR-068)",
+      "goal": "An admin never sees 'deleted' for a deletion that failed.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-4"
+      ],
+      "scope": [
+        "A-006 UI: card and list show Confirmed (in progress), Completed or Failed from the request state; Failed says an admin must retry and offers Retry; overdue shown until completed",
+        "ADR-068 hardening 6: gcTime 0 on the start and exportAccess mutations"
+      ],
+      "out_of_scope": [
+        "Server logic (T-0410)"
+      ],
+      "depends_on": [
+        "T-0410"
+      ],
+      "acceptance": [
+        "UI tests citing DEL-4 for in progress, completed, failed and retry",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
     },
     {
       "id": "T-0406",
