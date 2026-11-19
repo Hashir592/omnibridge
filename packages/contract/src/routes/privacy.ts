@@ -1,4 +1,4 @@
-import { ERASURE_WITHDRAW_REASONS } from '@omnibridge/core';
+import { ERASURE_STATES, ERASURE_WITHDRAW_REASONS } from '@omnibridge/core';
 import { z } from 'zod';
 import { FileDownloadSchema } from '../download.ts';
 import { defineRoute } from '../route.ts';
@@ -10,7 +10,9 @@ import { defineRoute } from '../route.ts';
  * export is streamed and kept nowhere. Errors:
  * - 404 not_found: no such request in this workspace
  * - 400 validation_failed: a withdraw reason missing or not in the list
- * - 409 conflict: the request is no longer open (confirmed or withdrawn)
+ * - 409 conflict: the request is no longer open (confirm, withdraw), or is not failed (retry)
+ * - 422 too_many_matches: an erasure search matches more records than one request holds; add
+ *   an identifier and search again (A-001, ADR-069). Nothing is stored.
  * - 400 validation_failed: the identifiers do not pin one buyer (no email, phone or marketplace
  *   ID, and not a name with a postcode)
  * - 422 validation_failed: an access export matches too many records
@@ -63,11 +65,25 @@ export const ErasureRequestSchema = z
     requestedAt: z.iso.datetime(),
     /** DEL-4: one month after the request. */
     dueAt: z.iso.datetime(),
-    /** Still open after its due date. A withdrawn request is never overdue (ADR-067). */
+    /**
+     * Past its due date and not yet completed (A-006, ADR-069): open, confirmed (in progress)
+     * and failed requests count. A completed or withdrawn request is never overdue (ADR-067).
+     */
     overdue: z.boolean(),
-    state: z.enum(['open', 'confirmed', 'withdrawn']),
+    /**
+     * open: matches found, not confirmed. confirmed: the deletion is queued or running.
+     * completed: the deletion ran. failed: its last attempt failed; an admin must retry.
+     * withdrawn: closed with nothing deleted.
+     */
+    state: z.enum(ERASURE_STATES),
     matchCount: z.number().int().min(0),
     confirmedAt: z.iso.datetime().nullable(),
+    /** When the deletion ran (state completed). */
+    completedAt: z.iso.datetime().nullable(),
+    /** When its last attempt failed (state failed); cleared by a retry. */
+    failedAt: z.iso.datetime().nullable(),
+    /** How often an admin has retried a failed deletion. */
+    retryCount: z.number().int().min(0),
     withdrawnAt: z.iso.datetime().nullable(),
     withdrawReason: z.enum(ERASURE_WITHDRAW_REASONS).nullable(),
     /** The deletion job (GET /jobs/:id shows its progress), once confirmed. */
@@ -128,6 +144,21 @@ export const withdrawErasureRequest = defineRoute({
 });
 
 /**
+ * A-006 (ADR-069): run a failed request's deletion again: the same records, as a new deletion
+ * run. The request goes back to confirmed (in progress) and stays overdue until it completes.
+ * Audited. 409 unless the request is failed.
+ */
+export const retryErasureRequest = defineRoute({
+  id: 'retryErasureRequest',
+  method: 'POST',
+  path: '/erasure-requests/:id/retry',
+  summary: 'Retry the deletion of a failed erasure request',
+  params: z.object({ id: z.uuid() }),
+  responses: { 202: ErasureRequestSchema },
+  ...privacy,
+});
+
+/**
  * DEL-5: everything held about one buyer, as a JSON file streamed to the admin and stored
  * nowhere (the one export DP-8 allows, because the buyer asked for it). Every read is logged.
  */
@@ -146,5 +177,6 @@ export const privacyRoutes = [
   listErasureRequests,
   confirmErasureRequest,
   withdrawErasureRequest,
+  retryErasureRequest,
   exportSubjectAccess,
 ] as const;

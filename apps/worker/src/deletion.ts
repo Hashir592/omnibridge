@@ -1,4 +1,4 @@
-import type { DeletionLog } from '@omnibridge/db';
+import type { DeletionLog, ErasureRequestRepository } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { deletionRunId, piiExpiryJob, type JobQueue, type PhasedHandler } from '@omnibridge/queue';
 import type {
@@ -15,6 +15,8 @@ export interface DeletionDeps {
   /** A client holding the deletion token (VAULT_DELETION_TOKEN), never the worker token. */
   vault: Pick<VaultClient, 'delete'>;
   log: Pick<DeletionLog, 'record'>;
+  /** A-006 (ADR-069): an erasure's request takes its state from this job's outcome. */
+  erasures: Pick<ErasureRequestRepository, 'complete' | 'fail'>;
   logger: Logger;
   now?: () => Date;
 }
@@ -75,6 +77,9 @@ function deletionRun<T>(
         },
         run.deleted.map((d) => ({ piiRef: d.pii_ref, channelAccountId: d.channel_account_id })),
       );
+      // A-006: in the same transaction as the run log, so the request says completed only when
+      // the run is recorded.
+      if (trigger === 'erasure') await deps.erasures.complete(job.ctx, job.jobId, now());
       deps.logger.info(
         {
           event: 'pii.deletion',
@@ -87,6 +92,17 @@ function deletionRun<T>(
         'deletion run done',
       );
       return { records: run.deleted.length };
+    },
+    failed: async (job) => {
+      const { trigger } = what(job.payload);
+      if (trigger !== 'erasure') return;
+      if (await deps.erasures.fail(job.ctx, job.jobId, now())) {
+        // IDs only: the admin sees Failed and retries; M05 may alert on this event.
+        deps.logger.warn(
+          { event: 'pii.erasure_failed', workspaceId: job.envelope.workspace_id, jobId: job.jobId },
+          'erasure deletion failed after its last attempt: an admin must retry',
+        );
+      }
     },
   };
 }

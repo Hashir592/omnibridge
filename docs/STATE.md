@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 18 Nov 2026 by S3 (T-0409).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 19 Nov 2026 by S3 (T-0410).
 
 ## Now
 
@@ -17,6 +17,13 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **T-0407 (S3, high) exact eBay buyer IDs (ADR-066):** PR #92 (auto-merge). db-pii 0006 adds blind-index field `buyer_exact` (trim only); ingest writes it; `/v1/ebay-user-match` uses only it. `buyer` stays case-folded for DEL-4 search. The vault backfills older records at start-up (logged count; a failure is logged, never stops the vault).
 - **T-0408 (S3, normal) withdraw an erasure request (ADR-067):** PR on `task/T-0408-withdraw-erasure` (auto-merge). db-main 0026 (state `withdrawn`, `withdrawn_by/at`, `withdraw_reason` from a fixed list: `wrong_identifiers`, `no_match`, `duplicate`, `buyer_withdrew`, `other`, Hashir 18 Nov). `POST /erasure-requests/:id/withdraw` (admin, open only else 409, reason required, 200). Audit `deletion.run` kind `erasure_withdrawn` with the reason code and count. List `@omnibridge/core` `ERASURE_WITHDRAW_REASONS`.
 - **T-0409 (S3, high) fixes from the S5 PII audit (ADR-068):** PR on `task/T-0409-pii-audit-fixes` (auto-merge). `infra/backup/journal.sh` (journal-only restic run; `--every 900` is the local scheduler), drill test with real restic; confirm claims the request in its own committed transaction, then queues; logger writes `[PIIMARK-REDACTED]` so scans flag scrubbed markers; drill scans full Mailpit sources (`infra/backup/mailpit-raw.mjs`); identifiers must pin one buyer (400); internal `ob_vault` network (vault off `ob_app`); `no-store` on every `/api` response; canary expiry fixed; db-main 0027 and db-pii 0007 validate the NOT VALID checks; db-pii 0007 adds `vault.purge_security_logs()` (6 years, run daily by the vault). **Waiting on S5's re-check comment.**
+- **T-0410 (S3, high) fixes from the external audit (ADR-069):** PR on `task/T-0410-external-audit-fixes` (auto-merge).
+  - A-001: the vault's eBay user match is paged (`cursor`/`next`); web queues every page before the 200, one job per batch keyed by a hash of the notice and its refs. A truncated erasure search answers 422 `too_many_matches` (new error code) and stores nothing.
+  - A-002: jobs sent from a request go through its transaction (`requestDeletion` and the invite notifier pass the bound context); first-admin invite queues inside its transaction.
+  - A-003: the eBay key cache negative-caches 404 kids for 1 h, caps uncached fetches at 5 a minute (a known key is used past its hour while capped), checks the kid's format; the webhook counts the address before a fetch.
+  - A-004: `retention.sh` forgets every db-pii snapshot older than 3 days by its own time (`infra/backup/expired-snapshots.mjs`), then keeps 3 daily.
+  - A-005: `createPiiPool(config, onError)` with pool and client error handlers; the vault logs `db.connection_error`.
+  - A-006: db-main 0028 (`completed`, `failed`, `completed_at`, `failed_at`, `retry_count`) and 0029 (validate). The pii.delete job completes or fails its erasure request (new `failed` hook on phased handlers, last attempt). Overdue until completed. `POST /erasure-requests/:id/retry` (admin, audited `erasure_retried`).
 - **After pulling:** recreate the stack once (`docker compose up -d`) so web, worker and pii-vault join `ob_vault`. Locally, run `infra/backup/journal.sh --every 900` in a spare terminal if you want the 15-minute journal runs.
 - **After pulling (older):** restart pii-vault once (runs the `buyer_exact` backfill). Then run `scripts/dev-secrets.sh` (three new vault tokens). For db-main max_connections 45, restart db-main (compose passes `-c max_connections=45`). An existing db-pii volume keeps vault_app's old cap 8: run `ALTER ROLE vault_app CONNECTION LIMIT 6` or recreate it.
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; short sessions.
@@ -25,10 +32,12 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## M04 plan (S1, 17 Nov)
 
-- Batch 1 and 2 (S3): done. T-0407 and T-0408 (S3): PRs open, auto-merge. **Next: S2 adds the Withdraw action and the `withdrawn` state (handoff 20261118-2200), then T-0406 (S5).**
+- Batch 1 and 2 (S3): done. T-0407 to T-0410 (S3): PRs, auto-merge. **Next: S2 T-0310 (handoff 20261119-1600-S3-to-S2), then the S4 M04 end review.**
 - Batch 2: T-0404 erasure/access requests and eBay deletion (S3, high), T-0405 backups, restore drill and marker scan (S3, high), T-0308 screens (S2), then T-0406 S5 audit, then the S4 M04 end review.
 
 ## Follow-ups noted
+
+- T-0410: the `failed` hook runs when the last attempt throws; a last attempt that ends by pg-boss expiry or a worker crash leaves the erasure request `confirmed` (still shown overdue). A sweep of dead-lettered pii.delete jobs would close it (S1 to decide). The eBay key fetch cap (5 a minute) is global to one web process. M05: alert on `pii.erasure_failed` and `ebay.public_key_throttled`.
 
 - T-0409: **S1** to update ARCHITECTURE §6 and the networks line (vault on `ob_vault`, not `ob_app`). **S2** (with the gcTime trivial fix): the buyer-data screen and its mock should send a strong identifier and show the 400 message; the mock still answers 422 for empty and accepts a postcode alone. S5 asked to lower `MAX_EXPORT_RECORDS` to 100; the ruling did not include it, so it stays 500 (S1 to decide). Accepted after review: two simultaneous confirms each write an audit row; the claim takes a second web-pool connection.
 
@@ -53,8 +62,9 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. S3: the T-0409 PR merges itself on green (if red, S3 fixes it).
-2. S5: re-check T-0409 in one PR comment. Then the S4 M04 end review (with the carry-over file).
+1. S3: the T-0410 PR merges itself on green (if red, S3 fixes it).
+2. S2: T-0310 (screens for the new states and Retry).
+3. S4: the M04 end review (with the carry-over file).
 
 ## Prerequisites outstanding (Hashir)
 

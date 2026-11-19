@@ -265,7 +265,9 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
       headers: headers(admin),
     });
     expect(confirmed.statusCode).toBe(202);
-    expect(confirmed.json()).toMatchObject({ state: 'confirmed', overdue: false });
+    // A-006 (ADR-069): confirmed is in progress, not done: past its due date it stays overdue
+    // until the deletion has completed.
+    expect(confirmed.json()).toMatchObject({ state: 'confirmed', overdue: true });
     expect(sent).toHaveLength(1);
     expect(JSON.stringify(sent)).not.toContain(PII_MARKER);
     expect(sent[0]?.payload.scope).toEqual({
@@ -498,6 +500,116 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
     }
   });
 
+  // A-006 (ADR-069): confirmed is not completed. A failed deletion shows failed and stays overdue
+  // until an admin retries it and it completes; the retry queues the same refs as a new run.
+  it('[DEL-4] a failed deletion leaves the request failed and overdue; an admin retries it (audited) and only completion ends the clock (A-006)', async () => {
+    const server = app();
+    const target = await ingest('order-r1', contact('Rory'), amazonAccount);
+    const created = (
+      await server.inject({
+        method: 'POST',
+        url: '/api/erasure-requests',
+        headers: headers(admin),
+        payload: { identifiers: { email: `${PII_MARKER}rory@example.test` } },
+      })
+    ).json<{ id: string; dueAt: string }>();
+    sent.length = 0;
+    const confirmed = await server.inject({
+      method: 'POST',
+      url: `/api/erasure-requests/${created.id}/confirm`,
+      headers: headers(admin),
+    });
+    expect(confirmed.statusCode).toBe(202);
+    const firstJob = confirmed.json<{ jobId: string }>().jobId;
+    const listed = async () =>
+      (
+        await server.inject({
+          method: 'GET',
+          url: '/api/erasure-requests',
+          headers: headers(admin),
+        })
+      )
+        .json<{ items: Record<string, unknown>[] }>()
+        .items.find((r) => r.id === created.id);
+    const retry = (id: string, userId: string) =>
+      server.inject({
+        method: 'POST',
+        url: `/api/erasure-requests/${id}/retry`,
+        headers: headers(userId),
+      });
+    const savedClock = clock;
+    try {
+      // Only a failed request can be retried.
+      expect((await retry(created.id, admin)).statusCode).toBe(409);
+      // The worker's deletion job fails for the last time (as the pii.delete handler records it).
+      const erasures = new ErasureRequestRepository(db.db);
+      await tenancy.runWorkspace({ workspaceId: A }, (c) => erasures.fail(c, firstJob, clock));
+      clock = new Date(Date.parse(created.dueAt) + DAY);
+      expect(await listed()).toMatchObject({ state: 'failed', overdue: true, retryCount: 0 });
+
+      expect((await retry(created.id, child)).statusCode).toBe(403);
+      expect((await retry(randomUUID(), admin)).statusCode).toBe(404);
+      sent.length = 0;
+      const retried = await retry(created.id, admin);
+      expect(retried.statusCode).toBe(202);
+      const body = retried.json<{ jobId: string; state: string; retryCount: number }>();
+      expect(body).toMatchObject({ state: 'confirmed', retryCount: 1, overdue: true });
+      expect(body.jobId).not.toBe(firstJob);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.key).toBe(`erasure:${created.id}:retry1`);
+      expect(sent[0]?.payload.scope).toEqual({ type: 'refs', pii_refs: [target.pii_ref] });
+      expect((await retry(created.id, admin)).statusCode).toBe(409);
+
+      // The old job's failure arriving late changes nothing: it is not the request's job now.
+      await tenancy.runWorkspace({ workspaceId: A }, (c) => erasures.fail(c, firstJob, clock));
+      expect(await listed()).toMatchObject({ state: 'confirmed', overdue: true });
+
+      await runQueued(sent[0] as Sent);
+      expect(await alive(target.pii_ref)).toBe(false);
+      await tenancy.runWorkspace({ workspaceId: A }, (c) =>
+        erasures.complete(c, body.jobId, clock),
+      );
+      const done = await listed();
+      expect(done).toMatchObject({ state: 'completed', overdue: false, failedAt: null });
+      expect(done?.completedAt).toEqual(clock.toISOString());
+
+      const audit = await tenancy.runWorkspace({ workspaceId: A }, (c) =>
+        new AuditLog(db.db).list(c, {}, { limit: 200 }),
+      );
+      expect(
+        audit.items
+          .filter((e) => e.entityId === created.id)
+          .map((e) => (e.after as { kind?: string } | null)?.kind),
+      ).toEqual(expect.arrayContaining(['erasure_confirmed', 'erasure_retried']));
+    } finally {
+      clock = savedClock;
+      await server.close();
+    }
+  });
+
+  it('[DEL-4] a confirmed request with no matches is completed at once, so it is never overdue (A-006)', async () => {
+    const server = app();
+    const created = (
+      await server.inject({
+        method: 'POST',
+        url: '/api/erasure-requests',
+        headers: headers(admin),
+        payload: { identifiers: { email: `${PII_MARKER}nobody-${randomUUID()}@example.test` } },
+      })
+    ).json<{ id: string; matchCount: number }>();
+    expect(created.matchCount).toBe(0);
+    sent.length = 0;
+    const res = await server.inject({
+      method: 'POST',
+      url: `/api/erasure-requests/${created.id}/confirm`,
+      headers: headers(admin),
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ state: 'completed', overdue: false, jobId: null });
+    expect(sent).toEqual([]);
+    await server.close();
+  });
+
   it('[DEL-5][DEL-4] a postcode alone is refused for an access export and an erasure; a name with it, or one strong identifier, is not (S5-20261118-04)', async () => {
     const server = app();
     const post = (url: string, identifiers: Record<string, string>) =>
@@ -673,6 +785,87 @@ describe('erasure, access export and eBay deletion [DEL-4][DEL-5][AT-10]', () =>
     expect(text).not.toContain(`"${username}"`);
     await server.close();
   });
+
+  // A-001 (ADR-069): the auditor matched 5,001 records of one eBay user and 5,000 were deleted:
+  // the match stopped at 5,000 with no word of the rest. Every record must be found (paged) and
+  // queued before the 200, and a deletion path that hits a limit must fail loudly.
+  it('[AT-10][DEL-4] 5,001 records of one eBay user: an erasure refuses a partial match, and the eBay notice deletes every one (A-001)', async () => {
+    const server = app();
+    const { username } = SAMPLE.message.notification.data;
+    const refs: string[] = [];
+    for (let i = 0; i < 5_001; i += 50) {
+      const batch = await Promise.all(
+        Array.from({ length: Math.min(50, 5_001 - i) }, (_, j) =>
+          clients.worker.ingest({
+            workspace_id: A,
+            kind: 'ebay_feedback',
+            channel_account_id: ebayAccount,
+            subject_type: 'feedback',
+            subject_id: `fb-a001-${String(i + j)}`,
+            fields: { buyer_username: username },
+          }),
+        ),
+      );
+      refs.push(...batch.map((r) => r.pii_ref));
+    }
+    const remaining = async () => {
+      const c = await owner.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [A]);
+        const res = await c.query<{ n: string }>(
+          'SELECT count(*) AS n FROM vault.records WHERE pii_ref = ANY($1::uuid[])',
+          [refs],
+        );
+        await c.query('COMMIT');
+        return Number(res.rows[0]?.n);
+      } finally {
+        c.release();
+      }
+    };
+    expect(await remaining()).toBe(5_001);
+
+    // An erasure search that matches more than one answer holds is refused, not stored short.
+    const listed = async () =>
+      (
+        await server.inject({
+          method: 'GET',
+          url: '/api/erasure-requests',
+          headers: headers(admin),
+        })
+      ).json<{ items: unknown[] }>().items.length;
+    const before = await listed();
+    const erasure = await server.inject({
+      method: 'POST',
+      url: '/api/erasure-requests',
+      headers: headers(admin),
+      payload: { identifiers: { buyer: username } },
+    });
+    expect(erasure.statusCode).toBe(422);
+    expect(erasure.json()).toMatchObject({ code: 'too_many_matches' });
+    expect(await listed()).toBe(before);
+
+    // The eBay notice pages through every match and queues them all before it answers.
+    sent.length = 0;
+    const res = await server.inject({
+      method: 'POST',
+      url: '/webhooks/ebay/account-deletion',
+      headers: { 'content-type': 'application/json', 'x-ebay-signature': SAMPLE.signature },
+      payload: JSON.stringify(SAMPLE.message),
+    });
+    expect(res.statusCode).toBe(200);
+    const queued = sent.flatMap((s) =>
+      s.payload.scope.type === 'refs' ? s.payload.scope.pii_refs : [],
+    );
+    expect(queued).toHaveLength(5_001);
+    expect(new Set(queued)).toEqual(new Set(refs));
+    expect(new Set(sent.map((s) => s.key)).size).toBe(sent.length);
+    // Each key is a fixed-length hash, so a long notice id never exceeds the 200-character cap.
+    expect(sent.every((s) => s.key.length <= 200)).toBe(true);
+    for (const s of sent) await runQueued(s);
+    expect(await remaining()).toBe(0);
+    await server.close();
+  }, 300_000);
 
   it('[DEL-4][DEL-5] no PII reached db-main or the logs', async () => {
     expect(await scanDatabaseForMarkers(main)).toEqual([]);

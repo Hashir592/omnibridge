@@ -359,6 +359,8 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         confirmErasureRequest: { params: { id: b.erasure } },
         // T-0408: nor withdrawn from A.
         withdrawErasureRequest: { params: { id: b.erasure }, body: { reason: 'other' } },
+        // T-0410 (A-006): nor retried from A.
+        retryErasureRequest: { params: { id: b.erasure } },
         exportSubjectAccess: {
           body: { identifiers: { email: 'walker@example.test' } },
           searchText: true,

@@ -478,6 +478,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/erasure-requests/{id}/retry': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Retry the deletion of a failed erasure request */
+    post: operations['retryErasureRequest'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/erasure-requests/{id}/withdraw': {
     parameters: {
       query?: never;
@@ -881,9 +898,11 @@ export interface components {
       subjectType: string;
     };
     ErasureRequest: {
+      completedAt: string | null;
       confirmedAt: string | null;
       /** Format: date-time */
       dueAt: string;
+      failedAt: string | null;
       /** Format: uuid */
       id: string;
       jobId: string | null;
@@ -891,16 +910,19 @@ export interface components {
       overdue: boolean;
       /** Format: date-time */
       requestedAt: string;
+      retryCount: number;
       /** @enum {string} */
-      state: 'open' | 'confirmed' | 'withdrawn';
+      state: 'open' | 'confirmed' | 'completed' | 'failed' | 'withdrawn';
       withdrawnAt: string | null;
       withdrawReason:
         ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
     };
     ErasureRequestCreated: {
+      completedAt: string | null;
       confirmedAt: string | null;
       /** Format: date-time */
       dueAt: string;
+      failedAt: string | null;
       /** Format: uuid */
       id: string;
       jobId: string | null;
@@ -909,17 +931,20 @@ export interface components {
       overdue: boolean;
       /** Format: date-time */
       requestedAt: string;
+      retryCount: number;
       /** @enum {string} */
-      state: 'open' | 'confirmed' | 'withdrawn';
+      state: 'open' | 'confirmed' | 'completed' | 'failed' | 'withdrawn';
       truncated: boolean;
       withdrawnAt: string | null;
       withdrawReason:
         ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
     };
     ErasureRequestCreatedInput: {
+      completedAt: string | null;
       confirmedAt: string | null;
       /** Format: date-time */
       dueAt: string;
+      failedAt: string | null;
       /** Format: uuid */
       id: string;
       jobId: string | null;
@@ -928,17 +953,20 @@ export interface components {
       overdue: boolean;
       /** Format: date-time */
       requestedAt: string;
+      retryCount: number;
       /** @enum {string} */
-      state: 'open' | 'confirmed' | 'withdrawn';
+      state: 'open' | 'confirmed' | 'completed' | 'failed' | 'withdrawn';
       truncated: boolean;
       withdrawnAt: string | null;
       withdrawReason:
         ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
     };
     ErasureRequestInput: {
+      completedAt: string | null;
       confirmedAt: string | null;
       /** Format: date-time */
       dueAt: string;
+      failedAt: string | null;
       /** Format: uuid */
       id: string;
       jobId: string | null;
@@ -946,8 +974,9 @@ export interface components {
       overdue: boolean;
       /** Format: date-time */
       requestedAt: string;
+      retryCount: number;
       /** @enum {string} */
-      state: 'open' | 'confirmed' | 'withdrawn';
+      state: 'open' | 'confirmed' | 'completed' | 'failed' | 'withdrawn';
       withdrawnAt: string | null;
       withdrawReason:
         ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
@@ -1085,7 +1114,8 @@ export interface components {
         | 'unsupported_media_type'
         | 'rate_limited'
         | 'internal_error'
-        | 'service_unavailable';
+        | 'service_unavailable'
+        | 'too_many_matches';
       detail?: string;
       errors?: {
         /** @enum {string} */
@@ -1113,7 +1143,8 @@ export interface components {
         | 'unsupported_media_type'
         | 'rate_limited'
         | 'internal_error'
-        | 'service_unavailable';
+        | 'service_unavailable'
+        | 'too_many_matches';
       detail?: string;
       errors?: {
         /** @enum {string} */
@@ -2592,6 +2623,46 @@ export interface operations {
     };
   };
   confirmErasureRequest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErasureRequest'];
+        };
+      };
+    };
+  };
+  retryErasureRequest: {
     parameters: {
       query?: never;
       header?: never;

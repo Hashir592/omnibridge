@@ -127,6 +127,68 @@ describe('JobQueue per-account lease', () => {
   });
 });
 
+// A-006 (ADR-069): confirmed is not completed. A phased handler learns when its job has failed
+// for the last time, in the job's tenant transaction, so the work it stands for can say failed.
+describe('JobQueue final failure of a phased handler (A-006)', () => {
+  const phased = defineJob({ type: 'test.phased', payload: z.object({}) });
+  const phasedJob = (retryCount: number) =>
+    ({
+      id: 'job-final',
+      name: phased.type,
+      data: {
+        workspace_id: WORKSPACE,
+        idempotency_key: 'k',
+        attempt: 0,
+        type: phased.type,
+        payload: {},
+      },
+      retryCount,
+      retryLimit: 2,
+    }) as unknown as JobWithMetadata<unknown>;
+
+  async function setup(failedHook: (jobId: string, ctx: TenantContext) => Promise<void>) {
+    const records: JobRecordStore = {
+      createAndEnqueue: () => Promise.reject(new Error('unused')),
+      update: () => Promise.resolve(),
+    };
+    let run: ((jobs: JobWithMetadata<unknown>[]) => Promise<void>) | undefined;
+    const boss = {
+      work: (_name: string, _opts: unknown, cb: typeof run) => {
+        run = cb;
+        return Promise.resolve('worker-1');
+      },
+    } as unknown as PgBoss;
+    const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
+    const { tenancy, opened } = spyTenancy();
+    const queue = new JobQueue({ boss, records, tenancy, logger });
+    await queue.work(phased, {
+      prepare: () => Promise.reject(new Error('vault down')),
+      commit: () => Promise.resolve({}),
+      failed: (job) => failedHook(job.jobId, job.ctx),
+    });
+    return { run: (j: JobWithMetadata<unknown>) => run?.([j]), opened };
+  }
+
+  it('[DEL-4] the failed hook runs once, on the last attempt only, in a tenant transaction', async () => {
+    const calls: { jobId: string; workspaceId: string }[] = [];
+    const { run, opened } = await setup((jobId, ctx) => {
+      calls.push({ jobId, workspaceId: ctx.workspaceId });
+      return Promise.resolve();
+    });
+    await expect(run(phasedJob(0))).rejects.toThrow('vault down');
+    await expect(run(phasedJob(1))).rejects.toThrow('vault down');
+    expect(calls).toEqual([]);
+    await expect(run(phasedJob(2))).rejects.toThrow('vault down');
+    expect(calls).toEqual([{ jobId: 'job-final', workspaceId: WORKSPACE }]);
+    expect(opened).toEqual([{ workspaceId: WORKSPACE }]);
+  });
+
+  it('[DEL-4] a failing hook never replaces the handler error', async () => {
+    const { run } = await setup(() => Promise.reject(new Error('db down')));
+    await expect(run(phasedJob(2))).rejects.toThrow('vault down');
+  });
+});
+
 describe('JobQueue tenant transactions (TEN-1)', () => {
   const plain = defineJob({ type: 'test.plain', payload: z.object({}) });
   const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });

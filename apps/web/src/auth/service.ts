@@ -6,6 +6,7 @@ import {
   type AuditAction,
   type PlatformActor,
   type SessionActor,
+  type TenantContext,
   type TenantRunner,
 } from '@omnibridge/core';
 import type { AuditLog, AuthStore, AuthUser, SessionStage, StoredSession } from '@omnibridge/db';
@@ -60,8 +61,11 @@ export interface AuthNotifier {
   }): Promise<void>;
   /** The worker makes the reset token and emails the link, so the token never sits in a queue. */
   passwordReset(input: { userId: string; workspaceId: string }): Promise<void>;
-  /** The worker makes the invite token and mails the link (USR-1). */
-  invite(input: { workspaceId: string; inviteId: string }): Promise<void>;
+  /**
+   * The worker makes the invite token and mails the link (USR-1). `within` is the request's bound
+   * context: the job then commits with the invite and is never seen before it (A-002).
+   */
+  invite(input: { workspaceId: string; inviteId: string; within?: TenantContext }): Promise<void>;
 }
 
 export interface AuthServiceOptions {

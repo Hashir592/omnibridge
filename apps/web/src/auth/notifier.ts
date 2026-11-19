@@ -10,6 +10,11 @@ import type { AuthNotifier } from './service.ts';
  * Auth mail through the queue (ADR-050): web enqueues, the worker sends. Every job carries a
  * workspace (invariant 12), so a lock notice goes out once per workspace of the user, to that
  * workspace's admins and the user.
+ *
+ * A-002 (ADR-069): a job must never be visible before the data it reads. The invite job goes
+ * through the request's transaction (`within`). The lock notice and the reset mail are sent
+ * after the lock and the reset allowance have committed in their own calls, so they read only
+ * committed data.
  */
 export function queueNotifier(
   queue: Pick<JobQueue, 'send'>,
@@ -34,9 +39,12 @@ export function queueNotifier(
         payload: { user_id: userId },
       });
     },
-    async invite({ workspaceId, inviteId }) {
+    async invite({ workspaceId, inviteId, within }) {
+      if (within !== undefined && within.workspaceId !== workspaceId) {
+        throw new Error('invite job: the request context is for another workspace');
+      }
       await queue.send(authInviteJob, {
-        ctx: { workspaceId, companyIds: [] },
+        ctx: within ?? { workspaceId, companyIds: [] },
         idempotencyKey: `invite:${inviteId}`,
         payload: { invite_id: inviteId },
       });

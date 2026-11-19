@@ -66,6 +66,7 @@ export {
   exportSubjectAccess,
   listErasureRequests,
   privacyRoutes,
+  retryErasureRequest,
   withdrawErasureRequest,
 } from './routes/privacy.ts';
 export {

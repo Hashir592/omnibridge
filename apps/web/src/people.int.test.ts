@@ -104,7 +104,8 @@ describe('users, ticks and invites over HTTP (T-0204)', () => {
         store: new AuthStore(main.db),
         notifier: {
           invite: (input) => {
-            invited.push(input);
+            // The request's context rides along (A-002); the test records what the mail names.
+            invited.push({ workspaceId: input.workspaceId, inviteId: input.inviteId });
             return Promise.resolve();
           },
         },

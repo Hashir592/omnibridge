@@ -21,6 +21,9 @@ export interface DeletionRequest {
  * expiry (the hourly sweep), cancellation (M10), erasure (T-0404), the eBay deletion notice
  * (T-0404), Amazon revocation (M07), eBay termination (M08) and workspace closure (M05). It
  * refuses a scope that does not fit the trigger, and queues IDs only (invariant 7a).
+ *
+ * A-002 (ADR-069): `ctx` is passed to the queue as it is, so a caller's bound context (a request
+ * or a job transaction) carries the job: it becomes visible only when that transaction commits.
  */
 export async function requestDeletion(
   queue: Pick<JobQueue, 'send'>,
@@ -33,7 +36,7 @@ export async function requestDeletion(
   const channelAccountId =
     request.scope.type === 'channel_account' ? request.scope.channel_account_id : undefined;
   return queue.send(piiDeleteJob, {
-    ctx: { workspaceId: ctx.workspaceId, companyIds: [] },
+    ctx,
     idempotencyKey: `${request.trigger}:${request.idempotencyKey}`,
     payload: { trigger: request.trigger, scope: request.scope },
     ...(channelAccountId === undefined ? {} : { channelAccountId }),

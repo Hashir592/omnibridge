@@ -37,10 +37,18 @@ describe('deletion job phases', () => {
           return Promise.resolve();
         },
       },
+      erasures: {
+        complete: (_ctx, jobId) => {
+          calls.push(`completed:${jobId}`);
+          return Promise.resolve(true);
+        },
+        fail: () => Promise.resolve(true),
+      },
       logger,
     };
     const handler = piiDeleteHandler(deps);
     const job: PreparingJob<Payload> = {
+      jobId: 'job-1',
       envelope: {
         workspace_id: workspaceId,
         idempotency_key: 'erasure:1',
@@ -57,6 +65,8 @@ describe('deletion job phases', () => {
     expect(calls.every((c) => c.startsWith('vault:'))).toBe(true);
     const result = await handler.commit({ ...job, ctx: { workspaceId, companyIds: [] } }, prepared);
     expect(calls[2]).toBe(`log:${prepared.runId}:1`);
+    // A-006: an erasure's request is completed in the same transaction as the run log.
+    expect(calls[3]).toBe('completed:job-1');
     expect(result).toEqual({ records: 1 });
   });
 });

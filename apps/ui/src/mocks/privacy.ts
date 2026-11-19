@@ -176,6 +176,10 @@ const asBody = (r: StoredRequest): ErasureRequest => {
     state: r.state,
     matchCount: r.piiRefs.length,
     confirmedAt: r.confirmedAt,
+    // T-0410 contract fields; the states they drive come with T-0310 (S2).
+    completedAt: null,
+    failedAt: null,
+    retryCount: 0,
     jobId: r.jobId,
     withdrawnAt: r.withdrawnAt ?? null,
     withdrawReason: r.withdrawReason ?? null,

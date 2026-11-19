@@ -2,8 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import type { Logger } from '@omnibridge/logger';
-import { migratePii, type PoolConfig } from '@omnibridge/pii-db';
-import pg from 'pg';
+import { createPiiPool, migratePii, type PoolConfig } from '@omnibridge/pii-db';
 import { buildVaultApp } from './app.ts';
 import { ServiceTokens } from './auth.ts';
 import { DeletionJournal, DeletionService } from './deletion.ts';
@@ -31,7 +30,9 @@ export async function startTestVault(options: {
   now?: () => Date;
 }): Promise<TestVault> {
   await migratePii(options.owner);
-  const pool = new pg.Pool({ ...options.app, max: 4 });
+  const pool = createPiiPool({ ...options.app, max: 4 }, (err) => {
+    options.logger.warn({ event: 'db.connection_error', err }, 'db-pii connection error');
+  });
   const tokens = {
     web: randomBytes(32).toString('base64url'),
     worker: randomBytes(32).toString('base64url'),

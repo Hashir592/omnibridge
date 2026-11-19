@@ -1,5 +1,6 @@
 import { createLogger } from '@omnibridge/logger';
 import {
+  EbayKeyNotFound,
   ebayPublicKeyFetcher,
   PublicKeyCache,
   verifyNotification,
@@ -29,6 +30,7 @@ describe('eBay adapter against the provider mocks (EBAY-2)', () => {
       }),
     );
     expect(await verifyNotification(SAMPLE.message, SAMPLE.signature, keys.get)).toBe(true);
-    await expect(keys.get('unknown-kid')).rejects.toThrow(/HTTP 404/);
+    // The mock answers 404 for a kid it does not know, as eBay does: an unknown kid (A-003).
+    await expect(keys.get('unknown-kid')).rejects.toBeInstanceOf(EbayKeyNotFound);
   });
 });

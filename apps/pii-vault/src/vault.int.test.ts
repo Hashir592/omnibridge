@@ -558,6 +558,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(byWorkspace[E2]).toEqual([order.pii_ref]);
     expect(await clients.web.ebayUserMatch({ username: 'nobody-at-all' })).toEqual({
       workspaces: [],
+      next: null,
     });
     const refused = await clients.worker.ebayUserMatch({ username: user }).catch((e: unknown) => e);
     expect((refused as VaultError).status).toBe(403);
@@ -567,6 +568,49 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       `SELECT purpose, result_count FROM vault.access_log WHERE purpose = 'ebay_account_deletion'`,
     );
     expect(logged).toEqual([{ purpose: 'ebay_account_deletion', result_count: '1' }]);
+  });
+
+  // A-001 (ADR-069): the match was cut at 5,000 with no word of the rest. Paged now: every ref
+  // comes back exactly once, across workspaces, and `next` is null only after the last one.
+  it('[AT-10] the eBay user match pages through every record in every workspace, each once', async () => {
+    const user = `${PII_MARKER}ebay-paged-${randomUUID().slice(0, 6)}`;
+    const P1 = randomUUID();
+    const P2 = randomUUID();
+    const expected: string[] = [];
+    for (const [ws, n] of [
+      [P1, 4],
+      [P2, 3],
+    ] as const) {
+      for (let i = 0; i < n; i += 1) {
+        const r = await clients.worker.ingest({
+          workspace_id: ws,
+          kind: 'ebay_feedback',
+          channel_account_id: account,
+          subject_type: 'feedback',
+          subject_id: `fb-page-${String(i)}`,
+          fields: { buyer_username: user },
+        });
+        expected.push(r.pii_ref);
+      }
+    }
+    const seen: string[] = [];
+    let cursor: { workspace_id: string; pii_ref: string } | null = null;
+    let pages = 0;
+    do {
+      const page = await vault.ebayUserMatch(
+        { username: user, ...(cursor === null ? {} : { cursor }) },
+        { caller: 'web' },
+        3,
+      );
+      const refs = page.workspaces.flatMap((w) => w.matches.map((m) => m.pii_ref));
+      expect(refs.length).toBeLessThanOrEqual(3);
+      seen.push(...refs);
+      cursor = page.next;
+      pages += 1;
+    } while (cursor !== null && pages < 10);
+    expect(cursor).toBeNull();
+    expect(seen).toHaveLength(expected.length);
+    expect(new Set(seen)).toEqual(new Set(expected));
   });
 
   it("[AT-10] a notice for 'AbC' matches 'AbC' and leaves 'abc' (ADR-066: exact, trim only)", async () => {

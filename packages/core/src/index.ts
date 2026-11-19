@@ -1,6 +1,12 @@
 export { cacheKey, companySetHash, type CacheKeyInput, type CompanySetHash } from './cache-key.ts';
 export { readSecretFile, requireEnv } from './env.ts';
-export { ERASURE_WITHDRAW_REASONS, type ErasureWithdrawReason } from './erasure.ts';
+export {
+  ERASURE_STATES,
+  ERASURE_WITHDRAW_REASONS,
+  erasureClosed,
+  type ErasureState,
+  type ErasureWithdrawReason,
+} from './erasure.ts';
 export { isUuid, UUID_PATTERN } from './ids.ts';
 export {
   ApiError,

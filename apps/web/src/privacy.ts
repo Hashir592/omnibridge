@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { ApiError } from '@omnibridge/core';
+import { ApiError, erasureClosed } from '@omnibridge/core';
 import type { privacyRoutes } from '@omnibridge/contract';
 import type { AuditLog, ErasureRequest, ErasureRequestRepository } from '@omnibridge/db';
 import { requestDeletion, type JobQueue } from '@omnibridge/queue';
@@ -17,7 +17,7 @@ export interface PrivacyOptions {
   vault: Pick<VaultClient, 'search' | 'mask' | 'readFull'>;
   erasures: Pick<
     ErasureRequestRepository,
-    'create' | 'get' | 'list' | 'claim' | 'setJob' | 'withdraw'
+    'create' | 'get' | 'list' | 'claim' | 'setJob' | 'withdraw' | 'completeEmpty' | 'retry'
   >;
   queue: Pick<JobQueue, 'send'>;
   audit: Pick<AuditLog, 'record'>;
@@ -43,10 +43,14 @@ function requestBody(request: ErasureRequest, now: Date) {
     id: request.id,
     requestedAt: request.requestedAt.toISOString(),
     dueAt: request.dueAt.toISOString(),
-    overdue: request.state === 'open' && now.getTime() > request.dueAt.getTime(),
+    // A-006 (ADR-069): the one-month clock (DEL-4) runs until the deletion has completed.
+    overdue: !erasureClosed(request.state) && now.getTime() > request.dueAt.getTime(),
     state: request.state,
     matchCount: request.piiRefs.length,
     confirmedAt: request.confirmedAt?.toISOString() ?? null,
+    completedAt: request.completedAt?.toISOString() ?? null,
+    failedAt: request.failedAt?.toISOString() ?? null,
+    retryCount: request.retryCount,
     jobId: request.jobId,
     withdrawnAt: request.withdrawnAt?.toISOString() ?? null,
     withdrawReason: request.withdrawReason,
@@ -62,6 +66,7 @@ export function privacyHandlers(
       listErasureRequests: unavailable,
       confirmErasureRequest: unavailable,
       withdrawErasureRequest: unavailable,
+      retryErasureRequest: unavailable,
       exportSubjectAccess: unavailable,
     };
   }
@@ -76,6 +81,16 @@ export function privacyHandlers(
         query: body.identifiers,
         actorUserId: session.userId,
       });
+      // A-001 (ADR-069): a deletion path never stops silently at a limit. A request holding only
+      // the first matches would leave the rest of the buyer's data, so none is stored.
+      if (found.truncated) {
+        throw new ApiError({
+          status: 422,
+          code: 'too_many_matches',
+          detail:
+            'These identifiers match too many records. Add another identifier and search again.',
+        });
+      }
       const refs = found.matches.map((m) => m.pii_ref);
       const masked = new Map<string, Record<string, string>>();
       for (let i = 0; i < refs.length; i += MASK_BATCH) {
@@ -146,7 +161,10 @@ export function privacyHandlers(
         claimed = current;
       }
       let confirmed = claimed;
-      if (claimed.piiRefs.length > 0) {
+      if (claimed.piiRefs.length === 0) {
+        // A-006: nothing to delete, so no job: the request is done now and never overdue.
+        confirmed = (await o.erasures.completeEmpty(tenant, claimed.id, at)) ?? claimed;
+      } else {
         // One deletion of exactly the refs the admin saw, keyed by the request so it runs once.
         const job = await requestDeletion(o.queue, tenant, {
           trigger: 'erasure',
@@ -167,6 +185,41 @@ export function privacyHandlers(
         ip: request.ip,
       });
       return { status: 202, body: requestBody(confirmed, at) };
+    },
+
+    // A-006 (ADR-069): a failed deletion is run again for the same refs, as a new run (a new key,
+    // so a new run id). One request transaction: the state change, the job (A-002: visible only
+    // on commit), its id and the audit row commit together, or none does.
+    retryErasureRequest: async ({ params, session, tenant, request }) => {
+      const existing = await o.erasures.get(tenant, params.id);
+      if (existing === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      const at = now();
+      const retried =
+        existing.state === 'failed' ? await o.erasures.retry(tenant, existing.id) : undefined;
+      if (retried === undefined) {
+        throw new ApiError({
+          status: 409,
+          code: 'conflict',
+          detail: 'Only a failed erasure request can be retried.',
+        });
+      }
+      const job = await requestDeletion(o.queue, tenant, {
+        trigger: 'erasure',
+        scope: { type: 'refs', pii_refs: retried.piiRefs },
+        idempotencyKey: `${retried.id}:retry${String(retried.retryCount)}`,
+      });
+      const queued = (await o.erasures.setJob(tenant, retried.id, job.id)) ?? {
+        ...retried,
+        jobId: job.id,
+      };
+      await o.audit.record(tenant, {
+        action: 'deletion.run',
+        actor: { kind: 'user', userId: session.userId },
+        entityId: retried.id,
+        after: { kind: 'erasure_retried', row_count: retried.piiRefs.length },
+        ip: request.ip,
+      });
+      return { status: 202, body: requestBody(queued, at) };
     },
 
     // ADR-067: an open request is closed with a reason code; nothing is queued or deleted.

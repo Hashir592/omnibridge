@@ -12,7 +12,10 @@ const logger = createLogger({ service: 'pii-vault', version });
 // The PII master key lives only here (invariant 9); it wraps every workspace's data and index keys.
 const piiKeyring = loadKeyring('pii');
 logger.info({ event: 'keyring.loaded', kekVersion: piiKeyring.activeVersion }, 'PII KEK loaded');
-const pool = createPiiPool(piiDbConfig('omnibridge-pii-vault', 4));
+// A-005: a connection the server ends is logged (the logger scrubs it), never an uncaught exception.
+const pool = createPiiPool(piiDbConfig('omnibridge-pii-vault', 4), (err) => {
+  logger.warn({ event: 'db.connection_error', err }, 'db-pii connection error');
+});
 
 // One token per caller (invariant 8); each is a Docker secret, never an env value or a log line.
 const tokens = new ServiceTokens({

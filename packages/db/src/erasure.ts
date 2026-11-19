@@ -1,5 +1,5 @@
-import type { ErasureWithdrawReason, TenantContext } from '@omnibridge/core';
-import type { Kysely, Selectable } from 'kysely';
+import type { ErasureState, ErasureWithdrawReason, TenantContext } from '@omnibridge/core';
+import { sql, type Kysely, type Selectable } from 'kysely';
 import type { ErasureRequestsTable, MainDb } from './schema.ts';
 import { withOwnTenantTransaction, withTenantTransaction } from './tenant.ts';
 
@@ -19,13 +19,18 @@ export interface ErasureRequest {
   requestedAt: Date;
   dueAt: Date;
   piiRefs: string[];
-  state: 'open' | 'confirmed' | 'withdrawn';
+  state: ErasureState;
   confirmedBy: string | null;
   confirmedAt: Date | null;
   jobId: string | null;
   withdrawnBy: string | null;
   withdrawnAt: Date | null;
   withdrawReason: ErasureWithdrawReason | null;
+  /** A-006 (ADR-069): when its deletion ran, or when its last attempt failed. */
+  completedAt: Date | null;
+  failedAt: Date | null;
+  /** How often an admin has retried a failed deletion. */
+  retryCount: number;
 }
 
 const toRequest = (r: Selectable<ErasureRequestsTable>): ErasureRequest => ({
@@ -41,6 +46,9 @@ const toRequest = (r: Selectable<ErasureRequestsTable>): ErasureRequest => ({
   withdrawnBy: r.withdrawn_by,
   withdrawnAt: r.withdrawn_at,
   withdrawReason: r.withdraw_reason,
+  completedAt: r.completed_at,
+  failedAt: r.failed_at,
+  retryCount: Number(r.retry_count),
 });
 
 /**
@@ -150,6 +158,86 @@ export class ErasureRequestRepository {
         .where('workspace_id', '=', ctx.workspaceId)
         .where('id', '=', id)
         .where('state', '=', 'open')
+        .returningAll()
+        .executeTakeFirst();
+      return row === undefined ? undefined : toRequest(row);
+    });
+  }
+
+  /**
+   * A-006 (ADR-069): the deletion job `jobId` has run; the request it belongs to is completed.
+   * Called by the job in its own tenant transaction (no user named). Only the request's current
+   * job counts, so a late outcome of a replaced job changes nothing. False when none matched.
+   */
+  async complete(ctx: TenantContext, jobId: string, at: Date): Promise<boolean> {
+    return this.#outcome(ctx, jobId, { state: 'completed', completed_at: at });
+  }
+
+  /** A-006: the last attempt of the deletion job `jobId` failed; an admin must retry. */
+  async fail(ctx: TenantContext, jobId: string, at: Date): Promise<boolean> {
+    return this.#outcome(ctx, jobId, { state: 'failed', failed_at: at });
+  }
+
+  async #outcome(
+    ctx: TenantContext,
+    jobId: string,
+    set: { state: 'completed'; completed_at: Date } | { state: 'failed'; failed_at: Date },
+  ): Promise<boolean> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const res = await trx
+        .updateTable('app.erasure_requests')
+        .set(set)
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('job_id', '=', jobId)
+        .where('state', '=', 'confirmed')
+        .executeTakeFirst();
+      return res.numUpdatedRows > 0n;
+    });
+  }
+
+  /**
+   * A-006: a confirmed request with no matches has nothing to delete and no job: it is completed
+   * at once, so it never shows as in progress or overdue. Undefined when it is not such a request.
+   */
+  async completeEmpty(
+    ctx: TenantContext,
+    id: string,
+    at: Date,
+  ): Promise<ErasureRequest | undefined> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const row = await trx
+        .updateTable('app.erasure_requests')
+        .set({ state: 'completed', completed_at: at })
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('id', '=', id)
+        .where('state', '=', 'confirmed')
+        .where('job_id', 'is', null)
+        .where(sql<boolean>`cardinality(pii_refs) = 0`)
+        .returningAll()
+        .executeTakeFirst();
+      return row === undefined ? undefined : toRequest(row);
+    });
+  }
+
+  /**
+   * A-006: an admin retries a failed request. In the request's own transaction: it goes back to
+   * confirmed with no job (the caller queues a new run of the same refs and records it with
+   * `setJob`), and the retry is counted. The row lock makes a second retry wait, then find it no
+   * longer failed. Undefined when it is not failed.
+   */
+  async retry(ctx: TenantContext, id: string): Promise<ErasureRequest | undefined> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const row = await trx
+        .updateTable('app.erasure_requests')
+        .set({
+          state: 'confirmed',
+          failed_at: null,
+          job_id: null,
+          retry_count: sql<number>`retry_count + 1`,
+        })
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('id', '=', id)
+        .where('state', '=', 'failed')
         .returningAll()
         .executeTakeFirst();
       return row === undefined ? undefined : toRequest(row);

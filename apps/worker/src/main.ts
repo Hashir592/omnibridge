@@ -6,6 +6,7 @@ import {
   AuditLog,
   AuthStore,
   createMainDb,
+  ErasureRequestRepository,
   FileRepository,
   InviteRepository,
   JobLeaseRepository,
@@ -104,6 +105,7 @@ const deletionDeps = {
     timeoutMs: 60_000,
   }),
   log: new DeletionLog(handlerDb.db),
+  erasures: new ErasureRequestRepository(handlerDb.db),
   logger: log,
 };
 await registerHandlers(queue, {
