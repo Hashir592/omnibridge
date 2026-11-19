@@ -156,7 +156,7 @@ Company scoping for child users uses a second RLS policy on tables that have `co
 
 ### 6.2 PII vault and deletion (ADR-007, M04)
 
-pii-vault is a small Fastify service on the `ob_pii` network, and only it can reach `db-pii`. Web and worker reach it over `ob_app`, using per-caller service tokens that carry capabilities.
+pii-vault is a small Fastify service on the `ob_pii` network, and only it can reach `db-pii`. Web and worker reach it over the internal `ob_vault` network (ADR-068; the vault is not on `ob_app`), using per-caller service tokens that carry capabilities.
 
 - **Search** (ORD-2, DEL-4) uses blind indexes: HMAC-SHA256 of the normalised postcode, email, phone and name, under a per-workspace index key.
 - **Hourly expiry job:** deletes PII whose `delete_after` has passed. `delete_after` is delivery (or dispatch) + `pii_expiry_days`, default 25 (PRD v1.2, P-010), so backups are clear by day 30.
@@ -207,7 +207,7 @@ Adapters implement `ChannelAdapter`, `AdsAdapter` and `ShippingProvider` (SHIP-3
 
 ### Isolation (OPS-8, OPS-9)
 
-OmniBridge has its own Linux user `omnibridge`, directory `/srv/omnibridge`, Compose project `omnibridge`, networks (`ob_edge`, `ob_app`, `ob_db` and `ob_pii` internal, `scan_ob`), secrets, backups and deploy pipeline. Module order is in `docs/plan/MODULES.md`; tasks are in `docs/backlog.json`.
+OmniBridge has its own Linux user `omnibridge`, directory `/srv/omnibridge`, Compose project `omnibridge`, networks (`ob_edge`, `ob_app`, `ob_db`, `ob_pii` and `ob_vault` internal, `scan_ob`), secrets, backups and deploy pipeline. Module order is in `docs/plan/MODULES.md`; tasks are in `docs/backlog.json`.
 
 ### Shared host layer (P-004)
 
