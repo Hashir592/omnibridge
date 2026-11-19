@@ -1,70 +1,44 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 19 Nov 2026 by S2 (T-0310).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 19 Nov 2026 by S1 (M04 closed, M05 planned, ADR-070).
 
 ## Now
 
 - **Phase:** B, local Docker only. Plan of 12 Nov 2026 (ADR-054): three releases, order in `docs/plan/MODULES.md`.
-- **Closed:** M01, M02 (S4 M02 end APPROVED, ADR-064), M03. M06 site pieces merged; waiting on the client's legal details.
-- **M04 batch 1 (S3) done; halfway checkpoint reviewed (S4), fixes in a PR:** report `docs/reviews/M04-halfway-report.md`.
-  - picomatch audit: PR #80 merged. No fixed release exists, so there is a time-boxed exception in `scripts/lib/audit-exceptions.json` (GHSA-fc5q-39xc-vjpf only, **expires 1 Dec 2026**, then the gate goes red again). **PS-026 open for S1.**
-  - T-0401 M02 carry-overs: PR #81 merged. Migrations 0021 (admin-only member writes in the DB, job company scope, one-call invite + password), 0022, 0023 (drop of the 0020 functions, ADR-063). db-main max_connections 45; caps ≤ max − 5 on both clusters (vault_app cap 6).
-  - T-0402 vault core: PR #82 (auto-merge). db-pii 0002; pii-vault API (ingest, expiry, read-full, mask, search, match); `@omnibridge/vault-client`; tokens `vault_token_web|worker|deletion`; AT-9 marker scan in testkit.
-  - T-0403 deletion service: PR #83 (auto-merge, stacked on #82). Vault `/v1/delete`, journal volume `pii_journal`, db-pii 0003, db-main 0024, worker jobs `pii.delete`, `pii.expiry`, hourly `pii.expiry-sweep`, entry point `requestDeletion` (all seven DEL-1 triggers), deletion certificate route, terms acceptances deleted with the person.
-- **Review (S4, 19 Nov 2026):** M04 end **APPROVED** (0 Blockers, 0 Majors, 4 Minors as follow-ups): `docs/reviews/M04-end.md`. Halfway carry-over, M02 carry-overs, S5 -01 to -04 and A-001 to A-006 all closed; each audit fix probed (broken on purpose, its test fails). Minors: F-M04e-01 (S1 to place: request stuck confirmed after a crash on the last attempt), F-M04e-02 to -04 (S2: no action for a claimed request with no job, dead truncated warning, identifier-rule test).
-- **T-0404 (S3) erasure, access export, eBay deletion:** PR on `task/T-0404-erasure-access` (auto-merge). db-pii 0005 (canary, canary events, workspace directory), db-main 0025 (`app.erasure_requests`). Routes (PROPOSED SHAPE for S2, T-0308): `POST/GET /erasure-requests`, `POST /erasure-requests/:id/confirm`, `POST /access-requests/export`. Vault `POST /v1/ebay-user-match` (PS-027, Hashir chose the vault fan-out). eBay notice now answers 200. One canary per workspace; a read writes `vault.canary_events` and a `vault.canary_read` warn log.
-- **T-0405 (S3) backups, restore drill, marker scan:** PR on `task/T-0405-backups-restore` (auto-merge). `infra/backup/` (`backup.sh`, `retention.sh`, `restore-drill.sh`, `apply-tombstones.sql`, `b2.md` for M22), `scripts/lib/marker-scan.mjs`, runbook `docs/ops/runbooks/restore.md`. Local restic repositories in `.backup/` (gitignored). The journal now also records workspace closures.
-- **T-0407 (S3, high) exact eBay buyer IDs (ADR-066):** PR #92 (auto-merge). db-pii 0006 adds blind-index field `buyer_exact` (trim only); ingest writes it; `/v1/ebay-user-match` uses only it. `buyer` stays case-folded for DEL-4 search. The vault backfills older records at start-up (logged count; a failure is logged, never stops the vault).
-- **T-0408 (S3, normal) withdraw an erasure request (ADR-067):** PR on `task/T-0408-withdraw-erasure` (auto-merge). db-main 0026 (state `withdrawn`, `withdrawn_by/at`, `withdraw_reason` from a fixed list: `wrong_identifiers`, `no_match`, `duplicate`, `buyer_withdrew`, `other`, Hashir 18 Nov). `POST /erasure-requests/:id/withdraw` (admin, open only else 409, reason required, 200). Audit `deletion.run` kind `erasure_withdrawn` with the reason code and count. List `@omnibridge/core` `ERASURE_WITHDRAW_REASONS`.
-- **T-0409 (S3, high) fixes from the S5 PII audit (ADR-068):** PR on `task/T-0409-pii-audit-fixes` (auto-merge). `infra/backup/journal.sh` (journal-only restic run; `--every 900` is the local scheduler), drill test with real restic; confirm claims the request in its own committed transaction, then queues; logger writes `[PIIMARK-REDACTED]` so scans flag scrubbed markers; drill scans full Mailpit sources (`infra/backup/mailpit-raw.mjs`); identifiers must pin one buyer (400); internal `ob_vault` network (vault off `ob_app`); `no-store` on every `/api` response; canary expiry fixed; db-main 0027 and db-pii 0007 validate the NOT VALID checks; db-pii 0007 adds `vault.purge_security_logs()` (6 years, run daily by the vault). **Waiting on S5's re-check comment.**
-- **T-0410 (S3, high) fixes from the external audit (ADR-069):** PR on `task/T-0410-external-audit-fixes` (auto-merge).
-  - A-001: the vault's eBay user match is paged (`cursor`/`next`); web queues every page before the 200, one job per batch keyed by a hash of the notice and its refs. A truncated erasure search answers 422 `too_many_matches` (new error code) and stores nothing.
-  - A-002: jobs sent from a request go through its transaction (`requestDeletion` and the invite notifier pass the bound context); first-admin invite queues inside its transaction.
-  - A-003: the eBay key cache negative-caches 404 kids for 1 h, caps uncached fetches at 5 a minute (a known key is used past its hour while capped), checks the kid's format; the webhook counts the address before a fetch.
-  - A-004: `retention.sh` forgets every db-pii snapshot older than 3 days by its own time (`infra/backup/expired-snapshots.mjs`), then keeps 3 daily.
-  - A-005: `createPiiPool(config, onError)` with pool and client error handlers; the vault logs `db.connection_error`.
-  - A-006: db-main 0028 (`completed`, `failed`, `completed_at`, `failed_at`, `retry_count`) and 0029 (validate). The pii.delete job completes or fails its erasure request (new `failed` hook on phased handlers, last attempt). Overdue until completed. `POST /erasure-requests/:id/retry` (admin, audited `erasure_retried`).
-- **After pulling:** recreate the stack once (`docker compose up -d`) so web, worker and pii-vault join `ob_vault`. Locally, run `infra/backup/journal.sh --every 900` in a spare terminal if you want the 15-minute journal runs.
-- **After pulling (older):** restart pii-vault once (runs the `buyer_exact` backfill). Then run `scripts/dev-secrets.sh` (three new vault tokens). For db-main max_connections 45, restart db-main (compose passes `-c max_connections=45`). An existing db-pii volume keeps vault_app's old cap 8: run `ALTER ROLE vault_app CONNECTION LIMIT 6` or recreate it.
+- **Closed:** M01, M02 (ADR-064), M03, **M04** (S4 M04 end APPROVED 19 Nov, `docs/reviews/M04-end.md`, ADR-070). M06 site pieces merged; waiting on the client's legal details.
+- **M04 in short:** pii-vault (ingest, read-full, mask, search, match, delete) on `ob_pii`/`ob_vault`; deletion service with all seven DEL-1 triggers, tombstones in three places, journal; erasure, withdraw, retry and access export; eBay deletion fan-out; backups, restore drill, AT-9 marker scan; S5 audit fixes (ADR-068) and the external audit fixes (ADR-069).
+- **Now: M05 core** (notification centre, email alerts, security alerts, platform console, app secrets). Tasks in `docs/backlog.json`. No halfway review; S5 audit T-0506 before the M05 end review.
+- **After pulling:** recreate the stack once (`docker compose up -d`) so web, worker and pii-vault join `ob_vault`. Locally, run `infra/backup/journal.sh --every 900` in a spare terminal if you want the 15-minute journal runs. Restart pii-vault once after T-0407 (runs the `buyer_exact` backfill); run `scripts/dev-secrets.sh` if the vault tokens are missing.
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; short sessions.
 - **Process (ADR-053, ADR-054):** sessions merge their own green PRs; CI is the only full gate.
 - **Hashir:** GitHub CLI on Hashir592. Dev machine to 16 GB in 1 to 2 weeks.
 
-## M04 plan (S1, 17 Nov)
+## M05 plan (S1, 19 Nov, ADR-070)
 
-- Batch 1 and 2 (S3): done. T-0407 to T-0410 (S3): PRs, auto-merge. S2 T-0310: PR on `task/T-0310-erasure-states` (auto-merge). **Next: the S4 M04 end review.**
-- Batch 2: T-0404 erasure/access requests and eBay deletion (S3, high), T-0405 backups, restore drill and marker scan (S3, high), T-0308 screens (S2), then T-0406 S5 audit, then the S4 M04 end review.
+- **Batch 1 (S3):** T-0411 stuck erasure retry (M04 Minors 01/02), T-0501 notification core (high), T-0502 email alerts and preferences, T-0503 security alerts (high).
+- **S2 in parallel:** T-0311 (M04 Minors 02 to 04, light), then T-0312 notification centre and email preference screens.
+- **Batch 2 (S3):** T-0504 platform console and daily digest (high), T-0505 app secrets store (high). S2: T-0313 console screens.
+- **Then:** T-0506 S5 audit, then the S4 M05 end review. S1 writes the M07 tasks when batch 1 lands.
 
 ## Follow-ups noted
 
-- T-0410: the `failed` hook runs when the last attempt throws; a last attempt that ends by pg-boss expiry or a worker crash leaves the erasure request `confirmed` (still shown overdue). A sweep of dead-lettered pii.delete jobs would close it (S1 to decide). The eBay key fetch cap (5 a minute) is global to one web process. M05: alert on `pii.erasure_failed` and `ebay.public_key_throttled`.
-
-- T-0409: **S1** to update ARCHITECTURE §6 and the networks line (vault on `ob_vault`, not `ob_app`). S5 asked to lower `MAX_EXPORT_RECORDS` to 100; the ruling did not include it, so it stays 500 (S1 to decide). Accepted after review: two simultaneous confirms each write an audit row; the claim takes a second web-pool connection.
-
-- ADR-068: when S1 writes M07, M08 and M10 tasks: expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first. M22: host timer for the 15-minute journal run.
-
-- **PS-026 (S1):** confirm the expiring audit exception mechanism; when picomatch ships a fix, bump it and delete the entry (before 1 Dec 2026).
-- **M22:** remove the vault's start-up `buyer_exact` backfill before the first deploy (dev data only). `vault.workspace_directory` has no row for a workspace whose only ingests predate db-pii 0005 (dev only): such records are not reached by an eBay notice.
-- **T-0308 (S2):** erasure and access screens against the T-0404 routes; erasure requests are on the Users tab, admins only.
-- **M05:** alert on `vault.canary_read` (and `vault.canary_events`). Workspaces whose keys predate T-0404 have no canary (dev data only): the first ingest after a fresh key makes one.
-- **M10:** the access export's `linkedOrders` is empty until orders are stored; join them by subject.
-- **M22 (backups):** apply `infra/backup/b2.md` (buckets, hide-only keys, lifecycle); schedule `backup.sh` nightly and `retention.sh` from the `backup-admin` environment; pin the restic image by digest; give the B2 restic run an OmniBridge egress network (it uses the default bridge today; local runs use none); backup-age alert (OPS-4).
-- **M10:** ingest is not idempotent per subject (a retried ingest makes a second record): key buyer records by order. Call `requestDeletion` on cancellation; set `delete_after` at dispatch/delivery + pii_expiry_days (the vault defaults to a 90-day backstop).
-- **M05:** workspace closure calls `requestDeletion({trigger:'workspace_closure'})`, then `DeletionLog.deleteUserTerms` for people left with no workspace. Audit event when the console switches a module (T-0211).
-- **M07 / M08:** Amazon revocation and eBay termination call `requestDeletion` with the channel account.
+- **M05 (in tasks):** alerts on `vault.canary_read`, `pii.erasure_failed`, `ebay.public_key_throttled`; SEC-12 login alerts from `auth.login_failed` / `auth.locked`; demoting a platform admin re-checked per request (ADR-061); console audit event when a module is switched (T-0211).
+- **M05 (in T-0504):** archiving a workspace runs the `workspace_closure` deletion, then `DeletionLog.deleteUserTerms`. Workspaces whose keys predate T-0404 have no canary (dev data only).
+- **ADR-068, for the M07, M08 and M10 tasks:** expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first.
+- **M07 / M08:** Amazon revocation and eBay termination call `requestDeletion` with the channel account. Provider jobs use phased handlers and never hold a tenant transaction across network calls. The eBay key fetch cap (5 a minute) is per web process.
+- **M10:** ingest is not idempotent per subject: key buyer records by order. Call `requestDeletion` on cancellation; set `delete_after` at dispatch/delivery + pii_expiry_days (vault backstop 90 days). The access export's `linkedOrders` joins orders by subject.
 - **M12:** the vault's `LabelFiles` hook deletes label files with their records.
-- **Queue runtime:** phased handlers exist now (`PhasedHandler`, F-M04h-05); SMTP mail jobs and M07 provider jobs should use them for their network half.
-- **PII key rotation:** decrypt by the stored `data_key_version`; a re-wrap job for the pii keyring.
+- **PS-026 / picomatch:** time-boxed audit exception (GHSA-fc5q-39xc-vjpf) **expires 1 Dec 2026**; when a fix ships, bump and delete the entry.
+- **M22 (backups):** apply `infra/backup/b2.md`; schedule `backup.sh` nightly and `retention.sh`; host timer for the 15-minute journal run before go-live (ADR-068); pin the restic image by digest; restic gets its own `ob_backup` network (ADR-066); backup-age alert (OPS-4).
+- **M22 (other):** remove the vault's start-up `buyer_exact` backfill; production `APP_ORIGINS`, `APP_ORIGIN`, SMTP (`SMTP_ALLOW_PLAIN=0`), `TRUSTED_PROXIES`; role creation (`10-roles.sh`) in the deploy; SEC-12 log retention 12 months and the two-weekly review; `data_key_version` for PII key rotation and a re-wrap job.
 - F-M02e-01 residual: `MembershipRepository.add` is a system write (dev seed and tests only, guarded by a source-scan test).
-- Not reproduced: `auth.int.test.ts` flood test failure on S4's machine (passes under 8x CPU stress); the assertion now names any stray status.
-- M22: production `APP_ORIGINS`, `APP_ORIGIN`, SMTP (`SMTP_ALLOW_PLAIN=0`), `TRUSTED_PROXIES`. Role creation (`10-roles.sh`) is part of the deploy.
-- Later: very large audit exports as a background job. M07: provider jobs must not hold a tenant transaction across network calls.
+- Not reproduced: `auth.int.test.ts` flood test failure on S4's machine (passes under 8x CPU stress).
+- Later: very large audit exports as a background job.
 
 ## Next step
 
-1. S3: the T-0410 PR merges itself on green (if red, S3 fixes it).
-2. S2: T-0310 PR merges itself on green (buyer-data screen: in progress, deleted, failed + Retry, 422 and 400 messages, gcTime 0).
-3. S4: the M04 end review (with the carry-over file).
+1. S3: T-0411, then T-0501 to T-0503 (handoff `docs/handoffs/20261119-1800-S1-to-S3.md`).
+2. S2: T-0311, then T-0312 (handoff `docs/handoffs/20261119-1800-S1-to-S2.md`).
 
 ## Prerequisites outstanding (Hashir)
 

@@ -697,7 +697,7 @@
         "every Blocker and Major finding has a recorded resolution verified by S4"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "done"
     },
     {
       "id": "T-0207",
@@ -1022,7 +1022,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0403",
@@ -1062,7 +1062,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0404",
@@ -1098,7 +1098,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0405",
@@ -1137,7 +1137,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0407",
@@ -1168,7 +1168,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0408",
@@ -1196,7 +1196,7 @@
         "CI full gate green at merge"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0409",
@@ -1236,7 +1236,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0410",
@@ -1273,7 +1273,35 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
+    },
+    {
+      "id": "T-0411",
+      "module": "M04",
+      "session": "S3",
+      "title": "Retry a stuck erasure request (ADR-070, F-M04e-01, F-M04e-02)",
+      "goal": "An erasure request never stays 'in progress' for good: a request whose deletion job died can be retried.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-4",
+        "DEL-1"
+      ],
+      "scope": [
+        "A confirmed erasure request is stuck when its pii.delete job is missing, failed, cancelled or expired (read pg-boss state by the job's idempotency key; no new table)",
+        "GET /erasure-requests returns stuck: true for such a request (contract field; PROPOSED SHAPE note for S2)",
+        "POST /erasure-requests/:id/retry accepts failed and stuck requests, else 409; re-queues with the same idempotency key; audited erasure_retried as today"
+      ],
+      "out_of_scope": [
+        "A dead-letter sweep job (dropped, ADR-070)",
+        "The UI (T-0311)"
+      ],
+      "depends_on": [],
+      "acceptance": [
+        "Tests first, citing DEL-4: a request whose last attempt crashed (job expired) shows stuck and retry completes it; a confirmed request with no job shows stuck and retry queues it; a request with a live job is not stuck and retry answers 409",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
     },
     {
       "id": "T-0308",
@@ -1303,7 +1331,7 @@
         "CI full gate green at merge"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0309",
@@ -1357,7 +1385,35 @@
         "CI full gate green at merge"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
+    },
+    {
+      "id": "T-0311",
+      "module": "M03",
+      "session": "S2",
+      "title": "M04 end Minors on the buyer-data screen (ADR-070)",
+      "goal": "Every stuck erasure request has an action, and no dead code or untested copy of the identifier rule is left.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-4"
+      ],
+      "scope": [
+        "Show Retry when a request has stuck: true (F-M04e-02), same call as for failed",
+        "Delete the unreachable truncated warning (F-M04e-03)",
+        "A test that runs the contract's identifier rule cases through pinsOneBuyer and the MSW mock and expects the same answers (F-M04e-04)"
+      ],
+      "out_of_scope": [
+        "Server changes (T-0411)"
+      ],
+      "depends_on": [
+        "T-0310"
+      ],
+      "acceptance": [
+        "Tests cite DEL-4",
+        "CI full gate green at merge"
+      ],
+      "risk": "light",
+      "status": "todo"
     },
     {
       "id": "T-0406",
@@ -1388,6 +1444,289 @@
       ],
       "acceptance": [
         "Findings file in docs/reviews/security/; every Blocker and Major fixed before the M04 end review"
+      ],
+      "risk": "high",
+      "status": "done"
+    },
+    {
+      "id": "T-0501",
+      "module": "M05",
+      "session": "S3",
+      "title": "Notification core: raise, resolve, deduplicate, recipients",
+      "goal": "Any module can raise a notification that reaches exactly the right people, once, and clears itself when its condition clears.",
+      "prd_ids": [
+        "NTF-1",
+        "NTF-2",
+        "NTF-5"
+      ],
+      "supports": [
+        "PERM-3",
+        "TEN-1"
+      ],
+      "scope": [
+        "db-main migration: app.notifications (workspace_id, forced RLS, composite FKs) with severity (critical, warning, info), type, company_id, channel_account_id, linked record (kind + id), signal label (native, derived, estimate), created/updated time; per-recipient state (unread, read) and a resolved state on the notification",
+        "Platform-level notifications in a separate table with no workspace (platform admins only)",
+        "A notify service in packages/core: raise(ctx, {type, severity, dedupeKey...}) upserts on (workspace, type, linked record) and updates in place (NTF-5); resolve(ctx, type, linked record) marks it resolved; callers pass the request's or job's bound context (ADR-069 A-002 pattern)",
+        "A type registry (code, severity, signal, required links) seeded with the PRD section 6 types; unknown types rejected",
+        "Recipients computed at read time: workspace admins, plus children whose ticked tabs and companies cover the linked record's tab and company (NTF-2); a child loses sight when a tick is removed",
+        "Contract routes (PROPOSED SHAPE for S2): list (filter by state and severity, cursor paging), unread count, mark read, mark all read; tab none, auth session, company-scoped",
+        "No buyer PII in any notification field (invariant 7): IDs and labels only"
+      ],
+      "out_of_scope": [
+        "Email (T-0502)",
+        "Security alert rules (T-0503)",
+        "Screens (T-0312)"
+      ],
+      "depends_on": [
+        "T-0411"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: a second raise for the same type and record updates the first (one row); resolve clears it; a child without the tab or company never sees it; another workspace never sees it (route walker); platform notices reach platform admins only",
+        "Marker scan passes with notifications raised from seeded data",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0502",
+      "module": "M05",
+      "session": "S3",
+      "title": "Email alerts and per-type preferences",
+      "goal": "Critical alerts reach people by email with no buyer PII, and each user chooses which other types they get by email.",
+      "prd_ids": [
+        "NTF-3",
+        "NTF-4",
+        "MAIL-3"
+      ],
+      "supports": [
+        "DP-8",
+        "AT-9"
+      ],
+      "scope": [
+        "Per-user, per-type email preference (default: on for critical, off for others); critical cannot be switched off for workspace admins (server refuses, 400)",
+        "Raising or escalating a notification queues one email job per recipient whose preference is on (ID-only payload); a PhasedHandler: the DB phase builds the message, the network phase sends via packages/mail",
+        "Plain branded templates (packages/mail/templates.ts pattern): what happened, the company and type, a link into the app; no buyer PII, no secrets, no record contents",
+        "Sender notifications@ (config, not hard-coded domain beyond env); link lifetimes as in PRD section 2",
+        "Contract routes (PROPOSED SHAPE for S2): get and set my email preferences"
+      ],
+      "out_of_scope": [
+        "SPF, DKIM and DMARC (M22, devops)",
+        "Digest (T-0504)"
+      ],
+      "depends_on": [
+        "T-0501"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: a critical raise emails every admin even with preference off; a warning emails only users who opted in; a dedupe update does not send a second email unless severity rises; the marker scan over Mailpit finds no marker",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0503",
+      "module": "M05",
+      "session": "S3",
+      "title": "Security alerts",
+      "goal": "Suspicious activity raises an alert to the right admins within minutes.",
+      "prd_ids": [
+        "SEC-12"
+      ],
+      "supports": [
+        "USR-5",
+        "DEL-5",
+        "DP-7",
+        "EBAY-2"
+      ],
+      "scope": [
+        "Rules over existing events (audit log and vault tables, never log scraping): unusual login (auth.login_failed burst for a user, auth.locked, first sign-in from a new IPv6 /64 or IPv4 address for that user), mass export (exports per user per hour over a threshold), mass PII view (vault read-full per user per hour over a threshold), canary read (vault.canary_events), pii.erasure_failed, ebay.public_key_throttled",
+        "Workspace alerts go to that workspace's admins; vault-wide and eBay-key alerts are platform-level (T-0501)",
+        "Thresholds in config with tested defaults; a scheduled worker job (short transactions) evaluates the counter rules; canary and erasure failures raise at once",
+        "The vault exposes canary events and read-full counts to the worker only through its client (capability-scoped, counts and IDs only)",
+        "Log retention of 12 months and the two-weekly log review are M22 (VictoriaLogs config and runbook); note it in the PR"
+      ],
+      "out_of_scope": [
+        "Log storage (M22)",
+        "Alerting through vmalert (M22)"
+      ],
+      "depends_on": [
+        "T-0501"
+      ],
+      "acceptance": [
+        "Tests first, citing SEC-12: each rule fires on a seeded pattern and stays quiet below its threshold; a canary read raises a critical platform alert; alert text holds no PII (marker scan)",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0504",
+      "module": "M05",
+      "session": "S3",
+      "title": "Platform console and daily health digest",
+      "goal": "The dev team runs workspaces, flags, jobs and incidents from /platform without seeing any tenant business data.",
+      "prd_ids": [
+        "PLAT-1",
+        "PLAT-2",
+        "PLAT-3",
+        "OPS-6"
+      ],
+      "supports": [
+        "TEN-8",
+        "NFR-1",
+        "DEL-1"
+      ],
+      "scope": [
+        "/platform routes (contract, PROPOSED SHAPE for S2): platform_admin only, MFA required, client IP in an env CIDR allowlist (dev: loopback only; empty list denies); the flag is re-checked on every request (ADR-061)",
+        "Workspaces: create, suspend, archive; send the first-admin invite; per-workspace counts (users, channel accounts, orders per day) and nothing else",
+        "Archiving (closing) a workspace calls requestDeletion({trigger:'workspace_closure'}), then DeletionLog.deleteUserTerms for people left with no workspace (DEL-1)",
+        "Feature flags: public_signup and the per-workspace module toggles (T-0211); every change audited",
+        "Jobs: queue depth per queue, failed and dead-letter list (IDs, type, error code only), redrive one job",
+        "API usage per provider and account, and the credential-expiry calendar: tables and views now, fed by M07 onwards; seed rows prove them",
+        "System health (the /healthz checks per service) and an incident banner shown to every signed-in user",
+        "OPS-6: a daily digest email to platform admins: jobs failed, API usage, credentials expiring in 30 days, deletion runs (counts only)",
+        "Route walker: no /platform route returns tenant orders, customers, finance or messages (PLAT-3); no impersonation"
+      ],
+      "out_of_scope": [
+        "App secrets (T-0505)",
+        "Screens (T-0313)",
+        "VPN set-up (M22)"
+      ],
+      "depends_on": [
+        "T-0501",
+        "T-0502"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: non-platform-admin 403; platform admin without MFA 403; outside the allowlist 403; a demoted admin is refused on the next request; suspend stops sign-in to that workspace; redrive re-runs one dead job; the digest holds counts only (marker scan)",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0505",
+      "module": "M05",
+      "session": "S3",
+      "title": "App secrets store",
+      "goal": "Amazon, Ads and eBay app credentials are set only in the console, kept encrypted, and never shown back.",
+      "prd_ids": [
+        "PLAT-4"
+      ],
+      "supports": [
+        "SEC-5",
+        "SEC-6",
+        "AMZ-10"
+      ],
+      "scope": [
+        "db-main table for app secrets (not tenant data: platform only), envelope-encrypted under the secrets master key with packages/crypto (ARCHITECTURE 6.7), current and next slots",
+        "The master key is a Docker secret mounted only into web and worker; never in the database, an image or a backup",
+        "/platform routes: set a secret (write-only), list names with set-on date and slot, promote next to current; values are never returned, logged or audited (the audit row holds the name and slot)",
+        "A typed reader in packages for providers (used from M07); web handlers read only for OAuth code exchange",
+        "docs/ops/secrets-register.md lists each app secret"
+      ],
+      "out_of_scope": [
+        "Provider tokens per channel account (M07)",
+        "Rotation alerts (M18)"
+      ],
+      "depends_on": [
+        "T-0504"
+      ],
+      "acceptance": [
+        "Tests first, citing PLAT-4: a raw SQL read shows ciphertext only; no route, log or audit row ever holds a value (marker scan with a planted secret marker); a non-platform-admin cannot set or list",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0312",
+      "module": "M03",
+      "session": "S2",
+      "title": "Notification centre and email preferences screens",
+      "goal": "Users see and clear their notifications from the bell and choose which come by email.",
+      "prd_ids": [],
+      "supports": [
+        "NTF-1",
+        "NTF-4",
+        "NTF-5"
+      ],
+      "scope": [
+        "Bell with unread count and the notification centre against T-0501's PROPOSED SHAPE (MSW first); reuse NotificationPanel and its mock",
+        "Severity, signal label, company, linked record link, state; mark read and mark all read",
+        "Settings: email on or off per type; critical shown locked on for admins"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-0501"
+      ],
+      "acceptance": [
+        "Tests cite NTF-1 and NTF-4",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0313",
+      "module": "M03",
+      "session": "S2",
+      "title": "Platform console screens",
+      "goal": "The dev team has a plain console for workspaces, flags, jobs, usage, credentials, incidents and app secrets.",
+      "prd_ids": [],
+      "supports": [
+        "PLAT-1",
+        "PLAT-2",
+        "PLAT-4",
+        "OPS-6"
+      ],
+      "scope": [
+        "/platform screens against T-0504 and T-0505's PROPOSED SHAPE (MSW first): workspaces, flags, jobs and dead-letter with redrive, API usage, credential calendar, health, incident banner editor, app secrets (write-only form, set-on date only)",
+        "Hidden for non-platform admins; the incident banner shows across the app"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-0504",
+        "T-0505"
+      ],
+      "acceptance": [
+        "Tests cite PLAT-1 and PLAT-4",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0506",
+      "module": "M05",
+      "session": "S5",
+      "title": "Security audit of the platform console, secrets store and alerts",
+      "goal": "An independent check that the console cannot reach tenant data, the secrets cannot leak and the alerts fire.",
+      "prd_ids": [],
+      "supports": [
+        "PLAT-1",
+        "PLAT-3",
+        "PLAT-4",
+        "SEC-12",
+        "NTF-3"
+      ],
+      "scope": [
+        "Audit T-0503 to T-0505: allowlist and MFA gate, flag re-check, PLAT-3 route walker coverage, secrets encryption and write-only paths, alert rule coverage, email and notification PII"
+      ],
+      "out_of_scope": [
+        "Fixing (S3 does it)"
+      ],
+      "depends_on": [
+        "T-0503",
+        "T-0505",
+        "T-0313"
+      ],
+      "acceptance": [
+        "Findings file in docs/reviews/security/; every Blocker and Major fixed before the M05 end review"
       ],
       "risk": "high",
       "status": "todo"
