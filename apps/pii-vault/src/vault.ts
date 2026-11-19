@@ -20,6 +20,8 @@ import {
   type RecordKind,
   type ReadPurpose,
   type SearchResponse,
+  type SignalsRequest,
+  type SignalsResponse,
 } from '@omnibridge/vault-client/schemas';
 import {
   BUYER_SOURCE_FIELDS,
@@ -425,6 +427,38 @@ export class Vault {
       }
     }
     return { workspaces, next };
+  }
+
+  /**
+   * SEC-12 (T-0503): what the security alerts watch in one workspace, as counts and IDs only: how
+   * many records each user read in full since `read_full_since` (system reads have no user and
+   * are left out), and every canary read since `canary_since`. Reads the logs; logs nothing.
+   */
+  async signals(req: SignalsRequest): Promise<SignalsResponse> {
+    return this.#tx(req.workspace_id, async (c) => {
+      const reads = await c.query<{ actor_user_id: string; n: string }>(
+        `SELECT actor_user_id, count(*) AS n FROM vault.access_log
+          WHERE workspace_id = $1 AND capability = 'read_full' AND at >= $2
+            AND actor_user_id IS NOT NULL
+          GROUP BY actor_user_id ORDER BY actor_user_id`,
+        [req.workspace_id, req.read_full_since],
+      );
+      const canary = await c.query<{
+        id: string;
+        at: Date;
+        caller: Caller;
+        capability: 'read_full' | 'mask';
+        actor_user_id: string | null;
+      }>(
+        `SELECT id::text AS id, at, caller, capability, actor_user_id FROM vault.canary_events
+          WHERE workspace_id = $1 AND at >= $2 ORDER BY at, id LIMIT 500`,
+        [req.workspace_id, req.canary_since],
+      );
+      return {
+        read_full: reads.rows.map((r) => ({ actor_user_id: r.actor_user_id, count: Number(r.n) })),
+        canary: canary.rows.map((r) => ({ ...r, at: r.at.toISOString() })),
+      };
+    });
   }
 
   /**

@@ -121,6 +121,17 @@ export const notifyEmailJob = defineJob({
 });
 
 /**
+ * The security scan of one workspace (T-0503, SEC-12): counter rules over the audit log, the
+ * auth events and the vault's read counts and canary reads. Every five minutes, keyed by slot.
+ */
+export const securityScanJob = defineJob({
+  type: 'security.scan',
+  payload: z.object({}).strict(),
+  retry: { limit: 2, delaySeconds: 30, backoff: true, maxDelaySeconds: 120 },
+  expireInSeconds: 240,
+});
+
+/**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
@@ -136,6 +147,7 @@ export const JOBS: readonly JobDefinition[] = [
   piiDeleteJob,
   piiExpiryJob,
   notifyEmailJob,
+  securityScanJob,
 ];
 
 /**
@@ -185,6 +197,13 @@ export const notifyPlatformEmailSweepJob = definePlatformJob({
   heavy: false,
 });
 
+/** SEC-12: one security.scan job per workspace every five minutes (T-0503). */
+export const securityScanSweepJob = definePlatformJob({
+  type: 'security.scan-sweep',
+  cron: '*/5 * * * *',
+  heavy: false,
+});
+
 /**
  * Every platform job with a cron (no workspace). The migrate job creates their queues, and the
  * worker schedules and consumes each one.
@@ -195,4 +214,5 @@ export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [
   housekeepingSweepJob,
   piiExpirySweepJob,
   notifyPlatformEmailSweepJob,
+  securityScanSweepJob,
 ];

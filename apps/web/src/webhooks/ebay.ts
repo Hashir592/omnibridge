@@ -15,7 +15,13 @@
  * spent the notice is answered 412 and eBay sends it again later.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { ApiError, readSecretFile, requireEnv, type TenantRunner } from '@omnibridge/core';
+import {
+  ApiError,
+  readSecretFile,
+  requireEnv,
+  type Notifier,
+  type TenantRunner,
+} from '@omnibridge/core';
 import type {
   AnyRoute,
   ebayAccountDeletion,
@@ -49,6 +55,11 @@ export interface EbayWebhookOptions {
   logger: Logger;
   /** AT-10: match in the vault and queue the deletion. Without it, a receipt only. */
   deletion?: EbayDeletionDeps;
+  /**
+   * SEC-12 (T-0503): a throttled key fetch raises a platform notice, one per hour (NTF-5). It is
+   * best effort: a failure to raise is logged and never changes the answer to eBay.
+   */
+  alerts?: Pick<Notifier, 'raisePlatform'>;
   /** Requests a minute from one address before 429 (default 60). */
   perMinute?: number;
   now?: () => number;
@@ -242,6 +253,18 @@ export function ebayWebhook(options: EbayWebhookOptions): EbayWebhook {
           { event: 'ebay.public_key_throttled' },
           'eBay public key fetch limit reached this minute',
         );
+        const hour = new Date((options.now ?? Date.now)()).toISOString().slice(0, 13);
+        await options.alerts
+          ?.raisePlatform(null, {
+            type: 'ebay.public_key_throttled',
+            record: { kind: 'hour', id: hour },
+          })
+          .catch((alertErr: unknown) => {
+            options.logger.error(
+              { event: 'notify.raise_failed', type: 'ebay.public_key_throttled', err: alertErr },
+              'could not raise the throttle alert',
+            );
+          });
         throw new ApiError({ status: 503, code: 'service_unavailable' });
       }
       if (err instanceof EbayBudgetExhausted) {
@@ -340,6 +363,7 @@ export function webhookVerifier(ebay: EbayWebhook) {
 export function ebayWebhookFromEnv(
   logger: Logger,
   deletion?: EbayDeletionDeps,
+  alerts?: Pick<Notifier, 'raisePlatform'>,
 ): EbayWebhook | undefined {
   if (!process.env.EBAY_VERIFICATION_TOKEN_FILE) return undefined;
   const budget = new DailyCallBudget(EBAY_WEBHOOK_DAILY_BUDGET);
@@ -357,5 +381,6 @@ export function ebayWebhookFromEnv(
     keys: keys.get,
     logger,
     ...(deletion === undefined ? {} : { deletion }),
+    ...(alerts === undefined ? {} : { alerts }),
   });
 }

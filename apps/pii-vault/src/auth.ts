@@ -11,8 +11,9 @@ export const CALLER_CAPABILITIES: Readonly<Record<Caller, readonly Capability[]>
   // Web: inbound website orders are ingested inside the request (invariant 7a); order detail and
   // the inbox read in full; lists are masked; order search and same-buyer groups.
   web: ['ingest', 'read_full', 'mask', 'search', 'match'],
-  // Worker: marketplace ingestion, labels, the inbox sync, same-buyer groups.
-  worker: ['ingest', 'read_full', 'mask', 'match'],
+  // Worker: marketplace ingestion, labels, the inbox sync, same-buyer groups, and the read counts
+  // and canary reads the security alerts watch (SEC-12).
+  worker: ['ingest', 'read_full', 'mask', 'match', 'signals'],
   // The deletion jobs only (DEL-1): nothing but delete.
   deletion: ['delete'],
 };

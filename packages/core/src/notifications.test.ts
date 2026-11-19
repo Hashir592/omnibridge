@@ -13,9 +13,9 @@ const ID = '7b0c3c9e-5d0e-4a8e-9a43-6d1f5f0b2c11';
 const ctx = { workspaceId: ID, companyIds: [] };
 
 describe('notification types', () => {
-  it('[NTF-1] every PRD section 6 type is registered once, with a severity and a tab or platform scope', () => {
-    expect(NOTIFICATION_TYPES).toHaveLength(21);
-    expect(new Set(NOTIFICATION_TYPES.map((t) => t.code)).size).toBe(21);
+  it('[NTF-1] every PRD section 6 type (and the SEC-12 security types) is registered once, with a severity and a tab or platform scope', () => {
+    expect(NOTIFICATION_TYPES).toHaveLength(28);
+    expect(new Set(NOTIFICATION_TYPES.map((t) => t.code)).size).toBe(28);
     for (const t of NOTIFICATION_TYPES) {
       expect(t.severities.length).toBeGreaterThan(0);
       expect(t.scope === 'platform' ? t.tab : typeof t.tab).toBe(
@@ -25,9 +25,11 @@ describe('notification types', () => {
     const platform = NOTIFICATION_TYPES.filter((t) => t.scope === 'platform').map((t) => t.code);
     expect(platform.sort()).toEqual([
       'ebay.api_usage_high',
+      'ebay.public_key_throttled',
       'platform.amazon_auth_limit',
       'platform.amazon_secret_rotation',
       'platform.report_failure',
+      'security.canary_read',
     ]);
   });
 

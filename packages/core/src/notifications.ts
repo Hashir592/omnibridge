@@ -204,6 +204,57 @@ export const NOTIFICATION_TYPES: readonly NotificationType[] = [
     'USR-9',
   ),
   t('reminders.due', 'Reminder due', ['info'], [], 'reminders', 'TOOL-1'),
+  // Security alerts (SEC-12, T-0503; severities agreed by Hashir and S1, 19 Nov 2026). Workspace
+  // ones are on the Users tab, so they reach admins only; vault-wide ones are platform-level.
+  t(
+    'security.unusual_login',
+    'Unusual sign-in activity',
+    ['warning'],
+    ['derived'],
+    'users',
+    'SEC-12, USR-5',
+  ),
+  t(
+    'security.account_locked',
+    'Sign-in locked after repeated failures',
+    ['warning'],
+    ['derived'],
+    'users',
+    'SEC-12, USR-5',
+  ),
+  t('security.mass_export', 'Unusually many exports', ['critical'], ['derived'], 'users', 'SEC-12'),
+  t(
+    'security.mass_pii_view',
+    'Unusually many buyer details opened',
+    ['critical'],
+    ['derived'],
+    'users',
+    'SEC-12, DP-7',
+  ),
+  t(
+    'security.canary_read',
+    'Canary record read: possible data breach',
+    ['critical'],
+    ['derived'],
+    'platform',
+    'SEC-12',
+  ),
+  t(
+    'pii.erasure_failed',
+    'Buyer data deletion failed: retry needed',
+    ['critical'],
+    ['derived'],
+    'users',
+    'DEL-4, DEL-5',
+  ),
+  t(
+    'ebay.public_key_throttled',
+    'eBay notification key fetches throttled',
+    ['warning'],
+    ['derived'],
+    'platform',
+    'EBAY-2',
+  ),
 ];
 
 const BY_CODE = new Map(NOTIFICATION_TYPES.map((x) => [x.code, x]));
@@ -235,7 +286,7 @@ export function emailLockedOn(type: NotificationType, role: 'admin' | 'member'):
 export interface NotificationRecord {
   /** e.g. `order`, `listing`, `channel_account`, `user`. */
   readonly kind: string;
-  /** A UUID, or a short code such as a day or hour slot (`2026-11-19T10`). */
+  /** A UUID, a day or hour slot (`2026-11-19T10`), or a numeric event id. */
   readonly id: string;
 }
 
@@ -285,6 +336,8 @@ export class InvalidNotification extends Error {
 const RECORD_KIND = /^[a-z][a-z0-9_]{0,39}$/;
 const RECORD_ID = /^[0-9a-zA-Z:._-]{1,64}$/;
 const SLOT_ID = /^\d{4}-\d{2}-\d{2}(T\d{2}(:\d{2})?)?$/;
+/** A numeric row id (an audit or vault event). */
+const NUMBER_ID = /^[1-9]\d{0,18}$/;
 const PARAM_KEY = /^[a-z][a-zA-Z0-9_]{0,39}$/;
 const MAX_PARAMS = 20;
 
@@ -313,8 +366,8 @@ export function checkRaise(input: RaiseInput, scope: 'workspace' | 'platform'): 
   }
   const { kind, id } = input.record;
   if (!RECORD_KIND.test(kind)) throw new InvalidNotification('Bad record kind');
-  if (!RECORD_ID.test(id) || !(isUuid(id) || SLOT_ID.test(id))) {
-    throw new InvalidNotification('A record id must be a UUID or a time slot');
+  if (!RECORD_ID.test(id) || !(isUuid(id) || SLOT_ID.test(id) || NUMBER_ID.test(id))) {
+    throw new InvalidNotification('A record id must be a UUID, a time slot or a number');
   }
   for (const [name, value] of [
     ['companyId', input.companyId],

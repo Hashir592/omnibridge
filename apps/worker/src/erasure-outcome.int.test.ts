@@ -6,11 +6,13 @@ import {
   ErasureRequestRepository,
   JobRecordRepository,
   migrateMain,
+  NotificationRepository,
   Tenancy,
   WorkspaceRepository,
   type ErasureRequest,
   type MainDbHandle,
 } from '@omnibridge/db';
+import { Notifier } from '@omnibridge/core';
 import { createLogger } from '@omnibridge/logger';
 import { JobQueue, piiDeleteJob, requestDeletion } from '@omnibridge/queue';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
@@ -98,7 +100,13 @@ describe('erasure request state from the deletion job (A-006)', () => {
     queue = new JobQueue({ boss, records: new JobRecordRepository(db.db), tenancy, logger });
     await queue.work(
       piiDeleteJob,
-      piiDeleteHandler({ vault: fakeVault, log: new DeletionLog(db.db), erasures, logger }),
+      piiDeleteHandler({
+        vault: fakeVault,
+        log: new DeletionLog(db.db),
+        erasures,
+        notifier: new Notifier({ store: new NotificationRepository(db.db) }),
+        logger,
+      }),
       { pollingIntervalSeconds: 0.5 },
     );
   }, 300_000);
@@ -126,5 +134,40 @@ describe('erasure request state from the deletion job (A-006)', () => {
     expect(failed.failedAt).toBeInstanceOf(Date);
     expect(failed.completedAt).toBeNull();
     expect(failed.jobId).toBe(request.jobId);
+  });
+
+  it('[SEC-12][DEL-4] a failed erasure raises a critical alert to admins at once; its completion after a retry resolves it', async () => {
+    vaultDown = true;
+    const request = await confirmed();
+    await settled(request.id);
+    const alerts = () =>
+      tenancy.runWorkspace({ workspaceId: ws }, async (ctx) =>
+        (
+          await new NotificationRepository(db.db).list(
+            ctx,
+            { userId: randomUUID(), tabs: 'all' },
+            {},
+            { limit: 50 },
+          )
+        ).items.filter((n) => n.type === 'pii.erasure_failed' && n.record.id === request.id),
+      );
+    expect(await alerts()).toEqual([
+      expect.objectContaining({ severity: 'critical', tab: 'users', state: 'unread' }),
+    ]);
+
+    // An admin retries (the route's steps) and the new run completes: the alert resolves.
+    vaultDown = false;
+    await tenancy.run(system, async (c) => {
+      const r = await erasures.retry(c, request.id, new Date());
+      if (r === undefined) throw new Error('not retried');
+      const job = await requestDeletion(queue, c, {
+        trigger: 'erasure',
+        scope: { type: 'refs', pii_refs: r.piiRefs },
+        idempotencyKey: `${r.id}:retry${String(r.retryCount)}`,
+      });
+      await erasures.setJob(c, r.id, job.id);
+    });
+    await settled(request.id);
+    expect((await alerts()).map((n) => n.state)).toEqual(['resolved']);
   });
 });

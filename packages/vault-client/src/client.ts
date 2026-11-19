@@ -1,5 +1,7 @@
 import type { z } from 'zod';
 import {
+  SignalsResponse,
+  type SignalsRequest,
   DeleteResponse,
   EbayUserMatchResponse,
   ExpiryResponse,
@@ -113,6 +115,11 @@ export class VaultClient {
   /** AT-10: the refs of one eBay user in every workspace (web only). */
   ebayUserMatch(request: EbayUserMatchRequest): Promise<EbayUserMatchResponse> {
     return this.#post('/v1/ebay-user-match', request, EbayUserMatchResponse);
+  }
+
+  /** SEC-12: read counts and canary reads of one workspace (the worker's token only). */
+  signals(request: SignalsRequest): Promise<SignalsResponse> {
+    return this.#post('/v1/signals', request, SignalsResponse);
   }
 
   match(workspaceId: string, piiRef: string): Promise<MatchResponse> {

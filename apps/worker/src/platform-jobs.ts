@@ -7,6 +7,7 @@ import type { PgBoss } from 'pg-boss';
 import { sweepAuditRetention } from './audit-retention.ts';
 import { sweepPiiExpiry } from './deletion.ts';
 import { sweepHousekeeping } from './housekeeping.ts';
+import { sweepSecurityScan } from './security.ts';
 import { sweepAccessReviews } from './users-jobs.ts';
 
 /**
@@ -80,6 +81,9 @@ export async function startPlatformJobs({
       'housekeeping.daily-sweep': async () => {
         const workspaces = await sweepHousekeeping({ auth, directory, queue, logger });
         logger.info({ event: 'housekeeping.sweep', count: workspaces }, 'job retention sent');
+      },
+      'security.scan-sweep': async () => {
+        await sweepSecurityScan({ directory, queue });
       },
       'notify.platform-email-sweep': async () => {
         const sent = await sendPlatformEmails();

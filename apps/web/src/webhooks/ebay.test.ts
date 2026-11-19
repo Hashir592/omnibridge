@@ -2,10 +2,12 @@ import { DailyCallBudget, EBAY_WEBHOOK_DAILY_BUDGET } from '@omnibridge/governor
 import { createLogger } from '@omnibridge/logger';
 import {
   EbayBudgetExhausted,
+  EbayKeyFetchThrottled,
   ebayPublicKeyFetcher,
   PublicKeyCache,
 } from '@omnibridge/provider-ebay';
 import { EBAY_SDK_SAMPLE as SAMPLE } from '@omnibridge/provider-ebay/testing';
+import type { RaiseInput } from '@omnibridge/core';
 import { describe, expect, it } from 'vitest';
 import { buildWebApp } from '../app.ts';
 import { ebayWebhook } from './ebay.ts';
@@ -294,5 +296,43 @@ describe('eBay key budget under junk notices (A-003)', () => {
     expect((await web.inject(junk('a-4', '10.3.0.1'))).statusCode).toBe(429);
     expect(keyReads).toHaveLength(3);
     await web.close();
+  });
+
+  it('[SEC-12][EBAY-2] a throttled key fetch raises a platform notice for the hour, and a failed raise never changes the 503', async () => {
+    const raised: RaiseInput[] = [];
+    let fail = false;
+    const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
+    const app = buildWebApp({
+      logger,
+      version: '0',
+      checks: { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resolve(true) },
+      ebay: ebayWebhook({
+        verificationToken: TOKEN,
+        endpoint: ENDPOINT,
+        keys: () => Promise.reject(new EbayKeyFetchThrottled()),
+        logger,
+        now: () => Date.parse('2026-11-19T10:42:00.000Z'),
+        alerts: {
+          raisePlatform: (_ctx, input) => {
+            if (fail) return Promise.reject(new Error('db down'));
+            raised.push(input);
+            return Promise.resolve({
+              id: '7b0c3c9e-5d0e-4a8e-9a43-6d1f5f0b2c11',
+              version: 1,
+              created: raised.length === 1,
+              escalated: false,
+              reopened: false,
+            });
+          },
+        },
+      }),
+    });
+    expect((await app.inject(notice())).statusCode).toBe(503);
+    expect(raised).toEqual([
+      { type: 'ebay.public_key_throttled', record: { kind: 'hour', id: '2026-11-19T10' } },
+    ]);
+    fail = true;
+    expect((await app.inject(notice())).statusCode).toBe(503);
+    await app.close();
   });
 });
