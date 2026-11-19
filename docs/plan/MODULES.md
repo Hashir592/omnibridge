@@ -340,6 +340,7 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
   - shared `edge` project live with TLS and WAF; failover-IP egress for carriers and websites
   - CI deploys: staging automatically, production blue/green on Hashir's approval
   - backups switched from the local restic repository to B2 EU Central (hide-only keys, off-server prune)
+  - host timer for the 15-minute tombstone-journal restic run, before go-live (ADR-068)
   - public site live on HTTPS (AT-23); eBay deletion endpoint subscribed; Amazon, Ads and eBay applications sent
   - verify-live tasks for every provider, run as each approval arrives (PRD §13.4)
   - network diagram and asset inventory
