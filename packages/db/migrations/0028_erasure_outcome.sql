@@ -10,7 +10,7 @@ SET LOCAL statement_timeout = '30s';
 ALTER TABLE app.erasure_requests
   ADD COLUMN completed_at timestamptz,
   ADD COLUMN failed_at timestamptz,
-  ADD COLUMN retry_count integer NOT NULL DEFAULT 0;
+  ADD COLUMN retry_count bigint NOT NULL DEFAULT 0;
 
 -- Expand: every state and its rule. NOT VALID checks every new or updated row; every old row
 -- (open, confirmed or withdrawn, with no outcome yet) already meets it. 0029 validates it.

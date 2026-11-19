@@ -48,7 +48,7 @@ const toRequest = (r: Selectable<ErasureRequestsTable>): ErasureRequest => ({
   withdrawReason: r.withdraw_reason,
   completedAt: r.completed_at,
   failedAt: r.failed_at,
-  retryCount: r.retry_count,
+  retryCount: Number(r.retry_count),
 });
 
 /**
@@ -229,12 +229,12 @@ export class ErasureRequestRepository {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const row = await trx
         .updateTable('app.erasure_requests')
-        .set((eb) => ({
+        .set({
           state: 'confirmed',
           failed_at: null,
           job_id: null,
-          retry_count: eb('retry_count', '+', 1),
-        }))
+          retry_count: sql<number>`retry_count + 1`,
+        })
         .where('workspace_id', '=', ctx.workspaceId)
         .where('id', '=', id)
         .where('state', '=', 'failed')

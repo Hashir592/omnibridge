@@ -241,7 +241,7 @@ export interface ErasureRequestsTable {
   /** A-006 (ADR-069): set from the deletion job's outcome. */
   completed_at: Date | null;
   failed_at: Date | null;
-  retry_count: ColumnType<number, number | undefined, number>;
+  retry_count: ColumnType<string, number | undefined, number>;
 }
 
 /** app.pii_tombstones (T-0403, invariant 10): the db-main copy, IDs only. */
