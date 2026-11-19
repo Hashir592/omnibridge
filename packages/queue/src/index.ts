@@ -80,6 +80,8 @@ export {
   piiExpiryJob,
   piiExpirySweepJob,
   PLATFORM_JOBS,
+  securityScanJob,
+  securityScanSweepJob,
 } from './registry.ts';
 export { deletionRunId, requestDeletion, type DeletionRequest } from './deletion.ts';
 export { emailOnRaise, type EmailRecipients } from './notify.ts';

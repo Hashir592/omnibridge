@@ -40,9 +40,9 @@ describe('deletion job phases', () => {
       erasures: {
         complete: (_ctx, jobId) => {
           calls.push(`completed:${jobId}`);
-          return Promise.resolve(true);
+          return Promise.resolve('request-1');
         },
-        fail: () => Promise.resolve(true),
+        fail: () => Promise.resolve('request-1'),
       },
       logger,
     };

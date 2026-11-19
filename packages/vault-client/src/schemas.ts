@@ -34,7 +34,16 @@ export const RECORD_KINDS = Object.keys(RECORD_FIELDS) as [RecordKind, ...Record
 export type FieldName = (typeof RECORD_FIELDS)[RecordKind][number];
 
 /** The capabilities of invariant 8. Each caller's token carries a fixed set of them. */
-export const CAPABILITIES = ['ingest', 'read_full', 'mask', 'search', 'match', 'delete'] as const;
+export const CAPABILITIES = [
+  'ingest',
+  'read_full',
+  'mask',
+  'search',
+  'match',
+  'delete',
+  // SEC-12 (T-0503): counts and IDs of reads, for the security alerts; the worker's token only.
+  'signals',
+] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
 /** DP-7: why a full record is read. Logged with every read. */
@@ -203,6 +212,33 @@ export type MatchRequest = z.infer<typeof MatchRequest>;
 /** ORD-9, ADR-055: the subject IDs of the same buyer on the same channel account. Nothing else. */
 export const MatchResponse = z.object({ subject_ids: z.array(z.string()) }).strict();
 export type MatchResponse = z.infer<typeof MatchResponse>;
+
+/**
+ * SEC-12 (T-0503): what the security alerts need from one workspace's vault logs, as counts and
+ * IDs only: full reads per user since `read_full_since`, and canary reads since `canary_since`.
+ */
+export const SignalsRequest = z
+  .object({ workspace_id: uuid, read_full_since: z.iso.datetime(), canary_since: z.iso.datetime() })
+  .strict();
+export type SignalsRequest = z.infer<typeof SignalsRequest>;
+
+export const SignalsResponse = z
+  .object({
+    read_full: z.array(z.object({ actor_user_id: uuid, count: z.number().int().min(0) }).strict()),
+    canary: z.array(
+      z
+        .object({
+          id: z.string().regex(/^[1-9]\d{0,18}$/),
+          at: z.iso.datetime({ offset: true }),
+          caller: z.enum(['web', 'worker', 'deletion']),
+          capability: z.enum(['read_full', 'mask']),
+          actor_user_id: uuid.nullable(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type SignalsResponse = z.infer<typeof SignalsResponse>;
 
 export const ErrorBody = z.object({ error: z.string() }).strict();
 

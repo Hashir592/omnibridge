@@ -1,3 +1,4 @@
+import type { Notifier } from '@omnibridge/core';
 import type { DeletionLog, ErasureRequestRepository } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { deletionRunId, piiExpiryJob, type JobQueue, type PhasedHandler } from '@omnibridge/queue';
@@ -17,6 +18,11 @@ export interface DeletionDeps {
   log: Pick<DeletionLog, 'record'>;
   /** A-006 (ADR-069): an erasure's request takes its state from this job's outcome. */
   erasures: Pick<ErasureRequestRepository, 'complete' | 'fail'>;
+  /**
+   * SEC-12 (T-0503): a failed erasure raises a critical alert to the workspace's admins, in the
+   * hook's own transaction; a completed one resolves it (NTF-1).
+   */
+  notifier?: Pick<Notifier, 'raise' | 'resolve'>;
   logger: Logger;
   now?: () => Date;
 }
@@ -79,7 +85,15 @@ function deletionRun<T>(
       );
       // A-006: in the same transaction as the run log, so the request says completed only when
       // the run is recorded.
-      if (trigger === 'erasure') await deps.erasures.complete(job.ctx, job.jobId, now());
+      if (trigger === 'erasure') {
+        const requestId = await deps.erasures.complete(job.ctx, job.jobId, now());
+        if (requestId !== undefined) {
+          await deps.notifier?.resolve(job.ctx, 'pii.erasure_failed', {
+            kind: 'erasure_request',
+            id: requestId,
+          });
+        }
+      }
       deps.logger.info(
         {
           event: 'pii.deletion',
@@ -96,8 +110,13 @@ function deletionRun<T>(
     failed: async (job) => {
       const { trigger } = what(job.payload);
       if (trigger !== 'erasure') return;
-      if (await deps.erasures.fail(job.ctx, job.jobId, now())) {
-        // IDs only: the admin sees Failed and retries; M05 may alert on this event.
+      const requestId = await deps.erasures.fail(job.ctx, job.jobId, now());
+      if (requestId !== undefined) {
+        // IDs only: the admin sees Failed and retries; the alert says so at once (SEC-12).
+        await deps.notifier?.raise(job.ctx, {
+          type: 'pii.erasure_failed',
+          record: { kind: 'erasure_request', id: requestId },
+        });
         deps.logger.warn(
           { event: 'pii.erasure_failed', workspaceId: job.envelope.workspace_id, jobId: job.jobId },
           'erasure deletion failed after its last attempt: an admin must retry',

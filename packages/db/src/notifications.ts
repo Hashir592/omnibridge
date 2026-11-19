@@ -373,6 +373,22 @@ export class NotificationRepository implements NotificationStore {
     return Number(rows[0]?.n ?? 0);
   }
 
+  /** The ids of open notifications of one type and record kind (rules that resolve, NTF-1). */
+  async openRecordIds(ctx: TenantContext, type: string, kind: string): Promise<string[]> {
+    return withTenantTransaction(this.#db, ctx, async (trx) =>
+      (
+        await trx
+          .selectFrom('app.notifications')
+          .select('record_id')
+          .where('workspace_id', '=', ctx.workspaceId)
+          .where('type', '=', type)
+          .where('record_kind', '=', kind)
+          .where('resolved_at', 'is', null)
+          .execute()
+      ).map((r) => r.record_id),
+    );
+  }
+
   // Email (T-0502: NTF-3, NTF-4). One job per recipient; a sent record per notification version.
 
   /** Who gets an email about this notification now (0031 definer: admins always for critical). */

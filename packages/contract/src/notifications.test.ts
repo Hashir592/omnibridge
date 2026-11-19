@@ -12,6 +12,11 @@ describe('notification tabs', () => {
     expect(adminOnly.sort()).toEqual([
       'channel.auth_lost',
       'channel.deletion_scheduled',
+      'pii.erasure_failed',
+      'security.account_locked',
+      'security.mass_export',
+      'security.mass_pii_view',
+      'security.unusual_login',
       'users.access_review_due',
     ]);
   });

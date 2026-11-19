@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { readSecretFile, requireEnv } from '@omnibridge/core';
+import { Notifier, readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
@@ -152,12 +152,17 @@ const app = buildWebApp({
   // The eBay account deletion endpoint (EBAY-2), when its secrets are mounted.
   ...(() => {
     // AT-10: a verified notice is matched in the vault and queued by ref (FA-14).
-    const ebay = ebayWebhookFromEnv(logger, {
-      vault,
-      accounts: new ChannelAccountRepository(main.db),
-      tenancy,
-      queue,
-    });
+    const ebay = ebayWebhookFromEnv(
+      logger,
+      {
+        vault,
+        accounts: new ChannelAccountRepository(main.db),
+        tenancy,
+        queue,
+      },
+      // SEC-12: a throttled key fetch raises a platform notice (T-0503).
+      new Notifier({ store: new NotificationRepository(main.db) }),
+    );
     return ebay === undefined ? {} : { ebay };
   })(),
   // compose sets uniquelocal: only the private-network edge may name the client address.

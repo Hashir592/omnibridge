@@ -208,14 +208,15 @@ export class ErasureRequestRepository {
   /**
    * A-006 (ADR-069): the deletion job `jobId` has run; the request it belongs to is completed.
    * Called by the job in its own tenant transaction (no user named). Only the request's current
-   * job counts, so a late outcome of a replaced job changes nothing. False when none matched.
+   * job counts, so a late outcome of a replaced job changes nothing. Returns the request's id, or
+   * undefined when none matched.
    */
-  async complete(ctx: TenantContext, jobId: string, at: Date): Promise<boolean> {
+  async complete(ctx: TenantContext, jobId: string, at: Date): Promise<string | undefined> {
     return this.#outcome(ctx, jobId, { state: 'completed', completed_at: at });
   }
 
   /** A-006: the last attempt of the deletion job `jobId` failed; an admin must retry. */
-  async fail(ctx: TenantContext, jobId: string, at: Date): Promise<boolean> {
+  async fail(ctx: TenantContext, jobId: string, at: Date): Promise<string | undefined> {
     return this.#outcome(ctx, jobId, { state: 'failed', failed_at: at });
   }
 
@@ -223,16 +224,17 @@ export class ErasureRequestRepository {
     ctx: TenantContext,
     jobId: string,
     set: { state: 'completed'; completed_at: Date } | { state: 'failed'; failed_at: Date },
-  ): Promise<boolean> {
+  ): Promise<string | undefined> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
-      const res = await trx
+      const row = await trx
         .updateTable('app.erasure_requests')
         .set(set)
         .where('workspace_id', '=', ctx.workspaceId)
         .where('job_id', '=', jobId)
         .where('state', '=', 'confirmed')
+        .returning('id')
         .executeTakeFirst();
-      return res.numUpdatedRows > 0n;
+      return row?.id;
     });
   }
 

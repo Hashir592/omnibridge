@@ -8,6 +8,7 @@ import {
   MatchRequest,
   ReadFullRequest,
   SearchRequest,
+  SignalsRequest,
   type Capability,
 } from '@omnibridge/vault-client/schemas';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
@@ -160,6 +161,12 @@ export function buildVaultApp({
     const caller = authorise(request, 'search');
     if (caller !== 'web') throw new HttpError(403, 'capability_missing');
     return vault.ebayUserMatch(parse(EbayUserMatchRequest, request.body), { caller });
+  });
+
+  // SEC-12: counts and IDs for the security alerts, for the worker's token only.
+  app.post('/v1/signals', async (request) => {
+    authorise(request, 'signals');
+    return vault.signals(parse(SignalsRequest, request.body));
   });
 
   // DEL-1: the deletion service, for the deletion jobs' token only.

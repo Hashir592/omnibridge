@@ -50,6 +50,7 @@ export {
 export { MembershipRepository, UserRepository, type User } from './users.ts';
 export { DeletionLog, type DeletionCertificate, type DeletionRun } from './deletion.ts';
 export { erasureDueAt, ErasureRequestRepository, type ErasureRequest } from './erasure.ts';
+export { SecuritySignals } from './security.ts';
 export {
   isNotificationCursor,
   NotificationRepository,

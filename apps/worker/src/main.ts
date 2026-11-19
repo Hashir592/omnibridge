@@ -1,4 +1,4 @@
-import { readSecretFile, requireEnv } from '@omnibridge/core';
+import { Notifier, readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
@@ -14,6 +14,7 @@ import {
   mainDbConfig,
   MembershipRepository,
   NotificationRepository,
+  SecuritySignals,
   Tenancy,
   UserRepository,
   WorkspaceRepository,
@@ -21,13 +22,14 @@ import {
 import { createLogger } from '@omnibridge/logger';
 import { Mailer } from '@omnibridge/mail';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
-import { JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
+import { emailOnRaise, JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
 import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
 import { piiDeleteHandler, piiExpiryHandler } from './deletion.ts';
 import { jobsRetentionHandler } from './housekeeping.ts';
 import { notifyEmailHandler, sweepPlatformEmails } from './notify-mail.ts';
+import { securityScanHandler, securityThresholdsFromEnv } from './security.ts';
 import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
 import { workerHandlerDbConfig } from './db.ts';
 import { registerHandlers } from './handlers.ts';
@@ -102,6 +104,11 @@ const users = new UserRepository(handlerDb.db);
 const appOrigin = requireEnv('APP_ORIGIN');
 // Notification emails (T-0502): one job per recipient, plus the minute sweep of platform notices.
 const notifications = new NotificationRepository(handlerDb.db);
+// Raising in a job emails its recipients through the same transaction (T-0502).
+const notifier = new Notifier({
+  store: notifications,
+  onRaised: emailOnRaise({ queue, recipients: notifications }),
+});
 // DEL-1: the deletion jobs reach pii-vault with the deletion token, the only one that may delete.
 const deletionDeps = {
   vault: new VaultClient({
@@ -111,6 +118,7 @@ const deletionDeps = {
   }),
   log: new DeletionLog(handlerDb.db),
   erasures: new ErasureRequestRepository(handlerDb.db),
+  notifier,
   logger: log,
 };
 await registerHandlers(queue, {
@@ -151,6 +159,18 @@ await registerHandlers(queue, {
   }),
   'pii.delete': piiDeleteHandler(deletionDeps),
   'pii.expiry': piiExpiryHandler(deletionDeps),
+  // SEC-12: the vault's read counts and canary reads come through the worker's own token.
+  'security.scan': securityScanHandler({
+    vault: new VaultClient({
+      baseUrl: requireEnv('PII_VAULT_URL'),
+      token: readSecretFile('VAULT_TOKEN'),
+    }),
+    signals: new SecuritySignals(handlerDb.db),
+    notifications,
+    notifier,
+    thresholds: securityThresholdsFromEnv(process.env),
+    logger: log,
+  }),
   'notify.email': notifyEmailHandler({
     tenancy: new Tenancy(handlerDb.db),
     notifications,
