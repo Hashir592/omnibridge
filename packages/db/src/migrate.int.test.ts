@@ -88,6 +88,7 @@ describe('db-main roles and migrations', () => {
       '0028_erasure_outcome',
       '0029_validate_erasure_outcome',
       '0030_notifications',
+      '0031_notification_email',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

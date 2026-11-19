@@ -53,10 +53,12 @@ export { erasureDueAt, ErasureRequestRepository, type ErasureRequest } from './e
 export {
   isNotificationCursor,
   NotificationRepository,
+  type EmailJobView,
   type Notification,
   type NotificationCursor,
   type NotificationFilter,
   type NotificationViewer,
+  type PlatformEmail,
 } from './notifications.ts';
 export {
   ACCESS_REVIEW_INTERVAL_MS,

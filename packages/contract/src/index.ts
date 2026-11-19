@@ -71,6 +71,9 @@ export {
 } from './routes/privacy.ts';
 export {
   countUnreadNotifications,
+  EmailPreferenceSchema,
+  getEmailPreferences,
+  setEmailPreferences,
   countUnreadPlatformNotifications,
   listNotifications,
   listPlatformNotifications,

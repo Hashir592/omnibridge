@@ -103,6 +103,58 @@ export const markAllNotificationsRead = defineRoute({
   ...bell,
 });
 
+/**
+ * NTF-4: one line per notification type this user can receive. Critical types default to on,
+ * others to off. `locked` types (critical, for admins) cannot be switched off.
+ */
+export const EmailPreferenceSchema = z
+  .object({
+    type: z.string(),
+    title: z.string(),
+    /** The most serious this type can be. */
+    severity: z.enum(NOTIFICATION_SEVERITIES),
+    email: z.boolean(),
+    locked: z.boolean(),
+  })
+  .meta({ id: 'EmailPreference' });
+
+const EmailPreferences = z
+  .object({ items: z.array(EmailPreferenceSchema) })
+  .meta({ id: 'EmailPreferences' });
+
+const mine = { auth: 'session', tab: 'none', adminOnly: false, companyScoped: false } as const;
+
+/** PROPOSED SHAPE for S2 (T-0312): the signed-in user's email choices per type. */
+export const getEmailPreferences = defineRoute({
+  id: 'getEmailPreferences',
+  method: 'GET',
+  path: '/me/notification-email-preferences',
+  summary: 'Get my notification email preferences',
+  responses: { 200: EmailPreferences },
+  ...mine,
+});
+
+/**
+ * Sets some types on or off; the others keep their setting. 400 for an unknown type, a type this
+ * user cannot receive, or an admin switching a critical type off (NTF-4).
+ */
+export const setEmailPreferences = defineRoute({
+  id: 'setEmailPreferences',
+  method: 'PUT',
+  path: '/me/notification-email-preferences',
+  summary: 'Set my notification email preferences',
+  body: z
+    .object({
+      items: z
+        .array(z.object({ type: z.string().min(1).max(64), email: z.boolean() }).strict())
+        .min(1)
+        .max(100),
+    })
+    .strict(),
+  responses: { 200: EmailPreferences },
+  ...mine,
+});
+
 const platformConsole = {
   auth: 'platform',
   tab: 'none',
@@ -158,4 +210,6 @@ export const notificationRoutes = [
   countUnreadPlatformNotifications,
   markPlatformNotificationRead,
   markAllPlatformNotificationsRead,
+  getEmailPreferences,
+  setEmailPreferences,
 ] as const;

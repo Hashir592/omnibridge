@@ -422,6 +422,27 @@
         },
         "required": ["marked"]
       },
+      "EmailPreferenceInput": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "warning", "info"] },
+          "email": { "type": "boolean" },
+          "locked": { "type": "boolean" }
+        },
+        "required": ["type", "title", "severity", "email", "locked"]
+      },
+      "EmailPreferencesInput": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmailPreferenceInput" }
+          }
+        },
+        "required": ["items"]
+      },
       "BuyerIdentifiersInput": {
         "type": "object",
         "properties": {
@@ -1346,6 +1367,26 @@
           "marked": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
         },
         "required": ["marked"],
+        "additionalProperties": false
+      },
+      "EmailPreference": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "warning", "info"] },
+          "email": { "type": "boolean" },
+          "locked": { "type": "boolean" }
+        },
+        "required": ["type", "title", "severity", "email", "locked"],
+        "additionalProperties": false
+      },
+      "EmailPreferences": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/EmailPreference" } }
+        },
+        "required": ["items"],
         "additionalProperties": false
       },
       "BuyerIdentifiers": {
@@ -4376,6 +4417,96 @@
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/NotificationsMarked" }
               }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/me/notification-email-preferences": {
+      "get": {
+        "operationId": "getEmailPreferences",
+        "summary": "Get my notification email preferences",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/EmailPreferences" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setEmailPreferences",
+        "summary": "Set my notification email preferences",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": { "type": "string", "minLength": 1, "maxLength": 64 },
+                        "email": { "type": "boolean" }
+                      },
+                      "required": ["type", "email"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["items"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/EmailPreferences" } }
             }
           },
           "4XX": {

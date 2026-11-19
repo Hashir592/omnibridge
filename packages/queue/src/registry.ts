@@ -107,6 +107,20 @@ export const piiExpiryJob = defineJob({
 });
 
 /**
+ * One notification email to one recipient (T-0502: NTF-3, NTF-4): IDs only (invariant 7a). The
+ * version is the notification's at raise time, so a re-raise that is not new, higher or
+ * reopened queues nothing, and a retried job never sends twice (the sent record is per version).
+ */
+export const notifyEmailJob = defineJob({
+  type: 'notify.email',
+  payload: z
+    .object({ notification_id: z.uuid(), user_id: z.uuid(), version: z.number().int().min(1) })
+    .strict(),
+  retry: { limit: 6, delaySeconds: 30, backoff: true, maxDelaySeconds: 1_800 },
+  expireInSeconds: 120,
+});
+
+/**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
@@ -121,6 +135,7 @@ export const JOBS: readonly JobDefinition[] = [
   jobsRetentionJob,
   piiDeleteJob,
   piiExpiryJob,
+  notifyEmailJob,
 ];
 
 /**
@@ -161,6 +176,16 @@ export const piiExpirySweepJob = definePlatformJob({
 });
 
 /**
+ * Critical platform notices (NTF-2, NTF-3): every minute, emails each platform admin about each
+ * one not yet sent at its current version. Light, and a run with nothing to send is one query.
+ */
+export const notifyPlatformEmailSweepJob = definePlatformJob({
+  type: 'notify.platform-email-sweep',
+  cron: '* * * * *',
+  heavy: false,
+});
+
+/**
  * Every platform job with a cron (no workspace). The migrate job creates their queues, and the
  * worker schedules and consumes each one.
  */
@@ -169,4 +194,5 @@ export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [
   accessReviewSweepJob,
   housekeepingSweepJob,
   piiExpirySweepJob,
+  notifyPlatformEmailSweepJob,
 ];

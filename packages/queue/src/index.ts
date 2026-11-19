@@ -74,9 +74,12 @@ export {
   auditRetentionSweepJob,
   filesScanJob,
   JOBS,
+  notifyEmailJob,
+  notifyPlatformEmailSweepJob,
   piiDeleteJob,
   piiExpiryJob,
   piiExpirySweepJob,
   PLATFORM_JOBS,
 } from './registry.ts';
 export { deletionRunId, requestDeletion, type DeletionRequest } from './deletion.ts';
+export { emailOnRaise, type EmailRecipients } from './notify.ts';

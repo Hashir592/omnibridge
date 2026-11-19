@@ -183,3 +183,52 @@ export function renderPasswordReset(values: {
   );
   return { subject, text, html };
 }
+
+const SEVERITY_LABEL = { critical: 'Critical', warning: 'Warning', info: 'Info' } as const;
+
+/**
+ * A notification email (NTF-3, MAIL-3): what happened (the type's title), how serious, which
+ * company, and a link into the app, which needs a sign-in. Nothing from the record itself: no
+ * buyer PII, no order contents, no secrets. The link is the app's own page, not a token, so it
+ * does not expire; signing in decides who may open it.
+ */
+export function renderNotificationEmail(values: {
+  recipientName: string;
+  severity: keyof typeof SEVERITY_LABEL;
+  title: string;
+  /** The company's trading name; omitted for a workspace-wide or platform notice. */
+  companyName?: string | undefined;
+  /** Where the notice is, e.g. the platform console instead of the workspace. */
+  scope: 'workspace' | 'platform';
+  linkUrl: string;
+  appOrigin: string;
+}): Email {
+  const linkUrl = checkAppUrl(values.linkUrl, values.appOrigin);
+  const label = SEVERITY_LABEL[values.severity];
+  const where =
+    values.scope === 'platform'
+      ? 'the platform console'
+      : values.companyName === undefined
+        ? 'your workspace'
+        : values.companyName;
+  const subject = `[${label}] ${values.title}${values.companyName === undefined ? '' : ` (${values.companyName})`}`;
+  const text = [
+    `Hello ${values.recipientName},`,
+    '',
+    `${label}: ${values.title}, in ${where}.`,
+    '',
+    `See it in OmniBridge (sign in first): ${linkUrl}`,
+    '',
+    'You can choose which alerts reach you by email in your notification settings.',
+  ].join('\n');
+  const html = baseTemplate(
+    subject,
+    [
+      `<p>Hello ${escapeHtml(values.recipientName)},</p>`,
+      `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(values.title)}, in ${escapeHtml(where)}.</p>`,
+      `<p><a href="${escapeHtml(linkUrl)}" style="background:#0F6B66;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">See it in OmniBridge</a></p>`,
+      '<p>You can choose which alerts reach you by email in your notification settings.</p>',
+    ].join(''),
+  );
+  return { subject, text, html };
+}

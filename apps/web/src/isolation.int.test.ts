@@ -403,6 +403,14 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         countUnreadPlatformNotifications: {},
         markPlatformNotificationRead: { params: { id: b.notification } },
         markAllPlatformNotificationsRead: {},
+        // T-0502: a user's own email choices only.
+        getEmailPreferences: {},
+        // The body is a type code, no id of B's, so it cannot aim at B (any status; the snapshot
+        // of B and the leak check still apply).
+        setEmailPreferences: {
+          body: { items: [{ type: 'reminders.due', email: true }] },
+          searchText: true,
+        },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
