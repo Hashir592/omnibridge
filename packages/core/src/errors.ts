@@ -16,6 +16,8 @@ export const ERROR_CODES = [
   'rate_limited',
   'internal_error',
   'service_unavailable',
+  // A-001 (ADR-069): a search matched more than one answer holds; narrow it and search again.
+  'too_many_matches',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

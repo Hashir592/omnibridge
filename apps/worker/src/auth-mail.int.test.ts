@@ -45,6 +45,7 @@ describe('auth mail jobs [USR-5][USR-7]', () => {
   const run = <T>(handler: (job: RunningJob<T>) => Promise<unknown>, payload: T) =>
     tenancy.run({ workspaceId: ws, companyIds: [] }, (ctx: TenantContext) =>
       handler({
+        jobId: randomUUID(),
         ctx,
         payload,
         attempt: 1,

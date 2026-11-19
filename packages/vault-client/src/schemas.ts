@@ -172,13 +172,20 @@ export type SearchResponse = z.infer<typeof SearchResponse>;
 
 /**
  * AT-10 (FA-14): an eBay deletion notice names an eBay user, not a workspace. The vault checks
- * every workspace that holds PII for records of that user (the `buyer` blind index, by user ID
- * or username) and answers the refs per workspace. Nothing is deleted here.
+ * every workspace that holds PII for records of that user (the `buyer_exact` blind index, by user
+ * ID or username) and answers the refs per workspace. Nothing is deleted here.
+ *
+ * A-001 (ADR-069): one answer holds at most 5,000 refs. `next` says where the next page starts
+ * (workspace, then pii_ref order); the caller asks again with it as `cursor` until it is null, so
+ * every record is found.
  */
+export const EbayUserMatchCursor = z.object({ workspace_id: uuid, pii_ref: uuid }).strict();
+export type EbayUserMatchCursor = z.infer<typeof EbayUserMatchCursor>;
 export const EbayUserMatchRequest = z
   .object({
     user_id: z.string().min(1).max(200).optional(),
     username: z.string().min(1).max(200).optional(),
+    cursor: EbayUserMatchCursor.optional(),
   })
   .strict()
   .refine((r) => r.user_id !== undefined || r.username !== undefined, 'user_id or username');
@@ -186,6 +193,7 @@ export type EbayUserMatchRequest = z.infer<typeof EbayUserMatchRequest>;
 export const EbayUserMatchResponse = z
   .object({
     workspaces: z.array(z.object({ workspace_id: uuid, matches: z.array(Subject) }).strict()),
+    next: EbayUserMatchCursor.nullable(),
   })
   .strict();
 export type EbayUserMatchResponse = z.infer<typeof EbayUserMatchResponse>;

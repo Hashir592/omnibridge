@@ -178,7 +178,12 @@ export function peopleHandlers(
           expires_at: invite.expiresAt.toISOString(),
         },
       });
-      await p.notifier.invite({ workspaceId: tenant.workspaceId, inviteId: invite.id });
+      // A-002: the job commits with the invite, so the worker always finds it.
+      await p.notifier.invite({
+        workspaceId: tenant.workspaceId,
+        inviteId: invite.id,
+        within: tenant,
+      });
       return { status: 201, body: invitedUser(invite) };
     },
 
@@ -277,11 +282,16 @@ export function peopleHandlers(
             },
             ip: request.ip,
           });
+          // A-002: queued in the same transaction, so the invite and its mail commit together.
+          await p.notifier.invite({
+            workspaceId: params.workspaceId,
+            inviteId: created.id,
+            within: ctx,
+          });
           return created;
         },
       );
       if (invite === undefined) throw notFound();
-      await p.notifier.invite({ workspaceId: params.workspaceId, inviteId: invite.id });
       return { status: 201, body: { id: invite.id } };
     },
 

@@ -11,3 +11,18 @@ export const ERASURE_WITHDRAW_REASONS = [
 ] as const;
 
 export type ErasureWithdrawReason = (typeof ERASURE_WITHDRAW_REASONS)[number];
+
+/**
+ * DEL-4: the life of an erasure request. A-006 (ADR-069): `confirmed` means its deletion is
+ * queued or running; the deletion job sets `completed` when it has run and `failed` when its
+ * last attempt failed (an admin may retry). Overdue counts until it is `completed` or
+ * `withdrawn` (ADR-067).
+ */
+export const ERASURE_STATES = ['open', 'confirmed', 'completed', 'failed', 'withdrawn'] as const;
+
+export type ErasureState = (typeof ERASURE_STATES)[number];
+
+/** True for a request whose one-month clock (DEL-4) has stopped. */
+export function erasureClosed(state: ErasureState): boolean {
+  return state === 'completed' || state === 'withdrawn';
+}

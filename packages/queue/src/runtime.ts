@@ -84,6 +84,11 @@ class Gate {
 const SLOT_POLL_MS = 100;
 
 export interface SendInput<T> {
+  /**
+   * The workspace of the job. A context bound to an open transaction (a request's `tenant`)
+   * makes the job record and the pg-boss job part of that transaction (A-002, ADR-069): the
+   * worker sees the job only once the request commits, and never if it rolls back.
+   */
   ctx: TenantContext;
   channelAccountId?: string;
   /** The one company the job belongs to, if any: web shows it only with that company in scope. */
@@ -93,6 +98,8 @@ export interface SendInput<T> {
 }
 
 export interface RunningJob<T> {
+  /** The job's id: its job record's and pg-boss's, the one `send` returned. */
+  readonly jobId: string;
   readonly envelope: JobEnvelope<T>;
   readonly payload: T;
   /**
@@ -122,6 +129,12 @@ export type PreparingJob<T> = Omit<RunningJob<T>, 'ctx'>;
 export interface PhasedHandler<T, O> {
   prepare(job: PreparingJob<T>): Promise<O>;
   commit(job: RunningJob<T>, prepared: O): Promise<unknown>;
+  /**
+   * A-006 (ADR-069): called once, after the job's last attempt failed (it then goes to the
+   * dead-letter queue), in a short tenant transaction of its own, so the work the job stands for
+   * can record that it failed. Its own failure is logged and never replaces the job's error.
+   */
+  failed?(job: RunningJob<T>, err: unknown): Promise<void>;
 }
 
 /** Options a caller may tune per worker; the rest is fixed by the job definition. */
@@ -284,6 +297,7 @@ export class JobQueue {
       // Inside the try, so a failed update still releases the slot (F-M01-end-01).
       await this.#records.update(ctx, key, { state: 'active', attempt, errorCode: null });
       const base: PreparingJob<z.infer<P>> = {
+        jobId: job.id,
         envelope: { ...envelope, attempt },
         payload: envelope.payload,
         attempt,
@@ -328,6 +342,29 @@ export class JobQueue {
             'job record update failed',
           );
         });
+      if (last && typeof handler !== 'function' && handler.failed !== undefined) {
+        const failed = handler.failed.bind(handler);
+        await this.#tenancy
+          .runWorkspace({ workspaceId: envelope.workspace_id }, (tenant) =>
+            failed(
+              {
+                jobId: job.id,
+                envelope: { ...envelope, attempt },
+                payload: envelope.payload,
+                attempt,
+                ctx: tenant,
+                progress: () => Promise.resolve(),
+              },
+              err,
+            ),
+          )
+          .catch((hookErr: unknown) => {
+            this.#log.error(
+              { event: 'job.failed_hook_failed', ...fields, err: hookErr },
+              'job failure could not be recorded',
+            );
+          });
+      }
       throw err; // pg-boss retries, or moves the job to <type>.dlq after the last attempt
     } finally {
       await release();

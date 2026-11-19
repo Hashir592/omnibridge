@@ -349,32 +349,58 @@ export class Vault {
    * `buyer_exact` blind index (ADR-066: trim only, never case-folded), in every workspace that
    * holds PII. One short transaction per workspace; a workspace
    * with a hit gets an access-log row with the count, one without is not logged.
+   *
+   * A-001 (ADR-069): paged, never cut short. One answer holds at most `pageSize` refs, in
+   * (workspace, pii_ref) order from `cursor`; `next` is where the following page starts, or null
+   * once every match has been returned.
    */
-  async ebayUserMatch(req: EbayUserMatchRequest, actor: Actor): Promise<EbayUserMatchResponse> {
+  async ebayUserMatch(
+    req: EbayUserMatchRequest,
+    actor: Actor,
+    pageSize = SEARCH_LIMIT,
+  ): Promise<EbayUserMatchResponse> {
     const values = [req.user_id, req.username]
       .filter((v): v is string => v !== undefined)
       .map(normaliseBuyerExact)
       .filter((v) => v !== '');
+    const cursor = req.cursor;
     const directory = await this.#pool.query<{ workspace_id: string }>(
-      'SELECT workspace_id FROM vault.workspace_directory ORDER BY workspace_id',
+      `SELECT workspace_id FROM vault.workspace_directory
+        WHERE $1::uuid IS NULL OR workspace_id >= $1::uuid
+        ORDER BY workspace_id`,
+      [cursor?.workspace_id ?? null],
     );
     const workspaces: EbayUserMatchResponse['workspaces'] = [];
+    let remaining = pageSize;
+    let last: EbayUserMatchResponse['next'] = null;
+    let next: EbayUserMatchResponse['next'] = null;
     for (const { workspace_id: workspaceId } of directory.rows) {
-      const matches = await this.#tx(workspaceId, async (c, tx) => {
+      if (remaining === 0) {
+        // The page is full and more workspaces are left: the next page starts after the last ref.
+        next = last;
+        break;
+      }
+      const after = cursor?.workspace_id === workspaceId ? cursor.pii_ref : null;
+      const take = remaining;
+      const page = await this.#tx(workspaceId, async (c, tx) => {
         const keys = await this.#loadKeys(tx, workspaceId, false);
-        if (keys === undefined || values.length === 0) return [];
+        if (keys === undefined || values.length === 0) return { rows: [], more: false };
+        // One more than fits, so a full page knows whether this workspace has more.
         const res = await c.query<SearchResponse['matches'][number]>(
           `SELECT r.pii_ref, r.kind, r.subject_type, r.subject_id, r.channel_account_id
              FROM vault.records r
             WHERE r.workspace_id = $1 AND NOT r.canary
+              AND ($4::uuid IS NULL OR r.pii_ref > $4::uuid)
               AND r.pii_ref IN (SELECT b.pii_ref FROM vault.blind_index b
                                  WHERE b.workspace_id = $1 AND b.field = 'buyer_exact'
                                    AND b.mac = ANY($2::bytea[]))
             ORDER BY r.pii_ref
             LIMIT $3`,
-          [workspaceId, values.map((v) => keys.index.mac('buyer_exact', v)), SEARCH_LIMIT],
+          [workspaceId, values.map((v) => keys.index.mac('buyer_exact', v)), take + 1, after],
         );
-        if (res.rows.length > 0) {
+        const more = res.rows.length > take;
+        const rows = more ? res.rows.slice(0, take) : res.rows;
+        if (rows.length > 0) {
           await this.#log(
             c,
             workspaceId,
@@ -382,14 +408,23 @@ export class Vault {
             'search',
             'ebay_account_deletion',
             null,
-            res.rows.length,
+            rows.length,
           );
         }
-        return res.rows;
+        return { rows, more };
       });
-      if (matches.length > 0) workspaces.push({ workspace_id: workspaceId, matches });
+      const lastRow = page.rows.at(-1);
+      if (lastRow !== undefined) {
+        workspaces.push({ workspace_id: workspaceId, matches: page.rows });
+        last = { workspace_id: workspaceId, pii_ref: lastRow.pii_ref };
+        remaining -= page.rows.length;
+      }
+      if (page.more) {
+        next = last;
+        break;
+      }
     }
-    return { workspaces };
+    return { workspaces, next };
   }
 
   /**

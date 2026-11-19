@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   challengeResponse,
   EbayBudgetExhausted,
+  EbayKeyFetchThrottled,
+  EbayKeyNotFound,
   ebayPublicKeyFetcher,
   isVerificationToken,
   PublicKeyCache,
@@ -143,5 +145,106 @@ describe('eBay marketplace account deletion (EBAY-2)', () => {
     await expect(fetchKey(SAMPLE.kid)).rejects.toBeInstanceOf(EbayBudgetExhausted);
     // Refused before sending: no third request went out.
     expect(fake).toHaveBeenCalledTimes(2);
+  });
+});
+
+// A-003 (ADR-069): forged notices must not spend the eBay budget.
+describe('eBay key cache under forged key ids (A-003)', () => {
+  const notFound = () => Promise.reject(new EbayKeyNotFound());
+
+  it('[EBAY-2] a kid eBay does not know is a bad signature, remembered for an hour', async () => {
+    let now = 0;
+    const fetchKey = vi.fn(notFound);
+    const cache = new PublicKeyCache(fetchKey, () => now);
+    const forged = Buffer.from(
+      JSON.stringify({
+        ...(JSON.parse(Buffer.from(SAMPLE.signature, 'base64').toString()) as object),
+        kid: 'forged',
+      }),
+    ).toString('base64');
+    expect(await verifyNotification(SAMPLE.message, forged, cache.get)).toBe(false);
+    expect(await verifyNotification(SAMPLE.message, forged, cache.get)).toBe(false);
+    expect(fetchKey).toHaveBeenCalledTimes(1);
+    now += 61 * 60_000;
+    expect(await verifyNotification(SAMPLE.message, forged, cache.get)).toBe(false);
+    expect(fetchKey).toHaveBeenCalledTimes(2);
+  });
+
+  it('[EBAY-2] a kid that is not a plain id is refused with no fetch', async () => {
+    const fetchKey = vi.fn(keyOf);
+    const odd = Buffer.from(
+      JSON.stringify({
+        ...(JSON.parse(Buffer.from(SAMPLE.signature, 'base64').toString()) as object),
+        kid: `../${'x'.repeat(200)}`,
+      }),
+    ).toString('base64');
+    expect(await verifyNotification(SAMPLE.message, odd, fetchKey)).toBe(false);
+    expect(fetchKey).not.toHaveBeenCalled();
+  });
+
+  it('[EBAY-2] at most 5 uncached fetches a minute in total; beforeFetch runs before each', async () => {
+    let now = 0;
+    const fetchKey = vi.fn(notFound);
+    const cache = new PublicKeyCache(fetchKey, () => now);
+    const before = vi.fn();
+    for (let i = 0; i < 5; i += 1) {
+      await expect(cache.get(`k${String(i)}`, before)).rejects.toBeInstanceOf(EbayKeyNotFound);
+    }
+    await expect(cache.get('k5', before)).rejects.toBeInstanceOf(EbayKeyFetchThrottled);
+    expect(fetchKey).toHaveBeenCalledTimes(5);
+    expect(before).toHaveBeenCalledTimes(5);
+    now += 60_000;
+    await expect(cache.get('k5', before)).rejects.toBeInstanceOf(EbayKeyNotFound);
+    expect(fetchKey).toHaveBeenCalledTimes(6);
+  });
+
+  it('[EBAY-2] a beforeFetch that throws stops the fetch', async () => {
+    const fetchKey = vi.fn(keyOf);
+    const cache = new PublicKeyCache(fetchKey);
+    await expect(
+      cache.get(SAMPLE.kid, () => {
+        throw new Error('rate limited');
+      }),
+    ).rejects.toThrow('rate limited');
+    expect(fetchKey).not.toHaveBeenCalled();
+  });
+
+  it('[EBAY-2] the fetcher reports 404 as an unknown kid, 5xx as an outage', async () => {
+    const fake = (status: number) => (url: string | URL) =>
+      Promise.resolve(
+        String(url).endsWith('/oauth2/token')
+          ? Response.json({ access_token: 'app-token', expires_in: 7200 })
+          : new Response(null, { status }),
+      );
+    const fetcher = (status: number) =>
+      ebayPublicKeyFetcher({
+        apiBase: 'http://provider-mocks:8080/ebay',
+        clientId: 'synthetic-client',
+        clientSecret: 'synthetic-secret',
+        budget: () => true,
+        fetch: fake(status) as typeof fetch,
+      });
+    await expect(fetcher(404)('k')).rejects.toBeInstanceOf(EbayKeyNotFound);
+    // A 400 may be our own request's fault: an error (eBay retries), never a cached unknown kid.
+    await expect(fetcher(400)('k')).rejects.not.toBeInstanceOf(EbayKeyNotFound);
+    await expect(fetcher(503)('k')).rejects.not.toBeInstanceOf(EbayKeyNotFound);
+  });
+
+  it("[EBAY-2] while a flood holds the fetch cap, eBay's known key is used past its hour, not refused", async () => {
+    let now = 0;
+    const fetchKey = vi.fn((kid: string) =>
+      kid === SAMPLE.kid ? Promise.resolve(SAMPLE.key) : Promise.reject(new EbayKeyNotFound()),
+    );
+    const cache = new PublicKeyCache(fetchKey, () => now);
+    expect(await cache.get(SAMPLE.kid)).toBe(SAMPLE.key);
+    now += 61 * 60_000; // the key's hour is over
+    for (let i = 0; i < 5; i += 1) {
+      await expect(cache.get(`junk-${String(i)}`)).rejects.toBeInstanceOf(EbayKeyNotFound);
+    }
+    expect(await cache.get(SAMPLE.kid)).toBe(SAMPLE.key);
+    expect(fetchKey).toHaveBeenCalledTimes(6);
+    now += 60_000; // a free slot: the key is fetched again
+    expect(await cache.get(SAMPLE.kid)).toBe(SAMPLE.key);
+    expect(fetchKey).toHaveBeenCalledTimes(7);
   });
 });

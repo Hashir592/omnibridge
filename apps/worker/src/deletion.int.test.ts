@@ -6,6 +6,7 @@ import {
   createMainDb,
   createQueues,
   DeletionLog,
+  ErasureRequestRepository,
   JobRecordRepository,
   migrateMain,
   Tenancy,
@@ -123,6 +124,7 @@ describe('deletion jobs, every trigger [DEL-1][DEL-2][DEL-3][AT-8]', () => {
     const deps = {
       vault: new VaultClient({ baseUrl: vault.baseUrl, token: vault.tokens.deletion }),
       log,
+      erasures: new ErasureRequestRepository(db.db),
       logger,
       now: () => clock,
     };

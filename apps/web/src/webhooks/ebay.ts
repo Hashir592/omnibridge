@@ -14,7 +14,7 @@
  * against the eBay governor's daily budget before it is sent (invariant 16); once the budget is
  * spent the notice is answered 412 and eBay sends it again later.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ApiError, readSecretFile, requireEnv, type TenantRunner } from '@omnibridge/core';
 import type {
   AnyRoute,
@@ -25,10 +25,11 @@ import { DailyCallBudget, EBAY_WEBHOOK_DAILY_BUDGET } from '@omnibridge/governor
 import type { ChannelAccountRepository } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { requestDeletion, type JobQueue } from '@omnibridge/queue';
-import type { VaultClient } from '@omnibridge/vault-client';
+import type { EbayUserMatchCursor, VaultClient } from '@omnibridge/vault-client';
 import {
   challengeResponse,
   EbayBudgetExhausted,
+  EbayKeyFetchThrottled,
   ebayPublicKeyFetcher,
   isVerificationToken,
   PublicKeyCache,
@@ -76,51 +77,94 @@ function noticeUser(notification: Record<string, unknown>): {
 }
 
 /**
+ * Pages of the vault's eBay user match one notice may take (5,000 refs each, A-001). Past this the
+ * notice fails loudly (503, eBay retries; every batch already queued runs once), never silently.
+ */
+const MAX_MATCH_PAGES = 1_000;
+
+/**
  * Queues the deletion of one eBay user's records: per workspace, only records on that
  * workspace's eBay accounts (an order contact) or eBay-only kinds (messages, feedback), so a
  * same-named buyer on another channel is never touched. Returns counts for the receipt.
+ *
+ * A-001 (ADR-069): every match is found and queued before the 200. The vault answers in pages of
+ * at most 5,000 refs (the most one deletion job holds); each page's batch per workspace is one
+ * job, keyed by the notice and a hash of its refs, so a notice sent again queues each exact batch
+ * once, and a batch that differs (records deleted since shift the pages) is never skipped.
  */
 async function queueEbayDeletion(
   deps: EbayDeletionDeps,
   notice: ReturnType<typeof noticeUser>,
+  logger: Logger,
 ): Promise<{ workspaces: number; records: number }> {
   if (notice.userId === undefined && notice.username === undefined) {
     return { workspaces: 0, records: 0 };
   }
-  const found = await deps.vault.ebayUserMatch({
-    ...(notice.userId === undefined ? {} : { user_id: notice.userId }),
-    ...(notice.username === undefined ? {} : { username: notice.username }),
-  });
   const key = notice.notificationId ?? randomUUID();
-  let workspaces = 0;
+  const hit = new Set<string>();
   let records = 0;
-  for (const hit of found.workspaces) {
-    const refs = await deps.tenancy.runWorkspace({ workspaceId: hit.workspace_id }, async (ctx) => {
-      const ebayAccounts = new Set(
-        (await deps.accounts.list(ctx)).filter((a) => a.provider === 'ebay').map((a) => a.id),
+  let cursor: EbayUserMatchCursor | null = null;
+  let pages = 0;
+  do {
+    if (pages === MAX_MATCH_PAGES) {
+      logger.error(
+        { event: 'ebay.account_deletion.too_large', pages, records },
+        'eBay notice matched more records than one notice may queue: not finished',
       );
-      const mine = hit.matches
-        .filter(
-          (m) =>
-            m.kind !== 'buyer_contact' ||
-            (m.channel_account_id !== null && ebayAccounts.has(m.channel_account_id)),
-        )
-        .map((m) => m.pii_ref);
-      if (mine.length > 0) {
-        await requestDeletion(deps.queue, ctx, {
-          trigger: 'ebay_account_deletion',
-          scope: { type: 'refs', pii_refs: mine },
-          idempotencyKey: key,
-        });
-      }
-      return mine.length;
-    });
-    if (refs > 0) {
-      workspaces += 1;
-      records += refs;
+      throw new ApiError({ status: 503, code: 'service_unavailable' });
     }
-  }
-  return { workspaces, records };
+    pages += 1;
+    const found = await deps.vault.ebayUserMatch({
+      ...(notice.userId === undefined ? {} : { user_id: notice.userId }),
+      ...(notice.username === undefined ? {} : { username: notice.username }),
+      ...(cursor === null ? {} : { cursor }),
+    });
+    for (const page of found.workspaces) {
+      const queued = await queueWorkspaceBatch(deps, page, key);
+      if (queued > 0) {
+        hit.add(page.workspace_id);
+        records += queued;
+      }
+    }
+    cursor = found.next;
+  } while (cursor !== null);
+  return { workspaces: hit.size, records };
+}
+
+/** One page's matches in one workspace: its eBay records only, queued as one deletion job. */
+function queueWorkspaceBatch(
+  deps: EbayDeletionDeps,
+  hit: Awaited<ReturnType<VaultClient['ebayUserMatch']>>['workspaces'][number],
+  noticeKey: string,
+): Promise<number> {
+  return deps.tenancy.runWorkspace({ workspaceId: hit.workspace_id }, async (ctx) => {
+    const ebayAccounts = new Set(
+      (await deps.accounts.list(ctx)).filter((a) => a.provider === 'ebay').map((a) => a.id),
+    );
+    const mine = hit.matches
+      .filter(
+        (m) =>
+          m.kind !== 'buyer_contact' ||
+          (m.channel_account_id !== null && ebayAccounts.has(m.channel_account_id)),
+      )
+      .map((m) => m.pii_ref);
+    if (mine.length > 0) {
+      // The notice and the exact refs, hashed: a fixed 64 characters, whatever the notice id's
+      // length (idempotency keys hold at most 200).
+      const batch = createHash('sha256')
+        .update(noticeKey)
+        .update('\0')
+        .update([...mine].sort().join(','))
+        .digest('hex');
+      // The request's own workspace transaction carries the job (A-002).
+      await requestDeletion(deps.queue, ctx, {
+        trigger: 'ebay_account_deletion',
+        scope: { type: 'refs', pii_refs: mine },
+        idempotencyKey: batch,
+      });
+    }
+    return mine.length;
+  });
 }
 
 export interface EbayWebhook {
@@ -133,8 +177,9 @@ export interface EbayWebhook {
 
 /**
  * A fixed one-minute window per client address, counting only what a flood would send: challenge
- * requests and notices that fail verification. eBay's own verified notices are never limited,
- * however many arrive together from its few addresses.
+ * requests, notices that make us fetch a key (counted before the fetch, A-003) and notices that
+ * fail verification. eBay's own verified notices with a known key are never limited, however
+ * many arrive together from its few addresses.
  */
 function rateLimiter(perMinute: number, now: () => number) {
   const windows = new Map<string, { start: number; count: number }>();
@@ -171,17 +216,34 @@ export function ebayWebhook(options: EbayWebhookOptions): EbayWebhook {
   }
   const limit = rateLimiter(options.perMinute ?? 60, options.now ?? Date.now);
   const verify = async (request: FastifyRequest): Promise<boolean> => {
-    // Checked before verifying, so a flood of bad notices cannot make us fetch keys from eBay.
+    // A-003 (ADR-069): checked before verifying, and a notice that makes us fetch a key is
+    // counted before the fetch goes out, so a flood of forged notices cannot spend the eBay
+    // budget. The key cache also remembers unknown kids and caps uncached fetches a minute.
     limit.check(request.ip);
     const header = request.headers['x-ebay-signature'];
+    // Set when the address was counted before a key fetch, so a failure is not counted twice.
+    const charge = { counted: false };
+    const keys = (kid: string) =>
+      options.keys(kid, () => {
+        limit.count(request.ip);
+        charge.counted = true;
+      });
     let ok: boolean;
     try {
       ok = await verifyNotification(
         request.body,
         typeof header === 'string' ? header : undefined,
-        options.keys,
+        keys,
       );
     } catch (err) {
+      if (err instanceof EbayKeyFetchThrottled) {
+        // Nothing was sent: 503, and eBay retries once the minute has passed.
+        options.logger.warn(
+          { event: 'ebay.public_key_throttled' },
+          'eBay public key fetch limit reached this minute',
+        );
+        throw new ApiError({ status: 503, code: 'service_unavailable' });
+      }
       if (err instanceof EbayBudgetExhausted) {
         // The governor refused before sending (ADR-058): 412, and eBay retries later.
         options.logger.warn(
@@ -198,7 +260,7 @@ export function ebayWebhook(options: EbayWebhookOptions): EbayWebhook {
       throw new ApiError({ status: 503, code: 'service_unavailable' });
     }
     if (!ok) {
-      limit.count(request.ip);
+      if (!charge.counted) limit.count(request.ip);
       options.logger.warn(
         { event: 'ebay.account_deletion.rejected' },
         'eBay notice: bad signature',
@@ -228,7 +290,11 @@ export function ebayWebhook(options: EbayWebhookOptions): EbayWebhook {
         const queued =
           options.deletion === undefined
             ? undefined
-            : await queueEbayDeletion(options.deletion, noticeUser(body.notification));
+            : await queueEbayDeletion(
+                options.deletion,
+                noticeUser(body.notification),
+                options.logger,
+              );
         // The receipt: no identifier of the eBay user or of the notice (EBAY-2, invariant 5).
         options.logger.info(
           {

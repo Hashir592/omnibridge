@@ -5,6 +5,8 @@ export const PACKAGE_NAME = '@omnibridge/provider-ebay';
 export {
   challengeResponse,
   EbayBudgetExhausted,
+  EbayKeyFetchThrottled,
+  EbayKeyNotFound,
   ebayPublicKeyFetcher,
   isVerificationToken,
   PublicKeyCache,
