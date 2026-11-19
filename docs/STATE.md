@@ -39,6 +39,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Follow-ups noted
 
+- **ADR-072:** T-0412 (S3, light) shared identifier-rule fixture, after batch 2. Notification detail key per type comes with M08/M09. T-0313 reads company names from `GET /companies`.
 - **M05 (in tasks):** demoting a platform admin re-checked per request (ADR-061); console audit event when a module is switched (T-0211).
 - **M05 batch 1 follow-ups (S1 to place):**
   - Notification retention or purge: not in the PRD.

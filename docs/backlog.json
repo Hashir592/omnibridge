@@ -1304,6 +1304,34 @@
       "status": "review"
     },
     {
+      "id": "T-0412",
+      "module": "M04",
+      "session": "S3",
+      "title": "One identifier-rule case table for contract and UI (ADR-072, F-M04e-04)",
+      "goal": "A change to the erasure identifier rule breaks a test on either side.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-4"
+      ],
+      "scope": [
+        "Move the case table from apps/ui/src/mocks/privacy.test.ts into a JSON fixture in packages/testkit",
+        "A contract test runs every case through BuyerIdentifiersSchema",
+        "The UI test reads the same fixture (no contract import in the SPA)"
+      ],
+      "out_of_scope": [
+        "Changing the rule"
+      ],
+      "depends_on": [
+        "T-0311"
+      ],
+      "acceptance": [
+        "Tests cite DEL-4",
+        "CI full gate green at merge"
+      ],
+      "risk": "light",
+      "status": "todo"
+    },
+    {
       "id": "T-0308",
       "module": "M03",
       "session": "S2",
@@ -1686,7 +1714,8 @@
       ],
       "scope": [
         "/platform screens against T-0504 and T-0505's PROPOSED SHAPE (MSW first): workspaces, flags, jobs and dead-letter with redrive, API usage, credential calendar, health, incident banner editor, app secrets (write-only form, set-on date only)",
-        "Hidden for non-platform admins; the incident banner shows across the app"
+        "Hidden for non-platform admins; the incident banner shows across the app",
+        "Notification screens read company names from GET /companies, not mock IDs (ADR-072)"
       ],
       "out_of_scope": [
         "Server logic"
