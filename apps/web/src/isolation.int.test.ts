@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { contractRoutes } from '@omnibridge/contract';
-import type { TenantContext } from '@omnibridge/core';
+import { checkRaise, type TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
@@ -13,6 +13,7 @@ import {
   DeletionLog,
   ErasureRequestRepository,
   CompanyRepository,
+  NotificationRepository,
   createMainDb,
   FileRepository,
   InviteRepository,
@@ -66,6 +67,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     review: '',
     account: '',
     erasure: '',
+    notification: '',
   };
   const a = { company: '', job: '' };
 
@@ -93,6 +95,12 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         invites: await new InviteRepository(main.db).pending(ctx),
         reviews: await new AccessReviewRepository(main.db).list(ctx),
         erasures: await new ErasureRequestRepository(main.db).list(ctx),
+        notifications: await new NotificationRepository(main.db).list(
+          ctx,
+          { userId: userB, tabs: 'all' },
+          {},
+          { limit: 200 },
+        ),
       });
     });
 
@@ -157,6 +165,25 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           at: new Date(),
         })
       ).id;
+    });
+    // T-0501: a notification of B, on a record of B's company.
+    b.notification = await tenancy.runWorkspace({ workspaceId: B }, async (ctx) => {
+      const id = randomUUID();
+      await new NotificationRepository(main.db).raise(
+        ctx,
+        checkRaise({ type: 'reminders.due', record: { kind: 'reminder', id } }, 'workspace'),
+        new Date(),
+      );
+      return (
+        (
+          await new NotificationRepository(main.db).list(
+            ctx,
+            { userId: userB, tabs: 'all' },
+            {},
+            { limit: 1 },
+          )
+        ).items[0]?.id ?? ''
+      );
     });
     a.company = await tenancy.runWorkspace({ workspaceId: A }, (ctx) =>
       r.companies.create(ctx, { legalName: 'A Ltd', tradingName: 'A', registeredAddress: address }),
@@ -274,6 +301,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         queue: { send: () => Promise.resolve({ id: randomUUID(), created: true }) },
         audit: new AuditLog(main.db),
       },
+      notifications: { notifications: new NotificationRepository(main.db) },
     });
   };
 
@@ -365,13 +393,34 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           body: { identifiers: { email: 'walker@example.test' } },
           searchText: true,
         },
+        // Notifications (T-0501): only A's own come back; B's cannot be marked from A.
+        listNotifications: {},
+        countUnreadNotifications: {},
+        markNotificationRead: { params: { id: b.notification } },
+        markAllNotificationsRead: {},
+        // Platform notices: a workspace session is refused.
+        listPlatformNotifications: {},
+        countUnreadPlatformNotifications: {},
+        markPlatformNotificationRead: { params: { id: b.notification } },
+        markAllPlatformNotificationsRead: {},
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
           body: { metadata: { topic: MARKER }, notification: { userId: userB } },
         },
       },
-      markers: [MARKER, B, b.company, b.job, b.file, b.invite, b.review, b.erasure, userB],
+      markers: [
+        MARKER,
+        B,
+        b.company,
+        b.job,
+        b.file,
+        b.invite,
+        b.review,
+        b.erasure,
+        b.notification,
+        userB,
+      ],
     });
   }
 

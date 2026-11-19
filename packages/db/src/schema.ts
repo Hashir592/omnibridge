@@ -253,6 +253,25 @@ export interface PiiTombstonesTable {
   deleted_at: ColumnType<Date, Date, never>;
 }
 
+/** app.notifications (T-0501, NTF-1): IDs, counts and codes only. Written by raw SQL upserts. */
+export interface NotificationsTable {
+  workspace_id: string;
+  id: string;
+  type: string;
+  severity: 'critical' | 'warning' | 'info';
+  signal: 'native' | 'derived' | 'estimate' | null;
+  tab: string;
+  company_id: string | null;
+  channel_account_id: string | null;
+  record_kind: string;
+  record_id: string;
+  params: ColumnType<unknown, string, string>;
+  created_at: ColumnType<Date, Date, never>;
+  updated_at: Date;
+  resolved_at: Date | null;
+  version: ColumnType<string, number | undefined, number>;
+}
+
 export interface MainDb {
   'app.workspaces': WorkspacesTable;
   'app.companies': CompaniesTable;
@@ -272,4 +291,5 @@ export interface MainDb {
   'app.deletion_runs': DeletionRunsTable;
   'app.pii_tombstones': PiiTombstonesTable;
   'app.erasure_requests': ErasureRequestsTable;
+  'app.notifications': NotificationsTable;
 }

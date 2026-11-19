@@ -51,6 +51,14 @@ export { MembershipRepository, UserRepository, type User } from './users.ts';
 export { DeletionLog, type DeletionCertificate, type DeletionRun } from './deletion.ts';
 export { erasureDueAt, ErasureRequestRepository, type ErasureRequest } from './erasure.ts';
 export {
+  isNotificationCursor,
+  NotificationRepository,
+  type Notification,
+  type NotificationCursor,
+  type NotificationFilter,
+  type NotificationViewer,
+} from './notifications.ts';
+export {
   ACCESS_REVIEW_INTERVAL_MS,
   AccessReviewRepository,
   INVITE_LIFETIME_MS,

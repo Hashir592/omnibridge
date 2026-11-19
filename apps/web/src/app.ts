@@ -34,6 +34,7 @@ import { deletionCertificateText } from './deletion-certificate.ts';
 import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
+import { notificationHandlers, type NotificationOptions } from './notifications.ts';
 import { privacyHandlers, type PrivacyOptions } from './privacy.ts';
 import type { AuthService } from './auth/service.ts';
 import { contractRoutesPlugin, installContract, type Handlers } from './contract.ts';
@@ -123,6 +124,8 @@ export interface WebAppOptions {
   people?: PeopleOptions;
   /** Erasure and subject access requests (T-0404). Without it those routes answer 503. */
   privacy?: PrivacyOptions;
+  /** The notification centre (T-0501). Without it those routes answer 503. */
+  notifications?: NotificationOptions;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
@@ -157,6 +160,7 @@ export function buildWebApp({
   ebay,
   people,
   privacy,
+  notifications,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
@@ -208,6 +212,7 @@ export function buildWebApp({
     ...ebayHandlers(ebay),
     ...peopleHandlers(people, auth),
     ...privacyHandlers(privacy),
+    ...notificationHandlers(notifications),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';
