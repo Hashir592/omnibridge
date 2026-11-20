@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { getResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErasureRequest, ErasureRequestCreated } from '../auth/api.ts';
@@ -170,19 +172,21 @@ describe('mock erasure requests', () => {
   });
 
   // The contract's rule (BuyerIdentifiersSchema, ADR-068). The SPA may not import the Zod registry
-  // (ui-uses-contract-client-only), so the cases and their answers are written out here.
+  // (ui-uses-contract-client-only), so it reads the shared case table the contract test runs
+  // through the schema too (ADR-072): a rule change on either side breaks a test.
   it('[DEL-4] the screen rule and the mock agree with the contract on which identifiers pin one buyer', async () => {
-    const cases: Array<[Record<string, string>, boolean]> = [
-      [{}, false],
-      [{ name: 'Morgan Ellis' }, false],
-      [{ postcode: 'SW1A 1AA' }, false],
-      [{ name: 'Morgan Ellis', postcode: 'SW1A 1AA' }, true],
-      [{ email: 'morgan.ellis@example.com' }, true],
-      [{ phone: '07700900111' }, true],
-      [{ buyer: 'morgan_e' }, true],
-      [{ name: 'Morgan Ellis', email: 'morgan.ellis@example.com' }, true],
-      [{ postcode: 'SW1A 1AA', phone: '07700900111' }, true],
-    ];
+    const fixture = join(
+      import.meta.dirname,
+      '../../../../packages/testkit/fixtures/buyer-identifier-cases.json',
+    );
+    const shared = JSON.parse(readFileSync(fixture, 'utf8')) as {
+      cases: { identifiers: Record<string, string>; pins: boolean }[];
+    };
+    const cases = shared.cases.map((c): [Record<string, string>, boolean] => [
+      c.identifiers,
+      c.pins,
+    ]);
+    expect(cases.length).toBeGreaterThan(0);
     for (const [identifiers, pins] of cases) {
       expect(pinsOneBuyer(identifiers), JSON.stringify(identifiers)).toBe(pins);
       const status = (await call('POST', '/api/erasure-requests', { identifiers })).status;

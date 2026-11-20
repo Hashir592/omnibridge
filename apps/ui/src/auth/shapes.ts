@@ -107,6 +107,12 @@ export interface WorkspaceChoice {
   modules: { website_connector: boolean };
 }
 
+/** GET /auth/workspaces → 200: the picker, and whether to offer the console (PS-034). */
+export interface WorkspaceList {
+  workspaces: WorkspaceChoice[];
+  platform_admin: boolean;
+}
+
 /** USR-3 rules, checked live in the UI; the server checks them again plus breach and history. */
 export const PASSWORD_RULES = [
   { id: 'length', label: 'At least 12 characters' },

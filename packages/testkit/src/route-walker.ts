@@ -168,19 +168,27 @@ export interface PlatformWalk {
    * never in a console answer. Workspace names and ids may appear; the console lists workspaces.
    */
   businessMarkers: readonly string[];
+  /**
+   * A route whose walked call is meant to answer something other than a 2xx (a refused archive
+   * is 409, a missing job 404): its declared statuses. Every other route must answer a 2xx, so a
+   * route refused by mistake (a gate or CSRF change) fails the walk instead of passing it.
+   */
+  expected?: Readonly<Record<string, readonly number[]>>;
 }
 
 export interface PlatformOutcome {
   route: string;
   status: number;
+  /** `2xx`, or the declared statuses joined with `|`. */
+  expected: string;
   leaked: string[];
   ok: boolean;
 }
 
 /**
  * PLAT-3: calls every platform route as a platform admin, aimed at workspace B, and checks that
- * no answer holds B's business data. Any status below 500 is allowed (a 404 or 409 is fine); a
- * server error fails, so the walk cannot pass by crashing.
+ * no answer holds B's business data. Each route must answer a 2xx, or one of the statuses
+ * declared for it in `expected` (ADR-076), so the walk proves the console really answered.
  */
 export async function walkPlatform(walk: PlatformWalk): Promise<PlatformOutcome[]> {
   const routes = walk.routes.filter((route) => route.auth === 'platform');
@@ -198,11 +206,17 @@ export async function walkPlatform(walk: PlatformWalk): Promise<PlatformOutcome[
       ...(call.body === undefined ? {} : { payload: call.body }),
     });
     const leaked = walk.businessMarkers.filter((marker) => res.body.includes(marker));
+    const declared = walk.expected?.[route.id];
+    const statusOk =
+      declared === undefined
+        ? res.statusCode >= 200 && res.statusCode < 300
+        : declared.includes(res.statusCode);
     outcomes.push({
       route: route.id,
       status: res.statusCode,
+      expected: declared === undefined ? '2xx' : declared.join('|'),
       leaked,
-      ok: leaked.length === 0 && res.statusCode < 500,
+      ok: leaked.length === 0 && statusOk,
     });
   }
   return outcomes;

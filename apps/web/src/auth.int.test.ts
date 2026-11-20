@@ -1013,7 +1013,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(next).toBe('workspace_picker');
     expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
     const list = await b.send('GET', '/api/auth/workspaces');
-    expect(list.json()).toEqual([
+    expect(list.json<{ workspaces: unknown[] }>().workspaces).toEqual([
       {
         id: A,
         name: 'Workspace A',
@@ -1449,6 +1449,24 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await server.close();
   });
 
+  it('[PLAT-1] GET /auth/workspaces says platform_admin only for a platform admin, read fresh (PS-034)', async () => {
+    const server = app();
+    const member = await makeUser({ workspaces: [A, B] });
+    const { b: m } = await signedIn(server, member);
+    expect((await m.send('GET', '/api/auth/workspaces')).json()).toMatchObject({
+      platform_admin: false,
+    });
+    const { operator, b } = await operatorSignedIn(server);
+    const list = await b.send('GET', '/api/auth/workspaces');
+    expect(list.json()).toMatchObject({ platform_admin: true, workspaces: [{ id: A }] });
+    // Demoted: the next answer says so, with no new sign-in.
+    await asRoot('UPDATE app.users SET platform_admin = false WHERE id = $1', [operator.id]);
+    expect((await b.send('GET', '/api/auth/workspaces')).json()).toMatchObject({
+      platform_admin: false,
+    });
+    await server.close();
+  });
+
   // ---- T-0507: console sign-ins are logged (S5-20261121-01, ADR-076) ----
 
   it('[SEC-12][PLAT-1] entering the console writes platform.console_entered with the address', async () => {
@@ -1515,7 +1533,9 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
     const { b: again } = await signedIn(server, user);
     const picker = await again.send('GET', '/api/auth/workspaces');
-    expect(picker.json<{ id: string }[]>().map((w) => w.id)).toEqual([B]);
+    expect(picker.json<{ workspaces: { id: string }[] }>().workspaces.map((w) => w.id)).toEqual([
+      B,
+    ]);
     expect((await again.send('POST', '/api/auth/workspace', { workspaceId: ws })).statusCode).toBe(
       403,
     );

@@ -87,9 +87,10 @@ services:
       seed: { condition: service_completed_successfully }
     environment:
       # PLAT-1, dev: loopback only. Docker Desktop hands host traffic to the edge from the
-      # ob_edge gateway (172.20.0.1 here), and the edge's ports are bound to 127.0.0.1, so that
-      # one address is this machine. If your ob_edge gateway differs, set PLATFORM_IP_ALLOWLIST.
-      PLATFORM_IP_ALLOWLIST: ${PLATFORM_IP_ALLOWLIST:-127.0.0.1/32,::1/128,172.20.0.1/32}
+      # ob_edge gateway, and the edge's ports are bound to 127.0.0.1, so that one address is this
+      # machine. The dev ob_edge subnet is pinned below (ADR-073), so the gateway is 10.203.0.1 on
+      # every machine. Never a Docker gateway in production: there it is the VPN range (ADR-076).
+      PLATFORM_IP_ALLOWLIST: ${PLATFORM_IP_ALLOWLIST:-127.0.0.1/32,::1/128,10.203.0.1/32}
 
   # The only provider endpoints dev and CI may call (ADR-011, invariant 17).
   provider-mocks:
@@ -136,6 +137,16 @@ services:
       timeout: 10s
       retries: 5
       start_period: 300s
+
+# Dev only (ADR-073): a fixed ob_edge subnet, so the console allowlist above names its gateway
+# on any machine. 10.203.0.0/24 is outside Docker's default pools. Changing it needs one
+# `docker compose down` (no -v) and `up -d`: Docker never re-addresses an existing network.
+networks:
+  ob_edge:
+    ipam:
+      config:
+        - subnet: 10.203.0.0/24
+          gateway: 10.203.0.1
 
 volumes:
   caddy_data:

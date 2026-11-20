@@ -82,6 +82,18 @@ export const WorkspaceChoiceSchema = z
   })
   .meta({ id: 'WorkspaceChoice' });
 
+/**
+ * The picker's answer (USR-2): the user's workspaces, and whether the user is a platform admin
+ * now, so the picker offers the console only to them (PS-034, ADR-075). The console still checks
+ * everything itself (PLAT-1).
+ */
+export const WorkspaceListSchema = z
+  .object({
+    workspaces: z.array(WorkspaceChoiceSchema),
+    platform_admin: z.boolean(),
+  })
+  .meta({ id: 'WorkspaceList' });
+
 /** Sets the `__Host-ob_csrf` cookie the SPA echoes in `x-csrf-token` (SEC-1). */
 export const getCsrf = defineRoute({
   id: 'getCsrf',
@@ -229,7 +241,7 @@ export const listMyWorkspaces = defineRoute({
   method: 'GET',
   path: '/auth/workspaces',
   summary: 'Workspaces the signed-in user belongs to',
-  responses: { 200: z.array(WorkspaceChoiceSchema) },
+  responses: { 200: WorkspaceListSchema },
   auth: 'signed-in',
   ...outsideTabs,
 });

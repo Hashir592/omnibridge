@@ -6,7 +6,7 @@ import { Button } from '../../kit/Button.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
 import { Skeleton } from '../../kit/Skeleton.tsx';
 import { authApi, type ApiProblem } from '../../auth/api.ts';
-import type { InviteInfo, SignInResult, WorkspaceChoice } from '../../auth/shapes.ts';
+import type { InviteInfo, SignInResult, WorkspaceList } from '../../auth/shapes.ts';
 import { AuthFrame, Notice, authLink } from './layout.tsx';
 import { LinkUnusable } from './password.tsx';
 import { PasswordRules, passwordLocallyValid, personalParts, useEnterApp } from './parts.tsx';
@@ -208,7 +208,7 @@ export function WorkspacesPage() {
     queryFn: async () => {
       const r = await authApi.workspaces();
       if (!r.ok) throw new Error(String(r.status));
-      return r.body as WorkspaceChoice[];
+      return (r.body as WorkspaceList).workspaces;
     },
   });
   const [busy, setBusy] = useState<string>();

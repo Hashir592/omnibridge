@@ -213,6 +213,17 @@
         },
         "required": ["id", "name", "role", "companies", "modules"]
       },
+      "WorkspaceListInput": {
+        "type": "object",
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WorkspaceChoiceInput" }
+          },
+          "platform_admin": { "type": "boolean" }
+        },
+        "required": ["workspaces", "platform_admin"]
+      },
       "SessionInfoInput": {
         "type": "object",
         "properties": {
@@ -1431,6 +1442,18 @@
           "modules": { "$ref": "#/components/schemas/WorkspaceModules" }
         },
         "required": ["id", "name", "role", "companies", "modules"],
+        "additionalProperties": false
+      },
+      "WorkspaceList": {
+        "type": "object",
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WorkspaceChoice" }
+          },
+          "platform_admin": { "type": "boolean" }
+        },
+        "required": ["workspaces", "platform_admin"],
         "additionalProperties": false
       },
       "SessionInfo": {
@@ -3576,12 +3599,7 @@
           "200": {
             "description": "Default Response",
             "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/WorkspaceChoice" }
-                }
-              }
+              "application/json": { "schema": { "$ref": "#/components/schemas/WorkspaceList" } }
             }
           },
           "4XX": {
