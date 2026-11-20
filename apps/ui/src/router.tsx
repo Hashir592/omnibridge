@@ -9,6 +9,7 @@ import {
 import { AppStateProvider } from './app/session.tsx';
 import { BUILT, NAV } from './app/nav.ts';
 import { Shell } from './components/Shell.tsx';
+import type { ConnectionsSearch } from './routes/connections/page.tsx';
 import type { OrdersSearch } from './routes/orders.tsx';
 import type { ShippingSearch } from './routes/shipping.tsx';
 import type { HealthSearch } from './routes/account-health.tsx';
@@ -197,7 +198,16 @@ const userDetail = createRoute({
 const connections = createRoute({
   getParentRoute: () => root,
   path: '/connections',
-  component: lazyRouteComponent(() => import('./routes/connections.tsx'), 'ConnectionsPage'),
+  // The OAuth return (T-0701): ?connected=<accountId> or ?error=<code>.
+  validateSearch: (s: Record<string, unknown>): ConnectionsSearch => {
+    const out: ConnectionsSearch = {};
+    for (const k of ['connected', 'error'] as const) {
+      const v = str(s[k]);
+      if (v) out[k] = v.slice(0, 200);
+    }
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/connections/page.tsx'), 'ConnectionsPage'),
 });
 
 const customerService = createRoute({

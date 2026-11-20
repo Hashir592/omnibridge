@@ -14,6 +14,9 @@ import {
   ViewTabs,
 } from '../kit/table/Toolbar.tsx';
 import type { PageSize } from '../lib/paging.ts';
+import { useCompanyNames } from '../app/companies.ts';
+import { useBulkWrite } from '../components/BulkConfirmDialog.tsx';
+import { Button } from '../kit/Button.tsx';
 import { ControlsGallery } from './gallery-controls.tsx';
 
 /*
@@ -176,6 +179,10 @@ export function GalleryPage() {
         </div>
       </Section>
 
+      <Section id="bulk" title="Bulk write confirmation (SAFE-1, SAFE-2)">
+        <BulkDemo />
+      </Section>
+
       <Section id="states" title="Page states">
         <div className="grid gap-4 xl:grid-cols-3">
           <Card>
@@ -202,6 +209,25 @@ export function GalleryPage() {
 }
 
 const noop = () => undefined;
+
+/** Previews a stock push to three accounts (one paused) through the bulk-write routes (MSW). */
+function BulkDemo() {
+  const bulk = useBulkWrite(useCompanyNames());
+  return (
+    <Card>
+      <div className="flex items-center gap-3 p-5">
+        <Button
+          disabled={bulk.busy}
+          onClick={() => void bulk.start('stock_push', ['ca_1', 'ca_2', 'ca_5'])}
+        >
+          Push stock to 3 accounts
+        </Button>
+        <span className="text-13 text-ink-muted">eBay · kestrel-home is paused in the mock.</span>
+      </div>
+      {bulk.dialog}
+    </Card>
+  );
+}
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (

@@ -42,7 +42,7 @@ test('[PLAT-1] [NFR-8] every console section has no serious accessibility issues
     await expect(page.getByRole('table', { name: s.table })).toBeVisible();
     await expectNoSeriousA11yIssues(page);
   }
-  for (const tab of ['Health', 'Incident banner', 'Flags']) {
+  for (const tab of ['Health', 'Incident banner', 'Maintenance', 'Flags']) {
     await page.getByRole('tab', { name: tab }).click();
     await expect(page.getByRole('tabpanel')).not.toContainText('Loading');
     await expectNoSeriousA11yIssues(page);
