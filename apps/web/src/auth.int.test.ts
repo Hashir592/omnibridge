@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { generateKekLine, parseKeyring, Secret } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  AppSecretStore,
   AuditLog,
   AuthStore,
   CompanyRepository,
@@ -20,7 +21,7 @@ import {
   type MainDbHandle,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
-import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
+import { scanTextForMarkers, startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWebApp } from './app.ts';
@@ -177,6 +178,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       },
       platform: {
         console: new PlatformConsole(main.db),
+        secrets: new AppSecretStore(main.db, platformKeys),
         queue: {
           send: (def, input) => {
             consoleJobs.push({
@@ -191,7 +193,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
         tenancy,
         checks,
         version: '0',
-        logger,
+        logger: log,
         now: () => clock,
       },
     });
@@ -1621,6 +1623,100 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     expect(within.body).not.toContain(value);
     const sooner = await op.send('GET', '/api/platform/credential-expiry?within_days=5');
     expect(sooner.json()).toEqual({ items: [] });
+    await server.close();
+  });
+
+  it('[PLAT-4] app secrets are write-only: no route, log or audit row ever holds a value', async () => {
+    const lines: string[] = [];
+    const captured = createLogger({
+      service: 'test',
+      version: '0',
+      destination: { write: (line: string) => lines.push(line) },
+    });
+    const server = app(service(), undefined, captured);
+    const member = await makeUser();
+    const { b: m } = await signedIn(server, member);
+    const value = `SECRETMARK-${randomUUID()}`;
+    expect(
+      (await m.send('PUT', '/api/platform/app-secrets/amazon.lwa_client_secret/current', { value }))
+        .statusCode,
+    ).toBe(403);
+    expect((await m.send('GET', '/api/platform/app-secrets')).statusCode).toBe(403);
+
+    const { operator, b: op } = await operatorSignedIn(server);
+    expect((await op.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const answers: string[] = [];
+    const call = async (method: 'GET' | 'POST' | 'PUT', url: string, body?: object) => {
+      const res = await op.send(method, url, body);
+      answers.push(res.body, JSON.stringify(res.headers));
+      return res;
+    };
+    expect(
+      (await call('PUT', '/api/platform/app-secrets/amazon.lwa_client_secret/current', { value }))
+        .statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await call('PUT', '/api/platform/app-secrets/amazon.lwa_client_secret/next', {
+          value: `${value}-next`,
+        })
+      ).statusCode,
+    ).toBe(204);
+    // An unknown name, a bad slot and an oversized value: refused, and nothing is echoed.
+    expect(
+      (await call('PUT', '/api/platform/app-secrets/amazon.unknown/current', { value })).statusCode,
+    ).toBe(400);
+    expect(
+      (await call('PUT', '/api/platform/app-secrets/ads.client_id/later', { value })).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await call('PUT', '/api/platform/app-secrets/ads.client_id/current', {
+          value: value.repeat(200),
+        })
+      ).statusCode,
+    ).toBe(400);
+    const list = await call('GET', '/api/platform/app-secrets');
+    expect(
+      list
+        .json<{ items: { name: string }[] }>()
+        .items.find((s) => s.name === 'amazon.lwa_client_secret'),
+    ).toEqual({
+      name: 'amazon.lwa_client_secret',
+      current: { set_at: clock.toISOString() },
+      next: { set_at: clock.toISOString() },
+    });
+    // The LWA client secret's 180-day expiry is on the credential calendar (AMZ-10, PLAT-2).
+    const expiry = await call('GET', '/api/platform/credential-expiry?within_days=365');
+    expect(
+      expiry.json<{ items: { kind: string; workspace_id: string | null }[] }>().items,
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: 'amazon.lwa_client_secret',
+        workspace_id: null,
+        slot: 'current',
+      }),
+    );
+    expect(
+      (await call('POST', '/api/platform/app-secrets/amazon.lwa_client_secret/promote')).statusCode,
+    ).toBe(204);
+    expect(
+      (await call('POST', '/api/platform/app-secrets/amazon.lwa_client_secret/promote')).statusCode,
+    ).toBe(409);
+    expect(
+      (await new AppSecretStore(main.db, platformKeys).get('amazon.lwa_client_secret'))?.reveal(),
+    ).toBe(`${value}-next`);
+
+    // The marker scan: no answer, log line or audit row holds the value.
+    const audit = await asRootRows<{ params: unknown }>(
+      'SELECT params FROM app.platform_audit_events WHERE user_id = $1',
+      [operator.id],
+    );
+    expect(audit).toContainEqual({ params: { name: 'amazon.lwa_client_secret', slot: 'current' } });
+    expect(
+      scanTextForMarkers([...answers, ...lines, JSON.stringify(audit)], 'SECRETMARK-'),
+    ).toEqual([]);
+    expect(lines.some((l) => l.includes('app_secret.set'))).toBe(true);
     await server.close();
   });
 });

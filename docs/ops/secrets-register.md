@@ -1,6 +1,6 @@
 # Secrets register
 
-Every secret OmniBridge uses: what it is, who owns it, where it lives, which containers get it, and when it is rotated (SEC-5, SEC-6, ADR-014). Last updated: 19 Oct 2026 by S3 (M01 halfway fixes).
+Every secret OmniBridge uses: what it is, who owns it, where it lives, which containers get it, and when it is rotated (SEC-5, SEC-6, ADR-014). Last updated: 20 Nov 2026 by S3 (T-0505 app secrets store).
 
 **Rules**
 
@@ -56,12 +56,22 @@ These are not Docker secrets. Each value is encrypted with AES-256-GCM under a p
 | `ebay.refresh_token` | eBay user refresh token per account | workspace admin | mock only | `app.credentials` | worker, web | 18-month eBay expiry; re-authorise before it | per account |
 | `evri.api_key`, `dpd.api_key` | Carrier API credentials per account | workspace admin | mock only | `app.credentials` | worker | 12 months | per account |
 
+## App secrets (platform store, `app.app_secrets`)
+
+OmniBridge's own app credentials (PLAT-4, T-0505). They are set only in the platform console (`PUT /platform/app-secrets/:name/:slot`) and are write-only: the console shows each name with the set-on date of its `current` and `next` slot, never a value. Each value is AES-256-GCM ciphertext under the platform data key, wrapped by `secrets_kek` and sealed to its name. The audit row (`app.platform_audit_events`) holds the name and slot only. Promoting `next` to `current` deletes the old value. The typed reader is `AppSecretStore.get` in `@omnibridge/db`: the worker uses it for provider calls, and web only for the OAuth code exchange.
+
+| Secret | What | Owner | Dev | Production | Containers | Rotation | Next rotation |
+|---|---|---|---|---|---|---|---|
+| `amazon.lwa_client_id` | SP-API LWA client ID (public identifier, stored with its secret) | Hashir | mock only | `app.app_secrets` | worker, web (OAuth exchange) | with the secret | set in M07 |
+| `amazon.lwa_client_secret` | SP-API LWA client secret; `next` holds Amazon's 7-day overlap (AMZ-10); its 180-day expiry is on the console's credential calendar | Hashir | mock only | `app.app_secrets` | worker, web (OAuth exchange) | 180 days; reminders on day 150, 165, 173 (M18) | set in M07 |
+| `ads.client_id`, `ads.client_secret` | Amazon Ads API client credentials | Hashir | mock only | `app.app_secrets` | worker, web (OAuth exchange) | 12 months | set in M15 |
+| `ebay.client_id`, `ebay.client_secret`, `ebay.dev_id` | eBay production keyset (App ID, Cert ID, Dev ID) | Hashir | mock only | `app.app_secrets` | worker, web (OAuth exchange) | 12 months or at eBay's keyset rotation | set in M08 |
+| `ebay.verification_token` | eBay account deletion endpoint verification token (EBAY-2); the early deploy still reads the Docker secret of the same name until M15 moves the endpoint to the store | Hashir | mock only | `app.app_secrets` | web | when changed at eBay | set in M15 |
+
 ## Planned (not created yet)
 
 | Secret | What | Owner | Dev | Production | Containers | Rotation | Next rotation |
 |---|---|---|---|---|---|---|---|
-| `amazon.lwa_client_secret` | LWA client ID/secret, `current` + `next` during Amazon's 7-day overlap (PLAT-4, AMZ-10); platform-level, table added in M05 | Hashir | mock only | platform credential store (M05) | worker, web | 180 days; reminders on day 150, 165, 173 | set in M07 |
-| `ads.client_secret`, `ebay.keyset` | Ads client secret and eBay app keyset (PLAT-4) | Hashir | mock only | platform credential store (M05) | worker, web | 12 months | set in M15/M18 |
 | `pii_vault_service_tokens` | Capability tokens for web and worker calling pii-vault (ADR-007) | Hashir | `dev.sops.yaml` (M04) | ops repo → tmpfs | web, worker, pii-vault | 12 months | set in M04 |
 | `smtp_password` | Scaleway TEM SMTP credentials | Hashir | Mailpit needs none | ops repo → tmpfs | web, worker | 12 months | set in M22 |
 | `b2_main_key`, `b2_pii_key`, `restic_main_password`, `restic_pii_password` | Backblaze B2 application keys (no delete) and restic passwords, separate for main and PII (ADR-016) | Hashir | local restic repo (M01b) | ops repo → tmpfs | backup jobs | 12 months | set in M22 |

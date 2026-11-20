@@ -18,6 +18,7 @@ import {
   mainDbConfig,
   MemberAccessRepository,
   ping,
+  AppSecretStore,
   PlatformConsole,
   Tenancy,
   WorkspaceRepository,
@@ -165,6 +166,8 @@ const app = buildWebApp({
   // The platform console (PLAT-1, PLAT-2): counts and IDs only, never tenant business data.
   platform: {
     console: platformConsole,
+    // App secrets (PLAT-4): sealed under the platform data key, which secrets_kek wraps.
+    secrets: new AppSecretStore(main.db, new PlatformKeys(authStore, secretsKeyring)),
     jobs: new JobAdmin({
       boss,
       types: JOBS.map((def) => def.type),

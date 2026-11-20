@@ -48,6 +48,9 @@ const CONSOLE_FIELDS = new Set([
   'kind',
   'slot',
   'expires_at',
+  // app secrets (PLAT-4): names and set-on dates, never a value
+  'current',
+  'next',
   // health
   'services',
   'web',

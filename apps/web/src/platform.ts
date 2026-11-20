@@ -6,7 +6,14 @@
  */
 import { ApiError, type TenantRunner } from '@omnibridge/core';
 import type { platformRoutes } from '@omnibridge/contract';
-import type { AuditLog, PlatformConsole, WorkspaceStatus } from '@omnibridge/db';
+import { Secret } from '@omnibridge/crypto';
+import {
+  LWA_SECRET_LIFETIME_DAYS,
+  type AppSecretStore,
+  type AuditLog,
+  type PlatformConsole,
+  type WorkspaceStatus,
+} from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { workspaceCloseJob, type JobAdmin, type JobQueue } from '@omnibridge/queue';
 import type { Handlers } from './contract.ts';
@@ -26,6 +33,8 @@ export interface PlatformOptions {
     | 'credentialExpiry'
     | 'jobRecords'
   >;
+  /** The app secrets store (T-0505, PLAT-4); without it those routes answer 503. */
+  secrets?: Pick<AppSecretStore, 'list' | 'set' | 'promote'>;
   /** The queue as the console sees it; without it the job routes answer 503. */
   jobs?: Pick<JobAdmin, 'overview' | 'deadLetters' | 'redrive' | 'lastHeartbeat'>;
   /** Queues the workspace.close job in the archive's own transaction. */
@@ -89,10 +98,17 @@ export function platformHandlers(
       getIncidentBanner: unavailable,
       setIncidentBanner: unavailable,
       clearIncidentBanner: unavailable,
+      listAppSecrets: unavailable,
+      setAppSecret: unavailable,
+      promoteAppSecret: unavailable,
     };
   }
   const p: PlatformOptions = options;
   const now = p.now ?? (() => new Date());
+  const needSecrets = () => {
+    if (p.secrets === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
+    return p.secrets;
+  };
   const needJobs = () => {
     if (p.jobs === undefined) throw new ApiError({ status: 503, code: 'service_unavailable' });
     return p.jobs;
@@ -339,18 +355,40 @@ export function platformHandlers(
     listCredentialExpiry: async ({ platform, query }) => {
       const until = new Date(now().getTime() + query.within_days * DAY_MS);
       const rows = await p.console.credentialExpiry(platform.userId, until);
-      return {
-        status: 200,
-        body: {
-          items: rows.map((r) => ({
-            workspace_id: r.workspaceId,
-            channel_account_id: r.channelAccountId,
-            kind: r.kind,
-            slot: r.slot,
-            expires_at: r.expiresAt.toISOString(),
-          })),
-        },
-      };
+      const items: {
+        workspace_id: string | null;
+        channel_account_id: string | null;
+        kind: string;
+        slot: 'current' | 'next';
+        expires_at: string;
+      }[] = rows.map((r) => ({
+        workspace_id: r.workspaceId,
+        channel_account_id: r.channelAccountId,
+        kind: r.kind,
+        slot: r.slot,
+        expires_at: r.expiresAt.toISOString(),
+      }));
+      // AMZ-10: Amazon's LWA client secret lasts 180 days from when it was set (PLAT-2 calendar).
+      if (p.secrets !== undefined) {
+        const lwa = (await p.secrets.list(platform.userId)).find(
+          (s) => s.name === 'amazon.lwa_client_secret',
+        );
+        for (const slot of ['current', 'next'] as const) {
+          const set = lwa?.[slot];
+          if (set == null) continue;
+          const expires = new Date(set.setAt.getTime() + LWA_SECRET_LIFETIME_DAYS * DAY_MS);
+          if (expires > until) continue;
+          items.push({
+            workspace_id: null,
+            channel_account_id: null,
+            kind: 'amazon.lwa_client_secret',
+            slot,
+            expires_at: expires.toISOString(),
+          });
+        }
+        items.sort((a, b) => a.expires_at.localeCompare(b.expires_at));
+      }
+      return { status: 200, body: { items } };
     },
 
     getPlatformHealth: async () => {
@@ -424,6 +462,47 @@ export function platformHandlers(
         action: 'platform.incident_cleared',
         ip: request.ip,
       });
+      return { status: 204, body: null };
+    },
+
+    listAppSecrets: async ({ platform }) => {
+      const rows = await needSecrets().list(platform.userId);
+      return {
+        status: 200,
+        body: {
+          items: rows.map((r) => ({
+            name: r.name,
+            current: r.current === null ? null : { set_at: r.current.setAt.toISOString() },
+            next: r.next === null ? null : { set_at: r.next.setAt.toISOString() },
+          })),
+        },
+      };
+    },
+
+    setAppSecret: async ({ platform, params, body, request }) => {
+      // Write-only (PLAT-4): the value goes straight into a Secret and is never echoed or logged.
+      await needSecrets().set(
+        platform.userId,
+        params.name,
+        params.slot,
+        new Secret(body.value),
+        now(),
+        request.ip,
+      );
+      p.logger.info(
+        { event: 'app_secret.set', userId: platform.userId, name: params.name, slot: params.slot },
+        'app secret set',
+      );
+      return { status: 204, body: null };
+    },
+
+    promoteAppSecret: async ({ platform, params, request }) => {
+      const promoted = await needSecrets().promote(platform.userId, params.name, now(), request.ip);
+      if (!promoted) throw conflict('There is no next value to promote');
+      p.logger.info(
+        { event: 'app_secret.promoted', userId: platform.userId, name: params.name },
+        'app secret promoted',
+      );
       return { status: 204, body: null };
     },
   };
