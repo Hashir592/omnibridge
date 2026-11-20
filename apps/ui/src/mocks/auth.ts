@@ -38,6 +38,7 @@ import type {
   TermsInfo,
   SessionInfo,
   WorkspaceChoice,
+  WorkspaceList,
 } from '../auth/shapes.ts';
 
 export const DEMO_PASSWORD = 'synthetic demo only';
@@ -346,7 +347,13 @@ export const authHandlers = [
     });
   }),
 
-  http.get('*/api/auth/workspaces', () => HttpResponse.json<WorkspaceChoice[]>(MOCK_WORKSPACES)),
+  // PS-034: the operator persona is a platform admin, so the picker may offer the console.
+  http.get('*/api/auth/workspaces', () =>
+    HttpResponse.json<WorkspaceList>({
+      workspaces: MOCK_WORKSPACES,
+      platform_admin: mfaDone && current !== undefined && ACCOUNTS[current]?.platform === true,
+    }),
+  ),
 
   http.post('*/api/auth/workspace', async ({ request }) => {
     const { workspaceId } = (await request.json()) as { workspaceId?: string };

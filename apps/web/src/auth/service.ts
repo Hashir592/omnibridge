@@ -927,8 +927,19 @@ export class AuthService {
 
   // ---- (9) workspace picker, platform console ----
 
+  /**
+   * The picker (USR-2), and whether to offer the console: the platform admin flag read now, as
+   * the console gate reads it on every request (PS-034, ADR-075).
+   */
   async workspaces(account: AccountActor) {
-    return this.#o.store.userWorkspaces(account.userId);
+    const [workspaces, user] = await Promise.all([
+      this.#o.store.userWorkspaces(account.userId),
+      this.#o.store.user(account.userId),
+    ]);
+    return {
+      workspaces,
+      platform_admin: user?.platformAdmin === true && user.mfaConfirmed,
+    };
   }
 
   async chooseWorkspace(request: FastifyRequest, workspaceId: string): Promise<string[]> {

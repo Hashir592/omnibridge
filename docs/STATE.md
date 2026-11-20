@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Nov 2026 by S3 (T-0507 audit fixes in a PR; T-0412 next).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Nov 2026 by S3 (T-0507 and T-0412 in PRs, auto-merge on).
 
 ## Now
 
@@ -20,7 +20,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - T-0505 (PLAT-4): db-main 0034 `app.app_secrets`.
     - Current and next slots, AES-256-GCM under the platform data key (secrets_kek), sealed to the name. Write-only routes; the audit holds name and slot only.
     - `AppSecretStore.get` is the typed reader for M07. `PlatformKeys` moved to `@omnibridge/db`. The register has an app secrets section. PS-033.
-- **After pulling:** recreate the stack once (`docker compose up -d`) so web gets `PLATFORM_IP_ALLOWLIST` (dev default: loopback plus 172.20.0.1, this machine's ob_edge gateway; set the variable if yours differs) and the seed adds the console's API usage rows. Locally, run `infra/backup/journal.sh --every 900` in a spare terminal if you want the 15-minute journal runs. Restart pii-vault once after T-0407 (runs the `buyer_exact` backfill); run `scripts/dev-secrets.sh` if the vault tokens are missing.
+- **After pulling (T-0412):** pull, then run `docker compose down` and `docker compose up -d` once. The dev network's addresses changed (`ob_edge` is pinned to 10.203.0.0/24; the dev `PLATFORM_IP_ALLOWLIST` is loopback plus 10.203.0.1). Don't add `-v`, or you'll wipe your data. Locally, run `infra/backup/journal.sh --every 900` in a spare terminal if you want the 15-minute journal runs; run `scripts/dev-secrets.sh` if the vault tokens are missing.
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; short sessions.
 - **Process (ADR-053, ADR-054):** sessions merge their own green PRs; CI is the only full gate.
 - **Hashir:** GitHub CLI on Hashir592. Dev machine to 16 GB in 1 to 2 weeks.
@@ -43,9 +43,13 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - The 0032 workspace rules skip platform admins.
   - `session_advance` takes the workspace FOR SHARE first (db-main 0035, 0036).
   - The 30-minute console idle limit already held (USR-6), so it gets a regression test only.
-  - Then T-0412, the S5 re-check, and the S4 M05 end review.
-- **ADR-073/074:** repo is public (Hashir); open S5 findings stay in handoffs until fixed. T-0412 also pins the dev `ob_edge` subnet. Platform-audit read route in M21; eBay keyset into the store in M15; LWA rotation reminders in M18.
-- **ADR-072:** T-0412 (S3, light) shared identifier-rule fixture, after batch 2. Notification detail key per type comes with M08/M09. T-0313 reads company names from `GET /companies`.
+- **T-0412 (S3, in a PR on top of T-0507, auto-merge on):**
+  - The identifier-rule cases are one JSON fixture, `packages/testkit/fixtures/buyer-identifier-cases.json`. The contract runs them through `BuyerIdentifiersSchema`, and the SPA test reads the same file.
+  - The dev `ob_edge` subnet is pinned.
+  - `GET /auth/workspaces` now answers `{ workspaces, platform_admin }`, with the flag read fresh (PS-034). S2's T-0315 adds the picker row.
+  - The PLAT-3 walk requires a 2xx, or a status declared per route.
+- **ADR-073/074:** repo is public (Hashir); open S5 findings stay in handoffs until fixed. Platform-audit read route in M21; eBay keyset into the store in M15; LWA rotation reminders in M18.
+- **ADR-072:** Notification detail key per type comes with M08/M09. T-0313 reads company names from `GET /companies`.
 - **M05 batch 2 follow-ups (S1 to place):** `public_signup` is stored only; T-0205 (deferred) reads it. Platform audit has no read route yet. M15 moves the eBay endpoint's token and keyset into the app secrets store (S1 accepted). M18: LWA rotation reminders.
 - Workspaces whose keys predate T-0404 have no canary (dev data only).
 - **ADR-068, for the M07, M08 and M10 tasks:** expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first.
@@ -61,9 +65,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. T-0507's PR merges itself on green CI.
-2. S3: T-0412 (light): identifier fixture, pinned dev `ob_edge` subnet, `platform_admin` on `GET /auth/workspaces`, PLAT-3 walk asserts 2xx.
-3. S5 re-checks S5-20261121-01/-02; S2 does T-0315; then the S4 M05 end review.
+1. PRs #124 (T-0507) and T-0412's merge themselves on green CI.
+2. S5 re-checks S5-20261121-01/-02; S2 does T-0315 (picker entry); then the S4 M05 end review.
 
 ## Prerequisites outstanding (Hashir)
 

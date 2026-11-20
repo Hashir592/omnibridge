@@ -638,6 +638,15 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         reactivateWorkspace: { params: { workspaceId: B } },
         archiveWorkspace: { params: { workspaceId: B } },
       },
+      // The calls meant to be refused (ADR-076); every other platform route must answer a 2xx.
+      expected: {
+        // B already has an admin: an operator cannot make themselves a member of a live tenant.
+        inviteFirstAdmin: [409],
+        // The id is B's own workspace notification, not a platform notice.
+        markPlatformNotificationRead: [404],
+        // The walk archives B before this route (contract order), and archive is final.
+        setWorkspaceModules: [409],
+      },
       // B's business data. Its workspace name and IDs may appear: the console lists workspaces,
       // and usage, expiry and dead-letter rows name accounts and jobs by ID (PLAT-2).
       businessMarkers: [

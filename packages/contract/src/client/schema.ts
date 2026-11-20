@@ -2004,6 +2004,14 @@ export interface components {
       /** @enum {string} */
       role: 'admin' | 'member';
     };
+    WorkspaceList: {
+      platform_admin: boolean;
+      workspaces: components['schemas']['WorkspaceChoice'][];
+    };
+    WorkspaceListInput: {
+      platform_admin: boolean;
+      workspaces: components['schemas']['WorkspaceChoiceInput'][];
+    };
     WorkspaceModules: {
       website_connector: boolean;
     };
@@ -3184,7 +3192,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['WorkspaceChoice'][];
+          'application/json': components['schemas']['WorkspaceList'];
         };
       };
     };

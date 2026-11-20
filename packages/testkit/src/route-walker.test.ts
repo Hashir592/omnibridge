@@ -9,7 +9,7 @@ import {
 } from '@omnibridge/contract';
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { walkIsolation, walkRoutes } from './route-walker.ts';
+import { walkIsolation, walkPlatform, walkRoutes } from './route-walker.ts';
 
 describe('route walker metadata', () => {
   it('[SEC-3] enumerates every registry route with its permission metadata', () => {
@@ -162,5 +162,54 @@ describe('isolation walk (TEN-1, AT-1)', () => {
       expect.objectContaining({ route: 'getThing', caller: 'workspace-a', status: 200 }),
       expect.objectContaining({ route: 'listThings', caller: 'workspace-a', leaked: ['B-MARKER'] }),
     ]);
+  });
+});
+
+describe('platform walk (PLAT-3)', () => {
+  const meta = { auth: 'platform', tab: 'none', adminOnly: false, companyScoped: false } as const;
+  const read = defineRoute({
+    ...meta,
+    id: 'readThing',
+    method: 'GET',
+    path: '/platform/thing',
+    responses: { 200: z.object({ id: z.string() }) },
+  });
+  const archive = defineRoute({
+    ...meta,
+    id: 'archiveThing',
+    method: 'POST',
+    path: '/platform/thing/archive',
+    responses: { 204: z.null(), 409: z.object({ code: z.string() }) },
+  });
+  const walk = (statuses: Record<string, number>, expected?: Record<string, number[]>) =>
+    walkPlatform({
+      routes: [read, archive],
+      inject: (req) =>
+        Promise.resolve({
+          statusCode: req.url.endsWith('/archive')
+            ? (statuses.archiveThing ?? 204)
+            : (statuses.readThing ?? 200),
+          body: '{}',
+        }),
+      platform: {},
+      calls: { readThing: {}, archiveThing: {} },
+      businessMarkers: ['B-SECRET'],
+      ...(expected === undefined ? {} : { expected }),
+    });
+
+  it('[PLAT-3] a platform route refused by mistake (403) fails the walk; a 2xx passes (ADR-076)', async () => {
+    expect((await walk({})).every((o) => o.ok)).toBe(true);
+    const refused = await walk({ readThing: 403 });
+    expect(refused.find((o) => o.route === 'readThing')).toMatchObject({
+      ok: false,
+      expected: '2xx',
+    });
+  });
+
+  it('[PLAT-3] a declared non-2xx answer passes only as declared', async () => {
+    const declared = await walk({ archiveThing: 409 }, { archiveThing: [409] });
+    expect(declared.every((o) => o.ok)).toBe(true);
+    const other = await walk({ archiveThing: 404 }, { archiveThing: [409] });
+    expect(other.find((o) => o.route === 'archiveThing')?.ok).toBe(false);
   });
 });

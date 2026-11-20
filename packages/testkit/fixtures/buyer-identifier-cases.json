@@ -1,0 +1,17 @@
+{
+  "comment": "DEL-4, ADR-068, ADR-072: which identifiers pin one buyer. The contract test runs every case through BuyerIdentifiersSchema; the SPA test runs them through pinsOneBuyer and the mock. A rule change must update this file, and both sides then follow it.",
+  "cases": [
+    { "identifiers": {}, "pins": false },
+    { "identifiers": { "name": "Morgan Ellis" }, "pins": false },
+    { "identifiers": { "postcode": "SW1A 1AA" }, "pins": false },
+    { "identifiers": { "name": "Morgan Ellis", "postcode": "SW1A 1AA" }, "pins": true },
+    { "identifiers": { "email": "morgan.ellis@example.com" }, "pins": true },
+    { "identifiers": { "phone": "07700900111" }, "pins": true },
+    { "identifiers": { "buyer": "morgan_e" }, "pins": true },
+    {
+      "identifiers": { "name": "Morgan Ellis", "email": "morgan.ellis@example.com" },
+      "pins": true
+    },
+    { "identifiers": { "postcode": "SW1A 1AA", "phone": "07700900111" }, "pins": true }
+  ]
+}
