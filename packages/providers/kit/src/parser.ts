@@ -48,6 +48,6 @@ export function defineParser<S extends z.ZodType>(
 }
 
 /** The platform notice record kind for a parser (`platform.report_failure`); its id is the version. */
-export function parserRecordKind(parser: VersionedParser<unknown>): string {
+export function parserRecordKind(parser: { provider: Provider; name: string }): string {
   return `parser_${parser.provider}_${parser.name}`.slice(0, 40);
 }

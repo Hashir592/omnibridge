@@ -324,7 +324,7 @@ describe('JobQueue permanent failure (INT-5)', () => {
   } as unknown as JobWithMetadata<unknown>;
 
   it('[INT-5] a PermanentJobError fails the job once, cleanly: no retry, dead-lettered, recorded', async () => {
-    const patches: { state: string; errorCode?: string | null }[] = [];
+    const patches: { state: string; errorCode?: string | null | undefined }[] = [];
     const sent: string[] = [];
     let run: ((jobs: JobWithMetadata<unknown>[]) => Promise<void>) | undefined;
     const boss = {

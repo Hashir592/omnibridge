@@ -41,6 +41,38 @@ describe('credential store (SEC-6, INT-3)', () => {
       return fn(trx);
     });
 
+  /** A real channel account of the workspace: credentials reference one (db-main 0037). */
+  const newAccount = (ctx: TenantContext) => {
+    const company = randomUUID();
+    const id = randomUUID();
+    // Accounts are company data: the insert runs with that company in scope.
+    return asTenant({ ...ctx, companyIds: [company] }, async (trx) => {
+      await trx
+        .insertInto('app.companies')
+        .values({
+          id: company,
+          workspace_id: ctx.workspaceId,
+          legal_name: 'Credential test Ltd',
+          trading_name: 'Credential test',
+          address_line1: '1 Test Street',
+          address_city: 'Testville',
+          address_postcode: 'TE1 1ST',
+        })
+        .execute();
+      await trx
+        .insertInto('app.channel_accounts')
+        .values({
+          id,
+          workspace_id: ctx.workspaceId,
+          company_id: company,
+          provider: 'amazon',
+          display_name: 'Credential test account',
+        })
+        .execute();
+      return id;
+    });
+  };
+
   beforeAll(async () => {
     cluster = await startRoleCluster('db-main', 'omnibridge', ROLES);
     await migrateMain(cluster.connection('ob_owner'));
@@ -59,7 +91,7 @@ describe('credential store (SEC-6, INT-3)', () => {
   it('[SEC-6] stored credentials hold ciphertext only, bound to their row', async () => {
     const value = marker();
     const r = repo();
-    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
+    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: await newAccount(A) };
     const id = await asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret(value)));
 
     const row = await asTenant(A, (trx) =>
@@ -181,7 +213,7 @@ describe('credential store (SEC-6, INT-3)', () => {
 
   it('[SEC-6] replacing current keeps the old token inactive for 7 days, then deletes it', async () => {
     const r = repo();
-    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
+    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: await newAccount(A) };
     const [first, second] = [marker(), marker()];
     const providerExpiry = new Date(Date.now() + 200 * DAY_MS);
     await asTenant(A, (trx) =>
@@ -254,7 +286,7 @@ describe('credential store (SEC-6, INT-3)', () => {
     const r = repo([kek1], logger);
     const D: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
     const values = [marker(), marker(), marker()];
-    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
+    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: await newAccount(D) };
 
     await asTenant(D, async (trx) => {
       await r.store(trx, D, ref, 'current', new Secret(values[0] ?? ''));
@@ -332,7 +364,7 @@ describe('credential store (SEC-6, INT-3)', () => {
 
   it('[SEC-6] concurrent re-authorisations of one account both succeed, one after the other', async () => {
     const H: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
-    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: randomUUID() };
+    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: await newAccount(H) };
     await asTenant(H, (trx) => repo().store(trx, H, ref, 'current', new Secret(marker())));
     const [first, second] = [marker(), marker()];
     const results = await Promise.allSettled([
@@ -359,7 +391,7 @@ describe('credential store (SEC-6, INT-3)', () => {
 
   it('[SEC-4] migration 0005: retired credential without delete_after is rejected', async () => {
     const r = repo();
-    const ref: CredentialRef = { kind: 'evri.api_key', channelAccountId: randomUUID() };
+    const ref: CredentialRef = { kind: 'evri.api_key', channelAccountId: await newAccount(A) };
     await asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret('x')));
     // Retiring by hand without a deletion time breaks the new rule ...
     await expect(
@@ -379,5 +411,37 @@ describe('credential store (SEC-6, INT-3)', () => {
         .where('channel_account_id', '=', ref.channelAccountId ?? null)
         .execute(),
     );
+  });
+  it('[INT-3] a token is read only in the provider environment it was stored in, and rests as ciphertext', async () => {
+    const value = `TOKENMARK-${randomUUID()}`;
+    const keyring = parseKeyring('secrets', kek1);
+    const live = new CredentialRepository({ keyring, logger: silent, environment: 'live' });
+    const mock = new CredentialRepository({ keyring, logger: silent, environment: 'mock' });
+    const ref: CredentialRef = { kind: 'ebay.refresh_token', channelAccountId: await newAccount(A) };
+    await asTenant(A, (trx) => live.store(trx, A, ref, 'current', new Secret(value)));
+
+    expect((await asTenant(A, (trx) => live.get(trx, A, ref)))?.reveal()).toBe(value);
+    // dev, CI or a restored copy in another environment cannot use it.
+    expect(await asTenant(A, (trx) => mock.get(trx, A, ref))).toBeUndefined();
+    // A raw read shows ciphertext only.
+    const rows = await asTenant(A, (trx) =>
+      trx
+        .selectFrom('app.credentials')
+        .select(['encrypted_value', 'environment'])
+        .where('channel_account_id', '=', ref.channelAccountId ?? null)
+        .execute(),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.environment).toBe('live');
+    expect(JSON.stringify(rows)).not.toContain('TOKENMARK');
+    expect(rows[0]?.encrypted_value.includes(Buffer.from(value))).toBe(false);
+  });
+
+  it('[INT-3] a credential must name an account of its own workspace', async () => {
+    const r = repo();
+    const ref: CredentialRef = { kind: 'ebay.refresh_token', channelAccountId: randomUUID() };
+    await expect(
+      asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret(marker()))),
+    ).rejects.toThrow(/foreign key/);
   });
 });

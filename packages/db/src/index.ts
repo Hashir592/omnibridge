@@ -10,6 +10,8 @@ export {
 } from './pool.ts';
 export {
   CREDENTIAL_KINDS,
+  AccountCredentials,
+  CREDENTIAL_KIND_BY_PROVIDER,
   CredentialRepository,
   type CredentialKind,
   type CredentialRef,
@@ -125,3 +127,20 @@ export {
   type AppSecretStatus,
 } from './app-secrets.ts';
 export { PLATFORM_KEY_SCOPE, PlatformKeys, rewrapPlatformKeys } from './platform-keys.ts';
+export {
+  AUTH_FAILURE_LIMIT,
+  AUTH_FAILURE_WINDOW_MS,
+  connectionStatus,
+  ConnectionRepository,
+  type ApiUsageToday,
+  type Connection,
+  type ConnectionDetail,
+  type ConnectionStatus,
+} from './connections.ts';
+export { SyncCursorRepository, type StoredCursor } from './sync-cursors.ts';
+export {
+  OAUTH_STATE_TTL_MS,
+  OAuthStateRepository,
+  oauthStateWorkspace,
+  type TakenOAuthState,
+} from './oauth-states.ts';

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { TenantContext } from '@omnibridge/core';
+import type { ProviderMode, TenantContext } from '@omnibridge/core';
 import {
   generateDataKey,
   rewrapDataKey,
@@ -12,6 +12,7 @@ import {
 import type { Logger } from '@omnibridge/logger';
 import { sql, type ExpressionBuilder, type Kysely } from 'kysely';
 import type { CredentialsTable, MainDb } from './schema.ts';
+import { withTenantTransaction } from './tenant.ts';
 
 export type CredentialSlot = CredentialsTable['slot'];
 
@@ -26,6 +27,7 @@ export const CREDENTIAL_KINDS = [
   'ebay.refresh_token',
   'evri.api_key',
   'dpd.api_key',
+  'website.api_key',
 ] as const;
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
@@ -41,6 +43,12 @@ export interface CredentialRepositoryOptions {
   /** The secrets master key (never the PII one). */
   readonly keyring: Keyring;
   readonly logger: Logger;
+  /**
+   * The provider environment this process talks to (PROVIDER_MODE, INT-3). Tokens are stored with
+   * it and only tokens of it are read, so a copied or restored database cannot use another
+   * environment's token. Defaults to `mock` (dev and CI).
+   */
+  readonly environment?: ProviderMode;
 }
 
 const TABLE = 'app.credentials';
@@ -57,6 +65,7 @@ const COLUMN = 'encrypted_value';
 export class CredentialRepository {
   readonly #keyring: Keyring;
   readonly #log: Logger;
+  readonly #environment: ProviderMode;
 
   constructor(options: CredentialRepositoryOptions) {
     if (options.keyring.purpose !== 'secrets') {
@@ -64,6 +73,7 @@ export class CredentialRepository {
     }
     this.#keyring = options.keyring;
     this.#log = options.logger.child({ component: 'credentials' });
+    this.#environment = options.environment ?? 'mock';
   }
 
   /** Stores a value in an empty slot. Use `replaceCurrent` or `promoteNext` to rotate. */
@@ -276,6 +286,7 @@ export class CredentialRepository {
         kind: ref.kind,
         channel_account_id: ref.channelAccountId ?? null,
         slot,
+        environment: this.#environment,
         encrypted_value: dataKey.encrypt(value.reveal(), this.#aad(ctx, id)),
         key_version: dataKey.version,
         expires_at: expiresAt,
@@ -349,6 +360,7 @@ export class CredentialRepository {
         eb(`${TABLE}.channel_account_id`, 'is not distinct from', ref.channelAccountId ?? null),
         eb(`${TABLE}.slot`, '=', slot),
         eb(`${TABLE}.is_active`, '=', true),
+        eb(`${TABLE}.environment`, '=', this.#environment),
       ]);
   }
 
@@ -408,4 +420,60 @@ function assertKnownKind(kind: string): void {
 /** PostgreSQL unique_violation (23505), as raised through pg. */
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err && err.code === '23505';
+}
+
+/** The stored credential of each provider: a refresh token (OAuth) or an API key. */
+export const CREDENTIAL_KIND_BY_PROVIDER = {
+  amazon: 'amazon.refresh_token',
+  amazon_ads: 'ads.refresh_token',
+  ebay: 'ebay.refresh_token',
+  website: 'website.api_key',
+  evri: 'evri.api_key',
+  dpd: 'dpd.api_key',
+} as const satisfies Readonly<Record<string, CredentialKind>>;
+
+/** AMZ-8: a re-authorisation keeps the old refresh token, inactive, for 7 days. */
+const REAUTH_RETAIN_MS = 7 * 86_400_000;
+
+/**
+ * Per-account provider tokens (INT-3) as provider code uses them: one call per read or write,
+ * each in the caller's tenant context. Values stay `Secret` and are never logged or returned.
+ */
+export class AccountCredentials {
+  readonly #db: Kysely<MainDb>;
+  readonly #repo: CredentialRepository;
+
+  constructor(db: Kysely<MainDb>, repo: CredentialRepository) {
+    this.#db = db;
+    this.#repo = repo;
+  }
+
+  read(
+    ctx: TenantContext,
+    channelAccountId: string,
+    provider: keyof typeof CREDENTIAL_KIND_BY_PROVIDER,
+  ): Promise<Secret | undefined> {
+    return withTenantTransaction(this.#db, ctx, (trx) =>
+      this.#repo.get(trx, ctx, { kind: CREDENTIAL_KIND_BY_PROVIDER[provider], channelAccountId }),
+    );
+  }
+
+  /** Stores a new token as current (a connect or re-authorisation); the old one is retired. */
+  replace(
+    ctx: TenantContext,
+    channelAccountId: string,
+    provider: keyof typeof CREDENTIAL_KIND_BY_PROVIDER,
+    value: Secret,
+    expiresAt?: Date,
+  ): Promise<string> {
+    return withTenantTransaction(this.#db, ctx, (trx) =>
+      this.#repo.replaceCurrent(
+        trx,
+        ctx,
+        { kind: CREDENTIAL_KIND_BY_PROVIDER[provider], channelAccountId },
+        value,
+        { retainOldForMs: REAUTH_RETAIN_MS, ...(expiresAt === undefined ? {} : { expiresAt }) },
+      ),
+    );
+  }
 }

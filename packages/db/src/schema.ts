@@ -22,6 +22,8 @@ export interface CredentialsTable {
   kind: string;
   channel_account_id: string | null;
   slot: 'current' | 'next';
+  /** INT-3: mock, sandbox or live (db-main 0037). */
+  environment: ColumnType<'mock' | 'sandbox' | 'live', 'mock' | 'sandbox' | 'live' | undefined, never>;
   encrypted_value: Buffer;
   key_version: BigIntColumn;
   is_active: Generated<boolean>;
@@ -137,7 +139,7 @@ export interface CompaniesTable {
   created_at: Generated<Date>;
 }
 
-export type ChannelProvider = 'amazon' | 'amazon_ads' | 'ebay' | 'website';
+export type ChannelProvider = 'amazon' | 'amazon_ads' | 'ebay' | 'website' | 'evri' | 'dpd';
 
 export interface ChannelAccountsTable {
   id: string;
@@ -148,6 +150,38 @@ export interface ChannelAccountsTable {
   orders_seen_at: NullableTime;
   archived_at: NullableTime;
   created_at: Generated<Date>;
+  /** Connection health (db-main 0037, INT-4, AMZ-12). */
+  last_success_at: Date | null;
+  last_token_refresh_at: Date | null;
+  auth_failures: ColumnType<string, number | undefined, number>;
+  auth_failures_since: Date | null;
+  needs_reauth_at: Date | null;
+  last_error_code: string | null;
+  last_error_at: Date | null;
+  /** SAFE-2: set while the account's automated writes are paused. */
+  paused_at: Date | null;
+}
+
+export interface SyncCursorsTable {
+  workspace_id: string;
+  channel_account_id: string;
+  stream: string;
+  cursor_at: Date | null;
+  overlap: ColumnType<{ id: string; at: string }[], string | undefined, string>;
+  last_run_at: Date | null;
+  last_success_at: Date | null;
+  updated_at: Date;
+}
+
+export interface OAuthStatesTable {
+  workspace_id: string;
+  state_hash: Buffer;
+  channel_account_id: string;
+  user_id: string;
+  provider: 'amazon' | 'amazon_ads' | 'ebay';
+  created_at: Date;
+  expires_at: Date;
+  used_at: Date | null;
 }
 
 export interface UsersTable {
@@ -311,4 +345,6 @@ export interface MainDb {
   'app.erasure_requests': ErasureRequestsTable;
   'app.notifications': NotificationsTable;
   'app.api_usage_daily': ApiUsageDailyTable;
+  'app.sync_cursors': SyncCursorsTable;
+  'app.oauth_states': OAuthStatesTable;
 }
