@@ -75,6 +75,11 @@ const CONSOLE_FIELDS = new Set([
   'createdAt',
   'updatedAt',
   'resolvedAt',
+  // M07: the maintenance switch and live usage (SAFE-3, RL-5), names and counts only
+  'maintenance',
+  'ebay_budget',
+  'non_urgent_limit',
+  'hard_limit',
 ]);
 
 /** Every property name anywhere in a JSON Schema. */

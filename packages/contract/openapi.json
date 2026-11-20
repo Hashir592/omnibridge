@@ -289,6 +289,318 @@
         "properties": { "next": { "type": "string", "enum": ["workspace_picker", "app"] } },
         "required": ["next"]
       },
+      "ProviderInput": {
+        "type": "string",
+        "enum": ["amazon", "amazon_ads", "ebay", "website", "evri", "dpd"]
+      },
+      "OAuthProviderInput": { "type": "string", "enum": ["amazon", "amazon_ads", "ebay"] },
+      "ConnectionStatusInput": {
+        "type": "string",
+        "enum": ["active", "needs_reauth", "paused", "error", "disconnected"]
+      },
+      "ApiUsageTodayInput": {
+        "type": "object",
+        "properties": {
+          "api": { "type": "string" },
+          "calls": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "cap": {
+            "anyOf": [
+              { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["api", "calls", "cap"]
+      },
+      "KillSwitchInput": {
+        "type": "object",
+        "properties": {
+          "paused": { "type": "boolean" },
+          "paused_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["paused", "paused_at"]
+      },
+      "ConnectionInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/ProviderInput" },
+          "display_name": { "type": "string" },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": { "$ref": "#/components/schemas/ConnectionStatusInput" },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "last_token_refresh_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "consecutive_auth_failures": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "usage_today": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ApiUsageTodayInput" }
+          },
+          "kill_switch": { "$ref": "#/components/schemas/KillSwitchInput" }
+        },
+        "required": [
+          "id",
+          "provider",
+          "display_name",
+          "company_id",
+          "status",
+          "last_success_at",
+          "last_token_refresh_at",
+          "consecutive_auth_failures",
+          "usage_today",
+          "kill_switch"
+        ]
+      },
+      "ConnectionDetailInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/ProviderInput" },
+          "display_name": { "type": "string" },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": { "$ref": "#/components/schemas/ConnectionStatusInput" },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "last_token_refresh_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "consecutive_auth_failures": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "usage_today": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ApiUsageTodayInput" }
+          },
+          "kill_switch": { "$ref": "#/components/schemas/KillSwitchInput" },
+          "needs_reauth_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": { "type": "string" },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  }
+                },
+                "required": ["code", "at"]
+              },
+              { "type": "null" }
+            ]
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "stream": { "type": "string" },
+                "cursor_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    { "type": "null" }
+                  ]
+                },
+                "last_success_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["stream", "cursor_at", "last_success_at"]
+            }
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string" },
+                "slot": { "type": "string", "enum": ["current", "next"] },
+                "expires_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["kind", "slot", "expires_at"]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "display_name",
+          "company_id",
+          "status",
+          "last_success_at",
+          "last_token_refresh_at",
+          "consecutive_auth_failures",
+          "usage_today",
+          "kill_switch",
+          "needs_reauth_at",
+          "last_error",
+          "streams",
+          "credentials"
+        ]
+      },
+      "MaintenanceStateInput": {
+        "type": "object",
+        "properties": {
+          "on": { "type": "boolean" },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["on", "since"]
+      },
+      "AuthorisationStartInput": {
+        "type": "object",
+        "properties": { "redirect_url": { "type": "string", "format": "uri" } },
+        "required": ["redirect_url"]
+      },
+      "BulkActionInput": {
+        "type": "string",
+        "enum": ["stock_push", "tracking_resend", "ads_change"]
+      },
+      "BulkPreviewInput": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string" },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "action": { "$ref": "#/components/schemas/BulkActionInput" },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "provider": { "$ref": "#/components/schemas/ProviderInput" },
+                "display_name": { "type": "string" },
+                "company_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "paused": { "type": "boolean" }
+              },
+              "required": ["id", "provider", "display_name", "company_id", "paused"]
+            }
+          }
+        },
+        "required": ["token", "expires_at", "action", "accounts"]
+      },
+      "BulkConfirmedInput": {
+        "type": "object",
+        "properties": {
+          "action": { "$ref": "#/components/schemas/BulkActionInput" },
+          "account_count": { "type": "integer", "minimum": 2, "maximum": 9007199254740991 },
+          "queued": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["action", "account_count", "queued"]
+      },
       "HealthInput": {
         "type": "object",
         "properties": {
@@ -736,6 +1048,39 @@
           }
         },
         "required": ["name", "current", "next"]
+      },
+      "MaintenanceInput": {
+        "type": "object",
+        "properties": {
+          "maintenance": { "type": "boolean" },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["maintenance", "updated_at"]
+      },
+      "EbayBudgetInput": {
+        "type": "object",
+        "properties": {
+          "api": { "type": "string" },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "calls": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "cap": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "non_urgent_limit": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "hard_limit": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["api", "day", "calls", "cap", "non_urgent_limit", "hard_limit"]
       },
       "BuyerIdentifiersInput": {
         "type": "object",
@@ -1524,6 +1869,327 @@
         "required": ["next"],
         "additionalProperties": false
       },
+      "Provider": {
+        "type": "string",
+        "enum": ["amazon", "amazon_ads", "ebay", "website", "evri", "dpd"]
+      },
+      "OAuthProvider": { "type": "string", "enum": ["amazon", "amazon_ads", "ebay"] },
+      "ConnectionStatus": {
+        "type": "string",
+        "enum": ["active", "needs_reauth", "paused", "error", "disconnected"]
+      },
+      "ApiUsageToday": {
+        "type": "object",
+        "properties": {
+          "api": { "type": "string" },
+          "calls": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "cap": {
+            "anyOf": [
+              { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["api", "calls", "cap"],
+        "additionalProperties": false
+      },
+      "KillSwitch": {
+        "type": "object",
+        "properties": {
+          "paused": { "type": "boolean" },
+          "paused_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["paused", "paused_at"],
+        "additionalProperties": false
+      },
+      "Connection": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/Provider" },
+          "display_name": { "type": "string" },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": { "$ref": "#/components/schemas/ConnectionStatus" },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "last_token_refresh_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "consecutive_auth_failures": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "usage_today": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ApiUsageToday" }
+          },
+          "kill_switch": { "$ref": "#/components/schemas/KillSwitch" }
+        },
+        "required": [
+          "id",
+          "provider",
+          "display_name",
+          "company_id",
+          "status",
+          "last_success_at",
+          "last_token_refresh_at",
+          "consecutive_auth_failures",
+          "usage_today",
+          "kill_switch"
+        ],
+        "additionalProperties": false
+      },
+      "ConnectionDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/Provider" },
+          "display_name": { "type": "string" },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": { "$ref": "#/components/schemas/ConnectionStatus" },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "last_token_refresh_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "consecutive_auth_failures": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "usage_today": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ApiUsageToday" }
+          },
+          "kill_switch": { "$ref": "#/components/schemas/KillSwitch" },
+          "needs_reauth_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": { "type": "string" },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  }
+                },
+                "required": ["code", "at"],
+                "additionalProperties": false
+              },
+              { "type": "null" }
+            ]
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "stream": { "type": "string" },
+                "cursor_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    { "type": "null" }
+                  ]
+                },
+                "last_success_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["stream", "cursor_at", "last_success_at"],
+              "additionalProperties": false
+            }
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string" },
+                "slot": { "type": "string", "enum": ["current", "next"] },
+                "expires_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["kind", "slot", "expires_at"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "display_name",
+          "company_id",
+          "status",
+          "last_success_at",
+          "last_token_refresh_at",
+          "consecutive_auth_failures",
+          "usage_today",
+          "kill_switch",
+          "needs_reauth_at",
+          "last_error",
+          "streams",
+          "credentials"
+        ],
+        "additionalProperties": false
+      },
+      "MaintenanceState": {
+        "type": "object",
+        "properties": {
+          "on": { "type": "boolean" },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["on", "since"],
+        "additionalProperties": false
+      },
+      "AuthorisationStart": {
+        "type": "object",
+        "properties": { "redirect_url": { "type": "string", "format": "uri" } },
+        "required": ["redirect_url"],
+        "additionalProperties": false
+      },
+      "BulkAction": { "type": "string", "enum": ["stock_push", "tracking_resend", "ads_change"] },
+      "BulkPreview": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string" },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "action": { "$ref": "#/components/schemas/BulkAction" },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "provider": { "$ref": "#/components/schemas/Provider" },
+                "display_name": { "type": "string" },
+                "company_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "paused": { "type": "boolean" }
+              },
+              "required": ["id", "provider", "display_name", "company_id", "paused"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["token", "expires_at", "action", "accounts"],
+        "additionalProperties": false
+      },
+      "BulkConfirmed": {
+        "type": "object",
+        "properties": {
+          "action": { "$ref": "#/components/schemas/BulkAction" },
+          "account_count": { "type": "integer", "minimum": 2, "maximum": 9007199254740991 },
+          "queued": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["action", "account_count", "queued"],
+        "additionalProperties": false
+      },
       "Health": {
         "type": "object",
         "properties": {
@@ -2005,6 +2671,41 @@
           }
         },
         "required": ["name", "current", "next"],
+        "additionalProperties": false
+      },
+      "Maintenance": {
+        "type": "object",
+        "properties": {
+          "maintenance": { "type": "boolean" },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["maintenance", "updated_at"],
+        "additionalProperties": false
+      },
+      "EbayBudget": {
+        "type": "object",
+        "properties": {
+          "api": { "type": "string" },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "calls": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "cap": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "non_urgent_limit": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "hard_limit": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["api", "day", "calls", "cap", "non_urgent_limit", "hard_limit"],
         "additionalProperties": false
       },
       "BuyerIdentifiers": {
@@ -6029,6 +6730,556 @@
         },
         "responses": {
           "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/platform/maintenance": {
+      "get": {
+        "operationId": "getMaintenance",
+        "summary": "The global maintenance switch",
+        "x-permissions": {
+          "auth": "platform",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Maintenance" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setMaintenance",
+        "summary": "Turn the global maintenance switch on or off",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "maintenance": { "type": "boolean" } },
+                "required": ["maintenance"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "platform",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Maintenance" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/platform/api-usage/live": {
+      "get": {
+        "operationId": "getLiveApiUsage",
+        "summary": "API usage against limits, today, as it happens",
+        "x-permissions": {
+          "auth": "platform",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ebay_budget": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/EbayBudget" }
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "workspace_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "channel_account_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "provider": { "type": "string" },
+                          "api": { "type": "string" },
+                          "day": {
+                            "type": "string",
+                            "format": "date",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                          },
+                          "calls": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                          "cap": {
+                            "anyOf": [
+                              { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                              { "type": "null" }
+                            ]
+                          },
+                          "updated_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                          }
+                        },
+                        "required": [
+                          "workspace_id",
+                          "channel_account_id",
+                          "provider",
+                          "api",
+                          "day",
+                          "calls",
+                          "cap",
+                          "updated_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["ebay_budget", "items"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections": {
+      "get": {
+        "operationId": "listConnections",
+        "summary": "Channel and carrier accounts with their health",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Connection" }
+                    },
+                    "maintenance": { "$ref": "#/components/schemas/MaintenanceState" }
+                  },
+                  "required": ["items", "maintenance"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{accountId}": {
+      "get": {
+        "operationId": "getConnection",
+        "summary": "One account with usage, sync streams and token expiry",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ConnectionDetail" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{accountId}/kill-switch": {
+      "put": {
+        "operationId": "setKillSwitch",
+        "summary": "Pause or resume an account's automated writes",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "paused": { "type": "boolean" } },
+                "required": ["paused"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Connection" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{accountId}/authorise": {
+      "post": {
+        "operationId": "startAuthorisation",
+        "summary": "Start connecting or re-authorising an account",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthorisationStart" }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/{provider}/callback": {
+      "get": {
+        "operationId": "oauthCallback",
+        "summary": "OAuth return from a provider",
+        "parameters": [
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "in": "query",
+            "name": "state",
+            "required": true
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "in": "query",
+            "name": "code",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "in": "query",
+            "name": "spapi_oauth_code",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "in": "query",
+            "name": "selling_partner_id",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "in": "query",
+            "name": "error",
+            "required": false
+          },
+          {
+            "schema": { "$ref": "#/components/schemas/OAuthProviderInput" },
+            "in": "path",
+            "name": "provider",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "public",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "303": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/bulk-writes/preview": {
+      "post": {
+        "operationId": "previewBulkWrite",
+        "summary": "Preview a write to several accounts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": { "$ref": "#/components/schemas/BulkActionInput" },
+                  "channel_account_ids": {
+                    "minItems": 2,
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "params": {
+                    "type": "object",
+                    "propertyNames": { "type": "string" },
+                    "additionalProperties": {
+                      "anyOf": [
+                        { "type": "string", "maxLength": 200 },
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        { "type": "boolean" },
+                        {
+                          "maxItems": 1000,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": ["action", "channel_account_ids"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkPreview" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/bulk-writes/confirm": {
+      "post": {
+        "operationId": "confirmBulkWrite",
+        "summary": "Confirm a previewed write to several accounts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "token": { "type": "string", "minLength": 20, "maxLength": 200 } },
+                "required": ["token"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkConfirmed" } }
+            }
+          },
           "4XX": {
             "description": "Client error (RFC 9457 problem)",
             "content": {

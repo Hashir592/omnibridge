@@ -101,6 +101,9 @@ export function platformHandlers(
       listAppSecrets: unavailable,
       setAppSecret: unavailable,
       promoteAppSecret: unavailable,
+      getMaintenance: unavailable,
+      setMaintenance: unavailable,
+      getLiveApiUsage: unavailable,
     };
   }
   const p: PlatformOptions = options;
@@ -505,5 +508,10 @@ export function platformHandlers(
       );
       return { status: 204, body: null };
     },
+
+    // M07 contract PR: the maintenance switch and live usage arrive with T-0702.
+    getMaintenance: unavailable,
+    setMaintenance: unavailable,
+    getLiveApiUsage: unavailable,
   };
 }

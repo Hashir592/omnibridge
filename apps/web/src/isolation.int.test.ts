@@ -495,6 +495,21 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           body: { value: 'walker-value' },
         },
         promoteAppSecret: { params: { name: 'ads.client_id' } },
+        getMaintenance: {},
+        setMaintenance: { body: { maintenance: false } },
+        getLiveApiUsage: {},
+        // Connections (M07): B's account cannot be read, paused or authorised from A.
+        listConnections: {},
+        getConnection: { params: { accountId: b.account } },
+        setKillSwitch: { params: { accountId: b.account }, body: { paused: true } },
+        startAuthorisation: { params: { accountId: b.account } },
+        // Public: the state names nothing of B's; any status, the leak check still runs.
+        oauthCallback: { params: { provider: 'ebay' }, query: { state: MARKER, code: MARKER } },
+        // SAFE-1: a bulk write cannot name B's account, nor use a token A never got.
+        previewBulkWrite: {
+          body: { action: 'stock_push', channel_account_ids: [b.account, randomUUID()] },
+        },
+        confirmBulkWrite: { body: { token: `${MARKER}-not-a-real-bulk-token` } },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
@@ -634,6 +649,9 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           body: { value: 'walker-value' },
         },
         promoteAppSecret: { params: { name: 'ads.client_id' } },
+        getMaintenance: {},
+        setMaintenance: { body: { maintenance: false } },
+        getLiveApiUsage: {},
         suspendWorkspace: { params: { workspaceId: B } },
         reactivateWorkspace: { params: { workspaceId: B } },
         archiveWorkspace: { params: { workspaceId: B } },
@@ -646,6 +664,10 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         markPlatformNotificationRead: [404],
         // The walk archives B before this route (contract order), and archive is final.
         setWorkspaceModules: [409],
+        // M07 contract PR: built in T-0702, which removes these three.
+        getMaintenance: [503],
+        setMaintenance: [503],
+        getLiveApiUsage: [503],
       },
       // B's business data. Its workspace name and IDs may appear: the console lists workspaces,
       // and usage, expiry and dead-letter rows name accounts and jobs by ID (PLAT-2).
