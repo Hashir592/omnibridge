@@ -216,7 +216,8 @@ export const listApiUsage = defineRoute({
 
 export const CredentialExpirySchema = z
   .object({
-    workspace_id: z.uuid(),
+    /** Null for an app secret of the platform itself (PLAT-4), e.g. Amazon's LWA client secret. */
+    workspace_id: z.uuid().nullable(),
     channel_account_id: z.uuid().nullable(),
     kind: z.string(),
     slot: z.enum(['current', 'next']),
@@ -305,6 +306,65 @@ export const clearIncidentBanner = defineRoute({
   ...platformConsole,
 });
 
+/** The app secrets the store accepts (PLAT-4, T-0505); the register lists each one. */
+export const APP_SECRET_NAMES = [
+  'amazon.lwa_client_id',
+  'amazon.lwa_client_secret',
+  'ads.client_id',
+  'ads.client_secret',
+  'ebay.client_id',
+  'ebay.client_secret',
+  'ebay.dev_id',
+  'ebay.verification_token',
+] as const;
+
+const SecretSlotSet = z.object({ set_at: z.iso.datetime() }).nullable();
+
+export const AppSecretStatusSchema = z
+  .object({
+    name: z.enum(APP_SECRET_NAMES),
+    /** When each slot was set; null when empty. Never the value (PLAT-4). */
+    current: SecretSlotSet,
+    next: SecretSlotSet,
+  })
+  .meta({ id: 'AppSecretStatus' });
+
+/** Every app secret with the set-on date of each slot. Values are never returned. */
+export const listAppSecrets = defineRoute({
+  id: 'listAppSecrets',
+  method: 'GET',
+  path: '/platform/app-secrets',
+  summary: 'App secrets: names and set-on dates only',
+  responses: { 200: z.object({ items: z.array(AppSecretStatusSchema) }) },
+  ...platformConsole,
+});
+
+/**
+ * Sets one slot of an app secret (write-only). The value is never returned, logged or audited;
+ * the audit row holds the name and slot. `next` holds Amazon's 7-day overlap (AMZ-10).
+ */
+export const setAppSecret = defineRoute({
+  id: 'setAppSecret',
+  method: 'PUT',
+  path: '/platform/app-secrets/:name/:slot',
+  summary: 'Set an app secret (write-only)',
+  params: z.object({ name: z.enum(APP_SECRET_NAMES), slot: z.enum(['current', 'next']) }),
+  body: z.object({ value: z.string().min(1).max(4096) }).strict(),
+  responses: { 204: NoBody },
+  ...platformConsole,
+});
+
+/** Makes `next` the current value; the old current one is deleted. 409 when there is no next. */
+export const promoteAppSecret = defineRoute({
+  id: 'promoteAppSecret',
+  method: 'POST',
+  path: '/platform/app-secrets/:name/promote',
+  summary: 'Promote the next value of an app secret to current',
+  params: z.object({ name: z.enum(APP_SECRET_NAMES) }),
+  responses: { 204: NoBody },
+  ...platformConsole,
+});
+
 export const platformRoutes = [
   listConsoleWorkspaces,
   suspendWorkspace,
@@ -322,4 +382,7 @@ export const platformRoutes = [
   getIncidentBanner,
   setIncidentBanner,
   clearIncidentBanner,
+  listAppSecrets,
+  setAppSecret,
+  promoteAppSecret,
 ] as const;

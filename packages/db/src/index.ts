@@ -115,3 +115,13 @@ export {
   type StoredSession,
   type WorkspaceChoiceRow,
 } from './auth.ts';
+export {
+  APP_SECRET_NAMES,
+  AppSecretStore,
+  isAppSecretName,
+  LWA_SECRET_LIFETIME_DAYS,
+  type AppSecretName,
+  type AppSecretSlot,
+  type AppSecretStatus,
+} from './app-secrets.ts';
+export { PLATFORM_KEY_SCOPE, PlatformKeys, rewrapPlatformKeys } from './platform-keys.ts';

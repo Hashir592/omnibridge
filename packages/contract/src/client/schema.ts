@@ -666,6 +666,57 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/platform/app-secrets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** App secrets: names and set-on dates only */
+    get: operations['listAppSecrets'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/app-secrets/{name}/{slot}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Set an app secret (write-only) */
+    put: operations['setAppSecret'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/app-secrets/{name}/promote': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Promote the next value of an app secret to current */
+    post: operations['promoteAppSecret'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/platform/credential-expiry': {
     parameters: {
       query?: never;
@@ -1139,6 +1190,46 @@ export interface components {
       /** Format: uuid */
       workspace_id: string;
     };
+    AppSecretStatus: {
+      current: {
+        /** Format: date-time */
+        set_at: string;
+      } | null;
+      /** @enum {string} */
+      name:
+        | 'amazon.lwa_client_id'
+        | 'amazon.lwa_client_secret'
+        | 'ads.client_id'
+        | 'ads.client_secret'
+        | 'ebay.client_id'
+        | 'ebay.client_secret'
+        | 'ebay.dev_id'
+        | 'ebay.verification_token';
+      next: {
+        /** Format: date-time */
+        set_at: string;
+      } | null;
+    };
+    AppSecretStatusInput: {
+      current: {
+        /** Format: date-time */
+        set_at: string;
+      } | null;
+      /** @enum {string} */
+      name:
+        | 'amazon.lwa_client_id'
+        | 'amazon.lwa_client_secret'
+        | 'ads.client_id'
+        | 'ads.client_secret'
+        | 'ebay.client_id'
+        | 'ebay.client_secret'
+        | 'ebay.dev_id'
+        | 'ebay.verification_token';
+      next: {
+        /** Format: date-time */
+        set_at: string;
+      } | null;
+    };
     AuditEvent: {
       action: string;
       /** @enum {string} */
@@ -1268,8 +1359,7 @@ export interface components {
       kind: string;
       /** @enum {string} */
       slot: 'current' | 'next';
-      /** Format: uuid */
-      workspace_id: string;
+      workspace_id: string | null;
     };
     CredentialExpiryInput: {
       channel_account_id: string | null;
@@ -1278,8 +1368,7 @@ export interface components {
       kind: string;
       /** @enum {string} */
       slot: 'current' | 'next';
-      /** Format: uuid */
-      workspace_id: string;
+      workspace_id: string | null;
     };
     DeadLetter: {
       attempt: number | null;
@@ -3811,6 +3900,145 @@ export interface operations {
             items: components['schemas']['ApiUsage'][];
           };
         };
+      };
+    };
+  };
+  listAppSecrets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['AppSecretStatus'][];
+          };
+        };
+      };
+    };
+  };
+  setAppSecret: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        name:
+          | 'amazon.lwa_client_id'
+          | 'amazon.lwa_client_secret'
+          | 'ads.client_id'
+          | 'ads.client_secret'
+          | 'ebay.client_id'
+          | 'ebay.client_secret'
+          | 'ebay.dev_id'
+          | 'ebay.verification_token';
+        slot: 'current' | 'next';
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          value: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  promoteAppSecret: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        name:
+          | 'amazon.lwa_client_id'
+          | 'amazon.lwa_client_secret'
+          | 'ads.client_id'
+          | 'ads.client_secret'
+          | 'ebay.client_id'
+          | 'ebay.client_secret'
+          | 'ebay.dev_id'
+          | 'ebay.verification_token';
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

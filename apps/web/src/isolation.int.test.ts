@@ -7,6 +7,7 @@ import { checkRaise, type TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  AppSecretStore,
   AuditLog,
   AuthStore,
   ChannelAccountRepository,
@@ -22,6 +23,7 @@ import {
   MembershipRepository,
   migrateMain,
   PlatformConsole,
+  PlatformKeys,
   Tenancy,
   UserRepository,
   WorkspaceRepository,
@@ -332,6 +334,10 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       // T-0504: the console, with a stand-in queue that holds one dead job of B's.
       platform: {
         console: new PlatformConsole(main.db),
+        secrets: new AppSecretStore(
+          main.db,
+          new PlatformKeys(new AuthStore(main.db), parseKeyring('secrets', generateKekLine(1))),
+        ),
         jobs: {
           overview: () =>
             Promise.resolve([
@@ -483,6 +489,12 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         getIncidentBanner: {},
         setIncidentBanner: { body: { message: 'Walker banner', severity: 'info' } },
         clearIncidentBanner: {},
+        listAppSecrets: {},
+        setAppSecret: {
+          params: { name: 'ads.client_id', slot: 'current' },
+          body: { value: 'walker-value' },
+        },
+        promoteAppSecret: { params: { name: 'ads.client_id' } },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
@@ -616,6 +628,12 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         setIncidentBanner: { body: { message: 'Walker banner', severity: 'info' } },
         clearIncidentBanner: {},
         setWorkspaceModules: { params: { workspaceId: B }, body: { website_connector: true } },
+        listAppSecrets: {},
+        setAppSecret: {
+          params: { name: 'ads.client_id', slot: 'next' },
+          body: { value: 'walker-value' },
+        },
+        promoteAppSecret: { params: { name: 'ads.client_id' } },
         suspendWorkspace: { params: { workspaceId: B } },
         reactivateWorkspace: { params: { workspaceId: B } },
         archiveWorkspace: { params: { workspaceId: B } },
