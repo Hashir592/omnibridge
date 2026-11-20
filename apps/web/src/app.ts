@@ -35,6 +35,7 @@ import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
+import { connectionHandlers } from './connections.ts';
 import { platformHandlers, type PlatformOptions } from './platform.ts';
 import { privacyHandlers, type PrivacyOptions } from './privacy.ts';
 import type { AuthService } from './auth/service.ts';
@@ -218,6 +219,7 @@ export function buildWebApp({
     ...privacyHandlers(privacy),
     ...notificationHandlers(notifications),
     ...platformHandlers(platform),
+    ...connectionHandlers(),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';

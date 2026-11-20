@@ -365,6 +365,66 @@ export const promoteAppSecret = defineRoute({
   ...platformConsole,
 });
 
+/** The global maintenance switch (SAFE-3): on, every outbound write of every workspace waits. */
+export const MaintenanceSchema = z
+  .object({ maintenance: z.boolean(), updated_at: z.iso.datetime().nullable() })
+  .meta({ id: 'Maintenance' });
+
+export const getMaintenance = defineRoute({
+  id: 'getMaintenance',
+  method: 'GET',
+  path: '/platform/maintenance',
+  summary: 'The global maintenance switch',
+  responses: { 200: MaintenanceSchema },
+  ...platformConsole,
+});
+
+/**
+ * Turns maintenance on (every workspace's provider writes wait; reads go on) or off (the waiting
+ * writes are sent). Audited as platform.maintenance_changed.
+ */
+export const setMaintenance = defineRoute({
+  id: 'setMaintenance',
+  method: 'PUT',
+  path: '/platform/maintenance',
+  summary: 'Turn the global maintenance switch on or off',
+  body: z.object({ maintenance: z.boolean() }).strict(),
+  responses: { 200: MaintenanceSchema },
+  ...platformConsole,
+});
+
+/** eBay's app-wide daily budget per API (EBAY-8), in the US Pacific day it resets on. */
+export const EbayBudgetSchema = z
+  .object({
+    api: z.string(),
+    day: Day,
+    calls: z.number().int().min(0),
+    cap: z.number().int().min(0),
+    /** Calls at which non-urgent work stops (80% of cap). */
+    non_urgent_limit: z.number().int().min(0),
+    /** Calls at which everything stops (95% of cap); eBay itself is never reached. */
+    hard_limit: z.number().int().min(0),
+  })
+  .meta({ id: 'EbayBudget' });
+
+/**
+ * Usage against limits right now (RL-5): today's eBay budget per API, and today's calls per
+ * provider, account and API, each written as the call is made.
+ */
+export const getLiveApiUsage = defineRoute({
+  id: 'getLiveApiUsage',
+  method: 'GET',
+  path: '/platform/api-usage/live',
+  summary: 'API usage against limits, today, as it happens',
+  responses: {
+    200: z.object({
+      ebay_budget: z.array(EbayBudgetSchema),
+      items: z.array(ApiUsageSchema.extend({ updated_at: z.iso.datetime() })),
+    }),
+  },
+  ...platformConsole,
+});
+
 export const platformRoutes = [
   listConsoleWorkspaces,
   suspendWorkspace,
@@ -385,4 +445,7 @@ export const platformRoutes = [
   listAppSecrets,
   setAppSecret,
   promoteAppSecret,
+  getMaintenance,
+  setMaintenance,
+  getLiveApiUsage,
 ] as const;

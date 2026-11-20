@@ -104,3 +104,4 @@ export {
   WorkspaceChoiceSchema,
 } from './routes/auth.ts';
 export * from './routes/platform.ts';
+export * from './routes/connections.ts';

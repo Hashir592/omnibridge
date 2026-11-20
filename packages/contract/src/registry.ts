@@ -1,5 +1,6 @@
 import { exportAuditEvents, listAuditEvents } from './routes/audit.ts';
 import { authRoutes } from './routes/auth.ts';
+import { connectionRoutes } from './routes/connections.ts';
 import { getDeletionCertificate } from './routes/deletion.ts';
 import { getHealth } from './routes/health.ts';
 import { getFile } from './routes/files.ts';
@@ -31,6 +32,7 @@ export const contractRoutes = [
   ...privacyRoutes,
   ...notificationRoutes,
   ...platformRoutes,
+  ...connectionRoutes,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;

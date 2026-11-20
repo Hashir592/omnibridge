@@ -409,6 +409,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/bulk-writes/confirm': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Confirm a previewed write to several accounts */
+    post: operations['confirmBulkWrite'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/bulk-writes/preview': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Preview a write to several accounts */
+    post: operations['previewBulkWrite'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/channel-accounts/{id}/deletion-certificate': {
     parameters: {
       query?: never;
@@ -436,6 +470,74 @@ export interface paths {
     /** Companies the signed-in user may see */
     get: operations['listCompanies'];
     put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Channel and carrier accounts with their health */
+    get: operations['listConnections'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/{accountId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One account with usage, sync streams and token expiry */
+    get: operations['getConnection'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/{accountId}/authorise': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Start connecting or re-authorising an account */
+    post: operations['startAuthorisation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/{accountId}/kill-switch': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Pause or resume an account's automated writes */
+    put: operations['setKillSwitch'];
     post?: never;
     delete?: never;
     options?: never;
@@ -649,6 +751,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/oauth/{provider}/callback': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** OAuth return from a provider */
+    get: operations['oauthCallback'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/platform/api-usage': {
     parameters: {
       query?: never;
@@ -658,6 +777,23 @@ export interface paths {
     };
     /** API usage per provider and account */
     get: operations['listApiUsage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/api-usage/live': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** API usage against limits, today, as it happens */
+    get: operations['getLiveApiUsage'];
     put?: never;
     post?: never;
     delete?: never;
@@ -832,6 +968,24 @@ export interface paths {
     /** Dead-lettered jobs */
     get: operations['listDeadLetters'];
     put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/maintenance': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The global maintenance switch */
+    get: operations['getMaintenance'];
+    /** Turn the global maintenance switch on or off */
+    put: operations['setMaintenance'];
     post?: never;
     delete?: never;
     options?: never;
@@ -1190,6 +1344,16 @@ export interface components {
       /** Format: uuid */
       workspace_id: string;
     };
+    ApiUsageToday: {
+      api: string;
+      calls: number;
+      cap: number | null;
+    };
+    ApiUsageTodayInput: {
+      api: string;
+      calls: number;
+      cap: number | null;
+    };
     AppSecretStatus: {
       current: {
         /** Format: date-time */
@@ -1272,6 +1436,58 @@ export interface components {
       user_id: string | null;
       user_name: string | null;
     };
+    AuthorisationStart: {
+      /** Format: uri */
+      redirect_url: string;
+    };
+    AuthorisationStartInput: {
+      /** Format: uri */
+      redirect_url: string;
+    };
+    /** @enum {string} */
+    BulkAction: 'stock_push' | 'tracking_resend' | 'ads_change';
+    /** @enum {string} */
+    BulkActionInput: 'stock_push' | 'tracking_resend' | 'ads_change';
+    BulkConfirmed: {
+      account_count: number;
+      action: components['schemas']['BulkAction'];
+      queued: number;
+    };
+    BulkConfirmedInput: {
+      account_count: number;
+      action: components['schemas']['BulkActionInput'];
+      queued: number;
+    };
+    BulkPreview: {
+      accounts: {
+        /** Format: uuid */
+        company_id: string;
+        display_name: string;
+        /** Format: uuid */
+        id: string;
+        paused: boolean;
+        provider: components['schemas']['Provider'];
+      }[];
+      action: components['schemas']['BulkAction'];
+      /** Format: date-time */
+      expires_at: string;
+      token: string;
+    };
+    BulkPreviewInput: {
+      accounts: {
+        /** Format: uuid */
+        company_id: string;
+        display_name: string;
+        /** Format: uuid */
+        id: string;
+        paused: boolean;
+        provider: components['schemas']['ProviderInput'];
+      }[];
+      action: components['schemas']['BulkActionInput'];
+      /** Format: date-time */
+      expires_at: string;
+      token: string;
+    };
     BuyerIdentifiers: {
       buyer?: string;
       email?: string;
@@ -1312,6 +1528,100 @@ export interface components {
       /** @enum {string} */
       vat_period: 'stagger_1' | 'stagger_2' | 'stagger_3' | 'monthly';
     };
+    Connection: {
+      /** Format: uuid */
+      company_id: string;
+      consecutive_auth_failures: number;
+      display_name: string;
+      /** Format: uuid */
+      id: string;
+      kill_switch: components['schemas']['KillSwitch'];
+      last_success_at: string | null;
+      last_token_refresh_at: string | null;
+      provider: components['schemas']['Provider'];
+      status: components['schemas']['ConnectionStatus'];
+      usage_today: components['schemas']['ApiUsageToday'][];
+    };
+    ConnectionDetail: {
+      /** Format: uuid */
+      company_id: string;
+      consecutive_auth_failures: number;
+      credentials: {
+        expires_at: string | null;
+        kind: string;
+        /** @enum {string} */
+        slot: 'current' | 'next';
+      }[];
+      display_name: string;
+      /** Format: uuid */
+      id: string;
+      kill_switch: components['schemas']['KillSwitch'];
+      last_error: {
+        /** Format: date-time */
+        at: string;
+        code: string;
+      } | null;
+      last_success_at: string | null;
+      last_token_refresh_at: string | null;
+      needs_reauth_at: string | null;
+      provider: components['schemas']['Provider'];
+      status: components['schemas']['ConnectionStatus'];
+      streams: {
+        cursor_at: string | null;
+        last_success_at: string | null;
+        stream: string;
+      }[];
+      usage_today: components['schemas']['ApiUsageToday'][];
+    };
+    ConnectionDetailInput: {
+      /** Format: uuid */
+      company_id: string;
+      consecutive_auth_failures: number;
+      credentials: {
+        expires_at: string | null;
+        kind: string;
+        /** @enum {string} */
+        slot: 'current' | 'next';
+      }[];
+      display_name: string;
+      /** Format: uuid */
+      id: string;
+      kill_switch: components['schemas']['KillSwitchInput'];
+      last_error: {
+        /** Format: date-time */
+        at: string;
+        code: string;
+      } | null;
+      last_success_at: string | null;
+      last_token_refresh_at: string | null;
+      needs_reauth_at: string | null;
+      provider: components['schemas']['ProviderInput'];
+      status: components['schemas']['ConnectionStatusInput'];
+      streams: {
+        cursor_at: string | null;
+        last_success_at: string | null;
+        stream: string;
+      }[];
+      usage_today: components['schemas']['ApiUsageTodayInput'][];
+    };
+    ConnectionInput: {
+      /** Format: uuid */
+      company_id: string;
+      consecutive_auth_failures: number;
+      display_name: string;
+      /** Format: uuid */
+      id: string;
+      kill_switch: components['schemas']['KillSwitchInput'];
+      last_success_at: string | null;
+      last_token_refresh_at: string | null;
+      provider: components['schemas']['ProviderInput'];
+      status: components['schemas']['ConnectionStatusInput'];
+      usage_today: components['schemas']['ApiUsageTodayInput'][];
+    };
+    /** @enum {string} */
+    ConnectionStatus: 'active' | 'needs_reauth' | 'paused' | 'error' | 'disconnected';
+    /** @enum {string} */
+    ConnectionStatusInput: 'active' | 'needs_reauth' | 'paused' | 'error' | 'disconnected';
     ConsoleWorkspace: {
       counts: {
         channel_accounts: number;
@@ -1413,6 +1723,24 @@ export interface components {
       };
     } & {
       [key: string]: unknown;
+    };
+    EbayBudget: {
+      api: string;
+      calls: number;
+      cap: number;
+      /** Format: date */
+      day: string;
+      hard_limit: number;
+      non_urgent_limit: number;
+    };
+    EbayBudgetInput: {
+      api: string;
+      calls: number;
+      cap: number;
+      /** Format: date */
+      day: string;
+      hard_limit: number;
+      non_urgent_limit: number;
     };
     EbayChallengeResponse: {
       challengeResponse: string;
@@ -1636,6 +1964,30 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    KillSwitch: {
+      paused: boolean;
+      paused_at: string | null;
+    };
+    KillSwitchInput: {
+      paused: boolean;
+      paused_at: string | null;
+    };
+    Maintenance: {
+      maintenance: boolean;
+      updated_at: string | null;
+    };
+    MaintenanceInput: {
+      maintenance: boolean;
+      updated_at: string | null;
+    };
+    MaintenanceState: {
+      on: boolean;
+      since: string | null;
+    };
+    MaintenanceStateInput: {
+      on: boolean;
+      since: string | null;
+    };
     MfaConfirmResult: {
       recoveryCodes: string[];
     };
@@ -1744,6 +2096,10 @@ export interface components {
     NotificationsMarkedInput: {
       marked: number;
     };
+    /** @enum {string} */
+    OAuthProvider: 'amazon' | 'amazon_ads' | 'ebay';
+    /** @enum {string} */
+    OAuthProviderInput: 'amazon' | 'amazon_ads' | 'ebay';
     PlatformFlags: {
       public_signup: boolean;
       updated_at: string | null;
@@ -1850,6 +2206,10 @@ export interface components {
       title: string;
       type: string;
     };
+    /** @enum {string} */
+    Provider: 'amazon' | 'amazon_ads' | 'ebay' | 'website' | 'evri' | 'dpd';
+    /** @enum {string} */
+    ProviderInput: 'amazon' | 'amazon_ads' | 'ebay' | 'website' | 'evri' | 'dpd';
     QueueOverview: {
       active: number;
       dead_letter: number;
@@ -3197,6 +3557,98 @@ export interface operations {
       };
     };
   };
+  confirmBulkWrite: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          token: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BulkConfirmed'];
+        };
+      };
+    };
+  };
+  previewBulkWrite: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          action: components['schemas']['BulkActionInput'];
+          channel_account_ids: string[];
+          params?: {
+            [key: string]: string | number | boolean | string[];
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BulkPreview'];
+        };
+      };
+    };
+  };
   getDeletionCertificate: {
     parameters: {
       query?: never;
@@ -3273,6 +3725,173 @@ export interface operations {
           'application/json': {
             items: components['schemas']['Company'][];
           };
+        };
+      };
+    };
+  };
+  listConnections: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['Connection'][];
+            maintenance: components['schemas']['MaintenanceState'];
+          };
+        };
+      };
+    };
+  };
+  getConnection: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ConnectionDetail'];
+        };
+      };
+    };
+  };
+  startAuthorisation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuthorisationStart'];
+        };
+      };
+    };
+  };
+  setKillSwitch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          paused: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Connection'];
         };
       };
     };
@@ -3868,6 +4487,50 @@ export interface operations {
       };
     };
   };
+  oauthCallback: {
+    parameters: {
+      query: {
+        code?: string;
+        error?: string;
+        selling_partner_id?: string;
+        spapi_oauth_code?: string;
+        state: string;
+      };
+      header?: never;
+      path: {
+        provider: components['schemas']['OAuthProviderInput'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      303: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   listApiUsage: {
     parameters: {
       query?: {
@@ -3906,6 +4569,60 @@ export interface operations {
         content: {
           'application/json': {
             items: components['schemas']['ApiUsage'][];
+          };
+        };
+      };
+    };
+  };
+  getLiveApiUsage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            ebay_budget: components['schemas']['EbayBudget'][];
+            items: {
+              api: string;
+              calls: number;
+              cap: number | null;
+              /** Format: uuid */
+              channel_account_id: string;
+              /** Format: date */
+              day: string;
+              provider: string;
+              /** Format: date-time */
+              updated_at: string;
+              /** Format: uuid */
+              workspace_id: string;
+            }[];
           };
         };
       };
@@ -4458,6 +5175,88 @@ export interface operations {
           'application/json': {
             items: components['schemas']['DeadLetter'][];
           };
+        };
+      };
+    };
+  };
+  getMaintenance: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Maintenance'];
+        };
+      };
+    };
+  };
+  setMaintenance: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          maintenance: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Maintenance'];
         };
       };
     };
