@@ -63,11 +63,13 @@ It runs:
 
 It must pass completely before any merge, and **CI is where the full gate runs** (ADR-054). Locally, use `scripts/verify.sh --quick`, plus the integration tests your task touches for high-risk tasks. A task is done only when the full run passes in CI. Speed rules (ADR-056): never wait for CI (push, enable auto-merge, move on); one review per PR by tier; a trivial lane for copy, colour and one-line fixes; the browser only when it proves something; quiet output; short sessions.
 
+**Fast lane (ADR-077, from M07):** 1 to 3 tasks per module, contract PR first so S2 works in parallel, risk tiers light / normal / high / **critical** (critical list in `docs/plan/MODULES.md`), no halfway reviews, S4 per milestone plus each critical PR, S5 per release plus critical checks. S3 makes small UI changes itself; S2 owns new screens and design. The gate and tests-first rules do not change.
+
 ## Conventions
 
 - **Branches:** `task/<task-id>-<short-slug>`, for example `task/T-0101-walking-skeleton`.
 - **Commits:** Conventional Commits, with the PRD IDs in a footer, for example `feat(auth): lock account after 10 failures` followed by `Refs: USR-5, AT-3`.
-- **Merging:** only through a pull request to `main`. Merging needs no wait for Hashir: the session that opened it merges it itself (`gh pr merge --merge --delete-branch`) once CI is green and its tier's checks passed (ADR-053, Hashir 12 Nov 2026). If CI is red, it fixes the branch and then merges. Never merge on red, never force-push, never push to `main`. Hashir's "go" before implementing a high-risk task stays.
+- **Merging:** only through a pull request to `main`. Merging needs no wait for Hashir: the session that opened it merges it itself (`gh pr merge --merge --delete-branch`) once CI is green and its tier's checks passed (ADR-053, Hashir 12 Nov 2026). If CI is red, it fixes the branch and then merges. Never merge on red, never force-push, never push to `main`. Hashir's "go" is needed only for **critical** tasks, and comes with the module paste (ADR-077).
 - **Tests:** every test title cites the IDs it proves, for example `it('[VAT-3] rounds once per rate group', …)`. Write tests **first** for money, VAT, deletion, tenancy and permissions.
 - **Task IDs:** a task's `prd_ids` lists only IDs its module owns. IDs it only helps with go in `supports` (ADR-027).
 - **Handoffs:** a message for another session is printed in chat as a fenced block headed exactly `PASTE INTO SESSION <N>`. It is also saved to `docs/handoffs/<YYYYMMDD-HHMM>-S<from>-to-S<to>.md`. Sessions never talk directly; Hashir carries the messages. When a ruling changes a session's rule file or files it uses, S1 sends that session a short note.

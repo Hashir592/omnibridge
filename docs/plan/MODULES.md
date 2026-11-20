@@ -31,7 +31,27 @@ Replaced on 12 Nov 2026 after the architecture audit (ADR-054). Requirement owne
 1. **Value early.** Release 1 is what the business runs on every day: one stock number, one order list, labels and tracking (PRD §1.1 goals 1 and 2). It goes to production before finance and growth features.
 2. **Public face early.** Amazon and eBay review an application only against a live site, and approvals take weeks. The public site, legal pages and the eBay endpoint ship right after M02, so the approvals run while the rest is built.
 3. **Everything else stays local-first.** Features are built and tested on local Docker with mocks (ADR-029). A provider `sandbox` mode is allowed on a staging server only, once one exists.
-4. **Checkpoints:** halfway reviews only for high-risk modules (M02, M04, M10, M12, M17, M18). A module-end review may run while the next module starts; APPROVED is needed before that next module's own end review and before any production deploy (ADR-054).
+4. **Checkpoints (ADR-077, from M07):** no halfway reviews. S4 reviews per milestone (below) while the next module starts; each critical task is reviewed on its own right after it merges. S5 audits once per release, plus the critical checks below. APPROVED is needed before any production deploy.
+
+## Fast lane (ADR-077): critical tasks and review milestones
+
+**Critical tasks** (the only ones with Hashir's "go" and an extra S4 review of their own PR). A wrong result here costs money, tax, buyer data or a seller account and is hard to undo:
+
+| Module | Critical part | Why | S5 check too |
+|---|---|---|---|
+| M07 | Outbound pipeline, kill and maintenance switches, Amazon and eBay governors, concurrency caps | A wrong write or a blown limit hits live seller accounts and the app keysets | no |
+| M09 | Stock engine: one stock number, allocation, oversell guard, channel pushes | Overselling damages account health | no |
+| M10 | Order ingest (vault-first PII write) and sales VAT (snapshots, pennies, refund cap, cutover) | Money, tax and buyer data | yes |
+| M12 | Label purchase and label files | Each label costs money; label files are PII | yes |
+| M17 | VAT quarters, P&L and accountant exports | Tax filings | no |
+| M18 | Amazon auth, LWA rotation, restricted data and AMZ-13 deletion | Seller account and buyer data | yes |
+| M19 | Ads rule engine writes | Spends money automatically | no |
+| M22 | Deploy | Production and secrets | yes |
+
+Everything else is high, normal or light. M21 is itself the final review.
+
+**S4 review milestones:** Release 1: M07 + M08, M09 + M10, M11 + M12, then the first marketplace core. Release 2: M18, M13 + M16, M17. Release 3: M19 + M20, M14 + the customer service and health screens. M21 is the final review.
+**S5 audits:** Release 1 before its deploy, Release 2, then the M21 pen test and final audit.
 
 ## Modules
 

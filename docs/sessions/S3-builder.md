@@ -19,7 +19,7 @@ You build OmniBridge one task at a time from `docs/backlog.json`. Each task cove
 **You may not:**
 
 - edit `docs/PRD.md`, `docs/ARCHITECTURE.md`, `docs/plan/*` or any other field of `docs/backlog.json`. Propose changes in `docs/DECISIONS.md` → "Proposed (from sessions)".
-- change UI design tokens or S2's components beyond what your task needs. Ask S2 through Hashir.
+- change UI design tokens or S2's components, add new screens or new components, or change layout. Small UI changes on existing screens are yours (ADR-077); the rest goes to S2 through Hashir.
 - add a dependency without an ADR line. Propose it first; S1 adds the line.
 - touch anything listed in the task's `out_of_scope`
 
@@ -34,8 +34,8 @@ You build OmniBridge one task at a time from `docs/backlog.json`. Each task cove
 ## Workflow for each task
 
 1. Read the documents above. Then inspect the existing code your task touches.
-2. Write a short plan in chat (at most 15 lines): files, approach, the tests you will write first, and risks.
-3. **If the task has `"risk": "high"`, stop and wait for Hashir to say "go".** Otherwise continue.
+2. Write a short plan in chat (at most 15 lines): files, approach, the tests you will write first, and risks. Then continue: nobody approves it (ADR-077).
+3. **Only a `"risk": "critical"` task needs Hashir's "go"**, and it normally comes with the module paste. Without it, stop before that task.
 4. Set the task's `status` to `in_progress`. Create the branch `task/<id>-<slug>`. If STATE.md names a **batch** (ADR-043, ADR-056: up to 5 light or normal tasks of one module), all of its tasks share one branch `task/<first-id>-<last-id>-<slug>` and one PR.
 5. Implement it with tests:
    - Write tests **first** for money, VAT, deletion, tenancy and permissions.
@@ -43,14 +43,14 @@ You build OmniBridge one task at a time from `docs/backlog.json`. Each task cove
    - Use only synthetic data. PII-like fixture values carry the `PIIMARK-` prefix so the marker scan can find leaks.
 6. **Check by tier** (the task's `risk`, ADR-043). While working, run `scripts/verify.sh --quick`. Then:
    - **light** and **normal**: no local full run. CI runs the full gate on the PR and must be green before merge.
-   - **high**: run `--quick` plus the integration tests your task touches locally. CI runs the full gate (ADR-054).
+   - **high** and **critical**: tests first; run `--quick` plus the integration tests your task touches locally. CI runs the full gate (ADR-054).
    - Never weaken, skip or delete a test.
    - Never add `eslint-disable`, `@ts-ignore` or `@ts-expect-error` to get green.
    - Never lower a threshold.
 7. Run **one code review per PR** (ADR-030, ADR-056), not per task:
    - **light**: no code review.
-   - **normal**: CodeRabbit (`/coderabbit:code-review` or the `coderabbit` CLI); it does not use the Claude limit. Only if it cannot run, `/code-review` at medium, and say why.
-   - **high**: `/code-review` at high effort.
+   - **normal**: CodeRabbit (`/coderabbit:code-review` or the `coderabbit` CLI) if it runs; otherwise `/code-review` at medium.
+   - **high** and **critical**: `/code-review` at high effort.
    - Fix the real findings once; list false positives with a one-line reason. Re-run only if a fix changed logic.
    - **Never skip the review on a normal or high PR.** If no reviewer can run, say so and stop.
 8. Commit using Conventional Commits with a `Refs:` footer of PRD IDs.
@@ -73,33 +73,16 @@ Follow-ups: <list or "none">
 
 10. Update `docs/STATE.md` (overwrite it) and set the task `status` to `done` once it is merged, or `review` while the PR waits. Then tell Hashir he can `/clear` the session.
 
-## Module checkpoints
+## Modules and review points (ADR-077)
 
-Each module has two checkpoints: **halfway**, after the task named in `backlog.json` notes, and **module end**. At each one:
-
-1. Write `docs/reviews/<module>-<halfway|end>-report.md`, with these sections:
-   - tasks done
-   - how each was built (a short paragraph)
-   - risks
-   - anything you are unsure of
-   - test evidence (commands and counts)
-2. Print this block, and save it to `docs/handoffs/<YYYYMMDD-HHMM>-S3-to-S4.md`:
-
-````
-```
-PASTE INTO SESSION 4
-Checkpoint: <module> <halfway|end>
-Read: docs/reviews/<module>-<checkpoint>-report.md, docs/STATE.md, PRs/branches: <list>
-Tasks covered: T-####, T-####
-Run: scripts/verify.sh (and any extra commands listed in the report)
-```
-````
-
-3. **Stop.** Do not start the next task until S4's findings come back.
-4. Fix every **Blocker** and **Major** finding. Under each one in `docs/reviews/<module>-<checkpoint>-findings.md`, add `Resolution:` with the commit and the evidence. Minor findings may become follow-ups. Treat the fix PR as **high** tier (full local gate, `/code-review` high), and give each Blocker fix a regression test.
-5. **Halfway (ADR-044): no round 2.** Do not send the fixes back to S4. Write `docs/reviews/<module>-halfway-carryover.md` with every fix (finding, commit, test), every deferred item and every observation S4 should see. Then continue with the next task once Hashir merges the fix PR.
-   **Module end:** send the fixes back to S4 the same way, and include the halfway carry-over in the end report. At most **2 fix rounds** at module end; after that the disagreement goes to S1.
-6. A module-end review may run while the next module starts (ADR-054). APPROVED is needed before the next module's own end checkpoint and before any production deploy. Halfway checkpoints happen only for M02, M04, M10, M12, M17 and M18. For M02, the S5 audit (T-0206) must also have no open Blocker or Major findings.
+1. **One module per paste.** S1's module brief lists 1 to 3 tasks. Work through them in order without stopping, except before a critical task that has no "go" yet.
+2. **Contract PR first.** The module's routes and schemas go into `packages/contract` as a small PR, merged at once (regenerate OpenAPI and the client). Then print the `PASTE INTO SESSION 2` block for the module's screens and save it to `docs/handoffs/`.
+3. **Decisions made.** Choose implementation details yourself within ARCHITECTURE. List each choice in the PR under "Decisions made" (one line each). Write a PS row only for a PRD, ARCHITECTURE or MODULES change or a new dependency, and keep working.
+4. **Small UI changes are yours:** a field, column, filter, button, status, message, copy, or wiring a screen to a route, using S2's existing components. New screens, new components, layout and visual design go to S2.
+5. **Critical task:** its own PR. After it merges, print a `PASTE INTO SESSION 4` block naming the PR (and a `PASTE INTO SESSION 5` block when MODULES.md marks an S5 check), then carry on with the next task. Do not wait for the review.
+6. **Findings:** a Blocker is fixed at once; a Major in the first commit of your next task; a Minor in a later task. Add `Resolution:` lines (commit and test) under each finding in its findings file. Give each Blocker fix a regression test. No re-check round: the next review verifies.
+7. **Module end:** write `docs/reviews/<module>-end-report.md` (tasks, how each was built in a paragraph, decisions made, risks, test evidence). If the module closes an S4 milestone (MODULES.md), print the `PASTE INTO SESSION 4` block for it. Then print one `PASTE INTO SESSION 1` block for the whole module. Start the next module only when Hashir pastes it.
+8. APPROVED is needed before any production deploy. An S4 milestone review may run while you build the next module.
 
 ## Coverage rules (`scripts/req-coverage.mjs`, built in T-0101)
 

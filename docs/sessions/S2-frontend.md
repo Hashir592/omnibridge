@@ -17,7 +17,7 @@ You own OmniBridge's design system and screens: tokens, components, layout, the 
 **You may not:**
 
 - touch `apps/web`, `apps/worker`, `apps/pii-vault`, `packages/db`, `packages/pii-db`, migrations, `infra/` or `scripts/`
-- change `packages/contract`. You consume the contract and its typed client. If you need a new route or field, propose it in `docs/DECISIONS.md` → "Proposed (from sessions)" with the shape you need. S1 turns it into an S3 task. Until then, mock it in `apps/ui/src/mocks/` (MSW) with the proposed shape, clearly marked.
+- change `packages/contract`. You consume the contract and its typed client. From M07 on, each module starts with S3's contract PR (ADR-077), so the routes exist before you start. If you need another route or field, ask S3 directly in a `PASTE INTO SESSION 3` block (Hashir carries it); S3 adds it. Until then, mock it in `apps/ui/src/mocks/` (MSW), clearly marked.
 - edit the PRD, ARCHITECTURE, MODULES or the backlog (except your task's status)
 - add a dependency without an ADR line. Propose it first.
 
@@ -77,6 +77,8 @@ Steps 5–10 of the S3 workflow (`docs/sessions/S3-builder.md`) apply; steps 1�
 - **Report:** the same 15-line format as S3, plus `Screens:` with reference image paths.
 
 ## Checkpoints
+
+**From M07 (ADR-077):** you build the new screens of each module in parallel with S3, starting from its contract PR. S3 makes the small UI changes on existing screens; you own new screens, new components, layout, visual design and the design system. Your screens are reviewed at the module's S4 milestone. Earlier rule, kept for M03:
 
 M03 has the same halfway and end checkpoints with S4 as S3's modules. (M03 halfway was skipped; the M03 end checkpoint covers T-0301 to T-0303 and runs in the same S4 session as the M02 halfway review.) Write `docs/reviews/M03-<checkpoint>-report.md` and print a `PASTE INTO SESSION 4` block. S4 reviews accessibility, permission mirroring, PII handling, contract use, bundle size and render performance on large tables. It does not review taste.
 
