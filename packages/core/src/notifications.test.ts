@@ -14,8 +14,8 @@ const ctx = { workspaceId: ID, companyIds: [] };
 
 describe('notification types', () => {
   it('[NTF-1] every PRD section 6 type (and the SEC-12 security types) is registered once, with a severity and a tab or platform scope', () => {
-    expect(NOTIFICATION_TYPES).toHaveLength(28);
-    expect(new Set(NOTIFICATION_TYPES.map((t) => t.code)).size).toBe(28);
+    expect(NOTIFICATION_TYPES).toHaveLength(31);
+    expect(new Set(NOTIFICATION_TYPES.map((t) => t.code)).size).toBe(31);
     for (const t of NOTIFICATION_TYPES) {
       expect(t.severities.length).toBeGreaterThan(0);
       expect(t.scope === 'platform' ? t.tab : typeof t.tab).toBe(
@@ -30,6 +30,9 @@ describe('notification types', () => {
       'platform.amazon_secret_rotation',
       'platform.report_failure',
       'security.canary_read',
+      'security.platform_account_locked',
+      'security.platform_login_failures',
+      'security.platform_unusual_login',
     ]);
   });
 

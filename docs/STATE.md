@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Nov 2026 by S2 (T-0313 console screens in a PR; M05 batch 2 merged as #117).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Nov 2026 by S3 (T-0507 audit fixes in a PR; T-0412 next).
 
 ## Now
 
@@ -34,7 +34,16 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Follow-ups noted
 
-- **ADR-076:** S5 T-0506 found one Major (console sign-ins not logged or alerted); T-0507 (S3, high) fixes it, then T-0412, then S5 re-check, then the S4 M05 end review.
+- **ADR-076 / T-0507 (S3, in a PR, auto-merge on):** S5 T-0506's Major and Minor are fixed (findings file committed with resolutions).
+  - Console entries are logged as `platform.console_entered`. Sign-ins with no workspace are logged as per-person `auth.login`.
+  - A platform rule in the security sweep raises:
+    - critical: console entry from a network unseen in 90 days;
+    - warning: failed sign-ins at the threshold in 15 minutes, and each lockout.
+    Entries and lockouts are read over 24 hours.
+  - The 0032 workspace rules skip platform admins.
+  - `session_advance` takes the workspace FOR SHARE first (db-main 0035, 0036).
+  - The 30-minute console idle limit already held (USR-6), so it gets a regression test only.
+  - Then T-0412, the S5 re-check, and the S4 M05 end review.
 - **ADR-073/074:** repo is public (Hashir); open S5 findings stay in handoffs until fixed. T-0412 also pins the dev `ob_edge` subnet. Platform-audit read route in M21; eBay keyset into the store in M15; LWA rotation reminders in M18.
 - **ADR-072:** T-0412 (S3, light) shared identifier-rule fixture, after batch 2. Notification detail key per type comes with M08/M09. T-0313 reads company names from `GET /companies`.
 - **M05 batch 2 follow-ups (S1 to place):** `public_signup` is stored only; T-0205 (deferred) reads it. Platform audit has no read route yet. M15 moves the eBay endpoint's token and keyset into the app secrets store (S1 accepted). M18: LWA rotation reminders.
@@ -52,8 +61,9 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. T-0313's PR merges itself on green CI.
-2. S1: place the batch 2 follow-ups and rule on PS-034 (handoffs `docs/handoffs/20261120-1745-S3-to-S1.md`, `docs/handoffs/20261120-1910-S2-to-S1.md`); then S5 T-0506 audit.
+1. T-0507's PR merges itself on green CI.
+2. S3: T-0412 (light): identifier fixture, pinned dev `ob_edge` subnet, `platform_admin` on `GET /auth/workspaces`, PLAT-3 walk asserts 2xx.
+3. S5 re-checks S5-20261121-01/-02; S2 does T-0315; then the S4 M05 end review.
 
 ## Prerequisites outstanding (Hashir)
 

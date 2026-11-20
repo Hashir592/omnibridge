@@ -260,13 +260,27 @@ export class AuthStore {
   /** A failed sign-in or lockout, per person, outside any workspace (ADR-052). */
   async recordAuthEvent(event: {
     userId: string | null;
-    action: 'auth.login_failed' | 'auth.locked' | 'mfa.enrolled' | 'auth.signed_out_everywhere';
+    action:
+      | 'auth.login'
+      | 'auth.login_failed'
+      | 'auth.locked'
+      | 'mfa.enrolled'
+      | 'auth.signed_out_everywhere';
     ip: string;
     detail: Readonly<Record<string, unknown>>;
     now: Date;
   }): Promise<void> {
     await sql`SELECT app.auth_event_record(${event.userId}::uuid, ${event.action},
       ${event.ip}::inet, ${JSON.stringify(event.detail)}::jsonb, ${event.now})`.execute(this.#db);
+  }
+
+  /**
+   * A platform admin entered the console (S5-20261121-01, ADR-076): user, time and client address
+   * in the platform audit, through the 0033 definer, which re-checks the admin.
+   */
+  async recordConsoleEntry(userId: string, ip: string, now: Date): Promise<void> {
+    await sql`SELECT app.console_audit(${userId}::uuid, 'platform.console_entered', NULL,
+      '{}'::jsonb, ${ip}::inet, ${now})`.execute(this.#db);
   }
 
   /** Whether the user has accepted this version of the terms and privacy policy (WWW-7). */

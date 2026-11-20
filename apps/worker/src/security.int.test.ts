@@ -8,6 +8,7 @@ import {
   MembershipRepository,
   migrateMain,
   NotificationRepository,
+  PlatformSecuritySignals,
   SecuritySignals,
   Tenancy,
   UserRepository,
@@ -25,7 +26,7 @@ import { VaultClient } from '@omnibridge/vault-client';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startTestVault, type TestVault } from '../../pii-vault/src/testing.ts';
-import { securityScanHandler, type SecurityThresholds } from './security.ts';
+import { scanPlatformSecurity, securityScanHandler, type SecurityThresholds } from './security.ts';
 
 // T-0503 (SEC-12): each rule fires on a seeded pattern and stays quiet one below its threshold;
 // a canary read raises a critical platform alert; nothing in an alert is PII.
@@ -266,6 +267,113 @@ describe('security alerts [SEC-12]', () => {
     ]);
     // Not in the workspace bell.
     expect(await open('security.canary_read')).toEqual([]);
+  });
+
+  // ---- T-0507: platform admins' sign-ins (S5-20261121-01, ADR-076) ----
+
+  const scanPlatform = () =>
+    scanPlatformSecurity({
+      signals: new PlatformSecuritySignals(db.db),
+      notifications: repo,
+      notifier: new Notifier({ store: repo, now: () => clock }),
+      thresholds,
+      logger,
+      now: () => clock,
+    });
+  /** Open platform notices of a type, as `kind:id`, with their severity. */
+  const platformOpen = async (type: string) =>
+    (
+      await root.query<{ rec: string; severity: string }>(
+        `SELECT record_kind || ':' || record_id AS rec, severity FROM app.platform_notifications
+          WHERE type = $1 AND resolved_at IS NULL ORDER BY rec`,
+        [type],
+      )
+    ).rows;
+  const consoleEntry = async (userId: string, at: Date, ip: string) =>
+    (
+      await root.query<{ id: string }>(
+        `INSERT INTO app.platform_audit_events (occurred_at, user_id, action, ip)
+         VALUES ($1, $2, 'platform.console_entered', $3::inet) RETURNING id`,
+        [at, userId, ip],
+      )
+    ).rows[0]?.id ?? '';
+  /** A platform admin who is also a member of workspace A (the wrong audience before T-0507). */
+  const makeOperator = async () => {
+    const id = randomUUID();
+    await tenancy.run({ workspaceId: A, companyIds: [], userId: id }, async (c) => {
+      await new UserRepository(db.db).create(c, { id, email: `${id}@example.test`, name: 'Op' });
+      await new MembershipRepository(db.db).add(c, { userId: id, role: 'member' });
+    });
+    await root.query('UPDATE app.users SET platform_admin = true WHERE id = $1', [id]);
+    return id;
+  };
+
+  it("[SEC-12][PLAT-1] a platform admin's console entry from a new network raises a critical platform notice; a known network and the first ever entry do not", async () => {
+    clock = new Date();
+    const recent = new Date(clock.getTime() - 60_000);
+    const moved = await makeOperator();
+    const steady = await makeOperator();
+    const fresh = await makeOperator();
+    await consoleEntry(moved, new Date(clock.getTime() - 10 * 24 * HOUR), '192.0.2.10');
+    const unusual = await consoleEntry(moved, recent, '198.51.100.20');
+    // The same IPv6 /64, another host: a known network.
+    await consoleEntry(steady, new Date(clock.getTime() - 3 * 24 * HOUR), '2001:db8:9:9::1');
+    await consoleEntry(steady, recent, '2001:db8:9:9::2');
+    // A first entry ever: never unusual.
+    await consoleEntry(fresh, recent, '203.0.113.30');
+    await scanPlatform();
+    await scanPlatform();
+    expect(await platformOpen('security.platform_unusual_login')).toEqual([
+      { rec: `console_entry:${unusual}`, severity: 'critical' },
+    ]);
+  });
+
+  it('[SEC-12] a console entry 2 hours old, missed by earlier sweeps, still raises (24-hour window)', async () => {
+    clock = new Date();
+    const op = await makeOperator();
+    await consoleEntry(op, new Date(clock.getTime() - 30 * 24 * HOUR), '192.0.2.50');
+    const late = await consoleEntry(op, new Date(clock.getTime() - 2 * HOUR), '198.51.100.50');
+    await scanPlatform();
+    expect(await platformOpen('security.platform_unusual_login')).toContainEqual({
+      rec: `console_entry:${late}`,
+      severity: 'critical',
+    });
+  });
+
+  it('[SEC-12] failed sign-ins at the threshold and a lockout of a platform admin raise warning platform notices; workspace admins get none', async () => {
+    clock = new Date();
+    const recent = new Date(clock.getTime() - 60_000);
+    const op = await makeOperator();
+    const calm = await makeOperator();
+    for (let i = 0; i < 3; i += 1) await authEvent(op, 'auth.login_failed', recent);
+    for (let i = 0; i < 2; i += 1) await authEvent(calm, 'auth.login_failed', recent);
+    // A lockout two hours ago, missed by earlier sweeps: still raised (24-hour window). And one
+    // a minute ago, inside the workspace rule's own window, which must still leave it alone.
+    await authEvent(op, 'auth.locked', new Date(clock.getTime() - 2 * HOUR));
+    await authEvent(op, 'auth.locked', recent);
+    await scanPlatform();
+    expect(await platformOpen('security.platform_login_failures')).toEqual([
+      { rec: `user:${op}`, severity: 'warning' },
+    ]);
+    const locks = await platformOpen('security.platform_account_locked');
+    const { rows: opLocks } = await root.query<{ id: string }>(
+      `SELECT id FROM app.auth_events WHERE user_id = $1 AND action = 'auth.locked' ORDER BY id`,
+      [op],
+    );
+    expect(locks.map((l) => l.rec)).toEqual(opLocks.map((r) => `lock:${r.id}`));
+    expect(locks[0]).toMatchObject({
+      rec: expect.stringMatching(/^lock:\d+$/) as string,
+      severity: 'warning',
+    });
+    // The workspace scan of A (where both are members) tells A's admins nothing about them.
+    await scan();
+    expect((await open('security.unusual_login')).filter((a) => a.includes(op))).toEqual([]);
+    const wsLocks = await open('security.account_locked');
+    for (const l of locks) expect(wsLocks).not.toContain(l.rec);
+    // Fifteen minutes on the failures have aged out: the notice resolves itself.
+    clock = new Date(clock.getTime() + 20 * 60_000);
+    await scanPlatform();
+    expect(await platformOpen('security.platform_login_failures')).toEqual([]);
   });
 
   it('[SEC-12] alert rows hold IDs and counts only: no buyer PII reached db-main', async () => {

@@ -239,6 +239,31 @@ export const NOTIFICATION_TYPES: readonly NotificationType[] = [
     'platform',
     'SEC-12',
   ),
+  // Platform admins' own sign-ins (T-0507, ADR-076): platform notices, never a workspace's.
+  t(
+    'security.platform_unusual_login',
+    'Console sign-in from a new network',
+    ['critical'],
+    ['derived'],
+    'platform',
+    'SEC-12, PLAT-1',
+  ),
+  t(
+    'security.platform_login_failures',
+    'Repeated failed sign-ins of a platform admin',
+    ['warning'],
+    ['derived'],
+    'platform',
+    'SEC-12, PLAT-1',
+  ),
+  t(
+    'security.platform_account_locked',
+    'Platform admin sign-in locked after repeated failures',
+    ['warning'],
+    ['derived'],
+    'platform',
+    'SEC-12, PLAT-1',
+  ),
   t(
     'pii.erasure_failed',
     'Buyer data deletion failed: retry needed',
