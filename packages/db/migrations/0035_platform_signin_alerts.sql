@@ -14,10 +14,15 @@ SET LOCAL lock_timeout = '1s';
 SET LOCAL statement_timeout = '30s';
 
 -- ---- (1) auth.login per person; validated in 0036, in its own transaction ---------------------
-ALTER TABLE app.auth_events DROP CONSTRAINT auth_events_action_check,
+-- The wider rule goes on first, so the table is never without one.
+ALTER TABLE app.auth_events
   ADD CONSTRAINT auth_events_action CHECK (action IN ('auth.login', 'auth.login_failed',
                                                       'auth.locked', 'mfa.enrolled',
                                                       'auth.signed_out_everywhere')) NOT VALID;
+-- Contract: the 0015 rule is the new one minus auth.login, so dropping it removes no guarantee.
+-- waiver: replaced by auth_events_action; ADR-076
+-- squawk-ignore ban-drop-constraint
+ALTER TABLE app.auth_events DROP CONSTRAINT IF EXISTS auth_events_action_check;
 
 -- ---- Platform admins, for the security definers only ------------------------------------------
 -- The IDs of every platform admin, read now (the 0031 policy shows platform admins to ob_owner
