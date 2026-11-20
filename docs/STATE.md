@@ -34,6 +34,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Follow-ups noted
 
+- **ADR-076:** S5 T-0506 found one Major (console sign-ins not logged or alerted); T-0507 (S3, high) fixes it, then T-0412, then S5 re-check, then the S4 M05 end review.
 - **ADR-073/074:** repo is public (Hashir); open S5 findings stay in handoffs until fixed. T-0412 also pins the dev `ob_edge` subnet. Platform-audit read route in M21; eBay keyset into the store in M15; LWA rotation reminders in M18.
 - **ADR-072:** T-0412 (S3, light) shared identifier-rule fixture, after batch 2. Notification detail key per type comes with M08/M09. T-0313 reads company names from `GET /companies`.
 - **M05 batch 2 follow-ups (S1 to place):** `public_signup` is stored only; T-0205 (deferred) reads it. Platform audit has no read route yet. M15 moves the eBay endpoint's token and keyset into the app secrets store (S1 accepted). M18: LWA rotation reminders.
