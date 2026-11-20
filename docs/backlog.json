@@ -1967,6 +1967,177 @@
       "status": "todo"
     },
     {
+      "id": "T-0801",
+      "module": "M08",
+      "session": "S3",
+      "title": "Catalogue: Master SKUs, VAT types, bundles, COGS, listings and mapping",
+      "goal": "Every product, its VAT type and its cost are held once with history, and every channel listing is found and mapped to exactly one product.",
+      "prd_ids": [
+        "CAT-1",
+        "CAT-2",
+        "CAT-3",
+        "CAT-4",
+        "CAT-5",
+        "CAT-6",
+        "FIN-1",
+        "AT-5"
+      ],
+      "supports": [
+        "TEN-6",
+        "VAT-7",
+        "PRF-5",
+        "INT-6",
+        "INT-8",
+        "SEC-12",
+        "NTF-1"
+      ],
+      "scope": [
+        "Contract PR first: every M08 route (Master SKUs list, detail, create, edit; bundles; VAT rates; COGS history and CSV import; listings, unmapped queue, map and unmap; mapping CSV import and export); then the PASTE INTO SESSION 2 block for T-0316",
+        "First commit: the two M05 Minors (ADR-078 1): event security notices resolve 7 days after the event; a catalog test that every definer filters workspace scope explicitly",
+        "Money type in packages/core: integer pence, half-up rounding helper used only where the PRD says (FIN-1); a lint or test rule against floats in money columns and code paths",
+        "Master SKUs (CAT-1): unique code per workspace, fields as listed, manufacturer list reused from earlier entries, active flag, reorder settings; workspace-shared (ARCHITECTURE 6.1 table)",
+        "VAT (CAT-2): four types kept separate; a workspace rate table with effective dates; a VAT-type history per SKU (effective-from rows) so the type on any date can be found (ADR-078 4)",
+        "Bundles (CAT-3): one component SKU and a pack size; VAT type locked to the component; COGS = component COGS x pack size; two different SKUs refused",
+        "COGS (CAT-4): ex-VAT, one value per SKU with effective-from history, optional purchase VAT rate; CSV import with a dry-run report; a lookup cogsOn(sku, date) and vatTypeOn(sku, date) for M10's write-once snapshots",
+        "Listings (CAT-5): discovery on connect and daily through the M07 adapters and cursors (mock data), stored with origin and channel_account_id (INT-6); exact-code auto-match; Unmapped queue; one listing to one SKU; CSV import and export; an unmapped listing never gets a stock write",
+        "CAT-6 hook: mapping a listing later emits a mapped event that M09 uses to back-fill stock movements and M10 uses to fill write-once snapshots",
+        "Small UI glue on existing screens is yours; the new catalogue screens are S2's T-0316"
+      ],
+      "out_of_scope": [
+        "Stock numbers and pushes (T-0901)",
+        "Order lines and their snapshots (M10)"
+      ],
+      "depends_on": [
+        "T-0702"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [AT-5] a bundle of 3 shows floor(available / 3) once M09 lands (the M08 test proves the formula and the refusal of a two-SKU bundle); [CAT-4] cogsOn returns the value in effect on the date and a later change does not alter an earlier lookup; [CAT-2] vatTypeOn follows the history; [CAT-5] exact match maps, anything else queues, one listing cannot map twice; [FIN-1] no float in money paths",
+        "Route walker and RLS coverage pass with the new tables against the ARCHITECTURE 6.1 scope list",
+        "CI full gate green at merge"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0901",
+      "module": "M09",
+      "session": "S3",
+      "title": "Stock engine: on hand, reserved, available, movements, pushes, manual allocation",
+      "goal": "One stock number per product drives every channel; a sale anywhere lowers every other listing within 2 minutes; the engine never oversells by its own mistake and never moves stock twice.",
+      "prd_ids": [
+        "INV-1",
+        "INV-2",
+        "INV-3",
+        "INV-4",
+        "INV-5",
+        "INV-6",
+        "INV-7",
+        "INV-8",
+        "INV-9",
+        "INV-10",
+        "AT-4",
+        "AT-27"
+      ],
+      "supports": [
+        "CAT-3",
+        "CAT-5",
+        "CAT-6",
+        "SAFE-2",
+        "EBAY-9",
+        "NTF-1"
+      ],
+      "scope": [
+        "CRITICAL (ADR-077): own PR, tests first, /code-review high, Hashir's go with the module paste, S4 reviews this PR alone after merge",
+        "Contract PR first: every M09 route (stock list and detail, movements and change log with filter and export, stock-in, adjustment, stock-take CSV, buffers, manual allocation save and back-to-auto, sync status); then the PASTE INTO SESSION 2 block for T-0317",
+        "Stock rows per non-bundle SKU (on hand, reserved); available = on hand - reserved (INV-1); bundles derived (CAT-3)",
+        "Append-only movement table with a unique key (source kind, source id, movement kind); on hand and reserved change only through movements, under a row lock on the stock row; a repeated event is a no-op (ADR-078 5, FA-10)",
+        "Movement kinds (INV-3): reserve, release, dispatch, return-to-stock, stock-in (supplier and notes), adjustment (reason required), stock-take import; an engine API M10 and M12 call with the order line as source",
+        "Change log (INV-5): every movement with SKU, change, new on hand, reason, source and the listings pushed with results; filter and CSV export; kept 3 years (purge job)",
+        "Targets (INV-2, INV-10, C7): auto = max(0, available - buffer); manual = max(0, min(manual_qty - manual_sold, available - buffer)); bundles divided and floored; buffer per channel account with per-listing override; FBA listings excluded (INV-9); unmapped listings never written",
+        "Pushes (INV-4): after each movement, recompute affected targets and enqueue an outbound write through the M07 path only when the target differs from the last quantity sent; one write per listing collapses older pending ones",
+        "Oversold (INV-6): available below 0 flags the order line and raises the Oversold notice; Sync failed (INV-8): the M07 failure state sets the badge and the notice",
+        "Reconciliation (INV-7): nightly per account, compare channel quantity with target, correct drift, skip listings with an order in the last 15 minutes, repeated drift raises the notice",
+        "Manual allocation (INV-10, C7.1 to C7.3): modes per SKU and listing, version-checked save, audit and change log, allocation-used-up notice, back to auto pushes every listing at once, every C7.3 edge case",
+        "CAT-6 back-fill: the M08 mapped event creates the missing movements once (same unique key)"
+      ],
+      "out_of_scope": [
+        "Order ingest (M10)",
+        "Labels and dispatch events (M12)",
+        "Screens (T-0317)"
+      ],
+      "depends_on": [
+        "T-0801"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [INV-3] each movement kind and a repeated event moves stock once; 20 parallel orders on the last 5 units never take available below what the movements allow and flag the overflow as Oversold [INV-6]; [AT-4] one sale queues a lower quantity for every other mapped MFN listing (mock, 2-minute budget measured in the test); [AT-27] the C7.3 edge-case table; [INV-7] drift corrected and repeated drift alerts; [INV-8] last retry failure sets Sync failed",
+        "CI full gate green at merge"
+      ],
+      "risk": "critical",
+      "status": "todo"
+    },
+    {
+      "id": "T-0316",
+      "module": "M03",
+      "session": "S2",
+      "title": "Catalogue screens",
+      "goal": "Sellers manage products, VAT types, bundles, costs and listing mapping on plain, fast screens.",
+      "prd_ids": [],
+      "supports": [
+        "CAT-1",
+        "CAT-3",
+        "CAT-4",
+        "CAT-5",
+        "CAT-6"
+      ],
+      "scope": [
+        "From the M08 contract PR (MSW first until the routes are live): Master SKU list and detail, bundle form, COGS history and CSV import with dry-run report, VAT rates, Unmapped listings queue with map action, mapping CSV import and export",
+        "Uses the existing stock-detail and table patterns; filters in the URL"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-0801"
+      ],
+      "acceptance": [
+        "Tests cite CAT-3 and CAT-5",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-0317",
+      "module": "M03",
+      "session": "S2",
+      "title": "Stock screens and manual allocation",
+      "goal": "Sellers see real stock, its history and sync state, and can allocate stock per listing safely.",
+      "prd_ids": [],
+      "supports": [
+        "INV-1",
+        "INV-5",
+        "INV-8",
+        "INV-10",
+        "AT-27"
+      ],
+      "scope": [
+        "From the M09 contract PR: stock list with on hand, reserved, available and sync badges; change log with filters and export; stock-in, adjustment and stock-take import; buffers; the C7.2 manual allocation form (allocation summary, plain warning, version-conflict prompt, back-to-auto results)",
+        "Plain inline messages, no tinted boxes"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-0901"
+      ],
+      "acceptance": [
+        "Tests cite INV-10 and AT-27",
+        "CI full gate green at merge"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
       "id": "T-0307",
       "module": "M03",
       "session": "S2",
