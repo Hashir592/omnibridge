@@ -11,7 +11,8 @@
  *
  * SYNTHETIC VALUES ONLY. Nothing here is a real password, secret or person. Demo values for
  * clicking through on localhost:
- * - sam.admin@example.test: MFA set up, two workspaces, so the workspace picker appears
+ * - sam.admin@example.test: MFA set up, two workspaces, so the workspace picker appears; also a
+ *   platform operator, so /platform opens the console (PLAT-1)
  * - pat.packer@example.test: MFA set up, one workspace, goes straight to the app
  * - new.user@example.test: MFA not set up yet, so enrolment appears (USR-4)
  * - password for all three: DEMO_PASSWORD below; TOTP code: DEMO_TOTP
@@ -19,7 +20,13 @@
  * - invite link: /invite/demo-invite; expired link: /invite/expired. Same for /reset-password?token=
  */
 import { HttpResponse, http } from 'msw/http';
-import { personaSessionInfo, setSignedInModules } from './session.ts';
+import {
+  consoleSessionInfo,
+  getPersona,
+  personaSessionInfo,
+  setSignedInModules,
+} from './session.ts';
+import { enterConsoleMock, inConsoleMock, mockIncident, resetPlatformMock } from './platform.ts';
 import type {
   InviteInfo,
   MfaConfirmResult,
@@ -43,9 +50,9 @@ export const TERMS_VERSION = '2026-11-15';
 
 const ACCOUNTS: Record<
   string,
-  { name: string; mfa: boolean; workspaces: number; termsAccepted?: boolean }
+  { name: string; mfa: boolean; workspaces: number; termsAccepted?: boolean; platform?: boolean }
 > = {
-  'sam.admin@example.test': { name: 'Sam Admin', mfa: true, workspaces: 2 },
+  'sam.admin@example.test': { name: 'Sam Admin', mfa: true, workspaces: 2, platform: true },
   'pat.packer@example.test': { name: 'Pat Packer', mfa: true, workspaces: 1 },
   'new.user@example.test': { name: 'New User', mfa: false, workspaces: 1 },
   // Has not accepted the current terms yet: MFA answers next: 'terms'.
@@ -115,6 +122,7 @@ export function resetAuthMock(): void {
   currentWorkspace = undefined;
   demoSession = false;
   mfaDone = false;
+  resetPlatformMock();
   for (const a of Object.values(ACCOUNTS)) {
     a.mfa = a.name !== 'New User';
     if (a.termsAccepted !== undefined) a.termsAccepted = false;
@@ -361,8 +369,11 @@ export const authHandlers = [
         platform: false,
         workspace: null,
         modules: { website_connector: false },
+        incident: mockIncident(),
       });
     }
+    if (inConsoleMock())
+      return HttpResponse.json(consoleSessionInfo(account.name, current, 'usr_mock'));
     const id = currentWorkspace ?? (account.workspaces === 1 ? 'ws_1' : undefined);
     const ws = MOCK_WORKSPACES.find((w) => w.id === id);
     return HttpResponse.json<SessionInfo>({
@@ -372,6 +383,20 @@ export const authHandlers = [
       platform: false,
       workspace: ws === undefined ? null : { id: ws.id, name: ws.name, role: ws.role },
       modules: ws?.modules ?? { website_connector: false },
+      incident: mockIncident(),
     });
+  }),
+
+  // A platform operator enters the console (PLAT-1); anyone else is 403. The demo admin persona
+  // is an operator in the mock-ups; the packer is not.
+  http.post('*/api/auth/platform', () => {
+    const account = current ? ACCOUNTS[current] : undefined;
+    const operator =
+      account !== undefined
+        ? mfaDone && account.platform === true
+        : demoSession && getPersona() === 'admin';
+    if (!operator) return problem(403, 'forbidden', 'not_platform_admin');
+    enterConsoleMock();
+    return new HttpResponse(null, { status: 204 });
   }),
 ];

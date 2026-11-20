@@ -19,6 +19,8 @@ import type { FinanceSearch } from './routes/finance.tsx';
 import type { ForecastSearch } from './routes/forecasting.tsx';
 import type { NotesSearch } from './routes/notes.tsx';
 import type { NotificationsSearch } from './routes/notifications.tsx';
+import type { PlatformSearch } from './routes/platform/console.tsx';
+import { isSection } from './routes/platform/rules.ts';
 import type { SettingsSearch } from './routes/settings.tsx';
 import type { SalesProfitSearch } from './routes/sales-profit.tsx';
 import type { StockSearch } from './routes/stock.tsx';
@@ -385,6 +387,15 @@ const resetPassword = createRoute({
   component: lazyRouteComponent(password, 'ResetPasswordPage'),
   staticData: { bare: true },
 });
+// The platform console (T-0313): its own frame, since a console session has no workspace (PLAT-1).
+const platform = createRoute({
+  getParentRoute: () => root,
+  path: '/platform',
+  validateSearch: (s: Record<string, unknown>): PlatformSearch =>
+    isSection(s.section) ? { section: s.section } : {},
+  component: lazyRouteComponent(() => import('./routes/platform/console.tsx'), 'PlatformPage'),
+  staticData: { bare: true },
+});
 const invite = createRoute({
   getParentRoute: () => root,
   path: '/invite/$token',
@@ -403,6 +414,7 @@ const routeTree = root.addChildren([
   ...auth,
   resetPassword,
   invite,
+  platform,
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

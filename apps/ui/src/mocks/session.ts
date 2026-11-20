@@ -7,6 +7,7 @@
  */
 import { channelAccounts, companies } from './data.ts';
 import type { SessionInfo } from '../auth/shapes.ts';
+import { inConsoleMock, mockIncident } from './platform.ts';
 import type { Channel, Session, Tab } from './types.ts';
 
 export type Persona = 'admin' | 'packer' | 'starter';
@@ -63,6 +64,7 @@ export function channelOn(channel: Channel): boolean {
  */
 export function personaSessionInfo(): SessionInfo {
   const s = currentSession();
+  if (inConsoleMock()) return consoleSessionInfo(s.user.name, s.user.email, `usr_${persona}`);
   const workspace =
     persona === 'starter'
       ? { id: 'ws_3', name: s.workspace, role: 'admin' as const }
@@ -77,6 +79,19 @@ export function personaSessionInfo(): SessionInfo {
     platform: false,
     workspace,
     modules: { website_connector: websiteConnector() },
+    incident: mockIncident(),
+  };
+}
+
+/** GET /auth/session in the platform console: no workspace, modules off (PS-032). */
+export function consoleSessionInfo(name: string, email: string, id: string): SessionInfo {
+  return {
+    user: { id, name, email },
+    next: null,
+    platform: true,
+    workspace: null,
+    modules: { website_connector: false },
+    incident: mockIncident(),
   };
 }
 
