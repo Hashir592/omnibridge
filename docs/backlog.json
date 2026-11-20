@@ -1318,7 +1318,8 @@
         "Move the case table from apps/ui/src/mocks/privacy.test.ts into a JSON fixture in packages/testkit",
         "A contract test runs every case through BuyerIdentifiersSchema",
         "The UI test reads the same fixture (no contract import in the SPA)",
-        "Pin the dev ob_edge subnet in compose and set the dev PLATFORM_IP_ALLOWLIST to loopback plus that gateway /32, replacing 172.20.0.1 (ADR-073)"
+        "Pin the dev ob_edge subnet in compose and set the dev PLATFORM_IP_ALLOWLIST to loopback plus that gateway /32, replacing 172.20.0.1 (ADR-073)",
+        "GET /auth/workspaces gains platform_admin: boolean, read fresh (PS-034, ADR-075); contract test"
       ],
       "out_of_scope": [
         "Changing the rule"
@@ -1731,7 +1732,34 @@
         "CI full gate green at merge"
       ],
       "risk": "normal",
-      "status": "review"
+      "status": "done"
+    },
+    {
+      "id": "T-0315",
+      "module": "M03",
+      "session": "S2",
+      "title": "Console entry in the workspace picker (PS-034, ADR-075)",
+      "goal": "Platform admins reach the console from the picker; nobody else sees it.",
+      "prd_ids": [],
+      "supports": [
+        "PLAT-1"
+      ],
+      "scope": [
+        "The picker shows 'Platform console' only when GET /auth/workspaces says platform_admin: true; it calls POST /auth/platform",
+        "MSW mock gains the field"
+      ],
+      "out_of_scope": [
+        "Server logic (T-0412)"
+      ],
+      "depends_on": [
+        "T-0412"
+      ],
+      "acceptance": [
+        "Tests cite PLAT-1",
+        "CI full gate green at merge"
+      ],
+      "risk": "light",
+      "status": "todo"
     },
     {
       "id": "T-0506",
