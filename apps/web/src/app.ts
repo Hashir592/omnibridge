@@ -35,6 +35,7 @@ import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
+import { platformHandlers, type PlatformOptions } from './platform.ts';
 import { privacyHandlers, type PrivacyOptions } from './privacy.ts';
 import type { AuthService } from './auth/service.ts';
 import { contractRoutesPlugin, installContract, type Handlers } from './contract.ts';
@@ -126,6 +127,8 @@ export interface WebAppOptions {
   privacy?: PrivacyOptions;
   /** The notification centre (T-0501). Without it those routes answer 503. */
   notifications?: NotificationOptions;
+  /** The platform console (T-0504). Without it those routes answer 503. */
+  platform?: PlatformOptions;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
@@ -161,6 +164,7 @@ export function buildWebApp({
   people,
   privacy,
   notifications,
+  platform,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
@@ -213,6 +217,7 @@ export function buildWebApp({
     ...peopleHandlers(people, auth),
     ...privacyHandlers(privacy),
     ...notificationHandlers(notifications),
+    ...platformHandlers(platform),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';
@@ -322,7 +327,16 @@ export function buildWebApp({
         { workspaceId: params.workspaceId },
         async (ctx) => {
           // An unknown workspace, and one this transaction cannot see, both look missing.
-          if ((await workspaces.get(ctx)) === undefined) return undefined;
+          const workspace = await workspaces.get(ctx);
+          if (workspace === undefined) return undefined;
+          // An archived workspace is closed for good (PLAT-2).
+          if (workspace.status === 'archived') {
+            throw new ApiError({
+              status: 409,
+              code: 'conflict',
+              detail: 'The workspace is archived',
+            });
+          }
           return companies.create(ctx, {
             legalName: body.legal_name,
             tradingName: body.trading_name,

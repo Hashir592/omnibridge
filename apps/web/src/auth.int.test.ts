@@ -1,26 +1,31 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
+import { generateKekLine, parseKeyring, Secret } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  AppSecretStore,
   AuditLog,
   AuthStore,
   CompanyRepository,
   createMainDb,
+  CredentialRepository,
   InviteRepository,
   issuePasswordReset,
   MemberAccessRepository,
   MembershipRepository,
   migrateMain,
+  PlatformConsole,
   Tenancy,
   UserRepository,
+  withTenantTransaction,
   WorkspaceRepository,
   type MainDbHandle,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
-import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
+import { scanTextForMarkers, startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWebApp } from './app.ts';
+import { parseIpAllowlist } from './auth/ip-allowlist.ts';
 import { HashGate, Passwords } from './auth/passwords.ts';
 import { PlatformKeys, totpAad } from './auth/platform-keys.ts';
 import { AuthService, type AuthNotifier, type AuthServiceOptions } from './auth/service.ts';
@@ -35,6 +40,7 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const address = { line1: '1 Example Street', city: 'Testville', postcode: 'TE1 1ST' };
 const PASSWORD = 'tangerine harbour lantern 47';
+const CONSOLE_NETWORK = '192.0.2.0/24';
 
 type Server = ReturnType<typeof buildWebApp>;
 
@@ -50,7 +56,7 @@ class Browser {
   }
 
   async send(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     url: string,
     payload?: object,
     opts: { csrf?: string | null; origin?: string | null; headers?: Record<string, string> } = {},
@@ -139,8 +145,13 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     origins: [ORIGIN],
     termsVersion: TERMS,
     now: () => clock,
+    // PLAT-1: the test browsers sign in from 192.0.2.0/24; anything else is outside.
+    platformAllowlist: parseIpAllowlist(CONSOLE_NETWORK),
+    incidentBanner: () => new PlatformConsole(main.db).incidentBanner(),
   });
   const service = (gate?: HashGate) => new AuthService(serviceOptions(gate));
+  /** Jobs the console queued (the archive's workspace.close). */
+  const consoleJobs: { type: string; workspaceId: string; key: string }[] = [];
 
   const app = (auth = service(), trustedProxies?: string, log = logger) =>
     buildWebApp({
@@ -164,6 +175,26 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
         notifier: { invite: () => Promise.resolve() },
         audit: new AuditLog(main.db),
         tenancy,
+      },
+      platform: {
+        console: new PlatformConsole(main.db),
+        secrets: new AppSecretStore(main.db, platformKeys),
+        queue: {
+          send: (def, input) => {
+            consoleJobs.push({
+              type: def.type,
+              workspaceId: input.ctx.workspaceId,
+              key: input.idempotencyKey,
+            });
+            return Promise.resolve({ id: randomUUID(), created: true });
+          },
+        },
+        audit: new AuditLog(main.db),
+        tenancy,
+        checks,
+        version: '0',
+        logger: log,
+        now: () => clock,
       },
     });
 
@@ -193,6 +224,17 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await root.connect();
     try {
       return (await root.query(text, values)).rowCount ?? 0;
+    } finally {
+      await root.end();
+    }
+  }
+
+  /** Rows read as the container's superuser (owner-only platform tables). */
+  async function asRootRows<T>(text: string, values: unknown[]): Promise<T[]> {
+    const root = new pg.Client({ connectionString: cluster.container.getConnectionUri() });
+    await root.connect();
+    try {
+      return (await root.query(text, values)).rows as T[];
     } finally {
       await root.end();
     }
@@ -1264,6 +1306,7 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
       platform: false,
       workspace: null,
       modules: { website_connector: false },
+      incident: null,
     });
     // Signed in, two workspaces: the picker.
     later(30_000);
@@ -1303,6 +1346,377 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     // Signed out: 401 again.
     await op.send('POST', '/api/auth/sign-out');
     expect((await op.send('GET', '/api/auth/session')).statusCode).toBe(401);
+    await server.close();
+  });
+  // ---- T-0504: the platform console gate (PLAT-1) and workspace status (PLAT-2) ----
+
+  /** A platform operator signed in with MFA (not yet in the console), from `ip`. */
+  async function operatorSignedIn(server: Server, ip = '192.0.2.10') {
+    const operator = await makeUser({ workspaces: [A] });
+    expect(
+      await asRoot('UPDATE app.users SET platform_admin = true WHERE id = $1', [operator.id]),
+    ).toBe(1);
+    const b = await new Browser(server, ip).start();
+    expect((await b.signIn(operator.email, PASSWORD)).statusCode).toBe(200);
+    later(30_000);
+    await b.send('POST', '/api/auth/mfa/verify', { code: code(operator.secret) });
+    return { operator, b };
+  }
+
+  /** The same session cookies, sent from another address. */
+  function sameSessionFrom(b: Browser, server: Server, ip: string): Browser {
+    const moved = new Browser(server, ip);
+    for (const [k, v] of b.cookies) moved.cookies.set(k, v);
+    return moved;
+  }
+
+  it('[PLAT-1] the console answers only a platform admin who entered it after MFA', async () => {
+    const server = app();
+    // Anonymous: 401.
+    const anon = await new Browser(server).start();
+    expect((await anon.send('GET', '/api/platform/workspaces')).statusCode).toBe(401);
+    // A workspace member who is not a platform admin: 403, and cannot enter the console.
+    const member = await makeUser();
+    const { b: m } = await signedIn(server, member);
+    expect((await m.send('GET', '/api/platform/workspaces')).statusCode).toBe(403);
+    expect((await m.send('POST', '/api/auth/platform')).statusCode).toBe(403);
+    // A platform admin before MFA: 403 on the console.
+    const operator = await makeUser({ workspaces: [A] });
+    await asRoot('UPDATE app.users SET platform_admin = true WHERE id = $1', [operator.id]);
+    const pre = await new Browser(server).start();
+    await pre.signIn(operator.email, PASSWORD);
+    expect((await pre.send('GET', '/api/platform/workspaces')).statusCode).toBe(403);
+    // After MFA but not yet in the console: 403 until they open it.
+    const { b } = await signedIn(server, operator);
+    expect((await b.send('GET', '/api/platform/workspaces')).statusCode).toBe(403);
+    expect((await b.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    expect((await b.send('GET', '/api/platform/workspaces')).statusCode).toBe(200);
+    await server.close();
+  });
+
+  it('[PLAT-1] outside the allowlist the console is refused, and an empty list refuses everyone', async () => {
+    const server = app();
+    const { b: outside } = await operatorSignedIn(server, '198.51.100.7');
+    expect((await outside.send('POST', '/api/auth/platform')).statusCode).toBe(403);
+    const { b: inside } = await operatorSignedIn(server);
+    expect((await inside.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    // The same console session from outside the list: refused on every request.
+    const moved = sameSessionFrom(inside, server, '198.51.100.7');
+    expect((await moved.send('GET', '/api/platform/workspaces')).statusCode).toBe(403);
+    expect((await inside.send('GET', '/api/platform/workspaces')).statusCode).toBe(200);
+    await server.close();
+
+    // PLATFORM_IP_ALLOWLIST unset: nobody, from anywhere.
+    const withoutList: AuthServiceOptions = { ...serviceOptions() };
+    delete withoutList.platformAllowlist;
+    const closed = app(new AuthService(withoutList));
+    const { b: c } = await operatorSignedIn(closed);
+    expect((await c.send('POST', '/api/auth/platform')).statusCode).toBe(403);
+    await closed.close();
+  });
+
+  it('[PLAT-1] a spoofed X-Forwarded-For from outside the list gets 403; a trusted edge is believed', async () => {
+    // Only 10.0.0.0/8 (the edge) may name the client; the browser itself is outside the list.
+    const server = app(service(), '10.0.0.0/8');
+    const { b } = await operatorSignedIn(server, '198.51.100.7');
+    const spoofed = await b.send('POST', '/api/auth/platform', undefined, {
+      headers: { 'x-forwarded-for': '192.0.2.10' },
+    });
+    expect(spoofed.statusCode).toBe(403);
+    // Behind the trusted edge, which names the real, allowlisted client address.
+    const viaEdge = sameSessionFrom(b, server, '10.0.0.5');
+    const edge = await viaEdge.send('POST', '/api/auth/platform', undefined, {
+      headers: { 'x-forwarded-for': '192.0.2.10' },
+    });
+    expect(edge.statusCode).toBe(204);
+    const spoofedRead = await sameSessionFrom(viaEdge, server, '198.51.100.7').send(
+      'GET',
+      '/api/platform/flags',
+      undefined,
+      { headers: { 'x-forwarded-for': '192.0.2.10' } },
+    );
+    expect(spoofedRead.statusCode).toBe(403);
+    await server.close();
+  });
+
+  it('[PLAT-1] a demoted platform admin is refused on the next request (ADR-061)', async () => {
+    const server = app();
+    const { operator, b } = await operatorSignedIn(server);
+    expect((await b.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    expect((await b.send('GET', '/api/platform/flags')).statusCode).toBe(200);
+    await asRoot('UPDATE app.users SET platform_admin = false WHERE id = $1', [operator.id]);
+    expect((await b.send('GET', '/api/platform/flags')).statusCode).toBe(403);
+    await server.close();
+  });
+
+  it('[PLAT-2] suspend stops sign-in to that workspace at once; reactivate lets it back', async () => {
+    const server = app();
+    const { b: op } = await operatorSignedIn(server);
+    expect((await op.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const created = await op.send('POST', '/api/platform/workspaces', { name: 'Suspend me' });
+    const ws = created.json<{ id: string }>().id;
+    const user = await makeUser({ workspaces: [ws, B] });
+    const { b } = await signedIn(server, user);
+    expect((await b.send('POST', '/api/auth/workspace', { workspaceId: ws })).statusCode).toBe(204);
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(200);
+
+    const suspended = await op.send('POST', `/api/platform/workspaces/${ws}/suspend`);
+    expect(suspended.statusCode).toBe(202);
+    expect(suspended.json()).toEqual({ id: ws, status: 'suspended' });
+    // The live session has ended, and a new sign-in cannot pick that workspace.
+    expect((await b.send('GET', '/api/companies')).statusCode).toBe(401);
+    const { b: again } = await signedIn(server, user);
+    const picker = await again.send('GET', '/api/auth/workspaces');
+    expect(picker.json<{ id: string }[]>().map((w) => w.id)).toEqual([B]);
+    expect((await again.send('POST', '/api/auth/workspace', { workspaceId: ws })).statusCode).toBe(
+      403,
+    );
+    // Suspending twice is a conflict; reactivating lets the user in again.
+    expect((await op.send('POST', `/api/platform/workspaces/${ws}/suspend`)).statusCode).toBe(409);
+    expect((await op.send('POST', `/api/platform/workspaces/${ws}/reactivate`)).statusCode).toBe(
+      202,
+    );
+    expect((await again.send('POST', '/api/auth/workspace', { workspaceId: ws })).statusCode).toBe(
+      204,
+    );
+    // Both moves are in the workspace's own audit log, by the platform actor.
+    const audit = await asRootRows<{ actor_kind: string; after: { status: string } }>(
+      `SELECT actor_kind, after FROM app.audit_events
+        WHERE workspace_id = $1 AND action = 'workspace.status_changed' ORDER BY occurred_at`,
+      [ws],
+    );
+    expect(audit.map((r) => [r.actor_kind, r.after.status])).toEqual([
+      ['platform', 'suspended'],
+      ['platform', 'active'],
+    ]);
+    await server.close();
+  });
+
+  it('[PLAT-2] archive is final: it queues the closure once; reactivate, suspend and invites answer 409', async () => {
+    const server = app();
+    const { b: op } = await operatorSignedIn(server);
+    expect((await op.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const created = await op.send('POST', '/api/platform/workspaces', { name: 'Archive me' });
+    const ws = created.json<{ id: string }>().id;
+    const pending = await op.send('POST', `/api/platform/workspaces/${ws}/invites`, {
+      email: 'pending@example.test',
+    });
+    expect(pending.statusCode).toBe(201);
+    expect((await op.send('POST', `/api/platform/workspaces/${ws}/suspend`)).statusCode).toBe(202);
+    expect((await op.send('POST', `/api/platform/workspaces/${ws}/archive`)).statusCode).toBe(202);
+    // Its open invite ended with it: nobody can join after the closure.
+    const invites = await asRootRows<{ revoked: boolean }>(
+      'SELECT revoked_at IS NOT NULL AS revoked FROM app.invites WHERE id = $1',
+      [pending.json<{ id: string }>().id],
+    );
+    expect(invites).toEqual([{ revoked: true }]);
+    expect(consoleJobs.filter((j) => j.workspaceId === ws)).toEqual([
+      { type: 'workspace.close', workspaceId: ws, key: `closure:${ws}` },
+    ]);
+    for (const action of ['reactivate', 'suspend', 'archive']) {
+      const res = await op.send('POST', `/api/platform/workspaces/${ws}/${action}`);
+      expect({ action, status: res.statusCode }).toEqual({ action, status: 409 });
+    }
+    const modules = await op.send('PUT', `/api/platform/workspaces/${ws}/modules`, {
+      website_connector: true,
+    });
+    expect(modules.statusCode).toBe(409);
+    const invite = await op.send('POST', `/api/platform/workspaces/${ws}/invites`, {
+      email: 'late@example.test',
+    });
+    expect(invite.statusCode).toBe(409);
+    const company = await op.send('POST', `/api/platform/workspaces/${ws}/companies`, {
+      legal_name: 'Late Ltd',
+      trading_name: 'Late',
+      registered_address: address,
+    });
+    expect(company.statusCode).toBe(409);
+    const missing = await op.send('POST', `/api/platform/workspaces/${randomUUID()}/archive`);
+    expect(missing.statusCode).toBe(404);
+    await server.close();
+  });
+
+  it('[PLAT-2] the incident banner reaches every session; flags and modules are audited', async () => {
+    const server = app();
+    const { operator, b: op } = await operatorSignedIn(server);
+    expect((await op.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const set = await op.send('PUT', '/api/platform/incident-banner', {
+      message: 'Amazon order sync is delayed',
+      severity: 'warning',
+    });
+    expect(set.statusCode).toBe(200);
+    const withAddress = await op.send('PUT', '/api/platform/incident-banner', {
+      message: 'Mail ops@example.test',
+      severity: 'info',
+    });
+    expect(withAddress.statusCode).toBe(400);
+    const user = await makeUser();
+    const { b } = await signedIn(server, user);
+    expect((await b.send('GET', '/api/auth/session')).json()).toMatchObject({
+      incident: { message: 'Amazon order sync is delayed', severity: 'warning' },
+    });
+    expect((await op.send('DELETE', '/api/platform/incident-banner')).statusCode).toBe(204);
+    expect((await b.send('GET', '/api/auth/session')).json()).toMatchObject({ incident: null });
+
+    const flags = await op.send('PUT', '/api/platform/flags', { public_signup: true });
+    expect(flags.json()).toMatchObject({ public_signup: true });
+    await op.send('PUT', '/api/platform/flags', { public_signup: false });
+    const toggled = await op.send('PUT', `/api/platform/workspaces/${B}/modules`, {
+      website_connector: true,
+    });
+    expect(toggled.statusCode).toBe(200);
+    await setModule(B, false);
+    const rows = await asRootRows<{ action: string; params: Record<string, unknown> }>(
+      `SELECT action, params FROM app.platform_audit_events
+        WHERE user_id = $1 ORDER BY occurred_at, id`,
+      [operator.id],
+    );
+    expect(rows.map((r) => r.action).sort()).toEqual(
+      [
+        'platform.incident_set',
+        'platform.incident_cleared',
+        'platform.flag_changed',
+        'platform.flag_changed',
+        'workspace.module_changed',
+      ].sort(),
+    );
+    expect(rows.find((r) => r.action === 'platform.incident_set')?.params).toEqual({
+      severity: 'warning',
+      length: 28,
+    });
+    expect(rows.find((r) => r.action === 'workspace.module_changed')?.params).toEqual({
+      module: 'website_connector',
+      enabled: true,
+    });
+    await server.close();
+  });
+
+  it('[PLAT-2] the credential-expiry calendar lists what expires within the window, never a value', async () => {
+    const server = app();
+    const { b: op } = await operatorSignedIn(server);
+    expect((await op.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const value = `${randomUUID()}-SECRET-VALUE`;
+    await tenancy.runWorkspace({ workspaceId: A }, (ctx) =>
+      withTenantTransaction(main.db, ctx, (trx) =>
+        new CredentialRepository({ keyring, logger }).store(
+          trx,
+          ctx,
+          { kind: 'evri.api_key' },
+          'current',
+          new Secret(value),
+          { expiresAt: new Date(clock.getTime() + 10 * DAY) },
+        ),
+      ),
+    );
+    const within = await op.send('GET', '/api/platform/credential-expiry?within_days=30');
+    expect(within.json()).toEqual({
+      items: [
+        {
+          workspace_id: A,
+          channel_account_id: null,
+          kind: 'evri.api_key',
+          slot: 'current',
+          expires_at: new Date(clock.getTime() + 10 * DAY).toISOString(),
+        },
+      ],
+    });
+    expect(within.body).not.toContain(value);
+    const sooner = await op.send('GET', '/api/platform/credential-expiry?within_days=5');
+    expect(sooner.json()).toEqual({ items: [] });
+    await server.close();
+  });
+
+  it('[PLAT-4] app secrets are write-only: no route, log or audit row ever holds a value', async () => {
+    const lines: string[] = [];
+    const captured = createLogger({
+      service: 'test',
+      version: '0',
+      destination: { write: (line: string) => lines.push(line) },
+    });
+    const server = app(service(), undefined, captured);
+    const member = await makeUser();
+    const { b: m } = await signedIn(server, member);
+    const value = `SECRETMARK-${randomUUID()}`;
+    expect(
+      (await m.send('PUT', '/api/platform/app-secrets/amazon.lwa_client_secret/current', { value }))
+        .statusCode,
+    ).toBe(403);
+    expect((await m.send('GET', '/api/platform/app-secrets')).statusCode).toBe(403);
+
+    const { operator, b: op } = await operatorSignedIn(server);
+    expect((await op.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const answers: string[] = [];
+    const call = async (method: 'GET' | 'POST' | 'PUT', url: string, body?: object) => {
+      const res = await op.send(method, url, body);
+      answers.push(res.body, JSON.stringify(res.headers));
+      return res;
+    };
+    expect(
+      (await call('PUT', '/api/platform/app-secrets/amazon.lwa_client_secret/current', { value }))
+        .statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await call('PUT', '/api/platform/app-secrets/amazon.lwa_client_secret/next', {
+          value: `${value}-next`,
+        })
+      ).statusCode,
+    ).toBe(204);
+    // An unknown name, a bad slot and an oversized value: refused, and nothing is echoed.
+    expect(
+      (await call('PUT', '/api/platform/app-secrets/amazon.unknown/current', { value })).statusCode,
+    ).toBe(400);
+    expect(
+      (await call('PUT', '/api/platform/app-secrets/ads.client_id/later', { value })).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await call('PUT', '/api/platform/app-secrets/ads.client_id/current', {
+          value: value.repeat(200),
+        })
+      ).statusCode,
+    ).toBe(400);
+    const list = await call('GET', '/api/platform/app-secrets');
+    expect(
+      list
+        .json<{ items: { name: string }[] }>()
+        .items.find((s) => s.name === 'amazon.lwa_client_secret'),
+    ).toEqual({
+      name: 'amazon.lwa_client_secret',
+      current: { set_at: clock.toISOString() },
+      next: { set_at: clock.toISOString() },
+    });
+    // The LWA client secret's 180-day expiry is on the credential calendar (AMZ-10, PLAT-2).
+    const expiry = await call('GET', '/api/platform/credential-expiry?within_days=365');
+    expect(
+      expiry.json<{ items: { kind: string; workspace_id: string | null }[] }>().items,
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: 'amazon.lwa_client_secret',
+        workspace_id: null,
+        slot: 'current',
+      }),
+    );
+    expect(
+      (await call('POST', '/api/platform/app-secrets/amazon.lwa_client_secret/promote')).statusCode,
+    ).toBe(204);
+    expect(
+      (await call('POST', '/api/platform/app-secrets/amazon.lwa_client_secret/promote')).statusCode,
+    ).toBe(409);
+    expect(
+      (await new AppSecretStore(main.db, platformKeys).get('amazon.lwa_client_secret'))?.reveal(),
+    ).toBe(`${value}-next`);
+
+    // The marker scan: no answer, log line or audit row holds the value.
+    const audit = await asRootRows<{ params: unknown }>(
+      'SELECT params FROM app.platform_audit_events WHERE user_id = $1',
+      [operator.id],
+    );
+    expect(audit).toContainEqual({ params: { name: 'amazon.lwa_client_secret', slot: 'current' } });
+    expect(
+      scanTextForMarkers([...answers, ...lines, JSON.stringify(audit)], 'SECRETMARK-'),
+    ).toEqual([]);
+    expect(lines.some((l) => l.includes('app_secret.set'))).toBe(true);
     await server.close();
   });
 });

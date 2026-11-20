@@ -195,6 +195,10 @@ services:
       # networks behind the edge, and Caddy replaces any client-sent X-Forwarded-For. So the
       # sign-in delay and the audit see the client's address, not the edge's (ADR-008).
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-uniquelocal}
+      # PLAT-1: the networks the platform console may be used from, checked against the client
+      # address resolved through TRUSTED_PROXIES. Empty allows nobody; production sets the VPN
+      # range (M22); compose.dev.yaml sets the host's own address.
+      PLATFORM_IP_ALLOWLIST: ${PLATFORM_IP_ALLOWLIST:-}
       FILES_DIR: /data/files
       PII_VAULT_URL: http://pii-vault:8080
       # Web's vault token: ingest, read-full (order detail, inbox), mask, search, match (T-0402).

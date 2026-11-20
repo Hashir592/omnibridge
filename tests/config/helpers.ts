@@ -67,7 +67,21 @@ export function loadComposeModel(): ComposeModel {
     ],
     { encoding: 'utf8', env: { ...process.env, COMPOSE_PROFILES: '*' } },
   );
-  cached = JSON.parse(json) as ComposeModel;
+  const model = JSON.parse(json) as ComposeModel;
+  // A service whose environment compose.dev.yaml extends comes out as a `KEY=value` list; read
+  // every one as a map, as the checks expect.
+  for (const svc of Object.values(model.services)) {
+    const env = svc.environment as unknown;
+    if (Array.isArray(env)) {
+      svc.environment = Object.fromEntries(
+        (env as string[]).map((line) => {
+          const at = line.indexOf('=');
+          return at < 0 ? [line, null] : [line.slice(0, at), line.slice(at + 1)];
+        }),
+      );
+    }
+  }
+  cached = model;
   return cached;
 }
 

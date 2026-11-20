@@ -76,12 +76,16 @@ export {
   JOBS,
   notifyEmailJob,
   notifyPlatformEmailSweepJob,
+  notifyRetentionJob,
   piiDeleteJob,
   piiExpiryJob,
   piiExpirySweepJob,
   PLATFORM_JOBS,
+  platformDigestJob,
   securityScanJob,
   securityScanSweepJob,
+  workspaceCloseJob,
 } from './registry.ts';
+export { JobAdmin, type DeadLetter, type QueueOverview, type RedriveOutcome } from './admin.ts';
 export { deletionRunId, requestDeletion, type DeletionRequest } from './deletion.ts';
 export { emailOnRaise, type EmailRecipients } from './notify.ts';

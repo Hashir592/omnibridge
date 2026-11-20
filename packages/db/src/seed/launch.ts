@@ -1,8 +1,10 @@
-import type { Kysely } from 'kysely';
+import { providerDay } from '@omnibridge/core';
+import { sql, type Kysely } from 'kysely';
 import {
   setWorkspaceModule,
   ChannelAccountRepository,
   CompanyRepository,
+  withTenantTransaction,
   Tenancy,
   WorkspaceRepository,
   type ChannelProvider,
@@ -125,4 +127,39 @@ export async function seedLaunch(db: Kysely<MainDb>): Promise<SeedResult> {
     }
   });
   return { workspaceId, companyIds: COMPANIES.map((c) => c.id), created };
+}
+
+/** The launch Amazon and eBay accounts of the first company, for the console's seed rows. */
+const AMAZON_ACCOUNT = '5eed0000-0000-4000-8000-0000000a1001';
+const EBAY_ACCOUNT = '5eed0000-0000-4000-8000-0000000a1003';
+
+/**
+ * DEV ONLY rows for the platform console (T-0504, PLAT-2) until M07 feeds them: API usage of two
+ * launch accounts today and yesterday. Safe to run again: existing rows are left as they are.
+ */
+export async function seedConsoleRows(
+  db: Kysely<MainDb>,
+  deps: { now?: Date } = {},
+): Promise<void> {
+  const now = deps.now ?? new Date();
+  const yesterday = new Date(now.getTime() - 86_400_000);
+  const tenancy = new Tenancy(db);
+  await tenancy.runWorkspace({ workspaceId: LAUNCH_WORKSPACE_ID }, async (ctx) => {
+    const rows = [
+      [AMAZON_ACCOUNT, 'amazon', 'orders', 1_840, null],
+      [EBAY_ACCOUNT, 'ebay', 'sell.fulfillment', 3_120, 5_000],
+    ] as const;
+    await withTenantTransaction(db, ctx, async (trx) => {
+      for (const at of [yesterday, now]) {
+        for (const [account, provider, api, calls, cap] of rows) {
+          await sql`
+            INSERT INTO app.api_usage_daily (workspace_id, channel_account_id, provider, api, day,
+                                             calls, cap, updated_at)
+            VALUES (${LAUNCH_WORKSPACE_ID}, ${account}, ${provider}, ${api},
+                    ${providerDay(provider, at)}::date, ${calls}, ${cap}, ${now})
+            ON CONFLICT DO NOTHING`.execute(trx);
+        }
+      }
+    });
+  });
 }

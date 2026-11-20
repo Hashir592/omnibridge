@@ -22,6 +22,8 @@ export interface Workspace {
   defaultVatRateBp: number;
   /** Fixed and read-only (TEN-6, section 7.3). */
   piiRetentionDays: number;
+  /** PLAT-2: set only by the platform console. */
+  status: 'active' | 'suspended' | 'archived';
   createdAt: Date;
 }
 
@@ -88,6 +90,7 @@ export class WorkspaceRepository {
       currency: row.currency,
       defaultVatRateBp: Number(row.default_vat_rate_bp),
       piiRetentionDays: Number(row.pii_retention_days),
+      status: row.status,
       createdAt: row.created_at,
     };
   }

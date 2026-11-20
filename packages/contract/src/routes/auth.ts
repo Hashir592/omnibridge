@@ -62,6 +62,16 @@ export const WorkspaceModulesSchema = z
   .object({ website_connector: z.boolean() })
   .meta({ id: 'WorkspaceModules' });
 
+/** The incident banner a platform admin set (PLAT-2): shown to every signed-in user. */
+export const IncidentSchema = z
+  .object({
+    /** Plain text, 1 to 200 characters, no email address. */
+    message: z.string(),
+    severity: z.enum(['info', 'warning', 'critical']),
+    set_at: z.iso.datetime(),
+  })
+  .meta({ id: 'Incident' });
+
 export const WorkspaceChoiceSchema = z
   .object({
     id: z.uuid(),
@@ -197,6 +207,8 @@ export const SessionInfoSchema = z
       .nullable(),
     /** That workspace's module toggles; all off when there is no workspace (PLAT-2, WEB-1). */
     modules: WorkspaceModulesSchema,
+    /** The incident banner, or null (PLAT-2, T-0504). */
+    incident: IncidentSchema.nullable(),
   })
   .meta({ id: 'SessionInfo' });
 

@@ -259,7 +259,16 @@ export function peopleHandlers(
       const invite = await p.tenancy.run(
         { workspaceId: params.workspaceId, companyIds: [] },
         async (ctx) => {
-          if ((await p.workspaces.get(ctx)) === undefined) return undefined;
+          const workspace = await p.workspaces.get(ctx);
+          if (workspace === undefined) return undefined;
+          // An archived workspace is closed for good (PLAT-2): nobody can be invited into it.
+          if (workspace.status === 'archived') {
+            throw new ApiError({
+              status: 409,
+              code: 'conflict',
+              detail: 'The workspace is archived',
+            });
+          }
           // Only the first admin (TEN-7): once a workspace has one, its admins invite everyone
           // else, so an operator can never make themselves an admin of a live workspace (PLAT-3).
           if (await p.members.hasAdmin(ctx)) {

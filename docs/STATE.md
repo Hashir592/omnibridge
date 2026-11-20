@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Nov 2026 by S3 (M05 batch 1 done).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Nov 2026 by S3 (M05 batch 2 built; CI blocked by billing).
 
 ## Now
 
@@ -8,24 +8,18 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Closed:** M01, M02 (ADR-064), M03, **M04** (S4 M04 end APPROVED 19 Nov, `docs/reviews/M04-end.md`, ADR-070). M06 site pieces merged; waiting on the client's legal details.
 - **M04 in short:** pii-vault (ingest, read-full, mask, search, match, delete) on `ob_pii`/`ob_vault`; deletion service with all seven DEL-1 triggers, tombstones in three places, journal; erasure, withdraw, retry and access export; eBay deletion fan-out; backups, restore drill, AT-9 marker scan; S5 audit fixes (ADR-068) and the external audit fixes (ADR-069).
 - **Now: M05 core** (notification centre, email alerts, security alerts, platform console, app secrets). Tasks in `docs/backlog.json`. No halfway review; S5 audit T-0506 before the M05 end review.
-- **M05 batch 1 (S3) done:**
-  - T-0411: PR #107, merged.
-  - T-0501: PR #108, merged.
-  - T-0502: PR #109, merged.
-  - T-0503: PR #110, auto-merge.
-  - T-0411 (DEL-4): an erasure request is `stuck` when it is confirmed and either its claim has no job 2 minutes on, or its `pii.delete` job is failed, cancelled or gone. The list returns `stuck`. Retry accepts failed and stuck requests under a new key `erasure:<id>:retry<n>` (Hashir and S1: ADR-070's "same key" would be a no-op).
-  - T-0501 (NTF-1/2/5): db-main 0030 holds `app.notifications`, one row per type and record, updated in place; read state is per user and version. Platform notices sit in owner-only tables behind definers.
-    - Core `Notifier` and type registry (IDs, counts and flags only); callers pass their bound context.
-    - Routes `/notifications` (list, unread-count, read, read-all) and `/platform/notifications`.
-  - T-0502 (NTF-3/4, MAIL-3): db-main 0031 holds per-user, per-type email preferences (critical types locked on for admins) and sent records per version.
-    - `notify.email` is a phased job per recipient, queued in the raiser's transaction.
-    - Critical platform notices go to platform admins by a minute sweep.
-    - Routes `/me/notification-email-preferences`.
-  - T-0503 (SEC-12): `security.scan` runs every 5 minutes per workspace, with thresholds in worker env `SECURITY_*`.
-    - It alerts on failed sign-in bursts, sign-ins from a network unseen in 90 days, lockouts, mass exports, mass full reads and canary reads (24 h, critical platform).
-    - Erasure failure alerts at once; an eBay key throttle raises a platform notice per hour.
-    - The vault has a new `signals` capability (worker token). db-main 0032 adds the auth-event definers.
-- **After pulling:** recreate the stack once (`docker compose up -d`) so web, worker and pii-vault join `ob_vault`. Locally, run `infra/backup/journal.sh --every 900` in a spare terminal if you want the 15-minute journal runs. Restart pii-vault once after T-0407 (runs the `buyer_exact` backfill); run `scripts/dev-secrets.sh` if the vault tokens are missing.
+- **M05 batch 1 (S3):** done and merged (T-0411, T-0501 to T-0503; ADR-071).
+- **M05 batch 2 (S3) built, waiting on CI:** PR #117 holds both tasks. The stacked PR #118 (T-0505) merged into #117's branch, not into main. GitHub Actions did not start: "recent account payments have failed or your spending limit needs to be increased". Auto-merge is on; it merges once CI runs green.
+  - T-0504 (PLAT-1/2/3, OPS-6): db-main 0033.
+    - `/platform` routes are for a platform admin with MFA, from `PLATFORM_IP_ALLOWLIST` (`request.ip` via TRUSTED_PROXIES; an empty list denies). The flag and MFA are re-read every request (ADR-061 closed).
+    - Workspaces have a status, active/suspended/archived; archive is final. Suspend and archive end sessions and open invites. Archive queues `workspace.close`: the workspace_closure deletion, then memberships, then the terms of people left with none.
+    - Also: flags (`public_signup`), module toggles, the incident banner (in `GET /auth/session`), jobs, dead letters and redrive one, `app.api_usage_daily` (THE usage table M07's eBay governor reserves against, provider's own day), the credential calendar, health, `app.platform_audit_events`.
+    - Daily jobs: the `platform.health-digest` email at 07:00 (counts only), and `notify.retention` (90 days, in the housekeeping sweep).
+    - PLAT-3 proof: the platform route walk and a static field allowlist. PS-032.
+  - T-0505 (PLAT-4): db-main 0034 `app.app_secrets`.
+    - Current and next slots, AES-256-GCM under the platform data key (secrets_kek), sealed to the name. Write-only routes; the audit holds name and slot only.
+    - `AppSecretStore.get` is the typed reader for M07. `PlatformKeys` moved to `@omnibridge/db`. The register has an app secrets section. PS-033.
+- **After pulling:** recreate the stack once (`docker compose up -d`) so web gets `PLATFORM_IP_ALLOWLIST` (dev default: loopback plus 172.20.0.1, this machine's ob_edge gateway; set the variable if yours differs) and the seed adds the console's API usage rows. Locally, run `infra/backup/journal.sh --every 900` in a spare terminal if you want the 15-minute journal runs. Restart pii-vault once after T-0407 (runs the `buyer_exact` backfill); run `scripts/dev-secrets.sh` if the vault tokens are missing.
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; trivial lane; browser only when it proves something; short sessions.
 - **Process (ADR-053, ADR-054):** sessions merge their own green PRs; CI is the only full gate.
 - **Hashir:** GitHub CLI on Hashir592. Dev machine to 16 GB in 1 to 2 weeks.
@@ -40,13 +34,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 ## Follow-ups noted
 
 - **ADR-072:** T-0412 (S3, light) shared identifier-rule fixture, after batch 2. Notification detail key per type comes with M08/M09. T-0313 reads company names from `GET /companies`.
-- **M05 (in tasks):** demoting a platform admin re-checked per request (ADR-061); console audit event when a module is switched (T-0211).
-- **M05 batch 1 follow-ups (S1 to place):**
-  - Notification retention or purge: not in the PRD.
-  - A web raise for a company outside a child's ticks fails RLS: callers raise in scope.
-  - A DB error while raising the erasure alert rolls back the failed state too; the request then shows stuck with Retry.
-  - Email is at-least-once: a commit failure after the SMTP send can repeat it.
-- **M05 (in T-0504):** archiving a workspace runs the `workspace_closure` deletion, then `DeletionLog.deleteUserTerms`. Workspaces whose keys predate T-0404 have no canary (dev data only).
+- **M05 batch 2 follow-ups (S1 to place):** `public_signup` is stored only; T-0205 (deferred) reads it. Platform audit has no read route yet. M15 moves the eBay endpoint's token and keyset into the app secrets store (S1 accepted). M18: LWA rotation reminders.
+- Workspaces whose keys predate T-0404 have no canary (dev data only).
 - **ADR-068, for the M07, M08 and M10 tasks:** expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first.
 - **M07 / M08:** Amazon revocation and eBay termination call `requestDeletion` with the channel account. Provider jobs use phased handlers and never hold a tenant transaction across network calls. The eBay key fetch cap (5 a minute) is per web process.
 - **M10:** ingest is not idempotent per subject: key buyer records by order. Call `requestDeletion` on cancellation; set `delete_after` at dispatch/delivery + pii_expiry_days (vault backstop 90 days). The access export's `linkedOrders` joins orders by subject.
@@ -60,15 +49,15 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. S3: PR #110 (T-0503) merges itself on green (if red, S3 fixes it).
-2. S2: T-0311, then T-0312 against PS-029 to PS-031 (handoff `docs/handoffs/20261120-0017-S3-to-S2.md`).
-3. S1: amend ADR-070 (retry key), place the follow-ups, write the M07 tasks (handoff `docs/handoffs/20261120-0017-S3-to-S1.md`).
-4. S3: batch 2 (T-0504, T-0505) once S1 says go.
+1. Hashir: fix GitHub Actions billing (Settings → Billing & plans), then re-run CI on PR #117; it merges itself on green.
+2. S2: T-0313 console screens against PS-032 and PS-033 (handoff `docs/handoffs/20261120-1745-S3-to-S2.md`).
+3. S1: place the batch 2 follow-ups; then S5 T-0506 audit (handoff `docs/handoffs/20261120-1745-S3-to-S1.md`).
 
 ## Prerequisites outstanding (Hashir)
 
 | Needed for | Item | Status |
 |---|---|---|
+| CI (blocks every merge) | GitHub Actions jobs do not start: account payment failed or spending limit reached (20 Nov 2026) | open |
 | Code review | CodeRabbit CLI is not installed on this machine, so `/code-review` runs instead (ADR-030) | open (optional) |
 | Local full gate | WSL 2 has 3.8 GiB (host 7.9 GB, no `.wslconfig`); the full stack with clamd fits but is tight | open |
 | Local tooling | Node 24.15 on the host; repo pins 24.22.0 (warning only). corepack needs `COREPACK_HOME=D:/.corepack` (EXDEV error otherwise) | open |

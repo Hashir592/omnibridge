@@ -18,7 +18,9 @@ import {
   defineJob,
   definePlatformJob,
   HEARTBEAT_QUEUE,
+  JobAdmin,
   JobQueue,
+  QUEUE_SCHEMA,
   queueMetrics,
   schedulePlatformJob,
 } from '@omnibridge/queue';
@@ -236,6 +238,66 @@ describe('durable job queue (NFR-3, OPS-10)', () => {
       .poll(async () => (await record('test.flaky', 'flaky-1'))?.state, { timeout: 60_000 })
       .toBe('completed');
     expect(attempts).toBe(3);
+  });
+
+  it('[PLAT-2] the console redrives one dead-lettered job and leaves the others', async () => {
+    const boss = await startBoss();
+    const queue = queueOn(boss);
+    const healed = new Set<string>();
+    await queue.work(
+      flakyJob,
+      (job) =>
+        healed.has(job.envelope.idempotency_key)
+          ? Promise.resolve()
+          : Promise.reject(new Error('synthetic failure')),
+      FAST,
+    );
+    const admin = new JobAdmin({
+      boss,
+      types: [flakyJob.type],
+      records: new JobRecordRepository(db),
+      heartbeat: { schema: QUEUE_SCHEMA, queue: HEARTBEAT_QUEUE },
+      logger,
+    });
+    for (const key of ['dead-1', 'dead-2']) {
+      await queue.send(flakyJob, { ctx: ws, idempotencyKey: key, payload: {} });
+    }
+    await expect
+      .poll(async () => (await admin.deadLetters(10)).length, { timeout: 60_000 })
+      .toBe(2);
+    const dead = await admin.deadLetters(10);
+    expect(dead.map((d) => [d.type, d.workspaceId]).sort()).toEqual([
+      [flakyJob.type, ws.workspaceId],
+      [flakyJob.type, ws.workspaceId],
+    ]);
+    const first = dead.find((d) => d.idempotencyKey === 'dead-1');
+    expect(first).toBeDefined();
+
+    // Unknown ids and types are not found; nothing moves.
+    expect(await admin.redrive(flakyJob.type, randomUUID())).toEqual({ outcome: 'not_found' });
+    expect(await admin.redrive('test.unknown', first?.id ?? '')).toEqual({ outcome: 'not_found' });
+
+    healed.add('dead-1');
+    expect(await admin.redrive(flakyJob.type, first?.id ?? '')).toEqual({
+      outcome: 'ok',
+      workspaceId: ws.workspaceId,
+    });
+    await expect
+      .poll(async () => (await record('test.flaky', 'dead-1'))?.state, { timeout: 60_000 })
+      .toBe('completed');
+    // The other one is still dead-lettered and still failed.
+    expect((await admin.deadLetters(10)).map((d) => d.idempotencyKey)).toEqual(['dead-2']);
+    expect((await record('test.flaky', 'dead-2'))?.state).toBe('failed');
+    // A second redrive of the same id finds nothing.
+    expect(await admin.redrive(flakyJob.type, first?.id ?? '')).toEqual({ outcome: 'not_found' });
+    expect(await admin.lastHeartbeat()).toBeNull();
+    // Leave the dead-letter queue empty for the tests after this one.
+    healed.add('dead-2');
+    const second = (await admin.deadLetters(10))[0];
+    expect(await admin.redrive(flakyJob.type, second?.id ?? '')).toMatchObject({ outcome: 'ok' });
+    await expect
+      .poll(async () => (await record('test.flaky', 'dead-2'))?.state, { timeout: 60_000 })
+      .toBe('completed');
   });
 
   it('[OPS-10] per-account cap of 4 never exceeded under 50 concurrent jobs', async () => {

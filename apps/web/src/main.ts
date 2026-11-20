@@ -18,14 +18,24 @@ import {
   mainDbConfig,
   MemberAccessRepository,
   ping,
+  AppSecretStore,
+  PlatformConsole,
   Tenancy,
   WorkspaceRepository,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
-import { createQueueClient, JobQueue } from '@omnibridge/queue';
+import {
+  createQueueClient,
+  HEARTBEAT_QUEUE,
+  JobAdmin,
+  JOBS,
+  JobQueue,
+  QUEUE_SCHEMA,
+} from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
 import { buildWebApp } from './app.ts';
+import { parseIpAllowlist } from './auth/ip-allowlist.ts';
 import { queueNotifier } from './auth/notifier.ts';
 import { Passwords } from './auth/passwords.ts';
 import { PlatformKeys } from './auth/platform-keys.ts';
@@ -67,6 +77,9 @@ const origins = requireEnv('APP_ORIGINS')
   .filter((o) => o !== '');
 const tenancy = new Tenancy(main.db);
 const authStore = new AuthStore(main.db);
+// The networks the platform console may be used from (PLAT-1); unset or empty allows nobody.
+const platformAllowlist = parseIpAllowlist(process.env.PLATFORM_IP_ALLOWLIST);
+const platformConsole = new PlatformConsole(main.db);
 // Web only sends jobs (the auth mail); the worker runs them (ADR-050).
 const boss = createQueueClient({
   host: requireEnv('DB_MAIN_HOST'),
@@ -100,6 +113,8 @@ const auth = new AuthService({
   // The current terms and privacy policy version, a platform setting (WWW-7); it must match the
   // date on the public site's legal pages (apps/site/src/settings.ts LEGAL_VERSION).
   termsVersion: requireEnv('TERMS_VERSION'),
+  platformAllowlist,
+  incidentBanner: () => platformConsole.incidentBanner(),
 });
 
 // The vault with web's own token (invariant 8): ingest, read, mask, search, match. Never delete.
@@ -115,11 +130,12 @@ async function piiVaultHealthy(): Promise<boolean> {
 // The built SPA (ADR-060), copied next to dist/ in the image; boot fails if it is missing.
 const spa = loadSpa(process.env.UI_DIST_DIR ?? fileURLToPath(new URL('../ui/', import.meta.url)));
 
+const checks = { dbMain: () => ping(main.pool), dbPii: piiVaultHealthy };
 const app = buildWebApp({
   logger,
   version,
   spa,
-  checks: { dbMain: () => ping(main.pool), dbPii: piiVaultHealthy },
+  checks,
   tenancy,
   directory: {
     workspaces: new WorkspaceRepository(main.db),
@@ -147,6 +163,25 @@ const app = buildWebApp({
   },
   // The notification centre (NTF-1, NTF-2).
   notifications: { notifications: new NotificationRepository(main.db) },
+  // The platform console (PLAT-1, PLAT-2): counts and IDs only, never tenant business data.
+  platform: {
+    console: platformConsole,
+    // App secrets (PLAT-4): sealed under the platform data key, which secrets_kek wraps.
+    secrets: new AppSecretStore(main.db, new PlatformKeys(authStore, secretsKeyring)),
+    jobs: new JobAdmin({
+      boss,
+      types: JOBS.map((def) => def.type),
+      records: new JobRecordRepository(main.db),
+      heartbeat: { schema: QUEUE_SCHEMA, queue: HEARTBEAT_QUEUE },
+      logger,
+    }),
+    queue,
+    audit: new AuditLog(main.db),
+    tenancy,
+    checks,
+    version,
+    logger,
+  },
   jobs: new JobRecordRepository(main.db),
   files: { store: fileStore, linkKey },
   // The eBay account deletion endpoint (EBAY-2), when its secrets are mounted.

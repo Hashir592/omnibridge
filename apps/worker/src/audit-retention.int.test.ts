@@ -3,6 +3,7 @@ import {
   AuditLog,
   AuthStore,
   createMainDb,
+  PlatformHousekeeping,
   JobLeaseRepository,
   JobRecordRepository,
   migrateMain,
@@ -135,10 +136,11 @@ describe('audit retention job (AUD-3)', () => {
     expect(sent).toEqual(workspaces.map(() => false));
   });
 
-  it('[NFR-3][USR-6] the housekeeping sweep purges as ob_worker and sends one jobs.retention per workspace, keyed by the London day', async () => {
+  it('[NFR-3][USR-6] the housekeeping sweep purges as ob_worker and sends one jobs.retention and one notify.retention per workspace, keyed by the London day', async () => {
     const sent: { type: string; workspaceId: string; key: string }[] = [];
     const count = await sweepHousekeeping({
       auth: new AuthStore(main.db),
+      notices: new PlatformHousekeeping(main.db),
       directory: new WorkspaceDirectory(platform.db),
       queue: {
         send: (def, input) => {
@@ -163,6 +165,15 @@ describe('audit retention job (AUD-3)', () => {
         })),
       ),
     );
+    expect(sent).toEqual(
+      expect.arrayContaining(
+        workspaces.map((workspaceId) => ({
+          type: 'notify.retention',
+          workspaceId,
+          key: 'notify.retention:2026-11-16',
+        })),
+      ),
+    );
   });
 
   it('[AUD-3] the worker schedules the sweep at 02:30 London time', async () => {
@@ -175,6 +186,7 @@ describe('audit retention job (AUD-3)', () => {
         'pii.expiry-sweep': () => Promise.resolve(),
         'notify.platform-email-sweep': () => Promise.resolve(),
         'security.scan-sweep': () => Promise.resolve(),
+        'platform.health-digest': () => Promise.resolve(),
       },
       logger,
     );

@@ -2,7 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import { AuthStore, createMainDb, migrateMain, type MainDbHandle } from '@omnibridge/db';
-import { LAUNCH_WORKSPACE_ID, seedLaunch, seedLaunchModules } from '@omnibridge/db/seed';
+import {
+  LAUNCH_WORKSPACE_ID,
+  seedConsoleRows,
+  seedLaunch,
+  seedLaunchModules,
+} from '@omnibridge/db/seed';
+import pg from 'pg';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEV_ONLY_DEMO_USER, refuseOutsideDev, seedDemoUser } from './auth/dev-seed.ts';
@@ -90,5 +96,28 @@ describe('DEV ONLY seed [USR-4]', () => {
     expect((await store.userWorkspaces(DEV_ONLY_DEMO_USER.id))[0]?.modules).toEqual({
       website_connector: true,
     });
+  });
+
+  it('[PLAT-2] the seed gives the console API usage rows, once', async () => {
+    await seedLaunch(main.db);
+    const deps = { now: new Date('2026-11-20T12:00:00Z') };
+    await seedConsoleRows(main.db, deps);
+    await seedConsoleRows(main.db, deps); // a re-run changes nothing
+    const root = new pg.Client({ connectionString: cluster.container.getConnectionUri() });
+    await root.connect();
+    try {
+      const usage = await root.query<{ n: string }>(
+        'SELECT count(*) AS n FROM app.api_usage_daily',
+      );
+      expect(usage.rows[0]?.n).toBe('4');
+      // eBay's rows are on its own US Pacific day (PLAT-2).
+      const ebay = await root.query<{ day: string }>(
+        `SELECT to_char(day, 'YYYY-MM-DD') AS day FROM app.api_usage_daily
+          WHERE provider = 'ebay' ORDER BY day`,
+      );
+      expect(ebay.rows.map((r) => r.day)).toEqual(['2026-11-19', '2026-11-20']);
+    } finally {
+      await root.end();
+    }
   });
 });

@@ -85,6 +85,11 @@ services:
   web:
     depends_on:
       seed: { condition: service_completed_successfully }
+    environment:
+      # PLAT-1, dev: loopback only. Docker Desktop hands host traffic to the edge from the
+      # ob_edge gateway (172.20.0.1 here), and the edge's ports are bound to 127.0.0.1, so that
+      # one address is this machine. If your ob_edge gateway differs, set PLATFORM_IP_ALLOWLIST.
+      PLATFORM_IP_ALLOWLIST: ${PLATFORM_IP_ALLOWLIST:-127.0.0.1/32,::1/128,172.20.0.1/32}
 
   # The only provider endpoints dev and CI may call (ADR-011, invariant 17).
   provider-mocks:

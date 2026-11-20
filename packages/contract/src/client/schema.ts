@@ -649,6 +649,196 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/platform/api-usage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** API usage per provider and account */
+    get: operations['listApiUsage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/app-secrets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** App secrets: names and set-on dates only */
+    get: operations['listAppSecrets'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/app-secrets/{name}/{slot}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Set an app secret (write-only) */
+    put: operations['setAppSecret'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/app-secrets/{name}/promote': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Promote the next value of an app secret to current */
+    post: operations['promoteAppSecret'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/credential-expiry': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Credentials expiring soon */
+    get: operations['listCredentialExpiry'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/flags': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Platform feature flags */
+    get: operations['getPlatformFlags'];
+    /** Set platform feature flags */
+    put: operations['setPlatformFlags'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/health': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** System health */
+    get: operations['getPlatformHealth'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/incident-banner': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The incident banner */
+    get: operations['getIncidentBanner'];
+    /** Set the incident banner */
+    put: operations['setIncidentBanner'];
+    post?: never;
+    /** Clear the incident banner */
+    delete: operations['clearIncidentBanner'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/jobs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Job queue depth per type */
+    get: operations['getQueueOverview'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/jobs/{type}/dead-letters/{id}/redrive': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Redrive one dead-lettered job */
+    post: operations['redriveDeadLetter'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/jobs/dead-letters': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Dead-lettered jobs */
+    get: operations['listDeadLetters'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/platform/notifications': {
     parameters: {
       query?: never;
@@ -724,10 +914,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List workspaces with counts only */
+    get: operations['listConsoleWorkspaces'];
     put?: never;
     /** Create a workspace */
     post: operations['createWorkspace'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/workspaces/{workspaceId}/archive': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Archive (close) a workspace */
+    post: operations['archiveWorkspace'];
     delete?: never;
     options?: never;
     head?: never;
@@ -762,6 +970,57 @@ export interface paths {
     put?: never;
     /** Invite a workspace's first admin */
     post: operations['inviteFirstAdmin'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/workspaces/{workspaceId}/modules': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Set a workspace's module toggles */
+    put: operations['setWorkspaceModules'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/workspaces/{workspaceId}/reactivate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Reactivate a suspended workspace */
+    post: operations['reactivateWorkspace'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/platform/workspaces/{workspaceId}/suspend': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Suspend a workspace */
+    post: operations['suspendWorkspace'];
     delete?: never;
     options?: never;
     head?: never;
@@ -907,6 +1166,70 @@ export interface components {
       line2?: string;
       postcode: string;
     };
+    ApiUsage: {
+      api: string;
+      calls: number;
+      cap: number | null;
+      /** Format: uuid */
+      channel_account_id: string;
+      /** Format: date */
+      day: string;
+      provider: string;
+      /** Format: uuid */
+      workspace_id: string;
+    };
+    ApiUsageInput: {
+      api: string;
+      calls: number;
+      cap: number | null;
+      /** Format: uuid */
+      channel_account_id: string;
+      /** Format: date */
+      day: string;
+      provider: string;
+      /** Format: uuid */
+      workspace_id: string;
+    };
+    AppSecretStatus: {
+      current: {
+        /** Format: date-time */
+        set_at: string;
+      } | null;
+      /** @enum {string} */
+      name:
+        | 'amazon.lwa_client_id'
+        | 'amazon.lwa_client_secret'
+        | 'ads.client_id'
+        | 'ads.client_secret'
+        | 'ebay.client_id'
+        | 'ebay.client_secret'
+        | 'ebay.dev_id'
+        | 'ebay.verification_token';
+      next: {
+        /** Format: date-time */
+        set_at: string;
+      } | null;
+    };
+    AppSecretStatusInput: {
+      current: {
+        /** Format: date-time */
+        set_at: string;
+      } | null;
+      /** @enum {string} */
+      name:
+        | 'amazon.lwa_client_id'
+        | 'amazon.lwa_client_secret'
+        | 'ads.client_id'
+        | 'ads.client_secret'
+        | 'ebay.client_id'
+        | 'ebay.client_secret'
+        | 'ebay.dev_id'
+        | 'ebay.verification_token';
+      next: {
+        /** Format: date-time */
+        set_at: string;
+      } | null;
+    };
     AuditEvent: {
       action: string;
       /** @enum {string} */
@@ -989,6 +1312,38 @@ export interface components {
       /** @enum {string} */
       vat_period: 'stagger_1' | 'stagger_2' | 'stagger_3' | 'monthly';
     };
+    ConsoleWorkspace: {
+      counts: {
+        channel_accounts: number;
+        orders_per_day: number | null;
+        users: number;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: uuid */
+      id: string;
+      modules: components['schemas']['WorkspaceModules'];
+      name: string;
+      /** @enum {string} */
+      status: 'active' | 'suspended' | 'archived';
+      status_changed_at: string | null;
+    };
+    ConsoleWorkspaceInput: {
+      counts: {
+        channel_accounts: number;
+        orders_per_day: number | null;
+        users: number;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: uuid */
+      id: string;
+      modules: components['schemas']['WorkspaceModulesInput'];
+      name: string;
+      /** @enum {string} */
+      status: 'active' | 'suspended' | 'archived';
+      status_changed_at: string | null;
+    };
     Created: {
       /** Format: uuid */
       id: string;
@@ -996,6 +1351,44 @@ export interface components {
     CreatedInput: {
       /** Format: uuid */
       id: string;
+    };
+    CredentialExpiry: {
+      channel_account_id: string | null;
+      /** Format: date-time */
+      expires_at: string;
+      kind: string;
+      /** @enum {string} */
+      slot: 'current' | 'next';
+      workspace_id: string | null;
+    };
+    CredentialExpiryInput: {
+      channel_account_id: string | null;
+      /** Format: date-time */
+      expires_at: string;
+      kind: string;
+      /** @enum {string} */
+      slot: 'current' | 'next';
+      workspace_id: string | null;
+    };
+    DeadLetter: {
+      attempt: number | null;
+      /** Format: date-time */
+      dead_lettered_at: string;
+      error_code: string | null;
+      /** Format: uuid */
+      id: string;
+      type: string;
+      workspace_id: string | null;
+    };
+    DeadLetterInput: {
+      attempt: number | null;
+      /** Format: date-time */
+      dead_lettered_at: string;
+      error_code: string | null;
+      /** Format: uuid */
+      id: string;
+      type: string;
+      workspace_id: string | null;
     };
     EbayAccountDeletionNotice: {
       metadata: {
@@ -1179,6 +1572,20 @@ export interface components {
       status: 'ok' | 'degraded';
       version: string;
     };
+    Incident: {
+      message: string;
+      /** Format: date-time */
+      set_at: string;
+      /** @enum {string} */
+      severity: 'info' | 'warning' | 'critical';
+    };
+    IncidentInput: {
+      message: string;
+      /** Format: date-time */
+      set_at: string;
+      /** @enum {string} */
+      severity: 'info' | 'warning' | 'critical';
+    };
     InviteInfo: {
       email: string;
       existingUser: boolean;
@@ -1337,6 +1744,54 @@ export interface components {
     NotificationsMarkedInput: {
       marked: number;
     };
+    PlatformFlags: {
+      public_signup: boolean;
+      updated_at: string | null;
+    };
+    PlatformFlagsInput: {
+      public_signup: boolean;
+      updated_at: string | null;
+    };
+    PlatformHealth: {
+      queue: {
+        dead_letter: number;
+        queued: number;
+      };
+      services: {
+        /** @enum {string} */
+        db_main: 'ok' | 'error';
+        /** @enum {string} */
+        pii_vault: 'ok' | 'error';
+        /** @enum {string} */
+        web: 'ok' | 'error';
+        /** @enum {string} */
+        worker: 'ok' | 'error';
+      };
+      /** @enum {string} */
+      status: 'ok' | 'degraded';
+      version: string;
+      worker_heartbeat_at: string | null;
+    };
+    PlatformHealthInput: {
+      queue: {
+        dead_letter: number;
+        queued: number;
+      };
+      services: {
+        /** @enum {string} */
+        db_main: 'ok' | 'error';
+        /** @enum {string} */
+        pii_vault: 'ok' | 'error';
+        /** @enum {string} */
+        web: 'ok' | 'error';
+        /** @enum {string} */
+        worker: 'ok' | 'error';
+      };
+      /** @enum {string} */
+      status: 'ok' | 'degraded';
+      version: string;
+      worker_heartbeat_at: string | null;
+    };
     Problem: {
       /** @enum {string} */
       code:
@@ -1395,6 +1850,20 @@ export interface components {
       title: string;
       type: string;
     };
+    QueueOverview: {
+      active: number;
+      dead_letter: number;
+      failed: number;
+      queued: number;
+      type: string;
+    };
+    QueueOverviewInput: {
+      active: number;
+      dead_letter: number;
+      failed: number;
+      queued: number;
+      type: string;
+    };
     ResetTokenInfo: {
       emailMasked: string;
       /** Format: date-time */
@@ -1406,6 +1875,7 @@ export interface components {
       expiresAt: string;
     };
     SessionInfo: {
+      incident: components['schemas']['Incident'] | null;
       modules: components['schemas']['WorkspaceModules'];
       next: ('mfa_code' | 'mfa_setup' | 'password_change' | 'terms' | 'workspace_picker') | null;
       platform: boolean;
@@ -1424,6 +1894,7 @@ export interface components {
       } | null;
     };
     SessionInfoInput: {
+      incident: components['schemas']['IncidentInput'] | null;
       modules: components['schemas']['WorkspaceModulesInput'];
       next: ('mfa_code' | 'mfa_setup' | 'password_change' | 'terms' | 'workspace_picker') | null;
       platform: boolean;
@@ -1538,6 +2009,18 @@ export interface components {
     };
     WorkspaceModulesInput: {
       website_connector: boolean;
+    };
+    WorkspaceStatusChange: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      status: 'active' | 'suspended' | 'archived';
+    };
+    WorkspaceStatusChangeInput: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      status: 'active' | 'suspended' | 'archived';
     };
     WorkspaceUser: {
       companyIds: string[];
@@ -1718,6 +2201,8 @@ export interface operations {
           | 'connection.added'
           | 'connection.removed'
           | 'connection.reauthorised'
+          | 'workspace.status_changed'
+          | 'workspace.module_changed'
           | 'kill_switch.changed'
           | 'stock.adjusted'
           | 'catalogue.changed'
@@ -1815,6 +2300,8 @@ export interface operations {
           | 'connection.added'
           | 'connection.removed'
           | 'connection.reauthorised'
+          | 'workspace.status_changed'
+          | 'workspace.module_changed'
           | 'kill_switch.changed'
           | 'stock.adjusted'
           | 'catalogue.changed'
@@ -3373,6 +3860,600 @@ export interface operations {
       };
     };
   };
+  listApiUsage: {
+    parameters: {
+      query?: {
+        from?: string;
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['ApiUsage'][];
+          };
+        };
+      };
+    };
+  };
+  listAppSecrets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['AppSecretStatus'][];
+          };
+        };
+      };
+    };
+  };
+  setAppSecret: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        name:
+          | 'amazon.lwa_client_id'
+          | 'amazon.lwa_client_secret'
+          | 'ads.client_id'
+          | 'ads.client_secret'
+          | 'ebay.client_id'
+          | 'ebay.client_secret'
+          | 'ebay.dev_id'
+          | 'ebay.verification_token';
+        slot: 'current' | 'next';
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          value: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  promoteAppSecret: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        name:
+          | 'amazon.lwa_client_id'
+          | 'amazon.lwa_client_secret'
+          | 'ads.client_id'
+          | 'ads.client_secret'
+          | 'ebay.client_id'
+          | 'ebay.client_secret'
+          | 'ebay.dev_id'
+          | 'ebay.verification_token';
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listCredentialExpiry: {
+    parameters: {
+      query?: {
+        within_days?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['CredentialExpiry'][];
+          };
+        };
+      };
+    };
+  };
+  getPlatformFlags: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlatformFlags'];
+        };
+      };
+    };
+  };
+  setPlatformFlags: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          public_signup: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlatformFlags'];
+        };
+      };
+    };
+  };
+  getPlatformHealth: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlatformHealth'];
+        };
+      };
+    };
+  };
+  getIncidentBanner: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            incident: components['schemas']['Incident'] | null;
+          };
+        };
+      };
+    };
+  };
+  setIncidentBanner: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          message: string;
+          /** @enum {string} */
+          severity: 'info' | 'warning' | 'critical';
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            incident: components['schemas']['Incident'];
+          };
+        };
+      };
+    };
+  };
+  clearIncidentBanner: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getQueueOverview: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['QueueOverview'][];
+          };
+        };
+      };
+    };
+  };
+  redriveDeadLetter: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        type: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** Format: uuid */
+            id: string;
+          };
+        };
+      };
+    };
+  };
+  listDeadLetters: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['DeadLetter'][];
+          };
+        };
+      };
+    };
+  };
   listPlatformNotifications: {
     parameters: {
       query?: {
@@ -3537,6 +4618,46 @@ export interface operations {
       };
     };
   };
+  listConsoleWorkspaces: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['ConsoleWorkspace'][];
+          };
+        };
+      };
+    };
+  };
   createWorkspace: {
     parameters: {
       query?: never;
@@ -3579,6 +4700,46 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['Created'];
+        };
+      };
+    };
+  };
+  archiveWorkspace: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspaceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkspaceStatusChange'];
         };
       };
     };
@@ -3673,6 +4834,132 @@ export interface operations {
             /** Format: uuid */
             id: string;
           };
+        };
+      };
+    };
+  };
+  setWorkspaceModules: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspaceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          website_connector: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkspaceModules'];
+        };
+      };
+    };
+  };
+  reactivateWorkspace: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspaceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkspaceStatusChange'];
+        };
+      };
+    };
+  };
+  suspendWorkspace: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspaceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkspaceStatusChange'];
         };
       };
     };

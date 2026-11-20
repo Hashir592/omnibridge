@@ -1631,7 +1631,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0505",
@@ -1666,7 +1666,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0312",

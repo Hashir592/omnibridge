@@ -52,6 +52,23 @@ export { DeletionLog, type DeletionCertificate, type DeletionRun } from './delet
 export { erasureDueAt, ErasureRequestRepository, type ErasureRequest } from './erasure.ts';
 export { SecuritySignals } from './security.ts';
 export {
+  PlatformConsole,
+  PlatformHousekeeping,
+  type ApiUsageRow,
+  type ConsoleAudit,
+  type ConsoleJobRecord,
+  type ConsoleWorkspace,
+  type CredentialExpiryRow,
+  type DigestCounts,
+  type DigestRecipient,
+  type IncidentBanner,
+  type IncidentSeverity,
+  type JobRecordKey,
+  type PlatformFlags,
+  type StatusOutcome,
+  type WorkspaceStatus,
+} from './platform-console.ts';
+export {
   isNotificationCursor,
   NotificationRepository,
   type EmailJobView,
@@ -98,3 +115,13 @@ export {
   type StoredSession,
   type WorkspaceChoiceRow,
 } from './auth.ts';
+export {
+  APP_SECRET_NAMES,
+  AppSecretStore,
+  isAppSecretName,
+  LWA_SECRET_LIFETIME_DAYS,
+  type AppSecretName,
+  type AppSecretSlot,
+  type AppSecretStatus,
+} from './app-secrets.ts';
+export { PLATFORM_KEY_SCOPE, PlatformKeys, rewrapPlatformKeys } from './platform-keys.ts';

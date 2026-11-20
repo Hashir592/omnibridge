@@ -16,9 +16,12 @@ export {
 export { POSTGRES_IMAGE, startRoleCluster, type RoleCluster } from './postgres.ts';
 export {
   walkIsolation,
+  walkPlatform,
   walkRoutes,
   type InjectRequest,
   type IsolationWalk,
+  type PlatformOutcome,
+  type PlatformWalk,
   type WalkCall,
   type WalkedRoute,
   type WalkOutcome,

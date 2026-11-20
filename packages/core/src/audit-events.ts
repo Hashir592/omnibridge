@@ -58,6 +58,9 @@ export const AUDIT_EVENTS = {
   'connection.added': spec('channel_account', ['provider', 'company_id', 'display_name']),
   'connection.removed': spec('channel_account', ['provider', 'company_id', 'display_name']),
   'connection.reauthorised': spec('channel_account', ['provider', 'expires_at']),
+  // The platform console (PLAT-2, T-0504): a platform admin changed the workspace.
+  'workspace.status_changed': spec('workspace', ['status']),
+  'workspace.module_changed': spec('workspace', ['module', 'enabled']),
   // Kill switch (invariant 13).
   'kill_switch.changed': spec('workspace', ['scope', 'enabled']),
   // Stock (INV-4): a manual adjustment needs a reason.
