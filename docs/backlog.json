@@ -1319,7 +1319,8 @@
         "A contract test runs every case through BuyerIdentifiersSchema",
         "The UI test reads the same fixture (no contract import in the SPA)",
         "Pin the dev ob_edge subnet in compose and set the dev PLATFORM_IP_ALLOWLIST to loopback plus that gateway /32, replacing 172.20.0.1 (ADR-073)",
-        "GET /auth/workspaces gains platform_admin: boolean, read fresh (PS-034, ADR-075); contract test"
+        "GET /auth/workspaces gains platform_admin: boolean, read fresh (PS-034, ADR-075); contract test",
+        "The PLAT-3 walk asserts a 2xx per platform route, not only the absence of markers (ADR-076)"
       ],
       "out_of_scope": [
         "Changing the rule"
@@ -1788,6 +1789,39 @@
       ],
       "acceptance": [
         "Findings file in docs/reviews/security/; every Blocker and Major fixed before the M05 end review"
+      ],
+      "risk": "high",
+      "status": "done"
+    },
+    {
+      "id": "T-0507",
+      "module": "M05",
+      "session": "S3",
+      "title": "Fixes from the M05 security audit (ADR-076)",
+      "goal": "Every console and platform-admin sign-in is logged and alerted, and a suspend always wins a sign-in race.",
+      "prd_ids": [],
+      "supports": [
+        "SEC-12",
+        "PLAT-1",
+        "PLAT-2"
+      ],
+      "scope": [
+        "enterPlatform writes platform.console_entered (user, time, client IP) to platform_audit_events; a sign-in ending at the picker records auth.login",
+        "Platform-level security rule in the sweep: new network (IPv4 or IPv6 /64, unseen 90 days, not the first entry) on console entry raises a critical platform notice; failed sign-ins at or above SECURITY_LOGIN_FAILURES in 15 min and each lockout of a platform admin raise warning platform notices",
+        "The workspace member rules (0032) leave platform admins out",
+        "session_advance reads the workspace status FOR SHARE (S5-20261121-02)",
+        "Console sessions: 30-minute idle limit",
+        "Commit docs/reviews/security/20261121-findings.md with the fix and the resolution lines"
+      ],
+      "out_of_scope": [
+        "M22 allowlist and proxy settings"
+      ],
+      "depends_on": [
+        "T-0506"
+      ],
+      "acceptance": [
+        "Tests first, the ones named in the findings file, citing SEC-12, PLAT-1 and PLAT-2",
+        "CI full gate green at merge"
       ],
       "risk": "high",
       "status": "todo"
