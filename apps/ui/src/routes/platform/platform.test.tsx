@@ -2,7 +2,14 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IncidentLine } from '../../components/IncidentLine.tsx';
-import { allowedMoves, capShare, daysUntil, incidentProblem, isSection } from './rules.ts';
+import {
+  allowedMoves,
+  capShare,
+  daysUntil,
+  incidentProblem,
+  isSection,
+  LIVE_POLL_MS,
+} from './rules.ts';
 import { SecretValueForm } from './secrets.tsx';
 
 afterEach(cleanup);
@@ -58,7 +65,13 @@ describe('console helpers', () => {
     expect(daysUntil('2026-11-19T10:00:00Z', now)).toBe(-1);
   });
 
+  it('[RL-5] live usage polls every 10 to 15 seconds', () => {
+    expect(LIVE_POLL_MS).toBeGreaterThanOrEqual(10_000);
+    expect(LIVE_POLL_MS).toBeLessThanOrEqual(15_000);
+  });
+
   it('[PLAT-1] only known sections are read from the address', () => {
+    expect(isSection('maintenance')).toBe(true);
     expect(isSection('secrets')).toBe(true);
     expect(isSection('orders')).toBe(false);
     expect(isSection(undefined)).toBe(false);

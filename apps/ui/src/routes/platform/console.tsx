@@ -13,10 +13,10 @@ import { Tabs } from '../../kit/Tabs.tsx';
 import { ErrorState } from '../../kit/states.tsx';
 import { AuthFrame, Notice } from '../auth/layout.tsx';
 import { HealthSection, JobsSection } from './operations.tsx';
-import { IncidentSection, FlagsSection } from './settings.tsx';
+import { IncidentSection, FlagsSection, MaintenanceSection } from './settings.tsx';
 import { SecretsSection } from './secrets.tsx';
 import type { Section } from './rules.ts';
-import { CredentialsSection, UsageSection } from './usage.tsx';
+import { CredentialsSection, LiveUsageSection, UsageSection } from './usage.tsx';
 import { WorkspacesSection } from './workspaces.tsx';
 
 export interface PlatformSearch {
@@ -153,11 +153,21 @@ function Console({ info }: { info: SessionInfo }) {
             items={[
               { value: 'workspaces', label: 'Workspaces', content: <WorkspacesSection /> },
               { value: 'jobs', label: 'Jobs', content: <JobsSection /> },
-              { value: 'usage', label: 'API usage', content: <UsageSection /> },
+              {
+                value: 'usage',
+                label: 'API usage',
+                content: (
+                  <div className="flex flex-col gap-5">
+                    <LiveUsageSection />
+                    <UsageSection />
+                  </div>
+                ),
+              },
               { value: 'credentials', label: 'Credentials', content: <CredentialsSection /> },
               { value: 'health', label: 'Health', content: <HealthSection /> },
               { value: 'incident', label: 'Incident banner', content: <IncidentSection /> },
               { value: 'secrets', label: 'App secrets', content: <SecretsSection /> },
+              { value: 'maintenance', label: 'Maintenance', content: <MaintenanceSection /> },
               { value: 'flags', label: 'Flags', content: <FlagsSection /> },
             ]}
           />

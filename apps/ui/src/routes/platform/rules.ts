@@ -12,6 +12,7 @@ export const SECTIONS = [
   'health',
   'incident',
   'secrets',
+  'maintenance',
   'flags',
 ] as const;
 export type Section = (typeof SECTIONS)[number];
@@ -62,3 +63,6 @@ export const SECRET_LABEL: Record<string, string> = {
   'ebay.dev_id': 'eBay developer ID',
   'ebay.verification_token': 'eBay deletion verification token',
 };
+
+/** RL-5: every call writes its usage row as it is made, so polling this often is real time. */
+export const LIVE_POLL_MS = 15_000;

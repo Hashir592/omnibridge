@@ -361,6 +361,12 @@ export type CredentialExpiry = components['schemas']['CredentialExpiry'];
 export type PlatformHealth = components['schemas']['PlatformHealth'];
 export type AppSecretStatus = components['schemas']['AppSecretStatus'];
 export type AppSecretName = AppSecretStatus['name'];
+export type Maintenance = components['schemas']['Maintenance'];
+export type EbayBudget = components['schemas']['EbayBudget'];
+export interface LiveUsage {
+  ebay_budget: EbayBudget[];
+  items: Array<ApiUsage & { updated_at: string }>;
+}
 export type SecretSlot = 'current' | 'next';
 export type StatusMove = 'suspend' | 'reactivate' | 'archive';
 export interface IncidentInput {
@@ -446,6 +452,14 @@ export const platformApi = {
       )
     ).items,
   health: () => read<PlatformHealth>(api.GET('/platform/health')),
+  /** SAFE-3: the global maintenance switch. */
+  maintenance: () => read<Maintenance>(api.GET('/platform/maintenance')),
+  setMaintenance: async (maintenance: boolean) =>
+    reply<Maintenance>(
+      api.PUT('/platform/maintenance', { body: { maintenance }, headers: await csrfHeaders() }),
+    ),
+  /** RL-5: today's usage, each row written as the call is made. */
+  liveUsage: () => read<LiveUsage>(api.GET('/platform/api-usage/live')),
   incident: async () =>
     (await read<{ incident: Incident | null }>(api.GET('/platform/incident-banner'))).incident,
   setIncident: async (input: IncidentInput) =>
@@ -472,5 +486,68 @@ export const platformApi = {
         params: { path: { name } },
         headers: await csrfHeaders(),
       }),
+    ),
+};
+
+/* ---------- connections (T-0701, T-0702 routes; T-0314 screens: INT-4, SAFE-1, SAFE-2) ---------- */
+
+export type Connection = components['schemas']['Connection'];
+export type ConnectionDetail = components['schemas']['ConnectionDetail'];
+export type ConnectionStatus = components['schemas']['ConnectionStatus'];
+export type Provider = components['schemas']['Provider'];
+export type ApiUsageToday = components['schemas']['ApiUsageToday'];
+export type MaintenanceState = components['schemas']['MaintenanceState'];
+export type BulkAction = components['schemas']['BulkAction'];
+export type BulkPreview = components['schemas']['BulkPreview'];
+export type BulkConfirmed = components['schemas']['BulkConfirmed'];
+
+const accountPath = (accountId: string) => ({ params: { path: { accountId } } });
+
+/** Connections is an admin tab; the server answers only the companies in the user's scope. */
+export const connectionsApi = {
+  list: async () =>
+    read<{ items: Connection[]; maintenance: MaintenanceState }>(api.GET('/connections')),
+  get: (accountId: string) =>
+    read<ConnectionDetail>(api.GET('/connections/{accountId}', accountPath(accountId))),
+  /** SAFE-2: answers the Connection with its new kill switch. */
+  setKillSwitch: async (accountId: string, paused: boolean) =>
+    reply<Connection>(
+      api.PUT('/connections/{accountId}/kill-switch', {
+        ...accountPath(accountId),
+        body: { paused },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** The provider's consent URL; 409 for an API-key provider. */
+  authorise: async (accountId: string) =>
+    reply<{ redirect_url: string }>(
+      api.POST('/connections/{accountId}/authorise', {
+        ...accountPath(accountId),
+        headers: await csrfHeaders(),
+      }),
+    ),
+};
+
+/** SAFE-1: preview names every account; confirm sends the token only. */
+export const bulkApi = {
+  preview: async (
+    action: BulkAction,
+    channelAccountIds: string[],
+    params?: Record<string, string | number | boolean | string[]>,
+  ) =>
+    reply<BulkPreview>(
+      api.POST('/bulk-writes/preview', {
+        body: {
+          action,
+          channel_account_ids: channelAccountIds,
+          ...(params === undefined ? {} : { params }),
+        },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** 202; 404 for an unknown token; 409 when it expired, was used or the scope changed. */
+  confirm: async (token: string) =>
+    reply<BulkConfirmed>(
+      api.POST('/bulk-writes/confirm', { body: { token }, headers: await csrfHeaders() }),
     ),
 };
