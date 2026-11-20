@@ -31,13 +31,23 @@ interface AppState {
 const Ctx = createContext<AppState | null>(null);
 
 /** Where an unfinished sign-in continues (USR-2, USR-3, USR-4, WWW-7). */
-const STEP_PATH: Record<NonNullable<SessionInfo['next']>, string> = {
+export const STEP_PATH: Record<NonNullable<SessionInfo['next']>, string> = {
   mfa_code: '/sign-in/code',
   mfa_setup: '/sign-in/set-up-mfa',
   password_change: '/sign-in/password-change',
   terms: '/sign-in/terms',
   workspace_picker: '/workspaces',
 };
+
+/**
+ * GET /auth/session for a query: the reply when it is 200 or 401, and a thrown error otherwise, so
+ * a failed refetch keeps the last good answer instead of replacing it.
+ */
+export async function readSession() {
+  const r = await authApi.session();
+  if (!r.ok && r.status !== 401) throw new Error(`session ${String(r.status)}`);
+  return r;
+}
 
 const initials = (name: string) =>
   name
@@ -58,9 +68,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [companyId, setCompanyId] = useState('all');
   const auth = useQuery({
     queryKey: ['auth-session', persona],
-    queryFn: () => authApi.session(),
+    queryFn: readSession,
     staleTime: Infinity,
-    // Read again every minute, so a new incident banner reaches open tabs (PLAT-2).
+    retry: 1,
+    // Read again every minute, so a new incident banner reaches open tabs (PLAT-2). A failed read
+    // throws, so the last good answer stays in place; only a 401 ends the session.
     refetchInterval: 60_000,
   });
   const { data } = useQuery({
@@ -113,9 +125,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   );
 
   // Nothing to show and nowhere to send them: say so plainly, with a way out (no blank app).
-  const stuck = auth.isError
-    ? 'error'
-    : auth.data && !auth.data.ok && auth.data.status !== 401
+  const stuck =
+    auth.isError && auth.data === undefined
       ? 'error'
       : info && !info.next && !info.workspace && !info.platform
         ? 'no_workspace'

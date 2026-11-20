@@ -1,3 +1,4 @@
+import { Field as BaseField } from '@base-ui/react/field';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { platformApi, type ApiProblem, type IncidentInput } from '../../auth/api.ts';
@@ -10,7 +11,7 @@ import { Field } from '../../kit/Field.tsx';
 import { Select } from '../../kit/Select.tsx';
 import { useToast } from '../../kit/Toast.tsx';
 import { formatDateTime } from '../../lib/format.ts';
-import { CONSOLE, ConsoleFailure, Loading } from './parts.tsx';
+import { CONSOLE, ConsoleFailure, Loading, refusal } from './parts.tsx';
 import { incidentProblem, INCIDENT_MAX } from './rules.ts';
 
 const INCIDENT_KEY = [CONSOLE, 'incident'] as const;
@@ -55,7 +56,7 @@ export function IncidentSection() {
         r.status === 422
           ? ((r.body as ApiProblem | undefined)?.errors?.[0]?.message ??
               'The message is not allowed.')
-          : 'The banner could not be saved. Try again.',
+          : (refusal(r.status) ?? 'The banner could not be saved. Try again.'),
       );
     },
     onError: () => {
@@ -70,7 +71,7 @@ export function IncidentSection() {
       if (r.ok) {
         setError(undefined);
         toast({ title: 'Banner cleared', tone: 'success' });
-      } else setError('The banner could not be cleared. Try again.');
+      } else setError(refusal(r.status) ?? 'The banner could not be cleared. Try again.');
     },
     onError: () => {
       setError('The banner could not be cleared. Try again.');
@@ -128,19 +129,16 @@ export function IncidentSection() {
             hint={`Plain text everyone signed in sees, up to ${String(INCIDENT_MAX)} characters. No email addresses.`}
             error={shown}
           >
-            <textarea
-              aria-label="Message"
-              aria-invalid={!!shown}
-              rows={3}
-              maxLength={INCIDENT_MAX + 50}
+            <BaseField.Control
+              render={<textarea rows={3} maxLength={INCIDENT_MAX + 50} />}
               value={message}
-              onChange={(e) => {
-                setMessage(e.target.value);
+              onValueChange={(v) => {
+                setMessage(v);
               }}
               onBlur={() => {
                 if (message !== '') setTouched(true);
               }}
-              className="w-full rounded-ctl border border-border bg-card px-3 py-2 text-13 text-ink shadow-card outline-none placeholder:text-ink-muted focus:border-brand-600 aria-[invalid=true]:border-danger"
+              className="h-auto w-full rounded-ctl border border-border bg-card px-3 py-2 text-13 text-ink shadow-card outline-none placeholder:text-ink-muted focus:border-brand-600 data-[invalid]:border-danger"
               placeholder="For example: eBay orders are arriving late. We are on it."
             />
           </Field>
@@ -198,7 +196,7 @@ export function FlagsSection() {
       if (r.ok) {
         setError(undefined);
         toast({ title: on ? 'Self sign-up on' : 'Self sign-up off', tone: 'success' });
-      } else setError('The flag could not be saved. Try again.');
+      } else setError(refusal(r.status) ?? 'The flag could not be saved. Try again.');
     },
     onError: () => {
       setError('The flag could not be saved. Try again.');

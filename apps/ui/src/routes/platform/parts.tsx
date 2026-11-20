@@ -33,6 +33,18 @@ export function ConsoleFailure({ error, retry }: { error: unknown; retry: () => 
   );
 }
 
+/**
+ * Why a console change was refused, for 401 and 403; undefined for anything else, so the caller
+ * keeps its own message. Retrying cannot fix either, so the text says what will.
+ */
+export function refusal(status: number): string | undefined {
+  if (status === 401) return 'Your session has ended. Sign in again to make changes.';
+  if (status === 403) {
+    return 'The console refused this. It needs a platform operator with two-step verification, on the office network or VPN.';
+  }
+  return undefined;
+}
+
 /** Loading line inside a console card. */
 export function Loading() {
   return (

@@ -217,21 +217,23 @@ const MOVES = {
 export const platformHandlers = [
   http.get('*/api/platform/workspaces', () => gate() ?? HttpResponse.json({ items: workspaces })),
 
-  http.post('*/api/platform/workspaces/:id/:move', ({ params }) => {
-    const denied = gate();
-    if (denied) return denied;
-    const move = MOVES[params.move as keyof typeof MOVES] as
-      (typeof MOVES)[keyof typeof MOVES] | undefined;
-    const ws = workspaces.find((w) => w.id === params.id);
-    if (!move || !ws) return problem(404, 'not_found', 'workspace');
-    if (!(move.from as readonly string[]).includes(ws.status)) {
-      return problem(409, 'conflict', 'wrong_state');
-    }
-    ws.status = move.to;
-    ws.status_changed_at = new Date().toISOString();
-    if (move.to === 'archived') ws.counts = { ...ws.counts, users: 0 };
-    return HttpResponse.json({ id: ws.id, status: ws.status }, { status: 202 });
-  }),
+  // One route per move: POST .../companies and .../invites are other routes.
+  ...(Object.keys(MOVES) as Array<keyof typeof MOVES>).map((name) =>
+    http.post(`*/api/platform/workspaces/:id/${name}`, ({ params }) => {
+      const denied = gate();
+      if (denied) return denied;
+      const move = MOVES[name];
+      const ws = workspaces.find((w) => w.id === params.id);
+      if (!ws) return problem(404, 'not_found', 'workspace');
+      if (!(move.from as readonly string[]).includes(ws.status)) {
+        return problem(409, 'conflict', 'wrong_state');
+      }
+      ws.status = move.to;
+      ws.status_changed_at = new Date().toISOString();
+      if (move.to === 'archived') ws.counts = { ...ws.counts, users: 0 };
+      return HttpResponse.json({ id: ws.id, status: ws.status }, { status: 202 });
+    }),
+  ),
 
   http.put('*/api/platform/workspaces/:id/modules', async ({ params, request }) => {
     const denied = gate();

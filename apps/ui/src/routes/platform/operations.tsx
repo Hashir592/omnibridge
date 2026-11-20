@@ -8,7 +8,7 @@ import { ConfirmDialog } from '../../kit/Dialog.tsx';
 import { EmptyState } from '../../kit/states.tsx';
 import { useToast } from '../../kit/Toast.tsx';
 import { formatDateTime, formatInt } from '../../lib/format.ts';
-import { CONSOLE, ConsoleFailure, Loading } from './parts.tsx';
+import { CONSOLE, ConsoleFailure, Loading, refusal } from './parts.tsx';
 import { useWorkspaceNames } from './workspaces.tsx';
 
 const JOBS_KEY = [CONSOLE, 'jobs'] as const;
@@ -34,7 +34,7 @@ export function JobsSection() {
         setError(
           r.status === 404
             ? 'That job is no longer dead-lettered. The list is refreshed.'
-            : 'The job could not be redriven. Try again.',
+            : (refusal(r.status) ?? 'The job could not be redriven. Try again.'),
         );
       }
     },

@@ -12,7 +12,7 @@ import { ConfirmDialog, Dialog } from '../../kit/Dialog.tsx';
 import { Field, Input } from '../../kit/Field.tsx';
 import { useToast } from '../../kit/Toast.tsx';
 import { formatDateTime } from '../../lib/format.ts';
-import { CONSOLE, ConsoleFailure, Loading } from './parts.tsx';
+import { CONSOLE, ConsoleFailure, Loading, refusal } from './parts.tsx';
 import { SECRET_LABEL } from './rules.ts';
 
 const SECRETS_KEY = [CONSOLE, 'app-secrets'] as const;
@@ -41,7 +41,7 @@ export function SecretsSection() {
         setError(
           r.status === 409
             ? `${label(name)} has no next value to promote. Set one first.`
-            : 'The value could not be promoted. Try again.',
+            : (refusal(r.status) ?? 'The value could not be promoted. Try again.'),
         );
       }
     },
@@ -51,7 +51,7 @@ export function SecretsSection() {
     onSettled: () => qc.invalidateQueries({ queryKey: SECRETS_KEY }),
   });
 
-  const save = async (value: string): Promise<boolean> => {
+  const save = async (value: string): Promise<boolean | string> => {
     if (!editing) return false;
     const r = await platformApi.setAppSecret(editing.name, editing.slot, value);
     await qc.invalidateQueries({ queryKey: SECRETS_KEY });
@@ -64,8 +64,9 @@ export function SecretsSection() {
         tone: 'success',
       });
       setEditing(undefined);
+      return true;
     }
-    return r.ok;
+    return refusal(r.status) ?? false;
   };
 
   return (
@@ -205,7 +206,8 @@ export function SecretValueForm({
   onCancel,
 }: {
   slot: SecretSlot;
-  onSave: (value: string) => Promise<boolean>;
+  /** True when saved; false or a message saying why not. */
+  onSave: (value: string) => Promise<boolean | string>;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState('');
@@ -231,8 +233,8 @@ export function SecretValueForm({
         setError(undefined);
         void onSave(value)
           .then((ok) => {
-            if (ok) setValue('');
-            else setError('The value could not be saved. Try again.');
+            if (ok === true) setValue('');
+            else setError(ok === false ? 'The value could not be saved. Try again.' : ok);
           })
           .catch(() => {
             setError('The value could not be saved. Try again.');
@@ -254,7 +256,11 @@ export function SecretValueForm({
         <Input
           type="password"
           name="app-secret-value"
-          autoComplete="new-password"
+          // Not a password: "off" plus the managers' own opt-outs, so none offers to save it.
+          autoComplete="off"
+          data-1p-ignore=""
+          data-lpignore="true"
+          data-bwignore=""
           spellCheck={false}
           value={value}
           onChange={setValue}

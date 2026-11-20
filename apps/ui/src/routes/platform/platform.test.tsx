@@ -72,7 +72,8 @@ describe('app secret form', () => {
     render(<SecretValueForm slot="current" onSave={vi.fn()} onCancel={vi.fn()} />);
     expect(field().value).toBe('');
     expect(field().type).toBe('password');
-    expect(field().autocomplete).toBe('new-password');
+    expect(field().autocomplete).toBe('off');
+    expect(field().hasAttribute('data-1p-ignore')).toBe(true);
   });
 
   it('[PLAT-4] clears the value after a save', async () => {

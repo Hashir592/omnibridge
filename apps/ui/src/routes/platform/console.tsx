@@ -4,6 +4,7 @@ import { ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { authApi } from '../../auth/api.ts';
 import type { SessionInfo } from '../../auth/shapes.ts';
+import { readSession, STEP_PATH } from '../../app/session.tsx';
 import { PageHeader } from '../../components/Card.tsx';
 import { IncidentLine } from '../../components/IncidentLine.tsx';
 import { Button } from '../../kit/Button.tsx';
@@ -22,14 +23,6 @@ export interface PlatformSearch {
   section?: Section;
 }
 
-const STEP_PATH: Record<NonNullable<SessionInfo['next']>, string> = {
-  mfa_code: '/sign-in/code',
-  mfa_setup: '/sign-in/set-up-mfa',
-  password_change: '/sign-in/password-change',
-  terms: '/sign-in/terms',
-  workspace_picker: '/workspaces',
-};
-
 /**
  * The platform console (T-0313; PLAT-1, PLAT-2, PLAT-4, OPS-6). It has its own frame, outside the
  * workspace shell: a console session has no workspace. Only a session that GET /auth/session says
@@ -40,8 +33,9 @@ export function PlatformPage() {
   const navigate = useNavigate();
   const session = useQuery({
     queryKey: ['auth-session', 'console'],
-    queryFn: () => authApi.session(),
+    queryFn: readSession,
     staleTime: Infinity,
+    retry: 1,
     refetchInterval: 60_000,
   });
   const info = session.data?.ok ? (session.data.body as SessionInfo) : undefined;
@@ -51,7 +45,7 @@ export function PlatformPage() {
     else if (info?.next) void navigate({ to: STEP_PATH[info.next] });
   }, [session.data, info, navigate]);
 
-  if (session.isError || (session.data && !session.data.ok && session.data.status !== 401)) {
+  if (session.isError && session.data === undefined) {
     return (
       <main className="grid min-h-dvh place-items-center bg-surface p-6">
         <ErrorState

@@ -13,7 +13,7 @@ import { ConfirmDialog } from '../../kit/Dialog.tsx';
 import { EmptyState } from '../../kit/states.tsx';
 import { useToast } from '../../kit/Toast.tsx';
 import { formatDate, formatInt } from '../../lib/format.ts';
-import { CONSOLE, ConsoleFailure, Loading } from './parts.tsx';
+import { CONSOLE, ConsoleFailure, Loading, refusal } from './parts.tsx';
 import { allowedMoves } from './rules.ts';
 
 export const WORKSPACES_KEY = [CONSOLE, 'workspaces'] as const;
@@ -77,7 +77,7 @@ export function WorkspacesSection() {
             ? `${v.ws.name} cannot be changed that way now. Archive is final, and only a suspended workspace can be reactivated.`
             : r.status === 404
               ? `${v.ws.name} no longer exists.`
-              : 'The change could not be saved. Try again.',
+              : (refusal(r.status) ?? 'The change could not be saved. Try again.'),
         );
       }
     },
@@ -102,7 +102,7 @@ export function WorkspacesSection() {
         setError(
           r.status === 409
             ? `${v.ws.name} is archived, so its modules cannot change.`
-            : 'The change could not be saved. Try again.',
+            : (refusal(r.status) ?? 'The change could not be saved. Try again.'),
         );
       }
     },
