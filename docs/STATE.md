@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Nov 2026 by S3 (M05 batch 2 built; CI blocked by billing).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 20 Nov 2026 by S2 (T-0313 console screens in a PR; M05 batch 2 merged as #117).
 
 ## Now
 
@@ -9,7 +9,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M04 in short:** pii-vault (ingest, read-full, mask, search, match, delete) on `ob_pii`/`ob_vault`; deletion service with all seven DEL-1 triggers, tombstones in three places, journal; erasure, withdraw, retry and access export; eBay deletion fan-out; backups, restore drill, AT-9 marker scan; S5 audit fixes (ADR-068) and the external audit fixes (ADR-069).
 - **Now: M05 core** (notification centre, email alerts, security alerts, platform console, app secrets). Tasks in `docs/backlog.json`. No halfway review; S5 audit T-0506 before the M05 end review.
 - **M05 batch 1 (S3):** done and merged (T-0411, T-0501 to T-0503; ADR-071).
-- **M05 batch 2 (S3) built, waiting on CI:** PR #117 holds both tasks. The stacked PR #118 (T-0505) merged into #117's branch, not into main. GitHub Actions did not start: "recent account payments have failed or your spending limit needs to be increased". Auto-merge is on; it merges once CI runs green.
+- **M05 batch 2 (S3) merged:** PR #117 (T-0504 and T-0505; #118 was stacked into it).
+- **T-0313 (S2) in a PR, auto-merge on:** `/platform` console screens (workspaces and status moves, jobs and redrive, API usage, credential calendar, health, incident banner editor, write-only app secrets, flags), the incident line across the app, notification company names from `GET /companies` (ADR-072). Own frame outside the workspace shell; not linked from the app. Proposal PS-034: a `platform_admin` flag so the picker can offer the console.
   - T-0504 (PLAT-1/2/3, OPS-6): db-main 0033.
     - `/platform` routes are for a platform admin with MFA, from `PLATFORM_IP_ALLOWLIST` (`request.ip` via TRUSTED_PROXIES; an empty list denies). The flag and MFA are re-read every request (ADR-061 closed).
     - Workspaces have a status, active/suspended/archived; archive is final. Suspend and archive end sessions and open invites. Archive queues `workspace.close`: the workspace_closure deletion, then memberships, then the terms of people left with none.
@@ -50,9 +51,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 ## Next step
 
-1. Hashir: fix GitHub Actions billing (Settings → Billing & plans), then re-run CI on PR #117; it merges itself on green.
-2. S2: T-0313 console screens against PS-032 and PS-033 (handoff `docs/handoffs/20261120-1745-S3-to-S2.md`).
-3. S1: place the batch 2 follow-ups; then S5 T-0506 audit (handoff `docs/handoffs/20261120-1745-S3-to-S1.md`).
+1. T-0313's PR merges itself on green CI.
+2. S1: place the batch 2 follow-ups and rule on PS-034 (handoffs `docs/handoffs/20261120-1745-S3-to-S1.md`, `docs/handoffs/20261120-1910-S2-to-S1.md`); then S5 T-0506 audit.
 
 ## Prerequisites outstanding (Hashir)
 
