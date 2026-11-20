@@ -1307,16 +1307,18 @@
       "id": "T-0412",
       "module": "M04",
       "session": "S3",
-      "title": "One identifier-rule case table for contract and UI (ADR-072, F-M04e-04)",
+      "title": "Shared identifier-rule fixture and a portable dev allowlist (ADR-072, ADR-073)",
       "goal": "A change to the erasure identifier rule breaks a test on either side.",
       "prd_ids": [],
       "supports": [
-        "DEL-4"
+        "DEL-4",
+        "PLAT-1"
       ],
       "scope": [
         "Move the case table from apps/ui/src/mocks/privacy.test.ts into a JSON fixture in packages/testkit",
         "A contract test runs every case through BuyerIdentifiersSchema",
-        "The UI test reads the same fixture (no contract import in the SPA)"
+        "The UI test reads the same fixture (no contract import in the SPA)",
+        "Pin the dev ob_edge subnet in compose and set the dev PLATFORM_IP_ALLOWLIST to loopback plus that gateway /32, replacing 172.20.0.1 (ADR-073)"
       ],
       "out_of_scope": [
         "Changing the rule"
@@ -1631,7 +1633,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0505",
@@ -1666,7 +1668,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0312",
