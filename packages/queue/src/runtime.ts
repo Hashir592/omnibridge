@@ -137,6 +137,25 @@ export interface PhasedHandler<T, O> {
   failed?(job: RunningJob<T>, err: unknown): Promise<void>;
 }
 
+/**
+ * A failure no retry can mend, e.g. a provider answer the parser cannot read (INT-5). The job ends
+ * at once: its record is failed with `code`, the `failed` hook runs, and the job waits in the
+ * dead-letter queue to be redriven once the cause is fixed. `code` is a stable dotted code, never
+ * a message or a value.
+ */
+export class PermanentJobError extends Error {
+  readonly code: string;
+
+  constructor(code: string, options?: { cause?: unknown }) {
+    if (!/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/.test(code) || code.length > 64) {
+      throw new Error('A PermanentJobError code must be a dotted lower-case code');
+    }
+    super(code, options);
+    this.name = 'PermanentJobError';
+    this.code = code;
+  }
+}
+
 /** Options a caller may tune per worker; the rest is fixed by the job definition. */
 export type WorkTuning = Pick<WorkOptions, 'localConcurrency' | 'pollingIntervalSeconds'>;
 
@@ -328,14 +347,26 @@ export class JobQueue {
       });
       this.#log.info({ event: 'job.completed', ...fields }, 'job completed');
     } catch (err) {
-      const last = job.retryCount >= job.retryLimit;
+      const permanent = err instanceof PermanentJobError;
+      const last = permanent || job.retryCount >= job.retryLimit;
       // Log first and never let a failed record update replace the handler's error.
       this.#log.warn(
-        { event: last ? 'job.dead_lettered' : 'job.retrying', ...fields, err },
+        {
+          event: permanent ? 'job.failed_permanent' : last ? 'job.dead_lettered' : 'job.retrying',
+          ...fields,
+          ...(permanent ? { errorCode: err.code } : { err }),
+        },
         last ? 'job failed; moved to the dead-letter queue' : 'job failed; will retry',
       );
+      if (permanent) {
+        // pg-boss would retry a thrown job, so this one is dead-lettered here and completes.
+        await this.#boss.send(deadLetterName(def), isPlainObject(job.data) ? job.data : {});
+      }
       await this.#records
-        .update(ctx, key, { state: last ? 'failed' : 'retrying', errorCode: 'handler_failed' })
+        .update(ctx, key, {
+          state: last ? 'failed' : 'retrying',
+          errorCode: permanent ? err.code : 'handler_failed',
+        })
         .catch((updateErr: unknown) => {
           this.#log.warn(
             { event: 'job.record_update_failed', ...fields, err: updateErr },
@@ -365,6 +396,7 @@ export class JobQueue {
             );
           });
       }
+      if (permanent) return;
       throw err; // pg-boss retries, or moves the job to <type>.dlq after the last attempt
     } finally {
       await release();

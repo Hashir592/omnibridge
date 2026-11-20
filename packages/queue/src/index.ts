@@ -50,6 +50,7 @@ export {
 } from './job.ts';
 export {
   JobQueue,
+  PermanentJobError,
   type ConcurrencyLimiter,
   type JobHandler,
   type JobRecordPatch,

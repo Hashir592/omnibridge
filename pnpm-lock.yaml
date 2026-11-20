@@ -613,6 +613,18 @@ importers:
 
   packages/providers/evri: {}
 
+  packages/providers/kit:
+    dependencies:
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../crypto
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   packages/providers/website: {}
 
   packages/queue:
