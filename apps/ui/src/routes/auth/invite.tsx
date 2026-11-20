@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { ChevronRight } from 'lucide-react';
 import { useState, type SyntheticEvent } from 'react';
@@ -7,6 +7,7 @@ import { Field, Input } from '../../kit/Field.tsx';
 import { Skeleton } from '../../kit/Skeleton.tsx';
 import { authApi, type ApiProblem } from '../../auth/api.ts';
 import type { InviteInfo, SignInResult, WorkspaceList } from '../../auth/shapes.ts';
+import { ConsoleEntry } from './console-entry.tsx';
 import { AuthFrame, Notice, authLink } from './layout.tsx';
 import { LinkUnusable } from './password.tsx';
 import { PasswordRules, passwordLocallyValid, personalParts, useEnterApp } from './parts.tsx';
@@ -208,9 +209,11 @@ export function WorkspacesPage() {
     queryFn: async () => {
       const r = await authApi.workspaces();
       if (!r.ok) throw new Error(String(r.status));
-      return (r.body as WorkspaceList).workspaces;
+      return r.body as WorkspaceList;
     },
   });
+  const qc = useQueryClient();
+  const navigate = useNavigate();
   const [busy, setBusy] = useState<string>();
   const [failed, setFailed] = useState(false);
 
@@ -247,7 +250,7 @@ export function WorkspacesPage() {
         </Notice>
       ) : (
         <ul aria-label="Workspaces" className="-mx-2 flex flex-col">
-          {(list.data ?? []).map((w) => (
+          {(list.data?.workspaces ?? []).map((w) => (
             <li key={w.id}>
               <button
                 disabled={!!busy}
@@ -271,6 +274,16 @@ export function WorkspacesPage() {
               </button>
             </li>
           ))}
+          <ConsoleEntry
+            show={list.data?.platform_admin === true}
+            disabled={!!busy}
+            enter={authApi.enterPlatform}
+            onEntered={async () => {
+              // The picker's cached data must not survive into the console session (PLAT-3).
+              qc.removeQueries();
+              await navigate({ to: '/platform' });
+            }}
+          />
           {!list.data &&
             [0, 1].map((i) => (
               <li key={i} className="flex items-center gap-3 px-2 py-2.5">
