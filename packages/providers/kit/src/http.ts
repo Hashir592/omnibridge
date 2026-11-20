@@ -6,22 +6,17 @@ import { EgressRefused } from './errors.ts';
  * Carrier and website hosts are added with their modules (M11, M12, M13); until then a live call
  * to them is refused. Production hosts are confirmed in M22.
  */
-const HOSTS: Readonly<Record<'sandbox' | 'live', Readonly<Record<Provider, readonly string[]>>>> = {
+type Hosts = Readonly<Partial<Record<Provider, Readonly<Record<string, string>>>>>;
+const HOSTS: Readonly<Record<'sandbox' | 'live', Hosts>> = {
   sandbox: {
-    amazon: ['sandbox.sellingpartnerapi-eu.amazon.com', 'api.amazon.com'],
-    amazon_ads: ['advertising-api-test.amazon.com', 'api.amazon.co.uk'],
-    ebay: ['api.sandbox.ebay.com'],
-    website: [],
-    evri: [],
-    dpd: [],
+    amazon: { api: 'sandbox.sellingpartnerapi-eu.amazon.com', lwa: 'api.amazon.com' },
+    amazon_ads: { api: 'advertising-api-test.amazon.com', lwa: 'api.amazon.co.uk' },
+    ebay: { api: 'api.sandbox.ebay.com' },
   },
   live: {
-    amazon: ['sellingpartnerapi-eu.amazon.com', 'api.amazon.com'],
-    amazon_ads: ['advertising-api-eu.amazon.com', 'api.amazon.co.uk'],
-    ebay: ['api.ebay.com'],
-    website: [],
-    evri: [],
-    dpd: [],
+    amazon: { api: 'sellingpartnerapi-eu.amazon.com', lwa: 'api.amazon.com' },
+    amazon_ads: { api: 'advertising-api-eu.amazon.com', lwa: 'api.amazon.co.uk' },
+    ebay: { api: 'api.ebay.com' },
   },
 };
 
@@ -59,20 +54,26 @@ export class ProviderHttp {
     this.#timeoutMs = options.timeoutMs ?? 15_000;
   }
 
-  /** A provider's base URL: under the mocks in mock mode, else its first host for this mode. */
-  base(provider: Provider, _service: string): URL {
+  /**
+   * A provider's base URL for one of its services (`api`, `lwa`): under the mocks in mock mode,
+   * else the host this mode lists for it.
+   */
+  base(provider: Provider, service: string): URL {
     if (this.#mocks !== undefined) return new URL(`${provider}/`, this.#mocks);
-    const host = HOSTS[this.#mode === 'live' ? 'live' : 'sandbox'][provider][0];
-    if (host === undefined) throw new EgressRefused(provider, '(none configured)');
+    const host = this.#hosts(provider)[service];
+    if (host === undefined) throw new EgressRefused(provider, `(no ${service} host)`);
     return new URL(`https://${host}/`);
+  }
+
+  #hosts(provider: Provider): Readonly<Record<string, string>> {
+    return HOSTS[this.#mode === 'live' ? 'live' : 'sandbox'][provider] ?? {};
   }
 
   #allowed(provider: Provider, url: URL): boolean {
     if (this.#mode === 'mock') {
       return url.host === this.#mocks?.host || LOOPBACK.includes(url.hostname);
     }
-    const hosts = HOSTS[this.#mode === 'live' ? 'live' : 'sandbox'][provider];
-    return url.protocol === 'https:' && hosts.includes(url.hostname);
+    return url.protocol === 'https:' && Object.values(this.#hosts(provider)).includes(url.hostname);
   }
 
   async request(provider: Provider, req: ProviderRequest): Promise<Response> {
