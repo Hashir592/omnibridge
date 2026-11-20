@@ -86,6 +86,9 @@ export {
   securityScanJob,
   securityScanSweepJob,
   workspaceCloseJob,
+  syncPollJob,
+  SYNC_STREAMS,
+  type SyncStreamName,
 } from './registry.ts';
 export { JobAdmin, type DeadLetter, type QueueOverview, type RedriveOutcome } from './admin.ts';
 export { deletionRunId, requestDeletion, type DeletionRequest } from './deletion.ts';

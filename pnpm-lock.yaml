@@ -440,6 +440,12 @@ importers:
       '@omnibridge/mail':
         specifier: workspace:*
         version: link:../../packages/mail
+      '@omnibridge/provider-ebay':
+        specifier: workspace:*
+        version: link:../../packages/providers/ebay
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../../packages/providers/kit
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -462,6 +468,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@omnibridge/provider-mocks':
+        specifier: workspace:*
+        version: link:../../mocks/provider-mocks
       '@omnibridge/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit
