@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Nov 2026 by S3 (T-0507 and T-0412 in PRs, auto-merge on).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Nov 2026 by S2 (T-0315 in a PR, auto-merge on; T-0507 and T-0412 merged).
 
 ## Now
 
@@ -66,7 +66,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 ## Next step
 
 1. PRs #124 (T-0507) and T-0412's merge themselves on green CI.
-2. S5 re-checks S5-20261121-01/-02; S2 does T-0315 (picker entry); then the S4 M05 end review.
+2. S5 re-checks S5-20261121-01/-02; then the S4 M05 end review. T-0315 (S2, picker console row) is in a PR, auto-merge on.
 
 ## Prerequisites outstanding (Hashir)
 
