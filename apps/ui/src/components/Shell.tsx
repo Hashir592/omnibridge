@@ -10,6 +10,7 @@ import { cn } from '../lib/cn.ts';
 import { formatInt } from '../lib/format.ts';
 import { mockApi } from '../mocks/api.ts';
 import { CompanySwatch } from './badges.tsx';
+import { IncidentLine } from './IncidentLine.tsx';
 import { NotificationBell } from './NotificationPanel.tsx';
 
 function useVisibleNav(): { main: NavItem[]; admin: NavItem[] } {
@@ -31,6 +32,7 @@ const menuItem =
   'flex h-8 cursor-default items-center gap-2 rounded-[6px] px-2 outline-none select-none data-[highlighted]:bg-hover';
 
 export function Shell() {
+  const { incident } = useAppState();
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
 
@@ -93,6 +95,7 @@ export function Shell() {
           </button>
           <NotificationBell />
         </header>
+        <IncidentLine incident={incident} />
         <main className="min-h-0 flex-1 overflow-hidden">
           <Outlet />
         </main>

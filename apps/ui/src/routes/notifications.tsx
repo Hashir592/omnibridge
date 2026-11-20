@@ -1,3 +1,4 @@
+import { useCompanyNames } from '../app/companies.ts';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { CheckCheck } from 'lucide-react';
@@ -97,7 +98,8 @@ function Centre({
   focusId: string | undefined;
   onFilter: (f: NotificationsSearch) => void;
 }) {
-  const { persona, company } = useAppState();
+  const { persona } = useAppState();
+  const companyName = useCompanyNames();
   const markRead = useMarkRead();
   const markAll = useMarkAllRead();
   const filter = { state, severity };
@@ -211,7 +213,7 @@ function Centre({
                 <NotificationRow
                   n={n}
                   highlighted={n.id === focusId}
-                  company={n.companyId ? company(n.companyId) : undefined}
+                  company={companyName(n.companyId)}
                   onOpen={() => {
                     if (n.state === 'unread') markRead.mutate(n.id);
                   }}

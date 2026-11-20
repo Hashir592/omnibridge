@@ -12,9 +12,10 @@ import { orderDetail } from './detail.ts';
 import { computeGroups, dismissGroup, removeFromGroup } from './groups.ts';
 import { homeSummary } from './home.ts';
 import { orderPage } from './orderList.ts';
+import { platformHandlers } from './platform.ts';
 import { previewHandlers } from './preview-handlers.ts';
 import { channelOn, currentSession } from './session.ts';
-import type { Channel, OrderRow } from './types.ts';
+import type { Channel, Company, OrderRow } from './types.ts';
 
 /** Mock of the ORD-5 audit: every full PII view is recorded (user, order, time). */
 export const piiViewLog: Array<{ user: string; orderId: string; at: string }> = [];
@@ -35,6 +36,18 @@ const hasOrdersTab = () => {
   return s.tabs.includes('orders') || s.tabs.includes('shipping');
 };
 
+/** The company hues as the hex badge colour the server stores (TEN-2). */
+const COMPANY_HEX: Record<Company['hue'], string> = {
+  teal: '#2F7F7A',
+  violet: '#7357B0',
+  cyan: '#2A7F9E',
+  magenta: '#A3477F',
+  olive: '#7A7A2E',
+  brown: '#8A5A3C',
+  indigo: '#4B5BB0',
+  slate: '#5F6B7D',
+};
+
 export const handlers = [
   // A page load (the browser asking for a document) is never an API call: Vite serves the SPA.
   // Without this, typing /users or /users/access-reviews into the address bar would get the
@@ -45,7 +58,25 @@ export const handlers = [
       : undefined,
   ),
   ...authHandlers,
+  ...platformHandlers,
   ...previewHandlers,
+
+  // GET /companies (TEN-5): the user's permitted companies only, as the real route answers.
+  http.get('*/api/companies', () =>
+    HttpResponse.json({
+      items: currentSession().companies.map((c) => ({
+        id: c.id,
+        legal_name: `${c.tradingName} Ltd`,
+        trading_name: c.tradingName,
+        company_number: null,
+        vat_number: null,
+        vat_period: 'stagger_1',
+        is_fulfilment_provider: c.id === 'co_1',
+        is_purchasing_company: c.id === 'co_1',
+        badge_colour: COMPANY_HEX[c.hue],
+      })),
+    }),
+  ),
 
   http.get('*/healthz', () =>
     HttpResponse.json<Health>({ status: 'ok', db_main: 'ok', db_pii: 'ok', version: 'mock' }),

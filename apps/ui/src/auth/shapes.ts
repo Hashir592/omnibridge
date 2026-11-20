@@ -86,6 +86,15 @@ export interface SessionInfo {
   workspace: { id: string; name: string; role: 'admin' | 'member' } | null;
   /** That workspace's module toggles; all off without a workspace. */
   modules: { website_connector: boolean };
+  /** The incident banner a platform admin set (PLAT-2, PS-032), shown across the app; or null. */
+  incident: Incident | null;
+}
+
+/** An incident line (PS-032): plain text, 1 to 200 characters, no email address. */
+export interface Incident {
+  message: string;
+  severity: 'info' | 'warning' | 'critical';
+  set_at: string;
 }
 
 /** GET /auth/workspaces → 200 (only after MFA). */

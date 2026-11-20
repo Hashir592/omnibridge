@@ -3,7 +3,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { authApi } from '../auth/api.ts';
 import { Button, buttonClass } from '../kit/Button.tsx';
-import type { SessionInfo } from '../auth/shapes.ts';
+import type { Incident, SessionInfo } from '../auth/shapes.ts';
 import { mockApi } from '../mocks/api.ts';
 import { getPersona, setPersona as setMockPersona, type Persona } from '../mocks/session.ts';
 import type { Company, Session } from '../mocks/types.ts';
@@ -24,6 +24,8 @@ interface AppState {
   companyId: string;
   setCompanyId: (id: string) => void;
   company: (id: string) => Company | undefined;
+  /** The platform's incident banner (PLAT-2), shown across the app; null when there is none. */
+  incident: Incident | null;
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -58,6 +60,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     queryKey: ['auth-session', persona],
     queryFn: () => authApi.session(),
     staleTime: Infinity,
+    // Read again every minute, so a new incident banner reaches open tabs (PLAT-2).
+    refetchInterval: 60_000,
   });
   const { data } = useQuery({
     queryKey: ['session', persona],
@@ -71,6 +75,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (!auth.data) return;
     if (auth.data.status === 401) void navigate({ to: '/sign-in' });
     else if (info?.next) void navigate({ to: STEP_PATH[info.next] });
+    // A console session has no workspace: it belongs in the console (PLAT-1).
+    else if (info?.platform && !info.workspace) void navigate({ to: '/platform' });
   }, [auth.data, info, navigate]);
 
   const session = useMemo<AppSession | undefined>(() => {
@@ -101,8 +107,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       companyId,
       setCompanyId,
       company: (id) => session?.companies.find((c) => c.id === id),
+      incident: info?.incident ?? null,
     }),
-    [session, persona, companyId, qc],
+    [session, persona, companyId, qc, info?.incident],
   );
 
   // Nothing to show and nowhere to send them: say so plainly, with a way out (no blank app).
@@ -110,7 +117,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     ? 'error'
     : auth.data && !auth.data.ok && auth.data.status !== 401
       ? 'error'
-      : info && !info.next && !info.workspace
+      : info && !info.next && !info.workspace && !info.platform
         ? 'no_workspace'
         : undefined;
   if (stuck) {
@@ -123,9 +130,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           <p className="mt-2 text-13 text-ink-muted">
             {stuck === 'error'
               ? 'The server did not answer. Try again in a moment.'
-              : info?.platform
-                ? 'This session is in the platform console. Sign in again to open a workspace.'
-                : 'Choose a workspace to continue.'}
+              : 'Choose a workspace to continue.'}
           </p>
           <div className="mt-5 flex justify-center gap-2">
             {stuck === 'error' ? (
@@ -133,11 +138,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
                 Try again
               </Button>
             ) : (
-              <Link
-                to={info?.platform ? '/sign-in' : '/workspaces'}
-                className={buttonClass('primary')}
-              >
-                {info?.platform ? 'Sign in again' : 'Choose a workspace'}
+              <Link to="/workspaces" className={buttonClass('primary')}>
+                Choose a workspace
               </Link>
             )}
           </div>

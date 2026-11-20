@@ -1,3 +1,4 @@
+import { useCompanyNames } from '../app/companies.ts';
 import { Popover } from '@base-ui/react/popover';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -18,7 +19,8 @@ const POPOVER_LIMIT = 20;
  * condition clears.
  */
 export function NotificationBell() {
-  const { session, persona, company } = useAppState();
+  const { session, persona } = useAppState();
+  const companyName = useCompanyNames();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'all' | 'unread'>('all');
   const count = useUnreadCount();
@@ -123,7 +125,7 @@ export function NotificationBell() {
                   <li key={n.id} className="border-b border-divider last:border-0">
                     <NotificationRow
                       n={n}
-                      company={n.companyId ? company(n.companyId) : undefined}
+                      company={companyName(n.companyId)}
                       onOpen={() => {
                         if (n.state === 'unread') markRead.mutate(n.id);
                         setOpen(false);

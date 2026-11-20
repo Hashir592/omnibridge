@@ -15,6 +15,7 @@ import type {
   TermsInfo,
   SessionInfo,
   WorkspaceChoice,
+  Incident,
 } from './shapes.ts';
 
 /** A reply as the screens read it: the parsed body (data or problem), status and Retry-After. */
@@ -330,5 +331,146 @@ export const authApi = {
   chooseWorkspace: async (workspaceId: string) =>
     reply<never>(
       api.POST('/auth/workspace', { body: { workspaceId }, headers: await csrfHeaders() }),
+    ),
+  /** A platform operator enters the console instead of a workspace; 403 for anyone else. */
+  enterPlatform: async () =>
+    reply<never>(api.POST('/auth/platform', { headers: await csrfHeaders() })),
+};
+
+/* ---------- companies (TEN-5): the user's permitted companies, by name (ADR-072) ---------- */
+
+export type CompanyRecord = components['schemas']['Company'];
+
+export const companiesApi = {
+  list: async (): Promise<CompanyRecord[]> => {
+    const r = await reply<{ items: CompanyRecord[] }>(api.GET('/companies'));
+    if (!r.ok) throw new Error(String(r.status));
+    return (r.body as { items: CompanyRecord[] }).items;
+  },
+};
+
+/* ---------- platform console (T-0504, T-0505 routes; T-0313 screens: PLAT-1, PLAT-2, PLAT-4) ---------- */
+
+export type ConsoleWorkspace = components['schemas']['ConsoleWorkspace'];
+export type WorkspaceStatus = ConsoleWorkspace['status'];
+export type PlatformFlags = components['schemas']['PlatformFlags'];
+export type QueueOverview = components['schemas']['QueueOverview'];
+export type DeadLetter = components['schemas']['DeadLetter'];
+export type ApiUsage = components['schemas']['ApiUsage'];
+export type CredentialExpiry = components['schemas']['CredentialExpiry'];
+export type PlatformHealth = components['schemas']['PlatformHealth'];
+export type AppSecretStatus = components['schemas']['AppSecretStatus'];
+export type AppSecretName = AppSecretStatus['name'];
+export type SecretSlot = 'current' | 'next';
+export type StatusMove = 'suspend' | 'reactivate' | 'archive';
+export interface IncidentInput {
+  message: string;
+  severity: Incident['severity'];
+}
+
+/**
+ * A console read that failed. The status is kept, so the console can tell "sign in again" (401)
+ * from "not allowed from here" (403: no platform flag, no MFA or outside the allowlist, PLAT-1).
+ */
+export class ConsoleError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`console ${String(status)}`);
+    this.status = status;
+  }
+}
+
+async function read<T>(
+  call: Promise<{ data?: unknown; error?: unknown; response: Response }>,
+): Promise<T> {
+  const r = await reply<T>(call);
+  if (!r.ok) throw new ConsoleError(r.status);
+  return r.body as T;
+}
+
+const wsPath = (workspaceId: string) => ({ params: { path: { workspaceId } } });
+
+/** Every route is `auth: platform` (PS-032, PS-033): IDs, names, statuses, dates and counts only. */
+export const platformApi = {
+  workspaces: async () =>
+    (await read<{ items: ConsoleWorkspace[] }>(api.GET('/platform/workspaces'))).items,
+  /** 202 { id, status }; 409 for a move the current status does not allow (archive is final). */
+  moveWorkspace: async (workspaceId: string, move: StatusMove) => {
+    const init = { ...wsPath(workspaceId), headers: await csrfHeaders() };
+    return reply<{ id: string; status: WorkspaceStatus }>(
+      move === 'suspend'
+        ? api.POST('/platform/workspaces/{workspaceId}/suspend', init)
+        : move === 'reactivate'
+          ? api.POST('/platform/workspaces/{workspaceId}/reactivate', init)
+          : api.POST('/platform/workspaces/{workspaceId}/archive', init),
+    );
+  },
+  /** 200 with the toggles; 409 for an archived workspace. */
+  setModules: async (workspaceId: string, modules: ConsoleWorkspace['modules']) =>
+    reply<ConsoleWorkspace['modules']>(
+      api.PUT('/platform/workspaces/{workspaceId}/modules', {
+        ...wsPath(workspaceId),
+        body: modules,
+        headers: await csrfHeaders(),
+      }),
+    ),
+  flags: () => read<PlatformFlags>(api.GET('/platform/flags')),
+  setFlags: async (flags: { public_signup: boolean }) =>
+    reply<PlatformFlags>(api.PUT('/platform/flags', { body: flags, headers: await csrfHeaders() })),
+  jobs: async () => (await read<{ items: QueueOverview[] }>(api.GET('/platform/jobs'))).items,
+  deadLetters: async (limit = 50) =>
+    (
+      await read<{ items: DeadLetter[] }>(
+        api.GET('/platform/jobs/dead-letters', { params: { query: { limit } } }),
+      )
+    ).items,
+  /** 202 { id }; 404 when it is no longer dead-lettered. */
+  redrive: async (type: string, id: string) =>
+    reply<{ id: string }>(
+      api.POST('/platform/jobs/{type}/dead-letters/{id}/redrive', {
+        params: { path: { type, id } },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** YYYY-MM-DD, at most 92 days apart. */
+  apiUsage: async (from: string, to: string) =>
+    (
+      await read<{ items: ApiUsage[] }>(
+        api.GET('/platform/api-usage', { params: { query: { from, to } } }),
+      )
+    ).items,
+  credentialExpiry: async (withinDays: number) =>
+    (
+      await read<{ items: CredentialExpiry[] }>(
+        api.GET('/platform/credential-expiry', { params: { query: { within_days: withinDays } } }),
+      )
+    ).items,
+  health: () => read<PlatformHealth>(api.GET('/platform/health')),
+  incident: async () =>
+    (await read<{ incident: Incident | null }>(api.GET('/platform/incident-banner'))).incident,
+  setIncident: async (input: IncidentInput) =>
+    reply<{ incident: Incident }>(
+      api.PUT('/platform/incident-banner', { body: input, headers: await csrfHeaders() }),
+    ),
+  clearIncident: async () =>
+    reply<never>(api.DELETE('/platform/incident-banner', { headers: await csrfHeaders() })),
+  appSecrets: async () =>
+    (await read<{ items: AppSecretStatus[] }>(api.GET('/platform/app-secrets'))).items,
+  /** Write-only (PLAT-4): 204 and nothing comes back. */
+  setAppSecret: async (name: AppSecretName, slot: SecretSlot, value: string) =>
+    reply<never>(
+      api.PUT('/platform/app-secrets/{name}/{slot}', {
+        params: { path: { name, slot } },
+        body: { value },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** 204; 409 when there is no next value to promote. */
+  promoteAppSecret: async (name: AppSecretName) =>
+    reply<never>(
+      api.POST('/platform/app-secrets/{name}/promote', {
+        params: { path: { name } },
+        headers: await csrfHeaders(),
+      }),
     ),
 };

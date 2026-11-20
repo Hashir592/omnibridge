@@ -5,8 +5,7 @@ import { SignalLabel, type Signal } from '../kit/Badge.tsx';
 import { cn } from '../lib/cn.ts';
 import { daysFromToday, formatDate, formatTime } from '../lib/format.ts';
 import { detailOf, targetOf } from '../lib/notificationLink.ts';
-import type { Company } from '../mocks/types.ts';
-import { CompanySwatch } from './badges.tsx';
+import type { CompanyName } from '../app/companies.ts';
 
 export const SEVERITY: Record<
   Notification['severity'],
@@ -39,7 +38,7 @@ export function NotificationRow({
   highlighted,
 }: {
   n: Notification;
-  company: Company | undefined;
+  company: CompanyName | undefined;
   onOpen: () => void;
   highlighted?: boolean;
 }) {
@@ -77,7 +76,12 @@ export function NotificationRow({
           {when(n.updatedAt)}
           {company && (
             <span className="flex items-center gap-1">
-              <CompanySwatch company={company} /> {company.tradingName}
+              <span
+                aria-hidden
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: company.colour }}
+              />{' '}
+              {company.name}
             </span>
           )}
           {n.signal && <SignalLabel signal={SIGNAL[n.signal]} />}
