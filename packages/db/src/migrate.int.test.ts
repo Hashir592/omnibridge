@@ -92,6 +92,8 @@ describe('db-main roles and migrations', () => {
       '0032_security_signals',
       '0033_platform_console',
       '0034_app_secrets',
+      '0035_platform_signin_alerts',
+      '0036_validate_auth_events_action',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

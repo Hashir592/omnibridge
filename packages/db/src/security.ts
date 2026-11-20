@@ -92,3 +92,47 @@ export class SecuritySignals {
     });
   }
 }
+
+/**
+ * What the platform-level security rule reads (T-0507, SEC-12, ADR-076): console entries from a
+ * new network, and failed sign-ins and lockouts of platform admins. No workspace: the worker's
+ * own role calls the 0035 definers directly. IDs, times and counts only.
+ */
+export class PlatformSecuritySignals {
+  readonly #db: Kysely<MainDb>;
+
+  constructor(db: Kysely<MainDb>) {
+    this.#db = db;
+  }
+
+  /** Console entries since `since` from a network unseen in `lookbackDays`; never a first one. */
+  async newNetworkConsoleEntries(
+    since: Date,
+    lookbackDays: number,
+  ): Promise<{ eventId: string; userId: string; at: Date }[]> {
+    const { rows } = await sql<{ event_id: string; user_id: string; occurred_at: Date }>`
+      SELECT event_id, user_id, occurred_at
+        FROM app.security_platform_console_entries(${since}, ${lookbackDays}::int)`.execute(
+      this.#db,
+    );
+    return rows.map((r) => ({ eventId: r.event_id, userId: r.user_id, at: r.occurred_at }));
+  }
+
+  /** Failed sign-ins per platform admin since `since`. */
+  async loginFailures(since: Date): Promise<{ userId: string; failures: number }[]> {
+    const { rows } = await sql<{ user_id: string; failures: string }>`
+      SELECT user_id, failures FROM app.security_platform_login_failures(${since})`.execute(
+      this.#db,
+    );
+    return rows.map((r) => ({ userId: r.user_id, failures: Number(r.failures) }));
+  }
+
+  /** Lockouts of platform admins since `since`, one per lock. */
+  async locks(since: Date): Promise<{ eventId: string; userId: string; at: Date }[]> {
+    const { rows } = await sql<{ event_id: string; user_id: string; occurred_at: Date }>`
+      SELECT event_id, user_id, occurred_at FROM app.security_platform_locks(${since})`.execute(
+      this.#db,
+    );
+    return rows.map((r) => ({ eventId: r.event_id, userId: r.user_id, at: r.occurred_at }));
+  }
+}

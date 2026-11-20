@@ -15,6 +15,7 @@ import {
   MembershipRepository,
   NotificationRepository,
   PlatformHousekeeping,
+  PlatformSecuritySignals,
   SecuritySignals,
   Tenancy,
   UserRepository,
@@ -35,7 +36,11 @@ import {
   workspaceCloseHandler,
 } from './platform-console.ts';
 import { notifyEmailHandler, sweepPlatformEmails } from './notify-mail.ts';
-import { securityScanHandler, securityThresholdsFromEnv } from './security.ts';
+import {
+  scanPlatformSecurity,
+  securityScanHandler,
+  securityThresholdsFromEnv,
+} from './security.ts';
 import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
 import { workerHandlerDbConfig } from './db.ts';
 import { registerHandlers } from './handlers.ts';
@@ -115,6 +120,8 @@ const notifier = new Notifier({
   store: notifications,
   onRaised: emailOnRaise({ queue, recipients: notifications }),
 });
+// SEC-12 thresholds, read once at boot (a bad value stops the worker).
+const securityThresholds = securityThresholdsFromEnv(process.env);
 // DEL-1: the deletion jobs reach pii-vault with the deletion token, the only one that may delete.
 const deletionDeps = {
   vault: new VaultClient({
@@ -176,7 +183,7 @@ await registerHandlers(queue, {
     signals: new SecuritySignals(handlerDb.db),
     notifications,
     notifier,
-    thresholds: securityThresholdsFromEnv(process.env),
+    thresholds: securityThresholds,
     logger: log,
   }),
   'notify.retention': notifyRetentionHandler({ housekeeping, logger: log }),
@@ -203,6 +210,15 @@ const closePlatformJobs = await startPlatformJobs({
       housekeeping: new PlatformHousekeeping(bookkeepingDb.db),
       mailer,
       appOrigin,
+      logger: log,
+    }),
+  // SEC-12: platform admins' sign-ins, once per security sweep (T-0507, ADR-076).
+  scanPlatform: () =>
+    scanPlatformSecurity({
+      signals: new PlatformSecuritySignals(handlerDb.db),
+      notifications,
+      notifier,
+      thresholds: securityThresholds,
       logger: log,
     }),
 });

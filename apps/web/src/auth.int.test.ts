@@ -1449,6 +1449,54 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     await server.close();
   });
 
+  // ---- T-0507: console sign-ins are logged (S5-20261121-01, ADR-076) ----
+
+  it('[SEC-12][PLAT-1] entering the console writes platform.console_entered with the address', async () => {
+    const server = app();
+    const { operator, b } = await operatorSignedIn(server, '192.0.2.44');
+    const before = clock;
+    expect((await b.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    const rows = await asRootRows<{ action: string; ip: string; at: Date; ws: string | null }>(
+      `SELECT action, host(ip) AS ip, occurred_at AS at, target_workspace_id AS ws
+         FROM app.platform_audit_events WHERE user_id = $1 ORDER BY occurred_at`,
+      [operator.id],
+    );
+    expect(rows).toEqual([
+      { action: 'platform.console_entered', ip: '192.0.2.44', at: before, ws: null },
+    ]);
+    // A refused entry (outside the list) writes nothing.
+    const { operator: outsider, b: out } = await operatorSignedIn(server, '198.51.100.9');
+    expect((await out.send('POST', '/api/auth/platform')).statusCode).toBe(403);
+    expect(
+      await asRootRows('SELECT 1 FROM app.platform_audit_events WHERE user_id = $1', [outsider.id]),
+    ).toEqual([]);
+    await server.close();
+  });
+
+  it('[SEC-12] a sign-in that ends at the picker records auth.login per person', async () => {
+    const server = app();
+    const user = await makeUser({ workspaces: [A, B] });
+    const { next } = await signedIn(server, user);
+    expect(next).toBe('workspace_picker');
+    expect((await authEvents(user.id)).filter((e) => e.action === 'auth.login')).toHaveLength(1);
+    // One workspace: the sign-in is recorded in that workspace instead, not per person.
+    const single = await makeUser({ workspaces: [A] });
+    expect((await signedIn(server, single)).next).toBe('app');
+    expect((await authEvents(single.id)).filter((e) => e.action === 'auth.login')).toEqual([]);
+    await server.close();
+  });
+
+  it('[PLAT-1] a console session idle for 30 minutes is ended (ADR-076)', async () => {
+    const server = app();
+    const { b } = await operatorSignedIn(server);
+    expect((await b.send('POST', '/api/auth/platform')).statusCode).toBe(204);
+    later(29 * 60_000);
+    expect((await b.send('GET', '/api/platform/flags')).statusCode).toBe(200);
+    later(30 * 60_000);
+    expect((await b.send('GET', '/api/platform/flags')).statusCode).toBe(401);
+    await server.close();
+  });
+
   it('[PLAT-2] suspend stops sign-in to that workspace at once; reactivate lets it back', async () => {
     const server = app();
     const { b: op } = await operatorSignedIn(server);
@@ -1573,6 +1621,8 @@ describe('passwords, MFA, lockout and sessions (USR-2 to USR-7, SEC-1, AT-3)', (
     );
     expect(rows.map((r) => r.action).sort()).toEqual(
       [
+        // Entering the console is on record too (T-0507, ADR-076).
+        'platform.console_entered',
         'platform.incident_set',
         'platform.incident_cleared',
         'platform.flag_changed',

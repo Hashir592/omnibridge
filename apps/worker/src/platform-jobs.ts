@@ -58,6 +58,7 @@ export async function startPlatformJobs({
   sendPlatformEmails,
   notices,
   sendDigest,
+  scanPlatform,
 }: {
   boss: PgBoss;
   queue: Pick<JobQueue, 'send'>;
@@ -71,6 +72,8 @@ export async function startPlatformJobs({
   notices: Pick<PlatformHousekeeping, 'purgePlatformNotices'>;
   /** OPS-6: the daily health digest; returns how many were sent. */
   sendDigest: () => Promise<number>;
+  /** SEC-12: the platform-level security rule (T-0507); returns how many notices it raised. */
+  scanPlatform: () => Promise<number>;
 }): Promise<() => Promise<void>> {
   const platformDb = createMainDb(platformDbConfig('omnibridge-worker-fanout'), onDbError);
   const directory = new WorkspaceDirectory(platformDb.db);
@@ -95,6 +98,8 @@ export async function startPlatformJobs({
       },
       'security.scan-sweep': async () => {
         await sweepSecurityScan({ directory, queue });
+        // Platform admins' sign-ins have no workspace: one run per sweep (ADR-076).
+        await scanPlatform();
       },
       'platform.health-digest': async () => {
         await sendDigest();

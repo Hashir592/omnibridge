@@ -496,4 +496,111 @@ describe('auth store behind definer functions (USR-2 to USR-7)', () => {
       app.query('SELECT * FROM app.auth_user_workspaces($1)', [randomUUID()]),
     ).rejects.toThrow(/does not exist/);
   });
+
+  it('[PLAT-2] a sign-in racing a suspend never leaves a live session in the suspended workspace (S5-20261121-02)', async () => {
+    const root = new pg.Pool({ connectionString: cluster.container.getConnectionUri(), max: 2 });
+    const tok = () => randomBytes(32);
+    const tenancy = new Tenancy(main.db);
+    /** A fresh active workspace the user belongs to, and a session at the picker. */
+    const setUp = async () => {
+      const ws = randomUUID();
+      await tenancy.run({ workspaceId: ws, companyIds: [], userId: user }, async (ctx) => {
+        await new WorkspaceRepository(main.db).create(ctx, { name: 'Race' });
+        await new MembershipRepository(main.db).add(ctx, { userId: user, role: 'member' });
+      });
+      const id = randomUUID();
+      await store.createSession({
+        id,
+        tokenHash: tok(),
+        csrfHash: tok(),
+        userId: user,
+        stage: 'pre_mfa',
+        now: t0,
+        expiresAt: at(t0, 10 * MIN),
+      });
+      const sql = 'SELECT app.session_advance($1, $2, $3, $4, $5, $6, $7, $8) AS ok';
+      await app.query(sql, [id, tok(), tok(), 'signed_in', null, t0, true, at(t0, 60 * MIN)]);
+      const enter = (client: pg.PoolClient | pg.Pool) =>
+        client
+          .query<{ ok: boolean }>(sql, [
+            id,
+            tok(),
+            tok(),
+            'workspace',
+            ws,
+            t0,
+            false,
+            at(t0, 60 * MIN),
+          ])
+          .then((r) => r.rows[0]?.ok);
+      return { ws, id, enter };
+    };
+    /** The suspend's own statements (0033 console_workspace_status), in an open transaction. */
+    const suspendOpen = async (client: pg.PoolClient, ws: string) => {
+      await client.query('BEGIN');
+      await client.query('SELECT status FROM app.workspaces WHERE id = $1 FOR UPDATE', [ws]);
+      await client.query(`UPDATE app.workspaces SET status = 'suspended' WHERE id = $1`, [ws]);
+      await client.query(
+        'UPDATE app.sessions SET revoked_at = $2 WHERE active_workspace = $1 AND revoked_at IS NULL',
+        [ws, t0],
+      );
+    };
+    const live = async (id: string) =>
+      (
+        await root.query<{ live: boolean }>(
+          'SELECT revoked_at IS NULL AS live FROM app.sessions WHERE id = $1',
+          [id],
+        )
+      ).rows[0]?.live;
+    const settled = (p: Promise<unknown>) =>
+      Promise.race([
+        p.then(() => true),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => {
+            resolve(false);
+          }, 300);
+        }),
+      ]);
+
+    try {
+      // (1) The suspend is mid-way when the sign-in arrives: the sign-in waits, then is refused.
+      const one = await setUp();
+      const suspender = await root.connect();
+      try {
+        await suspendOpen(suspender, one.ws);
+        const entering = one.enter(app);
+        expect(await settled(entering)).toBe(false); // blocked on the suspend
+        await suspender.query('COMMIT');
+        expect(await entering).toBe(false);
+      } finally {
+        suspender.release();
+      }
+      expect(await live(one.id)).toBe(true); // still at the picker, never in the workspace
+      const stage = await root.query<{ stage: string; ws: string | null }>(
+        'SELECT stage, active_workspace AS ws FROM app.sessions WHERE id = $1',
+        [one.id],
+      );
+      expect(stage.rows[0]).toEqual({ stage: 'signed_in', ws: null });
+
+      // (2) The sign-in is mid-way when the suspend arrives: the suspend waits, then revokes it.
+      const two = await setUp();
+      const signer = await app.connect();
+      const suspender2 = await root.connect();
+      try {
+        await signer.query('BEGIN');
+        expect(await two.enter(signer)).toBe(true);
+        const suspending = suspendOpen(suspender2, two.ws);
+        expect(await settled(suspending)).toBe(false); // blocked on the sign-in's share lock
+        await signer.query('COMMIT');
+        await suspending;
+        await suspender2.query('COMMIT');
+      } finally {
+        signer.release();
+        suspender2.release();
+      }
+      expect(await live(two.id)).toBe(false);
+    } finally {
+      await root.end();
+    }
+  });
 });

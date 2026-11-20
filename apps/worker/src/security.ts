@@ -1,5 +1,9 @@
 import type { Notifier, TenantContext } from '@omnibridge/core';
-import type { NotificationRepository, SecuritySignals } from '@omnibridge/db';
+import type {
+  NotificationRepository,
+  PlatformSecuritySignals,
+  SecuritySignals,
+} from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { securityScanJob, type JobQueue, type PhasedHandler } from '@omnibridge/queue';
 import type { SignalsResponse, VaultClient } from '@omnibridge/vault-client';
@@ -194,6 +198,82 @@ async function raiseCanary(
       ...(read.actor_user_id === null ? {} : { userId: read.actor_user_id }),
     },
   });
+}
+
+/**
+ * S1 (21 Nov 2026, ADR-076): console entries and lockouts of platform admins are read over the
+ * last day, as canary reads are, so worker downtime loses none; NTF-5 keeps one notice each.
+ */
+const PLATFORM_EVENT_WINDOW_MS = 24 * 60 * MINUTE;
+
+export interface PlatformSecurityScanDeps {
+  signals: Pick<PlatformSecuritySignals, 'newNetworkConsoleEntries' | 'loginFailures' | 'locks'>;
+  notifications: Pick<NotificationRepository, 'openPlatformRecordIds'>;
+  notifier: Pick<Notifier, 'raisePlatform' | 'resolvePlatform'>;
+  thresholds: Pick<SecurityThresholds, 'loginFailures'>;
+  logger: Logger;
+  now?: () => Date;
+}
+
+/**
+ * The platform-level rule (T-0507, SEC-12, S5-20261121-01), once per sweep: platform admins'
+ * sign-ins are platform notices to platform admins, never alerts in a workspace. A console entry
+ * from a network unseen in 90 days is critical (emailed); failed sign-ins at or above the
+ * threshold in 15 minutes and every lockout are warnings. Params are IDs and counts only.
+ * Returns how many notices it raised.
+ */
+export async function scanPlatformSecurity(deps: PlatformSecurityScanDeps): Promise<number> {
+  const at = (deps.now ?? (() => new Date()))();
+  let raised = 0;
+
+  const failures = await deps.signals.loginFailures(new Date(at.getTime() - 15 * MINUTE));
+  const threshold = deps.thresholds.loginFailures;
+  const over = failures.filter((f) => f.failures >= threshold);
+  for (const f of over) {
+    await deps.notifier.raisePlatform(null, {
+      type: 'security.platform_login_failures',
+      record: { kind: 'user', id: f.userId },
+      params: { userId: f.userId, count: f.failures, windowMinutes: 15, threshold },
+    });
+    raised += 1;
+  }
+  const still = new Set(over.map((f) => f.userId));
+  for (const id of await deps.notifications.openPlatformRecordIds(
+    'security.platform_login_failures',
+    'user',
+  )) {
+    if (!still.has(id)) {
+      await deps.notifier.resolvePlatform(null, 'security.platform_login_failures', {
+        kind: 'user',
+        id,
+      });
+    }
+  }
+
+  const since = new Date(at.getTime() - PLATFORM_EVENT_WINDOW_MS);
+  for (const entry of await deps.signals.newNetworkConsoleEntries(since, LOGIN_LOOKBACK_DAYS)) {
+    await deps.notifier.raisePlatform(null, {
+      type: 'security.platform_unusual_login',
+      record: { kind: 'console_entry', id: entry.eventId },
+      params: { userId: entry.userId, newNetwork: true },
+    });
+    raised += 1;
+  }
+  for (const lock of await deps.signals.locks(since)) {
+    await deps.notifier.raisePlatform(null, {
+      type: 'security.platform_account_locked',
+      record: { kind: 'lock', id: lock.eventId },
+      params: { userId: lock.userId },
+    });
+    raised += 1;
+  }
+  if (raised > 0) {
+    deps.logger.warn(
+      { event: 'security.platform_alerts', count: raised },
+      'platform security alerts raised',
+    );
+  }
+  return raised;
 }
 
 /** security.scan-sweep: one security.scan job per workspace, keyed by the five-minute slot. */

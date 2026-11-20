@@ -374,6 +374,13 @@ export class NotificationRepository implements NotificationStore {
   }
 
   /** The ids of open notifications of one type and record kind (rules that resolve, NTF-1). */
+  /** Open platform notices of a type and record kind, by record ID (0035 definer; the worker). */
+  async openPlatformRecordIds(type: string, kind: string): Promise<string[]> {
+    const { rows } = await sql<{ id: string }>`
+      SELECT app.platform_notice_open_records(${type}, ${kind}) AS id`.execute(this.#db);
+    return rows.map((r) => r.id);
+  }
+
   async openRecordIds(ctx: TenantContext, type: string, kind: string): Promise<string[]> {
     return withTenantTransaction(this.#db, ctx, async (trx) =>
       (

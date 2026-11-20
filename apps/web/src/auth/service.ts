@@ -649,9 +649,20 @@ export class AuthService {
       next = 'app';
     }
     const cookies = await this.#advance(session, stage, workspaceId, now, true);
-    // The sign-in is recorded in the workspace it enters; with the picker, when one is chosen.
-    if (workspaceId !== null)
+    // The sign-in is recorded in the workspace it enters. One that ends with no workspace (the
+    // picker, the terms or a password change) is kept per person, as failures are (ADR-076): a
+    // platform admin who belongs to no workspace is still on record.
+    if (workspaceId !== null) {
       await this.#auditIn(workspaceId, user.userId, 'auth.login', request.ip);
+    } else {
+      await this.#o.store.recordAuthEvent({
+        userId: user.userId,
+        action: 'auth.login',
+        ip: request.ip,
+        detail: {},
+        now,
+      });
+    }
     return { body: { next }, cookies };
   }
 
@@ -935,8 +946,16 @@ export class AuthService {
     await this.#requireTerms(this.#sessionOf(request));
     this.#requireConsoleNetwork(request);
     const user = await this.#user(account.userId);
-    if (!user.platformAdmin) throw forbidden('Only platform operators can open the console');
-    return this.#advance(this.#sessionOf(request), 'platform', null, this.#now(), false);
+    if (!user.platformAdmin || !user.mfaConfirmed) {
+      throw forbidden('Only platform operators can open the console');
+    }
+    const now = this.#now();
+    const cookies = await this.#advance(this.#sessionOf(request), 'platform', null, now, false);
+    // Who entered the console, when and from where (SEC-12, S5-20261121-01). If this write fails
+    // the request fails, and the rotated session token never reaches the browser, so no console
+    // session is usable without its record.
+    await this.#o.store.recordConsoleEntry(user.userId, request.ip, now);
+    return cookies;
   }
 
   // ---- terms and privacy policy (WWW-7) ----
