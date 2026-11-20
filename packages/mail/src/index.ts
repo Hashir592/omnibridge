@@ -20,5 +20,7 @@ export {
   renderLockNotice,
   renderNotificationEmail,
   renderPasswordReset,
+  renderPlatformDigest,
+  type DigestNumbers,
   type Email,
 } from './templates.ts';

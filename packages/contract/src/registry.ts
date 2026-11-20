@@ -5,6 +5,7 @@ import { getHealth } from './routes/health.ts';
 import { getFile } from './routes/files.ts';
 import { getJob } from './routes/jobs.ts';
 import { notificationRoutes } from './routes/notifications.ts';
+import { platformRoutes } from './routes/platform.ts';
 import { privacyRoutes } from './routes/privacy.ts';
 import { createCompany, createWorkspace, listCompanies } from './routes/tenancy.ts';
 import { userRoutes } from './routes/users.ts';
@@ -29,6 +30,7 @@ export const contractRoutes = [
   ...userRoutes,
   ...privacyRoutes,
   ...notificationRoutes,
+  ...platformRoutes,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;

@@ -232,3 +232,70 @@ export function renderNotificationEmail(values: {
   );
   return { subject, text, html };
 }
+
+/** The daily health digest's numbers (OPS-6): counts only, nothing about any record. */
+export interface DigestNumbers {
+  jobsFailed: number;
+  apiCalls: number;
+  apiCappedCalls: number;
+  apiCap: number;
+  credentialsExpiring: number;
+  deletionRuns: number;
+  recordsDeleted: number;
+}
+
+const count = (n: number) => n.toLocaleString('en-GB');
+
+/**
+ * The daily health digest to platform admins (OPS-6): jobs failed, API usage against limits,
+ * credentials expiring in the next 30 days and deletion runs, all as counts, with a link to the
+ * console. Never a workspace's business data, a record, an address or a secret.
+ */
+export function renderPlatformDigest(values: {
+  recipientName: string;
+  /** The London date it covers, DD/MM/YYYY. */
+  date: string;
+  numbers: DigestNumbers;
+  consoleUrl: string;
+  appOrigin: string;
+}): Email {
+  const consoleUrl = checkAppUrl(values.consoleUrl, values.appOrigin);
+  const n = values.numbers;
+  const usage =
+    n.apiCap > 0
+      ? `${count(n.apiCalls)} (accounts with a daily limit: ${count(n.apiCappedCalls)} of ${count(n.apiCap)} allowed)`
+      : `${count(n.apiCalls)} (no limits recorded)`;
+  const rows: [string, string][] = [
+    ['Jobs failed (last 24 hours)', count(n.jobsFailed)],
+    ['API calls today', usage],
+    ['Credentials expiring in 30 days', count(n.credentialsExpiring)],
+    [
+      'Deletion runs (last 24 hours)',
+      `${count(n.deletionRuns)} (${count(n.recordsDeleted)} records deleted)`,
+    ],
+  ];
+  const subject = `OmniBridge daily health digest, ${values.date}`;
+  const text = [
+    `Hello ${values.recipientName},`,
+    '',
+    `The platform on ${values.date}:`,
+    ...rows.map(([label, value]) => `- ${label}: ${value}`),
+    '',
+    `Details are in the platform console (sign in first): ${consoleUrl}`,
+  ].join('\n');
+  const html = baseTemplate(
+    subject,
+    [
+      `<p>Hello ${escapeHtml(values.recipientName)},</p>`,
+      `<p>The platform on ${escapeHtml(values.date)}:</p>`,
+      '<table style="border-collapse:collapse">',
+      ...rows.map(
+        ([label, value]) =>
+          `<tr><td style="padding:4px 12px 4px 0">${escapeHtml(label)}</td><td style="padding:4px 0"><strong>${escapeHtml(value)}</strong></td></tr>`,
+      ),
+      '</table>',
+      `<p><a href="${escapeHtml(consoleUrl)}" style="background:#0F6B66;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none">Open the console</a></p>`,
+    ].join(''),
+  );
+  return { subject, text, html };
+}

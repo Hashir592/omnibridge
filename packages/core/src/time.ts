@@ -74,3 +74,40 @@ export function parseUtc(iso: string): Date {
   }
   return instant;
 }
+
+/** A provider whose API calls are counted per day in `app.api_usage_daily` (PLAT-2). */
+export type UsageProvider = 'amazon' | 'amazon_ads' | 'ebay' | 'website' | 'evri' | 'dpd';
+
+/** eBay resets its daily call limits at midnight US Pacific time; the others are counted by UTC day. */
+const USAGE_TIME_ZONES: Readonly<Record<UsageProvider, string>> = {
+  amazon: 'UTC',
+  amazon_ads: 'UTC',
+  ebay: 'America/Los_Angeles',
+  website: 'UTC',
+  evri: 'UTC',
+  dpd: 'UTC',
+};
+
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * The provider's own day at this instant, as `YYYY-MM-DD`: the `day` of `app.api_usage_daily`
+ * (PLAT-2; M07's eBay governor reserves against it, so its day must match eBay's own reset).
+ */
+export function providerDay(provider: UsageProvider, instant: Date): string {
+  assertValid(instant);
+  const timeZone = USAGE_TIME_ZONES[provider];
+  let format = dayFormats.get(timeZone);
+  if (format === undefined) {
+    format = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    dayFormats.set(timeZone, format);
+  }
+  const parts: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  for (const part of format.formatToParts(instant)) parts[part.type] = part.value;
+  return `${parts.year ?? ''}-${parts.month ?? ''}-${parts.day ?? ''}`;
+}

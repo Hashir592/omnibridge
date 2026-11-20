@@ -21,6 +21,7 @@ import {
   MemberAccessRepository,
   MembershipRepository,
   migrateMain,
+  PlatformConsole,
   Tenancy,
   UserRepository,
   WorkspaceRepository,
@@ -34,6 +35,7 @@ import {
   startRoleCluster,
   stubAuth,
   walkIsolation,
+  walkPlatform,
   type RoleCluster,
 } from '@omnibridge/testkit';
 import pg from 'pg';
@@ -230,6 +232,31 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         reason: `${MARKER} reason`,
       }),
     );
+    // T-0504: the console's own checks read the admin flag and MFA from the database.
+    const su = new pg.Client({ connectionString: cluster.container.getConnectionUri() });
+    await su.connect();
+    try {
+      await su.query(
+        `INSERT INTO app.users (id, email, name, platform_admin)
+         VALUES ($1, $2, 'Platform admin', true)`,
+        [admin, `${admin}@example.test`],
+      );
+      await su.query(
+        `INSERT INTO app.user_auth (user_id, password_hash, password_set_at, totp_secret,
+                                    totp_key_version, mfa_confirmed_at)
+         VALUES ($1, '$argon2id$synthetic', now(), '\\x00', 1, now())`,
+        [admin],
+      );
+      // PLAT-2: a usage row of B's account (M07 writes these): the console shows its ids only.
+      await su.query(
+        `INSERT INTO app.api_usage_daily (workspace_id, channel_account_id, provider, api, day,
+                                          calls, cap, updated_at)
+         VALUES ($1, $2, 'ebay', 'sell.fulfillment', current_date, 12, 5000, now())`,
+        [B, b.account],
+      );
+    } finally {
+      await su.end();
+    }
     b.file = await tenancy.runWorkspace({ workspaceId: B }, async (ctx) => {
       const id = await store.put(ctx, {
         body: PDF,
@@ -302,6 +329,34 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         audit: new AuditLog(main.db),
       },
       notifications: { notifications: new NotificationRepository(main.db) },
+      // T-0504: the console, with a stand-in queue that holds one dead job of B's.
+      platform: {
+        console: new PlatformConsole(main.db),
+        jobs: {
+          overview: () =>
+            Promise.resolve([
+              { type: 'orders.export', queued: 1, active: 0, failed: 1, deadLetter: 1 },
+            ]),
+          deadLetters: () =>
+            Promise.resolve([
+              {
+                id: b.job,
+                type: 'orders.export',
+                workspaceId: B,
+                idempotencyKey: `${MARKER}-export`,
+                deadLetteredAt: new Date(),
+              },
+            ]),
+          redrive: () => Promise.resolve({ outcome: 'ok' as const, workspaceId: B }),
+          lastHeartbeat: () => Promise.resolve(new Date()),
+        },
+        queue: { send: () => Promise.resolve({ id: randomUUID(), created: true }) },
+        audit: new AuditLog(main.db),
+        tenancy,
+        checks,
+        version: '0',
+        logger,
+      },
     });
   };
 
@@ -411,6 +466,23 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           body: { items: [{ type: 'reminders.due', email: true }] },
           searchText: true,
         },
+        // The platform console (T-0504): a workspace session is refused on every route.
+        listConsoleWorkspaces: {},
+        suspendWorkspace: { params: { workspaceId: B } },
+        reactivateWorkspace: { params: { workspaceId: B } },
+        archiveWorkspace: { params: { workspaceId: B } },
+        setWorkspaceModules: { params: { workspaceId: B }, body: { website_connector: true } },
+        getPlatformFlags: {},
+        setPlatformFlags: { body: { public_signup: false } },
+        getQueueOverview: {},
+        listDeadLetters: {},
+        redriveDeadLetter: { params: { type: 'orders.export', id: b.job } },
+        listApiUsage: {},
+        listCredentialExpiry: {},
+        getPlatformHealth: {},
+        getIncidentBanner: {},
+        setIncidentBanner: { body: { message: 'Walker banner', severity: 'info' } },
+        clearIncidentBanner: {},
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
@@ -503,6 +575,114 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     expect(missing.statusCode).toBe(404);
     // The platform answer carries ids only, never the workspace's business data (PLAT-3).
     expect(Object.keys(company.json<object>())).toEqual(['id']);
+    await server.close();
+  });
+  // Last: it suspends and archives B through the console.
+  it('[PLAT-3] no platform route returns tenant business data, even aimed at another workspace', async () => {
+    const server = app();
+    const outcomes = await walkPlatform({
+      routes: contractRoutes,
+      inject: async (req) => {
+        const res = await server.inject({
+          method: req.method as 'GET',
+          url: req.url,
+          headers: req.headers,
+          ...(req.payload === undefined ? {} : { payload: req.payload as object }),
+        });
+        return { statusCode: res.statusCode, body: res.body };
+      },
+      platform: platformHeaders(admin),
+      calls: {
+        createWorkspace: { body: { name: 'Walker workspace' } },
+        createCompany: {
+          params: { workspaceId: B },
+          body: { legal_name: 'Walker Ltd', trading_name: 'Walker', registered_address: address },
+        },
+        inviteFirstAdmin: { params: { workspaceId: B }, body: { email: 'walker@example.test' } },
+        listPlatformNotifications: {},
+        countUnreadPlatformNotifications: {},
+        markPlatformNotificationRead: { params: { id: b.notification } },
+        markAllPlatformNotificationsRead: {},
+        listConsoleWorkspaces: {},
+        getPlatformFlags: {},
+        setPlatformFlags: { body: { public_signup: false } },
+        getQueueOverview: {},
+        listDeadLetters: {},
+        redriveDeadLetter: { params: { type: 'orders.export', id: b.job } },
+        listApiUsage: {},
+        listCredentialExpiry: {},
+        getPlatformHealth: {},
+        getIncidentBanner: {},
+        setIncidentBanner: { body: { message: 'Walker banner', severity: 'info' } },
+        clearIncidentBanner: {},
+        setWorkspaceModules: { params: { workspaceId: B }, body: { website_connector: true } },
+        suspendWorkspace: { params: { workspaceId: B } },
+        reactivateWorkspace: { params: { workspaceId: B } },
+        archiveWorkspace: { params: { workspaceId: B } },
+      },
+      // B's business data. Its workspace name and IDs may appear: the console lists workspaces,
+      // and usage, expiry and dead-letter rows name accounts and jobs by ID (PLAT-2).
+      businessMarkers: [
+        `${MARKER} Ltd`,
+        `${MARKER} ebay`,
+        `${MARKER}-${userB}`,
+        `${MARKER} reason`,
+        `${MARKER}-export`,
+        `${MARKER.toLowerCase()}@example.test`,
+        `${userB}@example.test`,
+        b.company,
+        b.invite,
+        b.review,
+        b.erasure,
+        b.file,
+        userB,
+      ],
+    });
+    expect(new Set(outcomes.map((o) => o.route))).toEqual(
+      new Set(contractRoutes.filter((r) => r.auth === 'platform').map((r) => r.id)),
+    );
+    expect(outcomes.filter((o) => !o.ok)).toEqual([]);
+
+    // Positive controls: the console did see B, as a name, ids and counts.
+    const list = await server.inject({
+      method: 'GET',
+      url: '/api/platform/workspaces',
+      headers: platformHeaders(admin),
+    });
+    const row = list
+      .json<{ items: { id: string; counts: object; status: string }[] }>()
+      .items.find((w) => w.id === B);
+    expect(row).toMatchObject({
+      status: 'archived',
+      counts: { users: 1, channel_accounts: 1, orders_per_day: null },
+    });
+    const usage = await server.inject({
+      method: 'GET',
+      url: '/api/platform/api-usage',
+      headers: platformHeaders(admin),
+    });
+    expect(usage.json()).toEqual({
+      items: [
+        expect.objectContaining({ workspace_id: B, channel_account_id: b.account, calls: 12 }),
+      ],
+    });
+    const dead = await server.inject({
+      method: 'GET',
+      url: '/api/platform/jobs/dead-letters',
+      headers: platformHeaders(admin),
+    });
+    const deadItems = dead.json<{ items: Record<string, unknown>[] }>().items;
+    expect(deadItems).toHaveLength(1);
+    expect(deadItems[0]).toMatchObject({
+      id: b.job,
+      type: 'orders.export',
+      workspace_id: B,
+      attempt: 0,
+      error_code: null,
+    });
+    expect(Object.keys(deadItems[0] ?? {}).sort()).toEqual(
+      ['attempt', 'dead_lettered_at', 'error_code', 'id', 'type', 'workspace_id'].sort(),
+    );
     await server.close();
   });
 });

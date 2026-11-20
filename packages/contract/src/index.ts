@@ -100,5 +100,7 @@ export {
   MfaResultSchema,
   ResetTokenInfoSchema,
   SignInResultSchema,
+  IncidentSchema,
   WorkspaceChoiceSchema,
 } from './routes/auth.ts';
+export * from './routes/platform.ts';

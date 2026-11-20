@@ -61,8 +61,10 @@ export {
   LONDON_TIME_ZONE,
   londonDate,
   parseUtc,
+  providerDay,
   toUtcIso,
   type LondonDate,
+  type UsageProvider,
 } from './time.ts';
 export {
   AUDIT_ACTIONS,

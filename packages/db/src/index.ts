@@ -52,6 +52,23 @@ export { DeletionLog, type DeletionCertificate, type DeletionRun } from './delet
 export { erasureDueAt, ErasureRequestRepository, type ErasureRequest } from './erasure.ts';
 export { SecuritySignals } from './security.ts';
 export {
+  PlatformConsole,
+  PlatformHousekeeping,
+  type ApiUsageRow,
+  type ConsoleAudit,
+  type ConsoleJobRecord,
+  type ConsoleWorkspace,
+  type CredentialExpiryRow,
+  type DigestCounts,
+  type DigestRecipient,
+  type IncidentBanner,
+  type IncidentSeverity,
+  type JobRecordKey,
+  type PlatformFlags,
+  type StatusOutcome,
+  type WorkspaceStatus,
+} from './platform-console.ts';
+export {
   isNotificationCursor,
   NotificationRepository,
   type EmailJobView,

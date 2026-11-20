@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { formatLondonDate, formatLondonDateTime, londonDate, parseUtc, toUtcIso } from './time.ts';
+import {
+  formatLondonDate,
+  formatLondonDateTime,
+  londonDate,
+  parseUtc,
+  providerDay,
+  toUtcIso,
+} from './time.ts';
 
 const at = (iso: string) => new Date(iso);
 
@@ -46,5 +53,19 @@ describe('London dates (NFR-7)', () => {
     expect(() => parseUtc('2026-02-30T10:00:00Z')).toThrow(RangeError);
     expect(() => londonDate(new Date(Number.NaN))).toThrow(RangeError);
     expect(() => toUtcIso(new Date(Number.NaN))).toThrow(RangeError);
+  });
+});
+
+describe('provider usage days (PLAT-2)', () => {
+  it('[PLAT-2] eBay counts by its own US Pacific day; the others by UTC day', () => {
+    // 07:30 UTC on 20 Nov is still 23:30 on 19 Nov in Los Angeles (PST, UTC-8).
+    expect(providerDay('ebay', at('2026-11-20T07:30:00Z'))).toBe('2026-11-19');
+    expect(providerDay('ebay', at('2026-11-20T08:00:00Z'))).toBe('2026-11-20');
+    // Summer (PDT, UTC-7).
+    expect(providerDay('ebay', at('2026-07-01T06:59:59Z'))).toBe('2026-06-30');
+    expect(providerDay('ebay', at('2026-07-01T07:00:00Z'))).toBe('2026-07-01');
+    expect(providerDay('amazon', at('2026-11-20T23:59:59Z'))).toBe('2026-11-20');
+    expect(providerDay('amazon_ads', at('2026-11-21T00:00:00Z'))).toBe('2026-11-21');
+    expect(providerDay('dpd', at('2026-06-30T23:30:00Z'))).toBe('2026-06-30');
   });
 });

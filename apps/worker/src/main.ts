@@ -14,6 +14,7 @@ import {
   mainDbConfig,
   MembershipRepository,
   NotificationRepository,
+  PlatformHousekeeping,
   SecuritySignals,
   Tenancy,
   UserRepository,
@@ -28,6 +29,11 @@ import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
 import { piiDeleteHandler, piiExpiryHandler } from './deletion.ts';
 import { jobsRetentionHandler } from './housekeeping.ts';
+import {
+  notifyRetentionHandler,
+  sendPlatformDigest,
+  workspaceCloseHandler,
+} from './platform-console.ts';
 import { notifyEmailHandler, sweepPlatformEmails } from './notify-mail.ts';
 import { securityScanHandler, securityThresholdsFromEnv } from './security.ts';
 import { accessReviewHandler, inviteHandler } from './users-jobs.ts';
@@ -121,6 +127,8 @@ const deletionDeps = {
   notifier,
   logger: log,
 };
+// The platform console's jobs (T-0504): workspace closure, notification retention, the digest.
+const housekeeping = new PlatformHousekeeping(handlerDb.db);
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -171,6 +179,8 @@ await registerHandlers(queue, {
     thresholds: securityThresholdsFromEnv(process.env),
     logger: log,
   }),
+  'notify.retention': notifyRetentionHandler({ housekeeping, logger: log }),
+  'workspace.close': workspaceCloseHandler({ queue, housekeeping, logger: log }),
   'notify.email': notifyEmailHandler({
     tenancy: new Tenancy(handlerDb.db),
     notifications,
@@ -187,6 +197,14 @@ const closePlatformJobs = await startPlatformJobs({
   logger: log,
   onDbError,
   sendPlatformEmails: () => sweepPlatformEmails({ notifications, mailer, appOrigin, logger: log }),
+  notices: new PlatformHousekeeping(bookkeepingDb.db),
+  sendDigest: () =>
+    sendPlatformDigest({
+      housekeeping: new PlatformHousekeeping(bookkeepingDb.db),
+      mailer,
+      appOrigin,
+      logger: log,
+    }),
 });
 const metrics = await startMetricsServer(
   queueMetrics({ boss, types: JOBS.map((def) => def.type) }),

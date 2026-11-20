@@ -90,6 +90,7 @@ describe('db-main roles and migrations', () => {
       '0030_notifications',
       '0031_notification_email',
       '0032_security_signals',
+      '0033_platform_console',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

@@ -94,7 +94,25 @@ export interface WorkspacesTable {
   pii_retention_days: ColumnType<string, never, never>;
   /** Module toggles (0019): written only by app.workspace_set_module. */
   modules: ColumnType<Readonly<Record<string, unknown>>, never, never>;
+  /** PLAT-2 (0033): written only by app.console_workspace_status. */
+  status: ColumnType<'active' | 'suspended' | 'archived', never, never>;
+  status_changed_at: ColumnType<Date | null, never, never>;
   created_at: Generated<Date>;
+}
+
+/**
+ * API calls per account, provider, API and the provider's own day (0033, PLAT-2): the table M07's
+ * governors reserve against (`calls + n <= cap` in one UPDATE).
+ */
+export interface ApiUsageDailyTable {
+  workspace_id: string;
+  channel_account_id: string;
+  provider: 'amazon' | 'amazon_ads' | 'ebay' | 'website' | 'evri' | 'dpd';
+  api: string;
+  day: ColumnType<string, string, never>;
+  calls: ColumnType<string, number | undefined, number>;
+  cap: ColumnType<string | null, number | null | undefined, number | null>;
+  updated_at: Date;
 }
 
 export type VatPeriod = 'stagger_1' | 'stagger_2' | 'stagger_3' | 'monthly';
@@ -292,4 +310,5 @@ export interface MainDb {
   'app.pii_tombstones': PiiTombstonesTable;
   'app.erasure_requests': ErasureRequestsTable;
   'app.notifications': NotificationsTable;
+  'app.api_usage_daily': ApiUsageDailyTable;
 }

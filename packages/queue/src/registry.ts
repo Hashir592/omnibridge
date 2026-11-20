@@ -132,6 +132,29 @@ export const securityScanJob = defineJob({
 });
 
 /**
+ * Notification retention for one workspace (ADR-071 4a): hard-deletes notifications resolved more
+ * than 90 days ago, with their read and email rows. Sent once a day by the housekeeping sweep.
+ */
+export const notifyRetentionJob = defineJob({
+  type: 'notify.retention',
+  payload: z.object({}).strict(),
+  retry: { limit: 5, delaySeconds: 60, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 300,
+});
+
+/**
+ * Closing an archived workspace (PLAT-2, DEL-1): queues the workspace_closure deletion, removes
+ * every membership, then deletes the terms of people left with no workspace (ADR-058b). Sent once
+ * by the console's archive, keyed `closure:<workspace>`; every step is safe to repeat.
+ */
+export const workspaceCloseJob = defineJob({
+  type: 'workspace.close',
+  payload: z.object({}).strict(),
+  retry: { limit: 10, delaySeconds: 60, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 300,
+});
+
+/**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
@@ -148,6 +171,8 @@ export const JOBS: readonly JobDefinition[] = [
   piiExpiryJob,
   notifyEmailJob,
   securityScanJob,
+  notifyRetentionJob,
+  workspaceCloseJob,
 ];
 
 /**
@@ -205,6 +230,16 @@ export const securityScanSweepJob = definePlatformJob({
 });
 
 /**
+ * OPS-6: the daily health digest to every platform admin at 07:00 London (counts only). Light;
+ * a second run the same day sends nothing (one sent record per admin and day).
+ */
+export const platformDigestJob = definePlatformJob({
+  type: 'platform.health-digest',
+  cron: '0 7 * * *',
+  heavy: false,
+});
+
+/**
  * Every platform job with a cron (no workspace). The migrate job creates their queues, and the
  * worker schedules and consumes each one.
  */
@@ -215,4 +250,5 @@ export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [
   piiExpirySweepJob,
   notifyPlatformEmailSweepJob,
   securityScanSweepJob,
+  platformDigestJob,
 ];

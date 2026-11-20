@@ -9,7 +9,15 @@ import {
   type TenantContext,
   type TenantRunner,
 } from '@omnibridge/core';
-import type { AuditLog, AuthStore, AuthUser, SessionStage, StoredSession } from '@omnibridge/db';
+import type {
+  AuditLog,
+  AuthStore,
+  AuthUser,
+  IncidentBanner,
+  IncidentSeverity,
+  SessionStage,
+  StoredSession,
+} from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import type { FastifyRequest } from 'fastify';
 import {
@@ -29,6 +37,7 @@ import {
   type PasswordRule,
   type Passwords,
 } from './passwords.ts';
+import { DENY_ALL, type IpAllowlist } from './ip-allowlist.ts';
 import { totpAad, type PlatformKeys } from './platform-keys.ts';
 import {
   enrolmentView,
@@ -86,6 +95,13 @@ export interface AuthServiceOptions {
   now?: () => Date;
   /** Secure cookies; off only for plain-HTTP tests. */
   secureCookies?: boolean;
+  /**
+   * The networks the platform console may be used from (PLAT-1, PLATFORM_IP_ALLOWLIST). Left out,
+   * nobody may use it.
+   */
+  platformAllowlist?: IpAllowlist;
+  /** The incident banner every signed-in user sees (PLAT-2); none when left out. */
+  incidentBanner?: () => Promise<IncidentBanner | null>;
 }
 
 export interface WithCookies<T> {
@@ -203,13 +219,40 @@ export class AuthService {
     return s === undefined ? undefined : this.#account(s);
   };
 
+  /**
+   * The console (PLAT-1): a session that entered it, from an allowlisted network, of a user who is
+   * a platform admin with MFA confirmed now. Both flags are read again on every request, so a
+   * demoted admin is refused on their next one (ADR-061). No session: 401; anything else: 403.
+   */
   resolvePlatform = async (
     request: FastifyRequest,
     route: AnyRoute,
   ): Promise<PlatformActor | undefined> => {
-    const s = await this.#resolve(request, route, ['platform']);
-    return s === undefined ? undefined : { userId: s.userId };
+    const s = await this.#resolve(request, route, [
+      'pre_mfa',
+      'signed_in',
+      'password_change',
+      'workspace',
+      'platform',
+    ]);
+    if (s === undefined) return undefined;
+    if (s.stage !== 'platform') {
+      throw forbidden('Sign in with MFA and open the console first');
+    }
+    this.#requireConsoleNetwork(request);
+    const user = await this.#o.store.user(s.userId);
+    if (user?.platformAdmin !== true || !user.mfaConfirmed) {
+      throw forbidden('Only platform operators can use the console');
+    }
+    return { userId: s.userId };
   };
+
+  /** PLAT-1: the client address Fastify resolved through TRUSTED_PROXIES, never a raw header. */
+  #requireConsoleNetwork(request: FastifyRequest): void {
+    if (!(this.#o.platformAllowlist ?? DENY_ALL).allows(request.ip)) {
+      throw forbidden('The console is not available from this network');
+    }
+  }
 
   #account(s: StoredSession): AccountActor {
     return { userId: s.userId, sessionId: s.id };
@@ -834,6 +877,7 @@ export class AuthService {
     platform: boolean;
     workspace: { id: string; name: string; role: 'admin' | 'member' } | null;
     modules: { website_connector: boolean };
+    incident: { message: string; severity: IncidentSeverity; set_at: string } | null;
   }> {
     const session = this.#sessionOf(request);
     const user = await this.#user(session.userId);
@@ -854,6 +898,11 @@ export class AuthService {
         : undefined;
     // A workspace session whose workspace is gone (left meanwhile) is sent back to the picker.
     if (session.stage === 'workspace' && current === undefined) next = 'workspace_picker';
+    const found = (await this.#o.incidentBanner?.()) ?? null;
+    const banner =
+      found === null
+        ? null
+        : { message: found.message, severity: found.severity, setAt: found.setAt };
     return {
       user: { id: user.userId, name: user.name, email: user.email },
       next,
@@ -861,6 +910,7 @@ export class AuthService {
       workspace:
         current === undefined ? null : { id: current.id, name: current.name, role: current.role },
       modules: current?.modules ?? { website_connector: false },
+      incident: banner === null ? null : { ...banner, set_at: banner.setAt.toISOString() },
     };
   }
 
@@ -883,6 +933,7 @@ export class AuthService {
 
   async enterPlatform(request: FastifyRequest, account: AccountActor): Promise<string[]> {
     await this.#requireTerms(this.#sessionOf(request));
+    this.#requireConsoleNetwork(request);
     const user = await this.#user(account.userId);
     if (!user.platformAdmin) throw forbidden('Only platform operators can open the console');
     return this.#advance(this.#sessionOf(request), 'platform', null, this.#now(), false);

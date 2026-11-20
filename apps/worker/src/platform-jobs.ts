@@ -1,4 +1,9 @@
-import { createMainDb, type AuthStore, type PoolErrorHandler } from '@omnibridge/db';
+import {
+  createMainDb,
+  type AuthStore,
+  type PlatformHousekeeping,
+  type PoolErrorHandler,
+} from '@omnibridge/db';
 // The only worker module allowed to hold ob_platform (dependency-cruiser, ADR-049).
 import { platformDbConfig, WorkspaceDirectory } from '@omnibridge/db/platform';
 import type { Logger } from '@omnibridge/logger';
@@ -51,6 +56,8 @@ export async function startPlatformJobs({
   logger,
   onDbError,
   sendPlatformEmails,
+  notices,
+  sendDigest,
 }: {
   boss: PgBoss;
   queue: Pick<JobQueue, 'send'>;
@@ -60,6 +67,10 @@ export async function startPlatformJobs({
   onDbError: PoolErrorHandler;
   /** Emails critical platform notices to platform admins (T-0502); returns how many were sent. */
   sendPlatformEmails: () => Promise<number>;
+  /** Resolved platform notices past retention (ADR-071 4a), as ob_worker. */
+  notices: Pick<PlatformHousekeeping, 'purgePlatformNotices'>;
+  /** OPS-6: the daily health digest; returns how many were sent. */
+  sendDigest: () => Promise<number>;
 }): Promise<() => Promise<void>> {
   const platformDb = createMainDb(platformDbConfig('omnibridge-worker-fanout'), onDbError);
   const directory = new WorkspaceDirectory(platformDb.db);
@@ -79,11 +90,14 @@ export async function startPlatformJobs({
         logger.info({ event: 'pii.expiry_sweep', count: workspaces }, 'PII expiry sent');
       },
       'housekeeping.daily-sweep': async () => {
-        const workspaces = await sweepHousekeeping({ auth, directory, queue, logger });
+        const workspaces = await sweepHousekeeping({ auth, notices, directory, queue, logger });
         logger.info({ event: 'housekeeping.sweep', count: workspaces }, 'job retention sent');
       },
       'security.scan-sweep': async () => {
         await sweepSecurityScan({ directory, queue });
+      },
+      'platform.health-digest': async () => {
+        await sendDigest();
       },
       'notify.platform-email-sweep': async () => {
         const sent = await sendPlatformEmails();

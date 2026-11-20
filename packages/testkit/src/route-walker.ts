@@ -155,3 +155,55 @@ export async function walkIsolation(walk: IsolationWalk): Promise<WalkOutcome[]>
   }
   return outcomes;
 }
+
+export interface PlatformWalk {
+  routes: readonly AnyRoute[];
+  inject: IsolationWalk['inject'];
+  /** Headers of a signed-in platform admin in the console. */
+  platform: Record<string, string>;
+  /** The same calls as the isolation walk: each platform route aimed at workspace B. */
+  calls: Readonly<Record<string, WalkCall>>;
+  /**
+   * Workspace B's business data (company names, users, orders, customers, finance, messages):
+   * never in a console answer. Workspace names and ids may appear; the console lists workspaces.
+   */
+  businessMarkers: readonly string[];
+}
+
+export interface PlatformOutcome {
+  route: string;
+  status: number;
+  leaked: string[];
+  ok: boolean;
+}
+
+/**
+ * PLAT-3: calls every platform route as a platform admin, aimed at workspace B, and checks that
+ * no answer holds B's business data. Any status below 500 is allowed (a 404 or 409 is fine); a
+ * server error fails, so the walk cannot pass by crashing.
+ */
+export async function walkPlatform(walk: PlatformWalk): Promise<PlatformOutcome[]> {
+  const routes = walk.routes.filter((route) => route.auth === 'platform');
+  const missing = routes.filter((route) => walk.calls[route.id] === undefined);
+  if (missing.length > 0) {
+    throw new Error(`Platform routes with no walker call: ${missing.map((r) => r.id).join(', ')}`);
+  }
+  const outcomes: PlatformOutcome[] = [];
+  for (const route of routes) {
+    const call = walk.calls[route.id] ?? {};
+    const res = await walk.inject({
+      method: route.method,
+      url: urlOf(route, call),
+      headers: walk.platform,
+      ...(call.body === undefined ? {} : { payload: call.body }),
+    });
+    const leaked = walk.businessMarkers.filter((marker) => res.body.includes(marker));
+    outcomes.push({
+      route: route.id,
+      status: res.statusCode,
+      leaked,
+      ok: leaked.length === 0 && res.statusCode < 500,
+    });
+  }
+  return outcomes;
+}
