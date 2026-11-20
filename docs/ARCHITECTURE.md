@@ -154,6 +154,15 @@ Isolation is enforced in three layers:
 
 Company scoping for child users uses a second RLS policy on tables that have `company_id`. Tab checks happen at the route layer. Dashboard caches are keyed by `workspace_id` plus a hash of the user's company set (NFR-6).
 
+**What is company-scoped (FA-13, ADR-078).** Only company-scoped tables get the restrictive `company_id` policy; the RLS coverage test checks each table against this list.
+
+| Scope | Tables (and later ones like them) | Rule |
+|---|---|---|
+| Company-scoped | orders and order lines, refunds, returns, labels and shipments, expenses, bills, payments, VAT ledger rows, channel accounts | Restrictive `company_id` policy; Combined = permitted companies only |
+| Workspace-shared | Master SKUs, bundles, COGS and VAT-type history, listings and mappings, stock rows, stock movements and the change log, sync cursors, outbound writes, carrier accounts (usable by every company, SHIP-1) | Workspace policy only; a row that names an order shows the order reference only when the user can see that company, otherwise "another company" |
+| Two companies | intercompany transfers | Visible when the user holds either company; changing one needs both |
+| User-private | notification reads, email preferences, sessions | Keyed by user; notification visibility is computed at read time |
+
 ### 6.2 PII vault and deletion (ADR-007, M04)
 
 pii-vault is a small Fastify service on the `ob_pii` network, and only it can reach `db-pii`. Web and worker reach it over the internal `ob_vault` network (ADR-068; the vault is not on `ob_app`), using per-caller service tokens that carry capabilities.
@@ -210,6 +219,7 @@ Adapters implement `ChannelAdapter`, `AdsAdapter` and `ShippingProvider` (SHIP-3
 - Platform notices live in `app.platform_notifications` with owner-only RLS, reached only through definer functions: `platform_notice_raise` and `_resolve` (ob_tenant_rw); `platform_notice_list`, `_unread_count` and `_mark_read` (ob_auth, platform admins only); `platform_notice_pending_emails` and `_email_sent` (ob_worker).
 - Email: `notification_email_recipients` (ob_tenant_rw); one `notify.email` job per recipient per notification version, a phased handler, at-least-once.
 - Security signals: `security_login_failures` and `security_locks` (ob_worker); the vault's `signals` capability (worker token only) returns read-full counts and canary reads, IDs and counts only.
+- Definers never rely on RLS alone for workspace scope: each filters by workspace (or by the platform-admin check) explicitly; a catalog test checks it (F-M05e-02).
 ## 7. Shared server and deployment (ADR-015, ADR-024)
 
 ### Isolation (OPS-8, OPS-9)
