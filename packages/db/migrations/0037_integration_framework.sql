@@ -27,10 +27,10 @@ ALTER TABLE app.channel_accounts DROP CONSTRAINT IF EXISTS channel_accounts_prov
 ALTER TABLE app.channel_accounts
   ADD COLUMN last_success_at timestamptz,
   ADD COLUMN last_token_refresh_at timestamptz,
-  -- Auth failures since the window opened (AMZ-12: 3 within 1 hour mark Needs re-authorisation);
-  -- a successful call sets both back.
+  -- Consecutive auth failures (INT-4), and the times of the last three (AMZ-12: 3 within any
+  -- hour mark Needs re-authorisation); a successful call clears both.
   ADD COLUMN auth_failures bigint NOT NULL DEFAULT 0,
-  ADD COLUMN auth_failures_since timestamptz,
+  ADD COLUMN auth_failure_times timestamptz[] NOT NULL DEFAULT '{}',
   ADD COLUMN needs_reauth_at timestamptz,
   -- A stable code only (e.g. provider.server_error), never a provider message or a value.
   ADD COLUMN last_error_code text,
@@ -38,7 +38,7 @@ ALTER TABLE app.channel_accounts
   -- SAFE-2: set while the account's automated writes are paused. Who paused it is in the audit log.
   ADD COLUMN paused_at timestamptz;
 ALTER TABLE app.channel_accounts ADD CONSTRAINT channel_accounts_health
-  CHECK (auth_failures >= 0
+  CHECK (auth_failures >= 0 AND cardinality(auth_failure_times) <= 3
          AND (last_error_code IS NULL OR last_error_code ~ '^[a-z][a-z0-9_.]{0,63}$')) NOT VALID;
 
 -- ---- Origin tags (INT-6) -----------------------------------------------------------------------
@@ -84,6 +84,9 @@ CREATE TABLE app.sync_cursors (
   cursor_at timestamptz,
   overlap jsonb NOT NULL DEFAULT '[]' CHECK (jsonb_typeof(overlap) = 'array'
                                              AND jsonb_array_length(overlap) <= 10000),
+  -- A run that stopped at its page cap goes on from here next time: { since, page, maxAt }. The
+  -- cursor moves on only once every page has been read, so no change is skipped.
+  resume jsonb CHECK (resume IS NULL OR jsonb_typeof(resume) = 'object'),
   last_run_at timestamptz,
   last_success_at timestamptz,
   updated_at timestamptz NOT NULL,

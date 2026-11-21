@@ -164,16 +164,16 @@ describe('connections, cursors and OAuth states (T-0701)', () => {
     });
   });
 
-  it('[INT-4] failures spread over more than an hour do not mark it; a revocation marks it at once', async () => {
+  it('[INT-4] three failures within any one hour mark it, not three spread wider; a revocation marks it at once', async () => {
     const id = await newAccount(A);
-    for (const iso of ['2026-11-21T08:00:00.000Z', '2026-11-21T08:50:00.000Z']) {
-      await asTenant(A, () => connections.recordAuthFailure(A, id, at(iso), { revoked: false }));
-    }
-    // An hour after the first: the window starts again.
-    const third = await asTenant(A, () =>
-      connections.recordAuthFailure(A, id, at('2026-11-21T09:05:00.000Z'), { revoked: false }),
-    );
-    expect(third).toEqual({ failures: 1, marked: false });
+    const fail = (iso: string) =>
+      asTenant(A, () => connections.recordAuthFailure(A, id, at(iso), { revoked: false }));
+    expect(await fail('2026-11-21T08:00:00.000Z')).toEqual({ failures: 1, marked: false });
+    expect(await fail('2026-11-21T08:50:00.000Z')).toEqual({ failures: 2, marked: false });
+    // 08:00 to 09:05 is more than an hour: not yet.
+    expect(await fail('2026-11-21T09:05:00.000Z')).toEqual({ failures: 3, marked: false });
+    // 08:50, 09:05 and 09:10 fall within one hour (AMZ-12).
+    expect(await fail('2026-11-21T09:10:00.000Z')).toEqual({ failures: 4, marked: true });
 
     const other = await newAccount(A);
     expect(
@@ -257,10 +257,12 @@ describe('connections, cursors and OAuth states (T-0701)', () => {
     expect(await asTenant(A, () => cursors.get(A, id, 'ebay.orders'))).toEqual({
       cursorAt: null,
       overlap: [],
+      resume: null,
     });
     const state = {
       cursorAt: at('2026-11-21T11:00:00.000Z'),
       overlap: [{ id: '12-34', at: '2026-11-21T11:00:00.000Z' }],
+      resume: { since: '2026-11-21T10:55:00.000Z', page: '200', maxAt: '2026-11-21T11:00:00.000Z' },
     };
     await asTenant(A, () =>
       cursors.save(A, id, 'ebay.orders', state, at('2026-11-21T11:01:00.000Z')),
@@ -269,6 +271,7 @@ describe('connections, cursors and OAuth states (T-0701)', () => {
     expect(await asTenant(B, () => cursors.get(B, id, 'ebay.orders'))).toEqual({
       cursorAt: null,
       overlap: [],
+      resume: null,
     });
     const detail = await asTenant(A, () => connections.get(A, id, at('2026-11-21T12:00:00.000Z')));
     expect(detail?.streams).toEqual([

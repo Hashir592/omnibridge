@@ -162,7 +162,7 @@ export class ConnectionRepository {
         .set({
           last_success_at: at,
           auth_failures: 0,
-          auth_failures_since: null,
+          auth_failure_times: sql<Date[]>`'{}'::timestamptz[]`,
           needs_reauth_at: null,
           ...(options.tokenRefreshed === true ? { last_token_refresh_at: at } : {}),
         })
@@ -175,8 +175,8 @@ export class ConnectionRepository {
 
   /**
    * An auth failure (AMZ-12, EBAY-5). Revoked (invalid_grant, a revocation) marks the account at
-   * once; otherwise the third failure within an hour does. `marked` is true only for the call that
-   * marked it, so the caller raises one notice.
+   * once; otherwise the third failure within any one hour does (the times of the last three are
+   * kept). `marked` is true only for the call that marked it, so the caller raises one notice.
    */
   async recordAuthFailure(
     ctx: TenantContext,
@@ -185,25 +185,29 @@ export class ConnectionRepository {
     options: { revoked: boolean },
   ): Promise<{ failures: number; marked: boolean }> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
-      const windowStart = new Date(at.getTime() - AUTH_FAILURE_WINDOW_MS);
       const row = await trx
         .updateTable('app.channel_accounts')
         .set({
-          auth_failures: sql<number>`CASE WHEN auth_failures_since IS NULL
-            OR auth_failures_since <= ${windowStart} THEN 1 ELSE auth_failures + 1 END`,
-          auth_failures_since: sql<Date>`CASE WHEN auth_failures_since IS NULL
-            OR auth_failures_since <= ${windowStart} THEN ${at}::timestamptz
-            ELSE auth_failures_since END`,
+          auth_failures: sql<number>`auth_failures + 1`,
+          // The last three failure times, oldest first.
+          auth_failure_times: sql<Date[]>`ARRAY(SELECT t FROM (
+            SELECT t FROM unnest(auth_failure_times || ${at}::timestamptz) AS t
+             ORDER BY t DESC LIMIT ${AUTH_FAILURE_LIMIT}) AS last ORDER BY t)`,
           last_error_code: 'provider.auth_failed',
           last_error_at: at,
         })
         .where('workspace_id', '=', ctx.workspaceId)
         .where('id', '=', id)
-        .returning('auth_failures')
+        .returning(['auth_failures', 'auth_failure_times'])
         .executeTakeFirst();
       if (row === undefined) return { failures: 0, marked: false };
       const failures = Number(row.auth_failures);
-      if (!options.revoked && failures < AUTH_FAILURE_LIMIT) return { failures, marked: false };
+      const oldest = row.auth_failure_times[0];
+      const withinHour =
+        row.auth_failure_times.length >= AUTH_FAILURE_LIMIT &&
+        oldest !== undefined &&
+        at.getTime() - new Date(oldest).getTime() <= AUTH_FAILURE_WINDOW_MS;
+      if (!options.revoked && !withinHour) return { failures, marked: false };
       const marked = await trx
         .updateTable('app.channel_accounts')
         .set({ needs_reauth_at: at })

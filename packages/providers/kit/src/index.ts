@@ -20,10 +20,19 @@ export type {
   TrackingEvent,
   WriteResult,
 } from './adapters.ts';
-export { applyPoll, OVERLAP_MS, pollSince, type CursorState, type SyncItem } from './cursor.ts';
+export {
+  applyPoll,
+  applyRun,
+  OVERLAP_MS,
+  pollSince,
+  type CursorResume,
+  type CursorState,
+  type SyncItem,
+} from './cursor.ts';
 export {
   AuthFailed,
   EgressRefused,
+  isProviderError,
   ProviderParserError,
   ProviderRejected,
   ProviderUnavailable,

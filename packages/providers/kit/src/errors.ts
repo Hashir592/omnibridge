@@ -74,6 +74,18 @@ export class ProviderUnavailable extends Error {
   }
 }
 
+/** True for a failure of the provider call itself, as opposed to our own (db-main, a bug). */
+export function isProviderError(err: unknown): boolean {
+  return (
+    err instanceof AuthFailed ||
+    err instanceof RateLimited ||
+    err instanceof ProviderRejected ||
+    err instanceof ProviderUnavailable ||
+    err instanceof ProviderParserError ||
+    err instanceof EgressRefused
+  );
+}
+
 /** A stable error code for a provider failure, for health rows and job records. */
 export function providerErrorCode(err: unknown): string {
   if (err instanceof AuthFailed) return 'provider.auth_failed';

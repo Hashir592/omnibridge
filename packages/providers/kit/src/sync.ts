@@ -1,8 +1,8 @@
 import type { Notifier, Provider, TenantContext, TenantRunner } from '@omnibridge/core';
 import type { Secret } from '@omnibridge/crypto';
 import type { AccessToken, Page } from './adapters.ts';
-import { applyPoll, pollSince, type CursorState, type SyncItem } from './cursor.ts';
-import { AuthFailed, ProviderParserError, providerErrorCode } from './errors.ts';
+import { applyRun, pollSince, type CursorState, type SyncItem } from './cursor.ts';
+import { AuthFailed, isProviderError, ProviderParserError, providerErrorCode } from './errors.ts';
 import { parserRecordKind } from './parser.ts';
 import type { AccessTokenCache } from './tokens.ts';
 
@@ -91,7 +91,8 @@ export interface SyncStream<T extends SyncItem> {
 }
 
 export type SyncResult =
-  { skipped: 'disconnected' } | { fetched: number; fresh: number; cursorAt: string | null };
+  | { skipped: 'disconnected' }
+  | { fetched: number; fresh: number; cursorAt: string | null; more?: true };
 
 /**
  * One incremental poll of one account (INT-1, INT-2, INT-5, INT-8): short transactions only, never
@@ -131,10 +132,12 @@ export async function runIncrementalSync<T extends SyncItem>(
     });
     count(api);
   };
-  // An object, not a let: it changes inside the token closure.
-  const auth = { refreshed: false };
+  // An object, not a let: it changes inside the token closure. `issued` is set before the call,
+  // so a refresh that fails is never tried a second time in the same run.
+  const auth = { refreshed: false, issued: false };
   const token = async () => {
     const got = await ports.tokens.get(accountId, async () => {
+      auth.issued = true;
       await governed('auth');
       return stream.authenticate(credential);
     });
@@ -152,9 +155,12 @@ export async function runIncrementalSync<T extends SyncItem>(
   };
 
   try {
-    const since = pollSince(cursor, now(), stream.lookbackMs);
+    // A run that stopped at the page cap goes on from where it stopped, with the same since.
+    const resume = cursor.resume ?? null;
+    const since =
+      resume === null ? pollSince(cursor, now(), stream.lookbackMs) : new Date(resume.since);
     const items: T[] = [];
-    let page: string | undefined;
+    let page: string | undefined = resume?.page;
     for (let n = 0; n < MAX_PAGES; n += 1) {
       let result: Page<T>;
       try {
@@ -163,7 +169,7 @@ export async function runIncrementalSync<T extends SyncItem>(
         result = await stream.fetchPage(access, since, page);
       } catch (err) {
         // One 401 with a cached token: it may just have expired early. Renew once and retry.
-        if (!(err instanceof AuthFailed) || err.revoked || auth.refreshed) throw err;
+        if (!(err instanceof AuthFailed) || err.revoked || auth.issued) throw err;
         ports.tokens.invalidate(accountId);
         const access = await token();
         await governed(stream.api);
@@ -173,7 +179,7 @@ export async function runIncrementalSync<T extends SyncItem>(
       page = result.next;
       if (page === undefined) break;
     }
-    const { fresh, next } = applyPoll(cursor, items);
+    const { fresh, next } = applyRun(cursor, items, { since, nextPage: page });
     await ports.tenancy.runWorkspace(actor, async (ctx) => {
       await stream.sink(ctx, accountId, fresh);
       await ports.cursors.save(ctx, accountId, stream.stream, next, now());
@@ -192,6 +198,7 @@ export async function runIncrementalSync<T extends SyncItem>(
       fetched: items.length,
       fresh: fresh.length,
       cursorAt: next.cursorAt?.toISOString() ?? null,
+      ...(page === undefined ? {} : { more: true as const }),
     };
   } catch (err) {
     await ports.tenancy.runWorkspace(actor, async (ctx) => {
@@ -210,7 +217,8 @@ export async function runIncrementalSync<T extends SyncItem>(
             channelAccountId: accountId,
           });
         }
-      } else {
+      } else if (isProviderError(err)) {
+        // A provider failure only: a db-main error after a good call is not the account's fault.
         await ports.health.recordError(ctx, accountId, providerErrorCode(err), now());
       }
       await recordCalls(ctx);

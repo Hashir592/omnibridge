@@ -1,5 +1,6 @@
 import {
   ApiError,
+  NotAMember,
   OAUTH_PROVIDERS,
   type Notifier,
   type OAuthProvider,
@@ -217,7 +218,8 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
           },
         );
       } catch (err) {
-        if (err instanceof ApiError) return back('error=forbidden');
+        // No longer an admin, or no longer a member at all: the token is not stored.
+        if (err instanceof ApiError || err instanceof NotAMember) return back('error=forbidden');
         throw err;
       }
       return back(`connected=${encodeURIComponent(taken.channelAccountId)}`);

@@ -1,5 +1,6 @@
 import type { Logger } from '@omnibridge/logger';
 import {
+  AuthFailed,
   EgressRefused,
   ProviderParserError,
   runIncrementalSync,
@@ -18,8 +19,8 @@ export type StreamFactory = () => Promise<SyncStream<OrderSummary>>;
 /**
  * sync.poll (T-0701: INT-1, INT-2, INT-5, INT-8). The whole poll runs in `prepare`, in short
  * transactions of its own and never one across a provider call (invariant 3); `commit` only hands
- * back the counts. A parser failure or a refused host ends the job at once: no retry can mend it,
- * and the job waits in the dead-letter queue for a redrive after the fix.
+ * back the counts. A parser failure, a refused host or a refused token ends the job at once: no
+ * retry can mend it, and the job waits in the dead-letter queue for a redrive after the fix.
  */
 export function syncPollHandler(deps: {
   ports: SyncPorts;
@@ -54,6 +55,9 @@ export function syncPollHandler(deps: {
           throw new PermanentJobError('provider.parser_failed');
         }
         if (err instanceof EgressRefused) throw new PermanentJobError('provider.egress_refused');
+        // Retrying a refused token spends provider calls and mends nothing: the failure is
+        // recorded (AMZ-12) and the next scheduled poll tries again once.
+        if (err instanceof AuthFailed) throw new PermanentJobError('provider.auth_failed');
         throw err;
       }
     },

@@ -217,8 +217,14 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
   it('[INT-4] a revoked eBay token marks the account and raises one critical notice; a success after re-auth resolves it', async () => {
     scenarios.set('ebay', refresh, 'revoked');
     ports.tokens.invalidate(account);
-    await expect(handler().prepare(job())).rejects.toMatchObject({ name: 'AuthFailed' });
-    await expect(handler().prepare(job())).rejects.toMatchObject({ name: 'AuthFailed' });
+    // A refused token ends the job at once (no retries that spend eBay calls).
+    for (let i = 0; i < 2; i += 1) {
+      const err = await handler()
+        .prepare(job())
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(PermanentJobError);
+      expect((err as PermanentJobError).code).toBe('provider.auth_failed');
+    }
     const open = await root.query<{ severity: string; resolved_at: Date | null }>(
       `SELECT severity, resolved_at FROM app.notifications
         WHERE workspace_id = $1 AND type = 'channel.auth_lost'`,

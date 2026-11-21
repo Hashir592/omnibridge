@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyPoll, OVERLAP_MS, pollSince, type CursorState } from './cursor.ts';
+import { applyPoll, applyRun, OVERLAP_MS, pollSince, type CursorState } from './cursor.ts';
 
 const at = (iso: string) => new Date(iso);
 const item = (externalId: string, iso: string) => ({ externalId, updatedAt: at(iso) });
@@ -58,5 +58,30 @@ describe('incremental cursors (INT-8)', () => {
     expect(out.next.cursorAt).toEqual(at('2026-11-21T11:00:00.000Z'));
     expect(out.next.overlap).toEqual([{ id: 'late', at: '2026-11-21T10:57:00.000Z' }]);
     expect(applyPoll(out.next, []).next).toEqual(out.next);
+  });
+  it('[INT-8] a run stopped at the page cap keeps the cursor and resumes from that page; no unread change is skipped', () => {
+    const since = at('2026-11-21T09:55:00.000Z');
+    const start: CursorState = { cursorAt: at('2026-11-21T10:00:00.000Z'), overlap: [] };
+    const first = applyRun(start, [item('A', '2026-11-21T11:30:00.000Z')], {
+      since,
+      nextPage: '50',
+    });
+    expect(first.fresh.map((i) => i.externalId)).toEqual(['A']);
+    // The cursor has not moved past the unread pages; the run goes on from page 50, same since.
+    expect(first.next.cursorAt).toEqual(start.cursorAt);
+    expect(first.next.resume).toEqual({
+      since: since.toISOString(),
+      page: '50',
+      maxAt: '2026-11-21T11:30:00.000Z',
+    });
+    // The rest: an earlier change on a later page, and A again, already handled.
+    const second = applyRun(
+      first.next,
+      [item('B', '2026-11-21T10:30:00.000Z'), item('A', '2026-11-21T11:30:00.000Z')],
+      { since, nextPage: undefined },
+    );
+    expect(second.fresh.map((i) => i.externalId)).toEqual(['B']);
+    expect(second.next.cursorAt).toEqual(at('2026-11-21T11:30:00.000Z'));
+    expect(second.next.resume).toBeNull();
   });
 });

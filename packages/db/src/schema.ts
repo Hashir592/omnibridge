@@ -158,7 +158,7 @@ export interface ChannelAccountsTable {
   last_success_at: Date | null;
   last_token_refresh_at: Date | null;
   auth_failures: ColumnType<string, number | undefined, number>;
-  auth_failures_since: Date | null;
+  auth_failure_times: ColumnType<Date[], Date[] | undefined, Date[]>;
   needs_reauth_at: Date | null;
   last_error_code: string | null;
   last_error_at: Date | null;
@@ -172,6 +172,11 @@ export interface SyncCursorsTable {
   stream: string;
   cursor_at: Date | null;
   overlap: ColumnType<{ id: string; at: string }[], string | undefined, string>;
+  resume: ColumnType<
+    { since: string; page: string; maxAt: string | null } | null,
+    string | null | undefined,
+    string | null
+  >;
   last_run_at: Date | null;
   last_success_at: Date | null;
   updated_at: Date;

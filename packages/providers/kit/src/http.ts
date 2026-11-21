@@ -1,5 +1,5 @@
 import type { Provider, ProviderMode } from '@omnibridge/core';
-import { EgressRefused } from './errors.ts';
+import { EgressRefused, ProviderUnavailable } from './errors.ts';
 
 /**
  * Provider hosts per mode (invariant 17). The only place real provider hostnames are written.
@@ -79,13 +79,19 @@ export class ProviderHttp {
   async request(provider: Provider, req: ProviderRequest): Promise<Response> {
     const url = new URL(req.url);
     if (!this.#allowed(provider, url)) throw new EgressRefused(provider, url.host);
-    return this.#fetch(url.href, {
-      method: req.method ?? 'GET',
-      ...(req.headers === undefined ? {} : { headers: req.headers }),
-      ...(req.body === undefined ? {} : { body: req.body }),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(this.#timeoutMs),
-    });
+    try {
+      return await this.#fetch(url.href, {
+        method: req.method ?? 'GET',
+        ...(req.headers === undefined ? {} : { headers: req.headers }),
+        ...(req.body === undefined ? {} : { body: req.body }),
+        redirect: 'manual',
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch {
+      // A refused connection, a reset or the timeout: retry later. The cause is dropped, as it
+      // may carry the URL with its query.
+      throw new ProviderUnavailable(provider);
+    }
   }
 }
 

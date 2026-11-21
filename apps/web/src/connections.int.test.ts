@@ -234,4 +234,39 @@ describe('Connections and the OAuth connect flow (T-0701)', () => {
     expect(res.statusCode).toBe(409);
     await server.close();
   });
+  it('[INT-2] a return for an admin who left the workspace meanwhile stores nothing and says so', async () => {
+    const server = app();
+    const leaver = randomUUID();
+    await tenancy.run({ workspaceId: A, companyIds: [], userId: leaver }, async (ctx) => {
+      await new UserRepository(db.db).create(ctx, {
+        id: leaver,
+        email: `${leaver}@example.test`,
+        name: 'Leaver',
+      });
+      await new MembershipRepository(db.db).add(ctx, { userId: leaver, role: 'admin' });
+    });
+    const start = await server.inject({
+      method: 'POST',
+      url: `/api/connections/${ebay}/authorise`,
+      headers: {
+        ...sessionHeaders({ workspaceId: A, userId: leaver, sessionId: 'session-leaver' }),
+        origin: APP,
+      },
+    });
+    const consent = start.json<{ redirect_url: string }>().redirect_url;
+    const back = new URL(
+      (await fetch(consent, { redirect: 'manual' })).headers.get('location') ?? '',
+    );
+    await root.query('DELETE FROM app.memberships WHERE workspace_id = $1 AND user_id = $2', [
+      A,
+      leaver,
+    ]);
+    const count = 'SELECT count(*)::int AS n FROM app.credentials';
+    const before = (await root.query(count)).rows;
+    const done = await server.inject({ method: 'GET', url: `${back.pathname}${back.search}` });
+    expect(done.statusCode).toBe(303);
+    expect(done.headers.location).toBe(`${APP}/connections?error=forbidden`);
+    expect((await root.query(count)).rows).toEqual(before);
+    await server.close();
+  });
 });
