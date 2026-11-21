@@ -1884,7 +1884,7 @@
         "CI full gate green at merge"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0702",
