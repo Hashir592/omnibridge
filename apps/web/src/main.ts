@@ -4,7 +4,9 @@ import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
   AccountCredentials,
+  BulkConfirmationRepository,
   ChannelAccountRepository,
+  OutboundWriteRepository,
   ConnectionRepository,
   CredentialRepository,
   OAuthStateRepository,
@@ -35,6 +37,7 @@ import {
   JobAdmin,
   JOBS,
   JobQueue,
+  OutboundQueue,
   QUEUE_SCHEMA,
 } from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
@@ -175,6 +178,11 @@ const app = buildWebApp({
     const connections = new ConnectionRepository(main.db, { environment: mode });
     return {
       connections,
+      // SAFE-2: resuming an account sends its held writes in the same transaction (T-0702).
+      outbound: new OutboundQueue({ queue, writes: new OutboundWriteRepository(main.db) }),
+      audit: new AuditLog(main.db),
+      // SAFE-1: the modules register their bulk actions (M09 stock_push, M12, M19).
+      bulk: { confirmations: new BulkConfirmationRepository(main.db), actions: {} },
       oauth: {
         flows: createOAuthFlows({
           mode,
@@ -201,6 +209,16 @@ const app = buildWebApp({
   // The platform console (PLAT-1, PLAT-2): counts and IDs only, never tenant business data.
   platform: {
     console: platformConsole,
+    // SAFE-3: turning maintenance off sends each workspace's held writes (T-0702).
+    outbound: (() => {
+      const writes = new OutboundWriteRepository(main.db);
+      const outbound = new OutboundQueue({ queue, writes });
+      return {
+        maintenanceWorkspaces: () => writes.maintenanceWorkspaces(),
+        resume: (ctx: Parameters<OutboundQueue['resumeMaintenance']>[0]) =>
+          outbound.resumeMaintenance(ctx),
+      };
+    })(),
     // App secrets (PLAT-4): sealed under the platform data key, which secrets_kek wraps.
     secrets: new AppSecretStore(main.db, new PlatformKeys(authStore, secretsKeyring)),
     jobs: new JobAdmin({

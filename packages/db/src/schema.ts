@@ -333,6 +333,54 @@ export interface NotificationsTable {
   version: ColumnType<string, number | undefined, number>;
 }
 
+export interface OutboundWritesTable {
+  workspace_id: string;
+  id: string;
+  channel_account_id: string;
+  provider: ChannelProvider;
+  operation: string;
+  urgent: Generated<boolean>;
+  idempotency_key: string;
+  payload: ColumnType<Record<string, unknown>, string, string>;
+  state: ColumnType<
+    'pending' | 'sending' | 'sent' | 'failed' | 'cancelled',
+    'pending' | undefined,
+    'pending' | 'sending' | 'sent' | 'failed' | 'cancelled'
+  >;
+  paused_reason: 'kill_switch' | 'maintenance' | null;
+  attempts: ColumnType<string, number | undefined, number>;
+  dispatch_seq: ColumnType<string, number | undefined, number>;
+  next_attempt_at: Date | null;
+  claimed_at: Date | null;
+  last_error_code: string | null;
+  result: ColumnType<Record<string, unknown> | null, string | null | undefined, string | null>;
+  created_at: Date;
+  updated_at: Date;
+  sent_at: Date | null;
+}
+
+export interface BulkConfirmationsTable {
+  workspace_id: string;
+  token_hash: Buffer;
+  user_id: string;
+  action: 'stock_push' | 'tracking_resend' | 'ads_change';
+  account_ids: string[];
+  params: ColumnType<Record<string, string | number | boolean | string[]>, string, string>;
+  created_at: Date;
+  expires_at: Date;
+  used_at: Date | null;
+}
+
+export interface AmazonRateBucketsTable {
+  workspace_id: string;
+  channel_account_id: string;
+  operation: string;
+  rate: number;
+  burst: number;
+  tokens: number;
+  refilled_at: Date;
+}
+
 export interface MainDb {
   'app.workspaces': WorkspacesTable;
   'app.companies': CompaniesTable;
@@ -356,4 +404,7 @@ export interface MainDb {
   'app.api_usage_daily': ApiUsageDailyTable;
   'app.sync_cursors': SyncCursorsTable;
   'app.oauth_states': OAuthStatesTable;
+  'app.outbound_writes': OutboundWritesTable;
+  'app.bulk_confirmations': BulkConfirmationsTable;
+  'app.amazon_rate_buckets': AmazonRateBucketsTable;
 }

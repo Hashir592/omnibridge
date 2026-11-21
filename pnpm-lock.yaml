@@ -443,6 +443,12 @@ importers:
       '@omnibridge/files':
         specifier: workspace:*
         version: link:../../packages/files
+      '@omnibridge/governor-amazon':
+        specifier: workspace:*
+        version: link:../../packages/governors/amazon
+      '@omnibridge/governor-ebay':
+        specifier: workspace:*
+        version: link:../../packages/governors/ebay
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
@@ -455,6 +461,9 @@ importers:
       '@omnibridge/provider-kit':
         specifier: workspace:*
         version: link:../../packages/providers/kit
+      '@omnibridge/provider-website':
+        specifier: workspace:*
+        version: link:../../packages/providers/website
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -555,6 +564,12 @@ importers:
       '@omnibridge/files':
         specifier: workspace:*
         version: link:../files
+      '@omnibridge/governor-amazon':
+        specifier: workspace:*
+        version: link:../governors/amazon
+      '@omnibridge/governor-ebay':
+        specifier: workspace:*
+        version: link:../governors/ebay
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../logger
@@ -587,9 +602,17 @@ importers:
         specifier: workspace:*
         version: link:../queue
 
-  packages/governors/amazon: {}
+  packages/governors/amazon:
+    dependencies:
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../../core
 
-  packages/governors/ebay: {}
+  packages/governors/ebay:
+    dependencies:
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../../core
 
   packages/logger:
     dependencies:

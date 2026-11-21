@@ -95,6 +95,8 @@ export interface SendInput<T> {
   companyId?: string;
   idempotencyKey: string;
   payload: T;
+  /** Not before this time (a deferred provider write, T-0702). */
+  startAfter?: Date;
 }
 
 export interface RunningJob<T> {
@@ -232,6 +234,7 @@ export class JobQueue {
       { id, type: def.type, idempotencyKey: input.idempotencyKey, companyId: input.companyId },
       async (db) => {
         const options: SendOptions = { id, db };
+        if (input.startAfter !== undefined) options.startAfter = input.startAfter;
         if (def.serialPerAccount && input.channelAccountId) {
           options.singletonKey = input.channelAccountId;
         }

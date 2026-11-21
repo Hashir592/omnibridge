@@ -14,6 +14,7 @@ import {
   OAuthStateRepository,
   AuditLog,
   AuthStore,
+  BulkConfirmationRepository,
   ChannelAccountRepository,
   DeletionLog,
   ErasureRequestRepository,
@@ -46,6 +47,7 @@ import {
 } from '@omnibridge/testkit';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { buildWebApp } from './app.ts';
 
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
@@ -355,6 +357,17 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           audit: new AuditLog(main.db),
           notifier: new Notifier({ store: new NotificationRepository(main.db) }),
           appOrigin: 'https://app.omnibridge.test',
+        },
+        // T-0702: a registered bulk action, so the walk reaches the account-scope check (SAFE-1).
+        bulk: {
+          confirmations: new BulkConfirmationRepository(main.db),
+          actions: {
+            stock_push: {
+              tab: 'stock-catalogue',
+              params: z.object({}).strict(),
+              run: () => Promise.reject(new Error('a bulk write ran in the isolation walk')),
+            },
+          },
         },
         logger,
       },
@@ -691,10 +704,6 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         markPlatformNotificationRead: [404],
         // The walk archives B before this route (contract order), and archive is final.
         setWorkspaceModules: [409],
-        // M07 contract PR: built in T-0702, which removes these three.
-        getMaintenance: [503],
-        setMaintenance: [503],
-        getLiveApiUsage: [503],
       },
       // B's business data. Its workspace name and IDs may appear: the console lists workspaces,
       // and usage, expiry and dead-letter rows name accounts and jobs by ID (PLAT-2).

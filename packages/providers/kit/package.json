@@ -11,6 +11,11 @@
       "@omnibridge/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./carrier": {
+      "@omnibridge/source": "./src/carrier.ts",
+      "types": "./dist/carrier.d.ts",
+      "default": "./dist/carrier.js"
     }
   },
   "scripts": {

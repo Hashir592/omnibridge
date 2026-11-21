@@ -7,6 +7,7 @@ import {
   type JobDefinition,
   type PlatformJobDefinition,
 } from './job.ts';
+import { outboundRecoverJob, outboundRecoverSweepJob, outboundSendJob } from './outbound.ts';
 
 /**
  * Virus scan of an uploaded file (SEC-2, T-0105). If clamd is unreachable the job fails and
@@ -191,6 +192,8 @@ export const JOBS: readonly JobDefinition[] = [
   notifyRetentionJob,
   workspaceCloseJob,
   syncPollJob,
+  outboundSendJob,
+  outboundRecoverJob,
 ];
 
 /**
@@ -269,4 +272,5 @@ export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [
   notifyPlatformEmailSweepJob,
   securityScanSweepJob,
   platformDigestJob,
+  outboundRecoverSweepJob,
 ];

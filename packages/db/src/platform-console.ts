@@ -261,6 +261,59 @@ export class PlatformConsole {
     }));
   }
 
+  /** The maintenance switch (SAFE-3): on, every outbound write of every workspace waits. */
+  async maintenance(userId: string): Promise<{ on: boolean; updatedAt: Date | null }> {
+    const row = (await this.#settings(userId)).find((s) => s.key === 'maintenance');
+    return { on: row?.value === true, updatedAt: row?.updated_at ?? null };
+  }
+
+  /** Sets the maintenance switch and writes its audit row in one transaction. */
+  async setMaintenance(userId: string, on: boolean, now: Date, audit: ConsoleAudit): Promise<void> {
+    await this.#db.transaction().execute(async (trx) => {
+      await sql`SELECT app.console_set_setting(${userId}::uuid, 'maintenance',
+                                               ${JSON.stringify(on)}::jsonb, ${now})`.execute(trx);
+      await this.#audit(trx, userId, audit, now);
+    });
+  }
+
+  /** RL-5: usage rows since `from`, each with the time its last call was counted. */
+  async liveUsage(userId: string, from: string): Promise<(ApiUsageRow & { updatedAt: Date })[]> {
+    const { rows } = await sql<{
+      workspace_id: string;
+      channel_account_id: string;
+      provider: string;
+      api: string;
+      day: string;
+      calls: string;
+      cap: string | null;
+      updated_at: Date;
+    }>`
+      SELECT workspace_id, channel_account_id, provider, api, to_char(day, 'YYYY-MM-DD') AS day,
+             calls, cap, updated_at
+        FROM app.console_api_usage_live(${userId}::uuid, ${from}::date)`.execute(this.#db);
+    return rows.map((r) => ({
+      workspaceId: r.workspace_id,
+      channelAccountId: r.channel_account_id,
+      provider: r.provider,
+      api: r.api,
+      day: r.day,
+      calls: num(r.calls),
+      cap: r.cap === null ? null : Number(r.cap),
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  /** EBAY-8: eBay's app-wide daily budget per API, since `from`. */
+  async ebayBudget(
+    userId: string,
+    from: string,
+  ): Promise<{ api: string; day: string; calls: number; cap: number }[]> {
+    const { rows } = await sql<{ api: string; day: string; calls: string; cap: string }>`
+      SELECT api, to_char(day, 'YYYY-MM-DD') AS day, calls, cap
+        FROM app.console_ebay_budget(${userId}::uuid, ${from}::date)`.execute(this.#db);
+    return rows.map((r) => ({ api: r.api, day: r.day, calls: num(r.calls), cap: Number(r.cap) }));
+  }
+
   async credentialExpiry(userId: string, until: Date): Promise<CredentialExpiryRow[]> {
     const { rows } = await sql<{
       workspace_id: string;

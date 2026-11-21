@@ -95,6 +95,45 @@ describe('architecture rules (INT-1, INT-2)', () => {
   });
 });
 
+describe('the governors share no retry helper (RL-3)', () => {
+  const governors = {
+    'packages/governors/amazon/src/backoff.ts': 'export const backoff = () => 1;\n',
+    'packages/governors/ebay/src/budget.ts': 'export const budget = 1;\n',
+    'packages/providers/kit/src/carrier.ts': 'export const carrierBackoff = () => 1;\n',
+    'packages/core/src/retry.ts': 'export const retry = () => 1;\n',
+  };
+
+  it('[RL-3] the shared-helper rules fail on a planted import between the two code paths', async () => {
+    const root = tree({
+      ...governors,
+      // The eBay governor reaching for Amazon's backoff, the kit's carrier backoff, or a core one.
+      'packages/governors/ebay/src/reserve.ts':
+        "import { backoff } from '../../amazon/src/backoff.ts';\n" +
+        "import { carrierBackoff } from '../../../providers/kit/src/carrier.ts';\n" +
+        "import { retry } from '../../../core/src/retry.ts';\nexport const r = [backoff, carrierBackoff, retry];\n",
+      // The eBay provider importing a governor, and the carrier backoff.
+      'packages/providers/ebay/src/adapter.ts':
+        "import { backoff } from '../../../governors/amazon/src/backoff.ts';\n" +
+        "import { carrierBackoff } from '../../kit/src/carrier.ts';\nexport const a = [backoff, carrierBackoff];\n",
+    });
+    expect(await violations(root)).toEqual([
+      'governors-no-core-retry-helper',
+      'governors-share-nothing',
+      'kit-carrier-backoff-only-carriers',
+      'providers-do-not-import-governors',
+    ]);
+  });
+
+  it('[RL-3] the carriers may use the carrier backoff', async () => {
+    const root = tree({
+      ...governors,
+      'packages/providers/evri/src/index.ts':
+        "import { carrierBackoff } from '../../kit/src/carrier.ts';\nexport const e = carrierBackoff;\n",
+    });
+    expect(await violations(root)).toEqual([]);
+  });
+});
+
 /** Every workspace package.json with its runtime dependencies. */
 function workspacePackages(root: string): { path: string; runtime: string[]; dev: string[] }[] {
   const out: { path: string; runtime: string[]; dev: string[] }[] = [];

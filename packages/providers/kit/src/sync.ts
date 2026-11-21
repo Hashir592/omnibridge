@@ -2,26 +2,19 @@ import type { Notifier, Provider, TenantContext, TenantRunner } from '@omnibridg
 import type { Secret } from '@omnibridge/crypto';
 import type { AccessToken, Page } from './adapters.ts';
 import { applyRun, pollSince, type CursorState, type SyncItem } from './cursor.ts';
-import { AuthFailed, isProviderError, ProviderParserError, providerErrorCode } from './errors.ts';
+import {
+  AuthFailed,
+  isProviderError,
+  ProviderParserError,
+  providerErrorCode,
+  RateLimited,
+} from './errors.ts';
+import type { ProviderGovernor } from './governor.ts';
 import { parserRecordKind } from './parser.ts';
 import type { AccessTokenCache } from './tokens.ts';
 
 /** The most pages one run reads; the rest wait for the next run (the cursor has moved on). */
 const MAX_PAGES = 50;
-
-/**
- * What a provider call reports to before it is sent (INT-2). T-0702 plugs in the Amazon and eBay
- * governors and the carrier cap; until then nothing waits.
- */
-export interface CallGovernor {
-  beforeCall(input: {
-    workspaceId: string;
-    channelAccountId: string;
-    provider: Provider;
-    api: string;
-    urgent: boolean;
-  }): Promise<void>;
-}
 
 /** The db repositories the sync uses, each taking the tenant context of a short transaction. */
 export interface SyncPorts {
@@ -72,7 +65,8 @@ export interface SyncPorts {
   };
   notifier: Pick<Notifier, 'raise' | 'resolve' | 'raisePlatform'>;
   tokens: AccessTokenCache;
-  governor?: CallGovernor;
+  /** The rate governors (T-0702); left out, nothing waits. */
+  governor?: ProviderGovernor;
   now?: () => Date;
 }
 
@@ -82,6 +76,8 @@ export interface SyncStream<T extends SyncItem> {
   readonly provider: Provider;
   /** The API name usage is counted under (RL-5). */
   readonly api: string;
+  /** The API name of the token call (eBay counts it as identity); `auth` when left out. */
+  readonly authApi?: string;
   /** How far back the first poll of an account reads. */
   readonly lookbackMs: number;
   authenticate(credential: Secret): Promise<AccessToken>;
@@ -122,23 +118,42 @@ export async function runIncrementalSync<T extends SyncItem>(
 
   const calls = new Map<string, number>();
   const count = (api: string) => calls.set(api, (calls.get(api) ?? 0) + 1);
+  const input = (api: string) => ({
+    workspaceId: job.workspaceId,
+    channelAccountId: accountId,
+    provider: stream.provider,
+    api,
+    urgent: false,
+  });
+  // A governor's own wait: retried like a rate limit, but not the account's fault (INT-4).
+  let held: RateLimited | undefined;
   const governed = async (api: string) => {
-    await ports.governor?.beforeCall({
-      workspaceId: job.workspaceId,
-      channelAccountId: accountId,
-      provider: stream.provider,
-      api,
-      urgent: false,
-    });
-    count(api);
+    const decision = (await ports.governor?.admit(input(api))) ?? {
+      ok: true,
+      usageRecorded: false,
+    };
+    if (!decision.ok) {
+      // INT-2: told to wait (an empty Amazon bucket, eBay's budget): nothing is sent this run.
+      held = new RateLimited(stream.provider, {
+        retryAfterMs: Math.max(0, decision.retryAt.getTime() - now().getTime()),
+        daily: stream.provider === 'ebay',
+      });
+      throw held;
+    }
+    // eBay's reservation already wrote the usage row (RL-5): never count it twice.
+    if (!decision.usageRecorded) count(api);
   };
+  const fetchPage = (access: AccessToken, since: Date, page: string | undefined) =>
+    ports.governor === undefined
+      ? stream.fetchPage(access, since, page)
+      : ports.governor.run(input(stream.api), () => stream.fetchPage(access, since, page));
   // An object, not a let: it changes inside the token closure. `issued` is set before the call,
   // so a refresh that fails is never tried a second time in the same run.
   const auth = { refreshed: false, issued: false };
   const token = async () => {
     const got = await ports.tokens.get(accountId, async () => {
       auth.issued = true;
-      await governed('auth');
+      await governed(stream.authApi ?? 'auth');
       return stream.authenticate(credential);
     });
     auth.refreshed ||= got.refreshed;
@@ -166,14 +181,14 @@ export async function runIncrementalSync<T extends SyncItem>(
       try {
         const access = await token();
         await governed(stream.api);
-        result = await stream.fetchPage(access, since, page);
+        result = await fetchPage(access, since, page);
       } catch (err) {
         // One 401 with a cached token: it may just have expired early. Renew once and retry.
         if (!(err instanceof AuthFailed) || err.revoked || auth.issued) throw err;
         ports.tokens.invalidate(accountId);
         const access = await token();
         await governed(stream.api);
-        result = await stream.fetchPage(access, since, page);
+        result = await fetchPage(access, since, page);
       }
       items.push(...result.items);
       page = result.next;
@@ -217,7 +232,7 @@ export async function runIncrementalSync<T extends SyncItem>(
             channelAccountId: accountId,
           });
         }
-      } else if (isProviderError(err)) {
+      } else if (isProviderError(err) && err !== held) {
         // A provider failure only: a db-main error after a good call is not the account's fault.
         await ports.health.recordError(ctx, accountId, providerErrorCode(err), now());
       }

@@ -96,6 +96,8 @@ describe('db-main roles and migrations', () => {
       '0036_validate_auth_events_action',
       '0037_integration_framework',
       '0038_validate_integration_framework',
+      '0039_outbound_governors',
+      '0040_validate_outbound_governors',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });
