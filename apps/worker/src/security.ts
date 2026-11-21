@@ -56,6 +56,12 @@ export function securityThresholdsFromEnv(
 const MINUTE = 60_000;
 /** Event rules look back further than the five-minute cadence, so a late run misses nothing. */
 const EVENT_WINDOW_MS = 15 * MINUTE;
+/**
+ * F-M05e-01 (ADR-078 1): an event alert resolves itself this long after its event, so the 90-day
+ * purge of resolved notices reaches it. Every event window above is far shorter, so a resolved
+ * event is never raised again.
+ */
+const EVENT_ALERT_LIFETIME_MS = 7 * 24 * 60 * MINUTE;
 /** A new network is one not seen in this many days before the sign-in. */
 const LOGIN_LOOKBACK_DAYS = 90;
 /** S1 (19 Nov 2026): canary reads of the last day, so worker downtime loses none. */
@@ -172,6 +178,16 @@ export function securityScanHandler(
         await raiseCanary(deps.notifier, ctx, read);
         raised.push('security.canary_read');
       }
+      // Event alerts older than their lifetime resolve themselves (F-M05e-01).
+      const expired = new Date(at.getTime() - EVENT_ALERT_LIFETIME_MS);
+      for (const [type, kind] of [
+        ['security.unusual_login', 'login'],
+        ['security.account_locked', 'lock'],
+      ] as const) {
+        for (const id of await deps.notifications.openRecordIds(ctx, type, kind, expired)) {
+          await deps.notifier.resolve(ctx, type, { kind, id });
+        }
+      }
       if (raised.length > 0) {
         deps.logger.warn(
           { event: 'security.alerts', workspaceId: ctx.workspaceId, count: raised.length },
@@ -266,6 +282,17 @@ export async function scanPlatformSecurity(deps: PlatformSecurityScanDeps): Prom
       params: { userId: lock.userId },
     });
     raised += 1;
+  }
+  // Event notices older than their lifetime resolve themselves (F-M05e-01), canary reads too.
+  const expired = new Date(at.getTime() - EVENT_ALERT_LIFETIME_MS);
+  for (const [type, kind] of [
+    ['security.platform_unusual_login', 'console_entry'],
+    ['security.platform_account_locked', 'lock'],
+    ['security.canary_read', 'canary_event'],
+  ] as const) {
+    for (const id of await deps.notifications.openPlatformRecordIds(type, kind, expired)) {
+      await deps.notifier.resolvePlatform(null, type, { kind, id });
+    }
   }
   if (raised > 0) {
     deps.logger.warn(

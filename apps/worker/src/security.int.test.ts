@@ -8,6 +8,7 @@ import {
   MembershipRepository,
   migrateMain,
   NotificationRepository,
+  PlatformHousekeeping,
   PlatformSecuritySignals,
   SecuritySignals,
   Tenancy,
@@ -374,6 +375,60 @@ describe('security alerts [SEC-12]', () => {
     clock = new Date(clock.getTime() + 20 * 60_000);
     await scanPlatform();
     expect(await platformOpen('security.platform_login_failures')).toEqual([]);
+  });
+
+  it('[SEC-12][NTF-1] an event alert resolves itself 7 days after its event, so the 90-day purge removes it (F-M05e-01)', async () => {
+    clock = new Date();
+    const member = randomUUID();
+    await tenancy.run({ workspaceId: A, companyIds: [], userId: member }, async (c) => {
+      await new UserRepository(db.db).create(c, {
+        id: member,
+        email: `${member}@example.test`,
+        name: 'M',
+      });
+      await new MembershipRepository(db.db).add(c, { userId: member, role: 'member' });
+    });
+    const op = await makeOperator();
+    await authEvent(member, 'auth.locked', new Date(clock.getTime() - 60_000));
+    await authEvent(op, 'auth.locked', new Date(clock.getTime() - 60_000));
+    await scan();
+    await scanPlatform();
+    const { rows: ids } = await root.query<{ id: string; user_id: string }>(
+      `SELECT id, user_id FROM app.auth_events WHERE user_id = ANY($1) AND action = 'auth.locked'`,
+      [[member, op]],
+    );
+    const wsLock = `lock:${ids.find((r) => r.user_id === member)?.id ?? ''}`;
+    const opLock = `lock:${ids.find((r) => r.user_id === op)?.id ?? ''}`;
+    expect(await open('security.account_locked')).toContain(wsLock);
+    expect((await platformOpen('security.platform_account_locked')).map((r) => r.rec)).toContain(
+      opLock,
+    );
+    // Six days on: still open. Eight days on: both resolved by the sweep.
+    clock = new Date(clock.getTime() + 6 * 24 * HOUR);
+    await scan();
+    await scanPlatform();
+    expect(await open('security.account_locked')).toContain(wsLock);
+    clock = new Date(clock.getTime() + 2 * 24 * HOUR);
+    await scan();
+    await scanPlatform();
+    expect(await open('security.account_locked')).not.toContain(wsLock);
+    expect(
+      (await platformOpen('security.platform_account_locked')).map((r) => r.rec),
+    ).not.toContain(opLock);
+    // The 90-day purge (notify.retention) now reaches them.
+    const cutoff = new Date(clock.getTime() + 91 * 24 * HOUR);
+    const housekeeping = new PlatformHousekeeping(db.db);
+    await tenancy.runWorkspace({ workspaceId: A }, (ctx) =>
+      housekeeping.purgeNotifications(ctx, cutoff),
+    );
+    await housekeeping.purgePlatformNotices(cutoff);
+    const left = await root.query(
+      `SELECT 1 FROM app.notifications WHERE record_kind || ':' || record_id = $1
+       UNION ALL
+       SELECT 1 FROM app.platform_notifications WHERE record_kind || ':' || record_id = $2`,
+      [wsLock, opLock],
+    );
+    expect(left.rows).toEqual([]);
   });
 
   it('[SEC-12] alert rows hold IDs and counts only: no buyer PII reached db-main', async () => {
