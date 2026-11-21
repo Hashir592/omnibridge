@@ -13,6 +13,8 @@ export function Combobox({
   emptyText = 'Nothing matches. Check the spelling or try fewer letters.',
   disabled,
   className,
+  onInputChange,
+  label,
 }: {
   options: Option[];
   value: string | null;
@@ -21,6 +23,10 @@ export function Combobox({
   emptyText?: string;
   disabled?: boolean;
   className?: string;
+  /** For a server-side search: called with the typed text, so the caller can refetch options. */
+  onInputChange?: (text: string) => void;
+  /** Accessible name when the combobox has no visible <Field> label. */
+  label?: string;
 }) {
   const selected = options.find((o) => o.value === value) ?? null;
   return (
@@ -33,9 +39,20 @@ export function Combobox({
       itemToStringLabel={(o: Option) => o.label}
       itemToStringValue={(o: Option) => o.value}
       disabled={disabled ?? false}
+      {...(onInputChange
+        ? {
+            onInputValueChange: (v: string) => {
+              onInputChange(v);
+            },
+          }
+        : {})}
     >
       <div className={cn('relative flex items-center', className)}>
-        <BaseCombobox.Input placeholder={placeholder} className={cn(controlClass, 'pr-16')} />
+        <BaseCombobox.Input
+          placeholder={placeholder}
+          aria-label={label}
+          className={cn(controlClass, 'pr-16')}
+        />
         <div className="absolute right-1 flex items-center">
           {selected && (
             <BaseCombobox.Clear

@@ -11,7 +11,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M09 built** (`docs/reviews/M09-end-report.md`): contract #142 and T-0901 #143, merged.
 - **S4:** the M07 + M08 milestone was BLOCKED on F-M08-end-01 (`docs/reviews/M08-end-findings.md`), fixed with both Minors in #146. The M09 + M10 milestone confirms the fix. The T-0901 critical review is still to run (`docs/handoffs/20261122-0300-S3-to-S4.md`).
 - **Next (S3):** M10, when Hashir pastes it.
-- **S2:** T-0316 catalogue screens (M08 client); T-0317 stock screens (M09 client; note `docs/handoffs/20261122-0300-S3-to-S2.md`).
+- **S2:** T-0316 catalogue screens built (PR, auto-merge; S3 ask for `channel_account_name` in `docs/handoffs/20261122-0131-S2-to-S3.md`). Next: T-0317 stock screens (M09 client; note `docs/handoffs/20261122-0300-S3-to-S2.md`).
 
 ## M08 in short (what later modules use)
 
