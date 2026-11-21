@@ -183,7 +183,7 @@ describe('connections, cursors and OAuth states (T-0701)', () => {
     ).toEqual({ failures: 1, marked: true });
   });
 
-  it('[INT-4] the list shows every field, the status by precedence and today\'s usage per API', async () => {
+  it("[INT-4] the list shows every field, the status by precedence and today's usage per API", async () => {
     const now = at('2026-11-21T12:00:00.000Z');
     const ctx = tenant();
     const disconnected = await newAccount(ctx);
@@ -201,7 +201,12 @@ describe('connections, cursors and OAuth states (T-0701)', () => {
         .where('id', '=', paused)
         .execute();
       await connections.recordSuccess(ctx, failing, at('2026-11-21T10:00:00.000Z'));
-      await connections.recordError(ctx, failing, 'provider.server_error', at('2026-11-21T11:00:00.000Z'));
+      await connections.recordError(
+        ctx,
+        failing,
+        'provider.server_error',
+        at('2026-11-21T11:00:00.000Z'),
+      );
       await connections.recordCalls(
         ctx,
         { channelAccountId: active, provider: 'ebay', api: 'sell.fulfillment', calls: 2 },
@@ -257,7 +262,9 @@ describe('connections, cursors and OAuth states (T-0701)', () => {
       cursorAt: at('2026-11-21T11:00:00.000Z'),
       overlap: [{ id: '12-34', at: '2026-11-21T11:00:00.000Z' }],
     };
-    await asTenant(A, () => cursors.save(A, id, 'ebay.orders', state, at('2026-11-21T11:01:00.000Z')));
+    await asTenant(A, () =>
+      cursors.save(A, id, 'ebay.orders', state, at('2026-11-21T11:01:00.000Z')),
+    );
     expect(await asTenant(A, () => cursors.get(A, id, 'ebay.orders'))).toEqual(state);
     expect(await asTenant(B, () => cursors.get(B, id, 'ebay.orders'))).toEqual({
       cursorAt: null,

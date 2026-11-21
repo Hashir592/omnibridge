@@ -68,7 +68,12 @@ export function syncPollHandler(deps: {
 export function countingSink(logger: Logger): SyncStream<OrderSummary>['sink'] {
   return (ctx, channelAccountId, items) => {
     logger.info(
-      { event: 'sync.received', workspaceId: ctx.workspaceId, channelAccountId, count: items.length },
+      {
+        event: 'sync.received',
+        workspaceId: ctx.workspaceId,
+        channelAccountId,
+        count: items.length,
+      },
       'sync changes received',
     );
     return Promise.resolve();

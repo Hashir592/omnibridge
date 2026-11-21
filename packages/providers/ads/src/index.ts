@@ -104,7 +104,10 @@ export function createAdsAdapter(options: {
           accept: SP_CAMPAIGN,
         },
         body: JSON.stringify({
-          campaigns: changes.map((c) => ({ campaignId: c.campaignId, state: c.state.toUpperCase() })),
+          campaigns: changes.map((c) => ({
+            campaignId: c.campaignId,
+            state: c.state.toUpperCase(),
+          })),
         }),
       });
       const body = CampaignsV1.parse(await readJson('amazon_ads', res));

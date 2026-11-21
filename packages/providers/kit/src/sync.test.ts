@@ -65,7 +65,13 @@ function harness(now: Date) {
     notifier: {
       raise: (_c, input) => {
         raised.push(input);
-        return Promise.resolve({ id: 'n', version: 1, created: true, escalated: false, reopened: false });
+        return Promise.resolve({
+          id: 'n',
+          version: 1,
+          created: true,
+          escalated: false,
+          reopened: false,
+        });
       },
       resolve: (_c, type) => {
         resolved.push(type);
@@ -73,7 +79,13 @@ function harness(now: Date) {
       },
       raisePlatform: (_c, input) => {
         platform.push(input);
-        return Promise.resolve({ id: 'p', version: 1, created: true, escalated: false, reopened: false });
+        return Promise.resolve({
+          id: 'p',
+          version: 1,
+          created: true,
+          escalated: false,
+          reopened: false,
+        });
       },
     },
     tokens: new AccessTokenCache(() => now.getTime()),
@@ -92,7 +104,9 @@ function stream(pages: () => Item[] | Error, sink: Item[]): SyncStream<Item> {
       Promise.resolve({ token: new Secret('access'), expiresAt: new Date(Date.now() + 7_200_000) }),
     fetchPage: () => {
       const out = pages();
-      return out instanceof Error ? Promise.reject(out) : Promise.resolve({ items: out, next: undefined });
+      return out instanceof Error
+        ? Promise.reject(out)
+        : Promise.resolve({ items: out, next: undefined });
     },
     sink: (_ctx, _account, items) => {
       sink.push(...items);

@@ -30,7 +30,12 @@ export {
   providerErrorCode,
   RateLimited,
 } from './errors.ts';
-export { ProviderHttp, type ProviderHttpOptions, type ProviderRequest } from './http.ts';
+export {
+  consentUrl,
+  ProviderHttp,
+  type ProviderHttpOptions,
+  type ProviderRequest,
+} from './http.ts';
 export { defineParser, parserRecordKind, type VersionedParser } from './parser.ts';
 export { readJson, retryAfterMs } from './respond.ts';
 export {

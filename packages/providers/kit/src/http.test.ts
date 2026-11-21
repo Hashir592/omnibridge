@@ -11,7 +11,7 @@ describe('provider HTTP client: the egress allowlist (invariant 17)', () => {
       mode: 'mock',
       mocksUrl: 'http://provider-mocks:8080',
       fetch: (url) => {
-        seen.push(String(url));
+        seen.push(url instanceof Request ? url.url : url.toString());
         return ok();
       },
     });
@@ -19,9 +19,9 @@ describe('provider HTTP client: the egress allowlist (invariant 17)', () => {
     await http.request('ebay', { url: 'http://127.0.0.1:4010/ebay/x' });
     expect(seen).toHaveLength(2);
     // A host outside the allowlist is refused before anything is sent.
-    await expect(
-      http.request('ebay', { url: 'https://example.com/steal' }),
-    ).rejects.toBeInstanceOf(EgressRefused);
+    await expect(http.request('ebay', { url: 'https://example.com/steal' })).rejects.toBeInstanceOf(
+      EgressRefused,
+    );
     await expect(
       http.request('ebay', { url: 'https://api.ebay.com/sell/x' }),
     ).rejects.toBeInstanceOf(EgressRefused);
@@ -31,7 +31,7 @@ describe('provider HTTP client: the egress allowlist (invariant 17)', () => {
   it('[INT-3] a live provider host is refused unless PROVIDER_MODE=live, and only over https', async () => {
     const sent: string[] = [];
     const fetchSpy = (url: string | URL | Request) => {
-      sent.push(String(url));
+      sent.push(url instanceof Request ? url.url : url.toString());
       return ok();
     };
     const sandbox = new ProviderHttp({ mode: 'sandbox', fetch: fetchSpy });

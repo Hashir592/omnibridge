@@ -24,7 +24,10 @@ import { buildMockServer } from './server.ts';
  */
 describe('adapters against provider-mocks (INT-1)', () => {
   const scenarios = new ScenarioStore();
-  const mock = buildMockServer(createLogger({ service: 'mock', version: '0', level: 'silent' }), scenarios);
+  const mock = buildMockServer(
+    createLogger({ service: 'mock', version: '0', level: 'silent' }),
+    scenarios,
+  );
   let http: ProviderHttp;
   const id = new Secret('synthetic-client-id');
   const secret = new Secret('synthetic-client-secret');
@@ -32,8 +35,9 @@ describe('adapters against provider-mocks (INT-1)', () => {
   let n = 0;
   /** A fresh account key per test, so scenarios never leak between them. */
   const account = () => new Secret(`TOKENMARK-account-${String((n += 1))}`);
-  const on = (provider: MockProvider, credential: Secret, scenario: Scenario, count?: number) =>
+  const on = (provider: MockProvider, credential: Secret, scenario: Scenario, count?: number) => {
     scenarios.set(provider, credential.reveal(), scenario, count);
+  };
 
   beforeAll(async () => {
     const url = await mock.listen({ host: '127.0.0.1', port: 0 });
@@ -56,7 +60,11 @@ describe('adapters against provider-mocks (INT-1)', () => {
     const all = await adapter.ordersUpdatedSince(token, new Date('2026-11-20T00:00:00.000Z'));
     expect(all.items).toHaveLength(2);
     expect(all.next).toBe('2');
-    const rest = await adapter.ordersUpdatedSince(token, new Date('2026-11-20T00:00:00.000Z'), all.next);
+    const rest = await adapter.ordersUpdatedSince(
+      token,
+      new Date('2026-11-20T00:00:00.000Z'),
+      all.next,
+    );
     expect(rest.items.map((o) => o.externalId)).toEqual(['MOCK-1003']);
     // The parser dropped the buyer fields.
     expect(JSON.stringify([first, all, rest])).not.toContain('PIIMARK');
@@ -70,7 +78,10 @@ describe('adapters against provider-mocks (INT-1)', () => {
     const adapter = ebay();
     const grant = account();
     on('ebay', grant, 'invalid_grant');
-    await expect(adapter.authenticate(grant)).rejects.toMatchObject({ name: 'AuthFailed', revoked: true });
+    await expect(adapter.authenticate(grant)).rejects.toMatchObject({
+      name: 'AuthFailed',
+      revoked: true,
+    });
 
     const revoked = account();
     const token = await adapter.authenticate(revoked);
@@ -116,10 +127,18 @@ describe('adapters against provider-mocks (INT-1)', () => {
     const adapter = createEvriAdapter({ http, clientId: id });
     const credential = account();
     const token: AccessToken = await adapter.authenticate(credential);
-    expect((await adapter.listServices(token, 'GB', 'GB', [])).map((s) => s.code)).toContain('EVRI-48');
+    expect((await adapter.listServices(token, 'GB', 'GB', [])).map((s) => s.code)).toContain(
+      'EVRI-48',
+    );
     const order = {
       reference: 'MOCK-1001',
-      address: { name: 'PIIMARK-Name', line1: 'PIIMARK-1 Street', city: 'Testville', postcode: 'TE1 1ST', country: 'GB' },
+      address: {
+        name: 'PIIMARK-Name',
+        line1: 'PIIMARK-1 Street',
+        city: 'Testville',
+        postcode: 'TE1 1ST',
+        country: 'GB',
+      },
     };
     const shipment = await adapter.createShipment(token, order, [{ weightGrams: 500 }], 'EVRI-48');
     expect(shipment).toEqual({
@@ -127,7 +146,9 @@ describe('adapters against provider-mocks (INT-1)', () => {
       carrierShipmentRef: 'EVRI-P-1',
       labels: [{ format: 'pdf', ref: 'EVRI-L-1' }],
     });
-    expect(Buffer.from(await adapter.getLabel(token, 'EVRI-L-1', 'pdf')).toString()).toContain('%PDF');
+    expect(Buffer.from(await adapter.getLabel(token, 'EVRI-L-1', 'pdf')).toString()).toContain(
+      '%PDF',
+    );
     expect(await adapter.tracking(token, 'H00MOCK0000001')).toHaveLength(1);
 
     on('evri', credential, 'invalid_parcel', 1);
@@ -143,14 +164,24 @@ describe('adapters against provider-mocks (INT-1)', () => {
     const adapter = createDpdAdapter({ http });
     const credential = account();
     const token = await adapter.authenticate(credential);
-    expect((await adapter.listServices(token, 'GB', 'GB', [])).map((s) => s.code)).toContain('1^12');
+    expect((await adapter.listServices(token, 'GB', 'GB', [])).map((s) => s.code)).toContain(
+      '1^12',
+    );
     const order = {
       reference: 'MOCK-1002',
-      address: { name: 'PIIMARK-Name', line1: 'PIIMARK-2 Street', city: 'Testville', postcode: 'TE1 1ST', country: 'GB' },
+      address: {
+        name: 'PIIMARK-Name',
+        line1: 'PIIMARK-2 Street',
+        city: 'Testville',
+        postcode: 'TE1 1ST',
+        country: 'GB',
+      },
     };
     const shipment = await adapter.createShipment(token, order, [{ weightGrams: 900 }], '1^12');
     expect(shipment.trackingNumbers).toEqual(['15500000000001']);
-    expect(Buffer.from(await adapter.getLabel(token, shipment.carrierShipmentRef, 'pdf')).toString()).toContain('%PDF');
+    expect(
+      Buffer.from(await adapter.getLabel(token, shipment.carrierShipmentRef, 'pdf')).toString(),
+    ).toContain('%PDF');
     expect(await adapter.tracking(token, '15500000000001')).toHaveLength(1);
     on('dpd', credential, 'invalid_parcel', 1);
     await expect(

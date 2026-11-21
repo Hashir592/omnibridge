@@ -26,7 +26,13 @@ import {
 } from '@omnibridge/provider-kit';
 import { buildMockServer, ScenarioStore } from '@omnibridge/provider-mocks';
 import { PermanentJobError, type PreparingJob, type SyncStreamName } from '@omnibridge/queue';
-import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
+import {
+  scanDatabaseForMarkers,
+  scanTextForMarkers,
+  startRoleCluster,
+  TOKEN_MARKER,
+  type RoleCluster,
+} from '@omnibridge/testkit';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -51,16 +57,21 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
   let root: pg.Pool;
   let tenancy: Tenancy;
   const scenarios = new ScenarioStore();
-  const mock = buildMockServer(createLogger({ service: 'mock', version: '0', level: 'silent' }), scenarios);
+  const mock = buildMockServer(
+    createLogger({ service: 'mock', version: '0', level: 'silent' }),
+    scenarios,
+  );
   let http: ProviderHttp;
   let ports: SyncPorts;
   const A = randomUUID();
   let account = '';
-  const refresh = `TOKENMARK-${randomUUID()}`;
+  const refresh = `${TOKEN_MARKER}${randomUUID()}`;
   const received: OrderSummary[] = [];
   const governed: string[] = [];
 
-  const job = (stream: SyncStreamName = 'ebay.orders'): PreparingJob<{ stream: SyncStreamName }> => ({
+  const job = (
+    stream: SyncStreamName = 'ebay.orders',
+  ): PreparingJob<{ stream: SyncStreamName }> => ({
     jobId: randomUUID(),
     envelope: {
       workspace_id: A,
@@ -81,14 +92,17 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
       clientId: new Secret('synthetic-client-id'),
       clientSecret: new Secret('synthetic-client-secret'),
     });
-  const handler = (stream = () =>
-    Promise.resolve(
-      ebayOrderStream(ebay(), (_ctx, _id, items) => {
-        received.push(...items);
-        return Promise.resolve();
-      }),
-    )) => syncPollHandler({ ports, streams: { 'ebay.orders': stream }, logger });
-  const inA = <T>(fn: (ctx: TenantContext) => Promise<T>) => tenancy.runWorkspace({ workspaceId: A }, fn);
+  const handler = (
+    stream = () =>
+      Promise.resolve(
+        ebayOrderStream(ebay(), (_ctx, _id, items) => {
+          received.push(...items);
+          return Promise.resolve();
+        }),
+      ),
+  ) => syncPollHandler({ ports, streams: { 'ebay.orders': stream }, logger });
+  const inA = <T>(fn: (ctx: TenantContext) => Promise<T>) =>
+    tenancy.runWorkspace({ workspaceId: A }, fn);
 
   beforeAll(async () => {
     cluster = await startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_worker']);
@@ -96,7 +110,10 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
     root = new pg.Pool({ connectionString: cluster.container.getConnectionUri(), max: 2 });
     db = createMainDb({ ...cluster.connection('ob_worker'), max: 4 });
     tenancy = new Tenancy(db.db);
-    http = new ProviderHttp({ mode: 'mock', mocksUrl: await mock.listen({ host: '127.0.0.1', port: 0 }) });
+    http = new ProviderHttp({
+      mode: 'mock',
+      mocksUrl: await mock.listen({ host: '127.0.0.1', port: 0 }),
+    });
     const keyring = parseKeyring('secrets', generateKekLine(1));
     const connections = new ConnectionRepository(db.db, { environment: 'mock' });
     const credentials = new AccountCredentials(
@@ -153,7 +170,9 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
     const again = await handler().prepare(job());
     expect(again).toEqual({ fetched: 1, fresh: 0, cursorAt: '2026-11-20T12:00:00.000Z' });
     expect(received.map((o) => o.externalId)).toEqual(['MOCK-1001', 'MOCK-1002', 'MOCK-1003']);
-    const detail = await inA((c) => ports.accounts.get(c, account, new Date('2026-11-21T12:00:00.000Z')));
+    const detail = await inA((c) =>
+      ports.accounts.get(c, account, new Date('2026-11-21T12:00:00.000Z')),
+    );
     expect(detail).toMatchObject({ status: 'active' });
     // Usage per API, in eBay's own day (RL-5); no buyer field reached the sink or the logs.
     const usage = await root.query<{ api: string; calls: string }>(
@@ -179,7 +198,9 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
         },
       });
     for (let i = 0; i < 2; i += 1) {
-      const err = await handler(stream).prepare(job()).catch((e: unknown) => e);
+      const err = await handler(stream)
+        .prepare(job())
+        .catch((e: unknown) => e);
       expect(err).toBeInstanceOf(PermanentJobError);
       expect((err as PermanentJobError).code).toBe('provider.parser_failed');
     }
@@ -223,10 +244,19 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
     const stream = () =>
       Promise.resolve({
         ...ebayOrderStream(ebay(), () => Promise.resolve()),
-        fetchPage: () => live.request('ebay', { url: 'https://api.ebay.com/sell/fulfillment/v1/order' }).then(() => ({ items: [], next: undefined })),
+        fetchPage: () =>
+          live
+            .request('ebay', { url: 'https://api.ebay.com/sell/fulfillment/v1/order' })
+            .then(() => ({ items: [], next: undefined })),
       });
-    const err = await handler(stream).prepare(job()).catch((e: unknown) => e);
+    const err = await handler(stream)
+      .prepare(job())
+      .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PermanentJobError);
     expect((err as PermanentJobError).code).toBe('provider.egress_refused');
+  });
+  it('[INT-3] the marker scan finds no token in db-main, the job tables or the logs', async () => {
+    expect(await scanDatabaseForMarkers(cluster, ['app', 'pgboss'], TOKEN_MARKER)).toEqual([]);
+    expect(scanTextForMarkers(lines, TOKEN_MARKER)).toEqual([]);
   });
 });

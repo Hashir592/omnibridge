@@ -105,7 +105,10 @@ export function createEvriAdapter(options: {
       if (res.status === 400) {
         // INVALID parcel: a stable code only; the answer may echo the address, so it is dropped.
         const body = ParcelErrorV1.parse(await res.json());
-        throw new ProviderRejected('evri', `evri.${(body.errors[0]?.code ?? 'invalid').toLowerCase()}`);
+        throw new ProviderRejected(
+          'evri',
+          `evri.${(body.errors[0]?.code ?? 'invalid').toLowerCase()}`,
+        );
       }
       const p = ParcelV1.parse(await readJson('evri', res));
       return {

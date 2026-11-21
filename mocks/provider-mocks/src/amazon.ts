@@ -36,9 +36,10 @@ export function lwaToken(app: MockApp, scenarios: ScenarioStore, provider: MockP
       (scenarios.take(provider, account, 'invalid_grant') ||
         scenarios.on(provider, account, 'revoked'))
     ) {
-      return reply
-        .code(400)
-        .send({ error: 'invalid_grant', error_description: 'The request has an invalid grant parameter' });
+      return reply.code(400).send({
+        error: 'invalid_grant',
+        error_description: 'The request has an invalid grant parameter',
+      });
     }
     return {
       access_token: accessToken(provider, account),
@@ -57,14 +58,20 @@ function spApiAccount(
 ): string | undefined {
   const account = accountOf('amazon', token);
   if (account === undefined || scenarios.on('amazon', account, 'revoked')) {
-    void reply.code(403).send({ errors: [{ code: 'Unauthorized', message: 'Access to requested resource is denied.' }] });
+    void reply.code(403).send({
+      errors: [{ code: 'Unauthorized', message: 'Access to requested resource is denied.' }],
+    });
     return undefined;
   }
   if (scenarios.take('amazon', account, 'rate_limit_storm')) {
     void reply
       .code(429)
       .header('x-amzn-RateLimit-Limit', '0.0167')
-      .send({ errors: [{ code: 'QuotaExceeded', message: 'You exceeded your quota for the requested resource.' }] });
+      .send({
+        errors: [
+          { code: 'QuotaExceeded', message: 'You exceeded your quota for the requested resource.' },
+        ],
+      });
     return undefined;
   }
   return account;
@@ -77,7 +84,9 @@ export function amazonRoutes(app: MockApp, scenarios: ScenarioStore): void {
     '/amazon/orders/v0/orders',
     (request, reply) => {
       const token = request.headers['x-amz-access-token'];
-      if (spApiAccount(scenarios, typeof token === 'string' ? token : undefined, reply) === undefined) {
+      if (
+        spApiAccount(scenarios, typeof token === 'string' ? token : undefined, reply) === undefined
+      ) {
         return reply;
       }
       const after = request.query.LastUpdatedAfter;
@@ -101,10 +110,17 @@ export function amazonRoutes(app: MockApp, scenarios: ScenarioStore): void {
     '/amazon/listings/2021-08-01/items/:sellerId/:sku',
     (request, reply) => {
       const token = request.headers['x-amz-access-token'];
-      if (spApiAccount(scenarios, typeof token === 'string' ? token : undefined, reply) === undefined) {
+      if (
+        spApiAccount(scenarios, typeof token === 'string' ? token : undefined, reply) === undefined
+      ) {
         return reply;
       }
-      return { sku: request.params.sku, status: 'ACCEPTED', submissionId: 'mock-submission', issues: [] };
+      return {
+        sku: request.params.sku,
+        status: 'ACCEPTED',
+        submissionId: 'mock-submission',
+        issues: [],
+      };
     },
   );
 }
@@ -126,7 +142,12 @@ export function adsRoutes(app: MockApp, scenarios: ScenarioStore): void {
   app.get('/amazon_ads/v2/profiles', (request, reply) => {
     if (account(request.headers.authorization, reply) === undefined) return reply;
     return [
-      { profileId: 1234567890, countryCode: 'UK', currencyCode: 'GBP', accountInfo: { type: 'seller' } },
+      {
+        profileId: 1234567890,
+        countryCode: 'UK',
+        currencyCode: 'GBP',
+        accountInfo: { type: 'seller' },
+      },
     ];
   });
   app.put<{ Body: { campaigns?: { campaignId?: string }[] } }>(

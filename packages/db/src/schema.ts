@@ -23,7 +23,11 @@ export interface CredentialsTable {
   channel_account_id: string | null;
   slot: 'current' | 'next';
   /** INT-3: mock, sandbox or live (db-main 0037). */
-  environment: ColumnType<'mock' | 'sandbox' | 'live', 'mock' | 'sandbox' | 'live' | undefined, never>;
+  environment: ColumnType<
+    'mock' | 'sandbox' | 'live',
+    'mock' | 'sandbox' | 'live' | undefined,
+    never
+  >;
   encrypted_value: Buffer;
   key_version: BigIntColumn;
   is_active: Generated<boolean>;

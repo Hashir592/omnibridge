@@ -34,7 +34,11 @@ export interface SyncPorts {
     ): Promise<{ provider: Provider; companyId: string; status: string } | undefined>;
   };
   credentials: {
-    read(ctx: TenantContext, channelAccountId: string, provider: Provider): Promise<Secret | undefined>;
+    read(
+      ctx: TenantContext,
+      channelAccountId: string,
+      provider: Provider,
+    ): Promise<Secret | undefined>;
   };
   cursors: {
     get(ctx: TenantContext, channelAccountId: string, stream: string): Promise<CursorState>;
@@ -87,8 +91,7 @@ export interface SyncStream<T extends SyncItem> {
 }
 
 export type SyncResult =
-  | { skipped: 'disconnected' }
-  | { fetched: number; fresh: number; cursorAt: string | null };
+  { skipped: 'disconnected' } | { fetched: number; fresh: number; cursorAt: string | null };
 
 /**
  * One incremental poll of one account (INT-1, INT-2, INT-5, INT-8): short transactions only, never
@@ -128,13 +131,14 @@ export async function runIncrementalSync<T extends SyncItem>(
     });
     count(api);
   };
-  let tokenRefreshed = false;
+  // An object, not a let: it changes inside the token closure.
+  const auth = { refreshed: false };
   const token = async () => {
     const got = await ports.tokens.get(accountId, async () => {
       await governed('auth');
       return stream.authenticate(credential);
     });
-    tokenRefreshed ||= got.refreshed;
+    auth.refreshed ||= got.refreshed;
     return got.token;
   };
   const recordCalls = async (ctx: TenantContext) => {
@@ -159,7 +163,7 @@ export async function runIncrementalSync<T extends SyncItem>(
         result = await stream.fetchPage(access, since, page);
       } catch (err) {
         // One 401 with a cached token: it may just have expired early. Renew once and retry.
-        if (!(err instanceof AuthFailed) || err.revoked || tokenRefreshed) throw err;
+        if (!(err instanceof AuthFailed) || err.revoked || auth.refreshed) throw err;
         ports.tokens.invalidate(accountId);
         const access = await token();
         await governed(stream.api);
@@ -174,7 +178,7 @@ export async function runIncrementalSync<T extends SyncItem>(
       await stream.sink(ctx, accountId, fresh);
       await ports.cursors.save(ctx, accountId, stream.stream, next, now());
       const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
-        tokenRefreshed,
+        tokenRefreshed: auth.refreshed,
       });
       if (reauthCleared) {
         await ports.notifier.resolve(ctx, 'channel.auth_lost', {

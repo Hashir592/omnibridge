@@ -32,13 +32,7 @@ import { Mailer } from '@omnibridge/mail';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { createEbayAdapter, ebayOrderStream } from '@omnibridge/provider-ebay';
 import { AccessTokenCache, ProviderHttp } from '@omnibridge/provider-kit';
-import {
-  emailOnRaise,
-  JOBS,
-  JobQueue,
-  PermanentJobError,
-  queueMetrics,
-} from '@omnibridge/queue';
+import { emailOnRaise, JOBS, JobQueue, PermanentJobError, queueMetrics } from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
 import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';

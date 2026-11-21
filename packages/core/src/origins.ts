@@ -21,7 +21,11 @@ export const PROVIDERS = ORIGIN_TAGS.filter(
 export type Provider = Exclude<OriginTag, 'manual'>;
 
 /** Providers whose accounts connect with OAuth; the rest take an API key. */
-export const OAUTH_PROVIDERS = ['amazon', 'amazon_ads', 'ebay'] as const satisfies readonly Provider[];
+export const OAUTH_PROVIDERS = [
+  'amazon',
+  'amazon_ads',
+  'ebay',
+] as const satisfies readonly Provider[];
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
 /** Carriers and the website: a concurrency cap per account instead of a governor (RL-4). */

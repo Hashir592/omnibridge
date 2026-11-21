@@ -3,11 +3,15 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { contractRoutes } from '@omnibridge/contract';
-import { checkRaise, type TenantContext } from '@omnibridge/core';
+import { checkRaise, Notifier, type TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  AccountCredentials,
   AppSecretStore,
+  ConnectionRepository,
+  CredentialRepository,
+  OAuthStateRepository,
   AuditLog,
   AuthStore,
   ChannelAccountRepository,
@@ -331,6 +335,29 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         audit: new AuditLog(main.db),
       },
       notifications: { notifications: new NotificationRepository(main.db) },
+      // T-0701: Connections and the OAuth return, with a stand-in for the provider exchange.
+      connections: {
+        connections: new ConnectionRepository(main.db),
+        oauth: {
+          flows: {
+            consent: () => Promise.resolve('http://provider-mocks:8080/ebay/oauth2/authorize'),
+            exchange: () => Promise.reject(new Error('no provider in this test')),
+          },
+          states: new OAuthStateRepository(main.db),
+          credentials: new AccountCredentials(
+            main.db,
+            new CredentialRepository({
+              keyring: parseKeyring('secrets', generateKekLine(1)),
+              logger,
+            }),
+          ),
+          tenancy,
+          audit: new AuditLog(main.db),
+          notifier: new Notifier({ store: new NotificationRepository(main.db) }),
+          appOrigin: 'https://app.omnibridge.test',
+        },
+        logger,
+      },
       // T-0504: the console, with a stand-in queue that holds one dead job of B's.
       platform: {
         console: new PlatformConsole(main.db),

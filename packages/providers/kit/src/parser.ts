@@ -33,7 +33,8 @@ export function defineParser<S extends z.ZodType>(
   schema: S,
 ): VersionedParser<z.output<S>> {
   if (!NAME.test(name)) throw new Error(`Parser name ${name} must be short snake_case`);
-  if (!Number.isInteger(version) || version < 1) throw new Error('Parser version must be 1 or more');
+  if (!Number.isInteger(version) || version < 1)
+    throw new Error('Parser version must be 1 or more');
   return {
     provider,
     name,

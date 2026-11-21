@@ -51,10 +51,17 @@ export function evriRoutes(app: MockApp, scenarios: ScenarioStore): void {
   });
   const bearer = (h: string | undefined) => h?.replace(/^Bearer /, '');
   app.get('/evri/services', (request, reply) => {
-    if (carrierAccount(scenarios, 'evri', bearer(request.headers.authorization), reply) === undefined) {
+    if (
+      carrierAccount(scenarios, 'evri', bearer(request.headers.authorization), reply) === undefined
+    ) {
       return reply;
     }
-    return { services: [{ code: 'EVRI-48', name: 'Evri 48' }, { code: 'EVRI-NEXTDAY', name: 'Evri Next Day' }] };
+    return {
+      services: [
+        { code: 'EVRI-48', name: 'Evri 48' },
+        { code: 'EVRI-NEXTDAY', name: 'Evri Next Day' },
+      ],
+    };
   });
   app.post('/evri/parcels', (request, reply) => {
     const account = carrierAccount(scenarios, 'evri', bearer(request.headers.authorization), reply);
@@ -62,16 +69,22 @@ export function evriRoutes(app: MockApp, scenarios: ScenarioStore): void {
     if (scenarios.take('evri', account, 'invalid_parcel')) {
       return reply.code(400).send({ errors: [{ code: 'INVALID', field: 'postcode' }] });
     }
-    return reply.code(201).send({ parcelId: 'EVRI-P-1', barcode: 'H00MOCK0000001', labelRef: 'EVRI-L-1' });
+    return reply
+      .code(201)
+      .send({ parcelId: 'EVRI-P-1', barcode: 'H00MOCK0000001', labelRef: 'EVRI-L-1' });
   });
   app.get<{ Params: { ref: string } }>('/evri/labels/:ref', (request, reply) => {
-    if (carrierAccount(scenarios, 'evri', bearer(request.headers.authorization), reply) === undefined) {
+    if (
+      carrierAccount(scenarios, 'evri', bearer(request.headers.authorization), reply) === undefined
+    ) {
       return reply;
     }
     return reply.type('application/pdf').send(PDF);
   });
   app.get<{ Params: { barcode: string } }>('/evri/parcels/:barcode/events', (request, reply) => {
-    if (carrierAccount(scenarios, 'evri', bearer(request.headers.authorization), reply) === undefined) {
+    if (
+      carrierAccount(scenarios, 'evri', bearer(request.headers.authorization), reply) === undefined
+    ) {
       return reply;
     }
     return { events: [{ code: 'COLLECTED', dateTime: '2026-11-20T15:00:00.000Z' }] };
@@ -83,13 +96,17 @@ export function dpdRoutes(app: MockApp, scenarios: ScenarioStore): void {
     const auth = request.headers.authorization ?? '';
     const user = auth.startsWith('Basic ') ? Buffer.from(auth.slice(6), 'base64').toString() : '';
     if (user === '' || scenarios.on('dpd', user, 'revoked')) {
-      return reply.code(401).send({ error: [{ errorCode: '1100', errorType: 'Authentication' }], data: null });
+      return reply
+        .code(401)
+        .send({ error: [{ errorCode: '1100', errorType: 'Authentication' }], data: null });
     }
     return { error: null, data: { geoSession: accessToken('dpd', user) } };
   });
   const session = (h: unknown) => (typeof h === 'string' ? h : undefined);
   app.get('/dpd/shipping/network/', (request, reply) => {
-    if (carrierAccount(scenarios, 'dpd', session(request.headers.geosession), reply) === undefined) {
+    if (
+      carrierAccount(scenarios, 'dpd', session(request.headers.geosession), reply) === undefined
+    ) {
       return reply;
     }
     return {
@@ -119,17 +136,24 @@ export function dpdRoutes(app: MockApp, scenarios: ScenarioStore): void {
     };
   });
   app.get<{ Params: { id: string } }>('/dpd/shipping/shipment/:id/label/', (request, reply) => {
-    if (carrierAccount(scenarios, 'dpd', session(request.headers.geosession), reply) === undefined) {
+    if (
+      carrierAccount(scenarios, 'dpd', session(request.headers.geosession), reply) === undefined
+    ) {
       return reply;
     }
     return reply.type('application/pdf').send(PDF);
   });
-  app.get<{ Params: { parcel: string } }>('/dpd/shipping/parcel/:parcel/events', (request, reply) => {
-    if (carrierAccount(scenarios, 'dpd', session(request.headers.geosession), reply) === undefined) {
-      return reply;
-    }
-    return { error: null, data: [{ code: '001', date: '2026-11-20T15:00:00.000Z' }] };
-  });
+  app.get<{ Params: { parcel: string } }>(
+    '/dpd/shipping/parcel/:parcel/events',
+    (request, reply) => {
+      if (
+        carrierAccount(scenarios, 'dpd', session(request.headers.geosession), reply) === undefined
+      ) {
+        return reply;
+      }
+      return { error: null, data: [{ code: '001', date: '2026-11-20T15:00:00.000Z' }] };
+    },
+  );
 }
 
 export function websiteRoutes(app: MockApp, scenarios: ScenarioStore): void {

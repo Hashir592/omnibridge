@@ -91,7 +91,10 @@ describe('credential store (SEC-6, INT-3)', () => {
   it('[SEC-6] stored credentials hold ciphertext only, bound to their row', async () => {
     const value = marker();
     const r = repo();
-    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: await newAccount(A) };
+    const ref: CredentialRef = {
+      kind: 'amazon.refresh_token',
+      channelAccountId: await newAccount(A),
+    };
     const id = await asTenant(A, (trx) => r.store(trx, A, ref, 'current', new Secret(value)));
 
     const row = await asTenant(A, (trx) =>
@@ -213,7 +216,10 @@ describe('credential store (SEC-6, INT-3)', () => {
 
   it('[SEC-6] replacing current keeps the old token inactive for 7 days, then deletes it', async () => {
     const r = repo();
-    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: await newAccount(A) };
+    const ref: CredentialRef = {
+      kind: 'amazon.refresh_token',
+      channelAccountId: await newAccount(A),
+    };
     const [first, second] = [marker(), marker()];
     const providerExpiry = new Date(Date.now() + 200 * DAY_MS);
     await asTenant(A, (trx) =>
@@ -286,7 +292,10 @@ describe('credential store (SEC-6, INT-3)', () => {
     const r = repo([kek1], logger);
     const D: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
     const values = [marker(), marker(), marker()];
-    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: await newAccount(D) };
+    const ref: CredentialRef = {
+      kind: 'amazon.refresh_token',
+      channelAccountId: await newAccount(D),
+    };
 
     await asTenant(D, async (trx) => {
       await r.store(trx, D, ref, 'current', new Secret(values[0] ?? ''));
@@ -364,7 +373,10 @@ describe('credential store (SEC-6, INT-3)', () => {
 
   it('[SEC-6] concurrent re-authorisations of one account both succeed, one after the other', async () => {
     const H: TenantContext = { workspaceId: randomUUID(), companyIds: [] };
-    const ref: CredentialRef = { kind: 'amazon.refresh_token', channelAccountId: await newAccount(H) };
+    const ref: CredentialRef = {
+      kind: 'amazon.refresh_token',
+      channelAccountId: await newAccount(H),
+    };
     await asTenant(H, (trx) => repo().store(trx, H, ref, 'current', new Secret(marker())));
     const [first, second] = [marker(), marker()];
     const results = await Promise.allSettled([
@@ -417,7 +429,10 @@ describe('credential store (SEC-6, INT-3)', () => {
     const keyring = parseKeyring('secrets', kek1);
     const live = new CredentialRepository({ keyring, logger: silent, environment: 'live' });
     const mock = new CredentialRepository({ keyring, logger: silent, environment: 'mock' });
-    const ref: CredentialRef = { kind: 'ebay.refresh_token', channelAccountId: await newAccount(A) };
+    const ref: CredentialRef = {
+      kind: 'ebay.refresh_token',
+      channelAccountId: await newAccount(A),
+    };
     await asTenant(A, (trx) => live.store(trx, A, ref, 'current', new Secret(value)));
 
     expect((await asTenant(A, (trx) => live.get(trx, A, ref)))?.reveal()).toBe(value);

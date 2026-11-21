@@ -88,3 +88,35 @@ export class ProviderHttp {
     });
   }
 }
+
+/**
+ * Where the seller's browser goes to grant access (a page, not an API call): live and sandbox
+ * consent pages per OAuth provider. In mock mode the provider-mocks consent page, which answers at
+ * once with a mock code. Amazon Ads (M19) has none yet.
+ */
+const CONSENT: Readonly<Record<'sandbox' | 'live', Readonly<Partial<Record<Provider, string>>>>> = {
+  sandbox: {
+    ebay: 'https://auth.sandbox.ebay.com/oauth2/authorize',
+    amazon: 'https://sellercentral.amazon.co.uk/apps/authorize/consent',
+  },
+  live: {
+    ebay: 'https://auth.ebay.com/oauth2/authorize',
+    amazon: 'https://sellercentral.amazon.co.uk/apps/authorize/consent',
+  },
+};
+
+export function consentUrl(
+  mode: ProviderMode,
+  provider: Provider,
+  mocksPublicUrl?: string,
+): URL | undefined {
+  if (mode === 'mock') {
+    if (mocksPublicUrl === undefined || !(provider in CONSENT.live)) return undefined;
+    return new URL(
+      `${provider}/oauth2/authorize`,
+      mocksPublicUrl.endsWith('/') ? mocksPublicUrl : `${mocksPublicUrl}/`,
+    );
+  }
+  const page = CONSENT[mode === 'live' ? 'live' : 'sandbox'][provider];
+  return page === undefined ? undefined : new URL(page);
+}

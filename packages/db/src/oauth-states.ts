@@ -7,7 +7,8 @@ import { withTenantTransaction } from './tenant.ts';
 /** How long a consent round trip may take. */
 export const OAUTH_STATE_TTL_MS = 10 * 60_000;
 
-const STATE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43})$/;
+const STATE =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43})$/;
 
 const hash = (state: string) => createHash('sha256').update(state).digest();
 

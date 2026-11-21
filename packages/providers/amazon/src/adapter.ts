@@ -187,7 +187,8 @@ export function createAmazonAdapter(options: AmazonAdapterOptions): ChannelAdapt
         });
         const body = ListingsPatchV1.parse(await spJson(res));
         if (body.status === 'ACCEPTED') accepted.push(level.sku);
-        else refused.push({ sku: level.sku, code: `amazon.${body.issues?.[0]?.code ?? body.status}` });
+        else
+          refused.push({ sku: level.sku, code: `amazon.${body.issues?.[0]?.code ?? body.status}` });
       }
       return { accepted, refused };
     },

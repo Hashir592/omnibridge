@@ -376,9 +376,15 @@ importers:
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@omnibridge/provider-amazon':
+        specifier: workspace:*
+        version: link:../../packages/providers/amazon
       '@omnibridge/provider-ebay':
         specifier: workspace:*
         version: link:../../packages/providers/ebay
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../../packages/providers/kit
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -407,6 +413,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@omnibridge/provider-mocks':
+        specifier: workspace:*
+        version: link:../../mocks/provider-mocks
       '@types/qrcode':
         specifier: 1.5.6
         version: 1.5.6

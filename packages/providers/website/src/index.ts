@@ -27,7 +27,9 @@ const OrdersV1 = defineParser(
         id: z.string().min(1),
         updated_at: z.iso.datetime({ offset: true }),
         status: z.string(),
-        lines: z.array(z.object({ id: z.string(), sku: z.string().nullable(), quantity: z.number().int() })),
+        lines: z.array(
+          z.object({ id: z.string(), sku: z.string().nullable(), quantity: z.number().int() }),
+        ),
       }),
     ),
     next_cursor: z.string().nullable(),

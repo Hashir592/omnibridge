@@ -91,8 +91,22 @@ services:
       # machine. The dev ob_edge subnet is pinned below (ADR-073), so the gateway is 10.203.0.1 on
       # every machine. Never a Docker gateway in production: there it is the VPN range (ADR-076).
       PLATFORM_IP_ALLOWLIST: ${PLATFORM_IP_ALLOWLIST:-127.0.0.1/32,::1/128,10.203.0.1/32}
+      # INT-3, invariant 17: provider calls go to provider-mocks only (the OAuth exchange, T-0701).
+      PROVIDER_MODE: mock
+      PROVIDER_MOCKS_URL: http://provider-mocks:8080
+    networks:
+      ob_mocks: {}
 
-  # The only provider endpoints dev and CI may call (ADR-011, invariant 17).
+  worker:
+    environment:
+      # INT-3, invariant 17: provider calls go to provider-mocks only (T-0701).
+      PROVIDER_MODE: mock
+      PROVIDER_MOCKS_URL: http://provider-mocks:8080
+    networks:
+      ob_mocks: {}
+
+  # The only provider endpoints dev and CI may call (ADR-011, invariant 17). It sits alone on the
+  # internal ob_mocks network with web and worker: no egress, and nothing else reaches it.
   provider-mocks:
     image: omnibridge/provider-mocks:dev
     build:
@@ -107,7 +121,7 @@ services:
     environment:
       PORT: '8080'
       NODE_OPTIONS: --max-old-space-size=96
-    networks: [ob_app]
+    networks: [ob_mocks]
     mem_limit: 128m
     cpus: 0.25
     pids_limit: 64
@@ -142,6 +156,10 @@ services:
 # on any machine. 10.203.0.0/24 is outside Docker's default pools. Changing it needs one
 # `docker compose down` (no -v) and `up -d`: Docker never re-addresses an existing network.
 networks:
+  # T-0701: web and worker reach provider-mocks here, and nothing on it reaches the internet.
+  ob_mocks:
+    name: ob_mocks
+    internal: true
   ob_edge:
     ipam:
       config:

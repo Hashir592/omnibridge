@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Logger } from '@omnibridge/logger';
 import Fastify from 'fastify';
 import { adsRoutes, amazonRoutes } from './amazon.ts';
@@ -40,6 +41,24 @@ export function buildMockServer(logger: Logger, scenarios: ScenarioStore = new S
   app.get('/amazon/ping', () => ({ ok: true, provider: 'amazon', mock: true }));
 
   scenarioRoutes(app, scenarios);
+  // The consent page of an OAuth provider: the seller "agrees" at once and the browser goes back
+  // to redirect_uri with a mock code and the state it was given.
+  app.get<{ Params: { provider: string }; Querystring: { redirect_uri?: string; state?: string } }>(
+    '/:provider/oauth2/authorize',
+    (request, reply) => {
+      const { redirect_uri: redirect, state } = request.query;
+      if (redirect === undefined || state === undefined || !/^https?:\/\//.test(redirect)) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const back = new URL(redirect);
+      back.searchParams.set(
+        request.params.provider === 'amazon' ? 'spapi_oauth_code' : 'code',
+        `mock-code-${randomUUID()}`,
+      );
+      back.searchParams.set('state', state);
+      return reply.redirect(back.href, 302);
+    },
+  );
   amazonRoutes(app, scenarios);
   adsRoutes(app, scenarios);
   ebayRoutes(app, scenarios);

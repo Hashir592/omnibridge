@@ -30,7 +30,11 @@ export interface OrderSummary {
   readonly externalId: string;
   readonly updatedAt: Date;
   readonly status: string;
-  readonly lines: readonly { readonly lineId: string; readonly sku: string | null; readonly quantity: number }[];
+  readonly lines: readonly {
+    readonly lineId: string;
+    readonly sku: string | null;
+    readonly quantity: number;
+  }[];
 }
 
 export interface StockLevel {
@@ -112,7 +116,12 @@ export interface ShippingProvider extends ProviderAdapter {
   readonly canVoid: boolean;
   readonly canTrack: boolean;
   readonly needsManifest: boolean;
-  listServices(token: AccessToken, from: string, to: string, parcels: readonly Parcel[]): Promise<readonly CarrierService[]>;
+  listServices(
+    token: AccessToken,
+    from: string,
+    to: string,
+    parcels: readonly Parcel[],
+  ): Promise<readonly CarrierService[]>;
   createShipment(
     token: AccessToken,
     order: { readonly reference: string; readonly address: ShipmentAddress },

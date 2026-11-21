@@ -30,15 +30,19 @@ module.exports = {
     {
       name: 'providers-only-from-worker',
       comment:
-        'Invariant 10: provider APIs are called only from packages/providers, through the queue. ' +
-        'Web handlers make no provider calls (OAuth code exchanges will get a named exception). ' +
-        'Named exception (T-0602, PS-022): the eBay account deletion webhook reads eBay public ' +
-        'keys through the eBay provider, because eBay needs an answer within 3 seconds. ' +
-        "Its integration test (T-0404, AT-10) sends eBay's own signed sample notice.",
+        'INT-1, invariant 15: provider APIs are called only from packages/providers, through the ' +
+        'queue; business modules never import a provider package. Named exceptions: the eBay ' +
+        'account deletion webhook reads eBay public keys (T-0602, PS-022: eBay needs an answer ' +
+        'within 3 seconds), and the OAuth code exchange (T-0701, INT-2), each from its own file.',
       severity: 'error',
       from: {
-        path: '^(apps/(web|ui|pii-vault|site)|packages/(core|db|pii-db|contract|crypto|logger))/',
-        pathNot: '^apps/web/src/(webhooks/ebay(\\.test)?|privacy\\.int\\.test)\\.ts$',
+        path:
+          '^(apps/(web|ui|pii-vault|site)|packages/(core|db|pii-db|contract|crypto|logger|queue|' +
+          'files|mail|vault-client))/',
+        pathNot: [
+          '^apps/web/src/(webhooks/ebay(\\.test)?|privacy\\.int\\.test)\\.ts$',
+          '^apps/web/src/oauth-exchange\\.ts$',
+        ],
       },
       to: { path: '^packages/providers/' },
     },
@@ -48,6 +52,24 @@ module.exports = {
       severity: 'error',
       from: { path: '^apps/web/src/(webhooks/ebay(\\.test)?|privacy\\.int\\.test)\\.ts$' },
       to: { path: '^packages/providers/(?!ebay/)' },
+    },
+    {
+      name: 'oauth-exchange-only-oauth-providers',
+      comment:
+        'INT-2: the web OAuth exchange may use the provider kit and the OAuth providers (eBay, ' +
+        'Amazon) to exchange a code, nothing else.',
+      severity: 'error',
+      from: { path: '^apps/web/src/oauth-exchange\\.ts$' },
+      to: { path: '^packages/providers/(?!(kit|ebay|amazon)/)' },
+    },
+    {
+      name: 'provider-kit-is-generic',
+      comment:
+        'INT-1: the provider kit holds the shared plumbing only; it imports no provider and no ' +
+        'governor, so no provider code can hide in it.',
+      severity: 'error',
+      from: { path: '^packages/providers/kit/' },
+      to: { path: '^packages/(providers/(?!kit/)|governors/)' },
     },
     {
       name: 'pii-db-only-from-vault',

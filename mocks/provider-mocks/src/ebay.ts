@@ -32,15 +32,13 @@ export function ebayRoutes(app: MockApp, scenarios: ScenarioStore): void {
     if (grant === 'client_credentials') {
       return { access_token: APP_TOKEN, expires_in: 7200, token_type: 'Bearer' };
     }
-    const account =
-      grant === 'refresh_token' ? body.get('refresh_token') : body.get('code');
+    const account = grant === 'refresh_token' ? body.get('refresh_token') : body.get('code');
     if (account === null || (grant !== 'refresh_token' && grant !== 'authorization_code')) {
       return reply.code(400).send({ error: 'unsupported_grant_type' });
     }
     if (
       grant === 'refresh_token' &&
-      (scenarios.take('ebay', account, 'invalid_grant') ||
-        scenarios.on('ebay', account, 'revoked'))
+      (scenarios.take('ebay', account, 'invalid_grant') || scenarios.on('ebay', account, 'revoked'))
     ) {
       return reply.code(400).send({
         error: 'invalid_grant',
@@ -65,19 +63,25 @@ export function ebayRoutes(app: MockApp, scenarios: ScenarioStore): void {
     const account = accountOf('ebay', authorization?.replace(/^Bearer /, ''));
     if (account === undefined || scenarios.on('ebay', account, 'revoked')) {
       reply.code(401).send({
-        errors: [{ errorId: 1001, domain: 'OAuth', category: 'REQUEST', message: 'Invalid access token' }],
+        errors: [
+          { errorId: 1001, domain: 'OAuth', category: 'REQUEST', message: 'Invalid access token' },
+        ],
       });
       return undefined;
     }
     if (scenarios.take('ebay', account, 'ebay_cap_exhausted')) {
       reply.code(429).send({
-        errors: [{ errorId: 2001, domain: 'ACCESS', category: 'REQUEST', message: 'Too many requests' }],
+        errors: [
+          { errorId: 2001, domain: 'ACCESS', category: 'REQUEST', message: 'Too many requests' },
+        ],
       });
       return undefined;
     }
     if (scenarios.take('ebay', account, 'rate_limit_storm')) {
       reply.code(429).send({
-        errors: [{ errorId: 2001, domain: 'ACCESS', category: 'REQUEST', message: 'Too many requests' }],
+        errors: [
+          { errorId: 2001, domain: 'ACCESS', category: 'REQUEST', message: 'Too many requests' },
+        ],
       });
       return undefined;
     }
@@ -98,9 +102,7 @@ export function ebayRoutes(app: MockApp, scenarios: ScenarioStore): void {
         total: all.length,
         limit,
         offset,
-        ...(offset + limit < all.length
-          ? { next: `mock?offset=${String(offset + limit)}` }
-          : {}),
+        ...(offset + limit < all.length ? { next: `mock?offset=${String(offset + limit)}` } : {}),
         orders: page.map((o) => ({
           orderId: o.id,
           legacyOrderId: o.id,
@@ -125,7 +127,10 @@ export function ebayRoutes(app: MockApp, scenarios: ScenarioStore): void {
     (request, reply) => {
       if (callAccount(request.headers.authorization, reply) === undefined) return reply;
       return {
-        responses: (request.body.requests ?? []).map((r) => ({ statusCode: 200, sku: r.sku ?? '' })),
+        responses: (request.body.requests ?? []).map((r) => ({
+          statusCode: 200,
+          sku: r.sku ?? '',
+        })),
       };
     },
   );

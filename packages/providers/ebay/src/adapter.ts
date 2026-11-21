@@ -178,7 +178,11 @@ export function createEbayAdapter(options: EbayAdapterOptions): ChannelAdapter &
           externalId: o.orderId,
           updatedAt: new Date(o.lastModifiedDate),
           status: o.orderFulfillmentStatus,
-          lines: o.lineItems.map((l) => ({ lineId: l.lineItemId, sku: l.sku ?? null, quantity: l.quantity })),
+          lines: o.lineItems.map((l) => ({
+            lineId: l.lineItemId,
+            sku: l.sku ?? null,
+            quantity: l.quantity,
+          })),
         })),
         next: body.next === undefined ? undefined : String(body.offset + body.limit),
       };
@@ -201,7 +205,10 @@ export function createEbayAdapter(options: EbayAdapterOptions): ChannelAdapter &
         accepted: body.responses.filter((r) => r.statusCode === 200).map((r) => r.sku),
         refused: body.responses
           .filter((r) => r.statusCode !== 200)
-          .map((r) => ({ sku: r.sku, code: `ebay.${String(r.errors?.[0]?.errorId ?? r.statusCode)}` })),
+          .map((r) => ({
+            sku: r.sku,
+            code: `ebay.${String(r.errors?.[0]?.errorId ?? r.statusCode)}`,
+          })),
       };
     },
   };

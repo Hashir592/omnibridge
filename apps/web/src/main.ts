@@ -1,9 +1,13 @@
 import { fileURLToPath } from 'node:url';
-import { Notifier, readSecretFile, requireEnv } from '@omnibridge/core';
+import { Notifier, providerModeFrom, readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  AccountCredentials,
   ChannelAccountRepository,
+  ConnectionRepository,
+  CredentialRepository,
+  OAuthStateRepository,
   DeletionLog,
   ErasureRequestRepository,
   NotificationRepository,
@@ -40,6 +44,7 @@ import { queueNotifier } from './auth/notifier.ts';
 import { Passwords } from './auth/passwords.ts';
 import { PlatformKeys } from './auth/platform-keys.ts';
 import { AuthService } from './auth/service.ts';
+import { createOAuthFlows } from './oauth-exchange.ts';
 import { loadSpa } from './spa.ts';
 import { ebayWebhookFromEnv } from './webhooks/ebay.ts';
 
@@ -163,6 +168,36 @@ const app = buildWebApp({
   },
   // The notification centre (NTF-1, NTF-2).
   notifications: { notifications: new NotificationRepository(main.db) },
+  // Connections and the OAuth connect flow (T-0701: INT-2, INT-3, INT-4).
+  connections: (() => {
+    const mode = providerModeFrom(process.env.PROVIDER_MODE);
+    const secrets = new AppSecretStore(main.db, new PlatformKeys(authStore, secretsKeyring));
+    const connections = new ConnectionRepository(main.db, { environment: mode });
+    return {
+      connections,
+      oauth: {
+        flows: createOAuthFlows({
+          mode,
+          ...(process.env.PROVIDER_MOCKS_URL ? { mocksUrl: process.env.PROVIDER_MOCKS_URL } : {}),
+          ...(process.env.PROVIDER_MOCKS_PUBLIC_URL
+            ? { mocksPublicUrl: process.env.PROVIDER_MOCKS_PUBLIC_URL }
+            : {}),
+          ...(process.env.EBAY_RUNAME ? { ebayRuName: process.env.EBAY_RUNAME } : {}),
+          secrets: (name) => secrets.get(name),
+        }),
+        states: new OAuthStateRepository(main.db),
+        credentials: new AccountCredentials(
+          main.db,
+          new CredentialRepository({ keyring: secretsKeyring, logger, environment: mode }),
+        ),
+        tenancy,
+        audit: new AuditLog(main.db),
+        notifier: new Notifier({ store: new NotificationRepository(main.db) }),
+        appOrigin: process.env.APP_ORIGIN ?? origins[0] ?? '',
+      },
+      logger,
+    };
+  })(),
   // The platform console (PLAT-1, PLAT-2): counts and IDs only, never tenant business data.
   platform: {
     console: platformConsole,
