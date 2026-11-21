@@ -4,7 +4,12 @@ import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { defineJob } from './job.ts';
-import { JobQueue, type ConcurrencyLimiter, type JobRecordStore } from './runtime.ts';
+import {
+  JobQueue,
+  PermanentJobError,
+  type ConcurrencyLimiter,
+  type JobRecordStore,
+} from './runtime.ts';
 
 const WORKSPACE = '00000000-0000-4000-8000-000000000001';
 const ACCOUNT = '00000000-0000-4000-8000-0000000000aa';
@@ -295,5 +300,70 @@ describe('JobQueue tenant transactions (TEN-1)', () => {
     });
     await expect(h.run([data({ workspace_id: WORKSPACE })])).rejects.toThrow(/vault down/);
     expect(h.opened).toEqual([]);
+  });
+});
+
+// INT-5 (T-0701): a failure that no retry can mend (a provider answer our parser cannot read) ends
+// the job at once: no retries, the record says why, and the job waits in the dead-letter queue to
+// be redriven once the parser is fixed.
+describe('JobQueue permanent failure (INT-5)', () => {
+  const permanent = defineJob({ type: 'test.permanent', payload: z.object({}) });
+  const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
+  const permanentJob = {
+    id: 'job-p',
+    name: permanent.type,
+    data: {
+      workspace_id: WORKSPACE,
+      idempotency_key: 'k-p',
+      attempt: 0,
+      type: permanent.type,
+      payload: {},
+    },
+    retryCount: 0,
+    retryLimit: 5,
+  } as unknown as JobWithMetadata<unknown>;
+
+  it('[INT-5] a PermanentJobError fails the job once, cleanly: no retry, dead-lettered, recorded', async () => {
+    const patches: { state: string; errorCode?: string | null | undefined }[] = [];
+    const sent: string[] = [];
+    let run: ((jobs: JobWithMetadata<unknown>[]) => Promise<void>) | undefined;
+    const boss = {
+      work: (_name: string, _opts: unknown, cb: typeof run) => {
+        run = cb;
+        return Promise.resolve('worker-1');
+      },
+      send: (name: string) => {
+        sent.push(name);
+        return Promise.resolve('dlq-id');
+      },
+    } as unknown as PgBoss;
+    const records: JobRecordStore = {
+      createAndEnqueue: () => Promise.reject(new Error('unused')),
+      update: (_ctx, _key, patch) => {
+        patches.push({ state: patch.state, errorCode: patch.errorCode });
+        return Promise.resolve();
+      },
+    };
+    const { tenancy } = spyTenancy();
+    const queue = new JobQueue({ boss, records, tenancy, logger });
+    const failedCalls: string[] = [];
+    await queue.work(permanent, {
+      prepare: () => Promise.reject(new PermanentJobError('provider.parser_failed')),
+      commit: () => Promise.resolve({}),
+      failed: (job, err) => {
+        failedCalls.push(`${job.jobId}:${(err as PermanentJobError).code}`);
+        return Promise.resolve();
+      },
+    });
+
+    // Resolves: pg-boss completes the job instead of retrying it.
+    await expect(run?.([permanentJob])).resolves.toBeUndefined();
+    expect(sent).toEqual(['test.permanent.dlq']);
+    expect(patches.at(-1)).toEqual({ state: 'failed', errorCode: 'provider.parser_failed' });
+    expect(failedCalls).toEqual(['job-p:provider.parser_failed']);
+  });
+
+  it('[INT-5] a PermanentJobError code must be a stable dotted code', () => {
+    expect(() => new PermanentJobError('Parser failed: field x')).toThrow(/code/);
   });
 });

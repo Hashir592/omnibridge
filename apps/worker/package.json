@@ -23,6 +23,8 @@
     "@omnibridge/files": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/mail": "workspace:*",
+    "@omnibridge/provider-ebay": "workspace:*",
+    "@omnibridge/provider-kit": "workspace:*",
     "@omnibridge/queue": "workspace:*",
     "@omnibridge/vault-client": "workspace:*",
     "kysely": "0.29.7",
@@ -32,6 +34,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@omnibridge/provider-mocks": "workspace:*",
     "@omnibridge/testkit": "workspace:*",
     "testcontainers": "12.2.1"
   }

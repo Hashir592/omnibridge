@@ -47,7 +47,7 @@ The master keys are never in a database, an image or a backup (SEC-6, invariant 
 
 ## Credentials in the database (envelope-encrypted, `app.credentials`)
 
-These are not Docker secrets. Each value is encrypted with AES-256-GCM under a per-workspace data key, which is wrapped by `secrets_kek` (T-0103). The table has `current` and `next` slots.
+These are not Docker secrets. Each value is encrypted with AES-256-GCM under a per-workspace data key, which is wrapped by `secrets_kek` (T-0103). The table has `current` and `next` slots. Each row also names the provider environment it belongs to (`mock`, `sandbox` or `live`, T-0701, INT-3): a token is read only in its own environment, so a copied or restored database cannot send it anywhere else.
 
 | Secret | What | Owner | Dev | Production | Containers | Rotation | Next rotation |
 |---|---|---|---|---|---|---|---|
@@ -55,6 +55,7 @@ These are not Docker secrets. Each value is encrypted with AES-256-GCM under a p
 | `ads.refresh_token` | Amazon Ads refresh token per profile | workspace admin | mock only | `app.credentials` | worker, web | on re-authorisation | per account |
 | `ebay.refresh_token` | eBay user refresh token per account | workspace admin | mock only | `app.credentials` | worker, web | 18-month eBay expiry; re-authorise before it | per account |
 | `evri.api_key`, `dpd.api_key` | Carrier API credentials per account | workspace admin | mock only | `app.credentials` | worker | 12 months | per account |
+| `website.api_key` | Website connector API key per account (M11) | workspace admin | mock only | `app.credentials` | worker | 12 months | per account |
 
 ## App secrets (platform store, `app.app_secrets`)
 

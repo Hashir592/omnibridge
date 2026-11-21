@@ -8,6 +8,7 @@ export const PACKAGE_NAME = '@omnibridge/testkit';
 
 export {
   PII_MARKER,
+  TOKEN_MARKER,
   scanDatabaseForMarkers,
   scanTextForMarkers,
   type MarkerHit,

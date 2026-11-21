@@ -15,3 +15,11 @@ export {
   type EbayKeyReadApi,
   type PublicKeySource,
 } from './account-deletion.ts';
+export {
+  createEbayAdapter,
+  EBAY_APIS,
+  EBAY_USER_SCOPES,
+  EbayOrdersV1,
+  ebayOrderStream,
+  type EbayAdapterOptions,
+} from './adapter.ts';

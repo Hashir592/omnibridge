@@ -148,6 +148,21 @@ export const startAuthorisation = defineRoute({
  * The code is exchanged for tokens (the one provider call web makes, INT-2), stored encrypted,
  * and the browser goes on to /connections with `connected` or `error` in the query.
  */
+/**
+ * The `error` the OAuth return puts on /connections (success puts `connected=<account id>`):
+ * - access_denied: the seller declined on the provider page, or the provider sent an error;
+ * - state_invalid: the link expired (10 minutes), was used already, or is not ours;
+ * - exchange_failed: the provider's token call failed; trying again may work;
+ * - forbidden: the user is no longer an admin of that workspace, so nothing was stored.
+ */
+export const OAUTH_RETURN_ERRORS = [
+  'access_denied',
+  'state_invalid',
+  'exchange_failed',
+  'forbidden',
+] as const;
+export type OAuthReturnError = (typeof OAUTH_RETURN_ERRORS)[number];
+
 export const oauthCallback = defineRoute({
   id: 'oauthCallback',
   method: 'GET',

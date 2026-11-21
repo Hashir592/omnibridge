@@ -13,6 +13,8 @@ const OMNIBRIDGE_NETWORKS = new Set([
   'ob_db',
   'ob_pii',
   'ob_vault',
+  // Dev and CI only: web and worker to provider-mocks (T-0701, invariant 17).
+  'ob_mocks',
   'scan_ob',
 ]);
 

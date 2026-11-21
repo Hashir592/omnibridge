@@ -21,5 +21,14 @@
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/provider-ebay": "workspace:*",
     "fastify": "5.12.7"
+  },
+  "devDependencies": {
+    "@omnibridge/crypto": "workspace:*",
+    "@omnibridge/provider-ads": "workspace:*",
+    "@omnibridge/provider-amazon": "workspace:*",
+    "@omnibridge/provider-dpd": "workspace:*",
+    "@omnibridge/provider-evri": "workspace:*",
+    "@omnibridge/provider-kit": "workspace:*",
+    "@omnibridge/provider-website": "workspace:*"
   }
 }

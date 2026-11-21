@@ -3,6 +3,8 @@ import type { RoleCluster } from './postgres.ts';
 
 /** Synthetic PII carries this prefix, so any copy of it outside the vault can be found (AT-9). */
 export const PII_MARKER = 'PIIMARK-';
+/** Synthetic provider tokens carry this prefix (INT-3): stored only as ciphertext, never logged. */
+export const TOKEN_MARKER = 'TOKENMARK-';
 
 /** One column of one table where the marker was found. */
 export interface MarkerHit {
