@@ -257,9 +257,27 @@ describe('bulk confirmation', () => {
 });
 
 describe('OAuth return', () => {
+  it('[INT-4] has its own message for every error the callback sends', () => {
+    const generic = 'The account could not be connected. Try again.';
+    for (const code of ['access_denied', 'state_invalid', 'exchange_failed', 'forbidden']) {
+      const r = oauthReturn({ error: code });
+      expect(r?.ok).toBe(false);
+      expect(r && !r.ok && r.text).not.toBe(generic);
+    }
+    expect(oauthReturn({ error: 'forbidden' })).toMatchObject({ text: /no longer an admin/ });
+  });
+
   it('[INT-4] reads the OAuth return from the address', () => {
     expect(oauthReturn({ connected: ACCOUNT })).toEqual({ ok: true, accountId: ACCOUNT });
     expect(oauthReturn({ error: 'access_denied' })).toMatchObject({ ok: false });
+    expect(oauthReturn({ error: 'unknown_code' })).toEqual({
+      ok: false,
+      text: 'The account could not be connected. Try again.',
+    });
+    expect(oauthReturn({ error: 'toString' })).toEqual({
+      ok: false,
+      text: 'The account could not be connected. Try again.',
+    });
     expect(oauthReturn({})).toBeUndefined();
   });
 });
