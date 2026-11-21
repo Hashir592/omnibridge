@@ -1356,6 +1356,210 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/stock': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List stock by Master SKU */
+    get: operations['listStock'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/{skuId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One SKU's stock, listings, targets and sync state */
+    get: operations['getStock'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/{skuId}/adjustments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Adjust stock with a reason */
+    post: operations['adjustStock'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/{skuId}/allocation': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Save a SKU's manual allocation */
+    put: operations['saveAllocation'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/{skuId}/allocation/auto': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Switch listings back to automatic stock */
+    post: operations['backToAuto'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/{skuId}/stock-in': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Book stock in */
+    post: operations['stockIn'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/buffers': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Safety buffers per sales account */
+    get: operations['listBuffers'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/buffers/{accountId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Set a sales account's safety buffer */
+    put: operations['setAccountBuffer'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/listings/{listingId}/buffer': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Set or clear a listing's own buffer */
+    put: operations['setListingBuffer'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/movements': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The stock change log, newest first */
+    get: operations['listMovements'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/movements/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Export the stock change log as CSV */
+    get: operations['exportMovements'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/stock/stock-take/import': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Import a stock-take from CSV */
+    post: operations['importStockTake'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/users': {
     parameters: {
       query?: never;
@@ -1494,6 +1698,30 @@ export interface components {
       line1: string;
       line2?: string;
       postcode: string;
+    };
+    /** @enum {string} */
+    AdjustReason: 'damaged' | 'count_correction' | 'lost' | 'other';
+    /** @enum {string} */
+    AdjustReasonInput: 'damaged' | 'count_correction' | 'lost' | 'other';
+    AllocationPush: {
+      /** Format: uuid */
+      listing_id: string;
+      /** @enum {string} */
+      result: 'queued' | 'unchanged' | 'held';
+    };
+    AllocationPushInput: {
+      /** Format: uuid */
+      listing_id: string;
+      /** @enum {string} */
+      result: 'queued' | 'unchanged' | 'held';
+    };
+    AllocationResult: {
+      pushes: components['schemas']['AllocationPush'][];
+      stock: components['schemas']['StockDetail'];
+    };
+    AllocationResultInput: {
+      pushes: components['schemas']['AllocationPushInput'][];
+      stock: components['schemas']['StockDetailInput'];
     };
     ApiUsage: {
       api: string;
@@ -2457,6 +2685,100 @@ export interface components {
       next: 'workspace_picker' | 'app' | 'password_change' | 'terms';
       recoveryCodesLeft?: number;
     };
+    Movement: {
+      /** Format: date-time */
+      at: string;
+      /** Format: uuid */
+      id: string;
+      kind: components['schemas']['MovementKind'];
+      note: string | null;
+      on_hand_after: number;
+      on_hand_change: number;
+      pushes: {
+        failed: number;
+        held: number;
+        pending: number;
+        sent: number;
+      };
+      reason: components['schemas']['AdjustReason'] | null;
+      reserved_change: number;
+      sku: string;
+      /** Format: uuid */
+      sku_id: string;
+      source:
+        | {
+            ref: string | null;
+            /** @constant */
+            type: 'order';
+          }
+        | {
+            /** @constant */
+            type: 'user';
+            user_id: string | null;
+          }
+        | {
+            /** @constant */
+            type: 'system';
+          };
+      supplier: string | null;
+    };
+    MovementInput: {
+      /** Format: date-time */
+      at: string;
+      /** Format: uuid */
+      id: string;
+      kind: components['schemas']['MovementKindInput'];
+      note: string | null;
+      on_hand_after: number;
+      on_hand_change: number;
+      pushes: {
+        failed: number;
+        held: number;
+        pending: number;
+        sent: number;
+      };
+      reason: components['schemas']['AdjustReasonInput'] | null;
+      reserved_change: number;
+      sku: string;
+      /** Format: uuid */
+      sku_id: string;
+      source:
+        | {
+            ref: string | null;
+            /** @constant */
+            type: 'order';
+          }
+        | {
+            /** @constant */
+            type: 'user';
+            user_id: string | null;
+          }
+        | {
+            /** @constant */
+            type: 'system';
+          };
+      supplier: string | null;
+    };
+    /** @enum {string} */
+    MovementKind:
+      | 'reserve'
+      | 'release'
+      | 'dispatch'
+      | 'return'
+      | 'stock_in'
+      | 'adjust'
+      | 'stock_take'
+      | 'allocation';
+    /** @enum {string} */
+    MovementKindInput:
+      | 'reserve'
+      | 'release'
+      | 'dispatch'
+      | 'return'
+      | 'stock_in'
+      | 'adjust'
+      | 'stock_take'
+      | 'allocation';
     NewCompany: {
       badge_colour?: string;
       company_number?: string | null;
@@ -2653,6 +2975,10 @@ export interface components {
     Provider: 'amazon' | 'amazon_ads' | 'ebay' | 'website' | 'evri' | 'dpd';
     /** @enum {string} */
     ProviderInput: 'amazon' | 'amazon_ads' | 'ebay' | 'website' | 'evri' | 'dpd';
+    /** @enum {string} */
+    PushResult: 'pending' | 'sent' | 'held' | 'failed';
+    /** @enum {string} */
+    PushResultInput: 'pending' | 'sent' | 'held' | 'failed';
     QueueOverview: {
       active: number;
       dead_letter: number;
@@ -2752,6 +3078,210 @@ export interface components {
       id: string;
       provider: components['schemas']['ProviderInput'];
       title: string | null;
+    };
+    StockBuffer: {
+      buffer: number;
+      /** Format: uuid */
+      channel_account_id: string;
+      display_name: string;
+      provider: components['schemas']['Provider'];
+    };
+    StockBufferInput: {
+      buffer: number;
+      /** Format: uuid */
+      channel_account_id: string;
+      display_name: string;
+      provider: components['schemas']['ProviderInput'];
+    };
+    StockBufferList: {
+      items: components['schemas']['StockBuffer'][];
+    };
+    StockBufferListInput: {
+      items: components['schemas']['StockBufferInput'][];
+    };
+    StockDetail: {
+      active: boolean;
+      allocation: {
+        allocated: number;
+        available: number;
+      };
+      available: number;
+      bundle: {
+        /** Format: uuid */
+        component_id: string;
+        component_sku: string;
+        pack_size: number;
+      } | null;
+      bundles: {
+        available: number;
+        /** Format: uuid */
+        id: string;
+        pack_size: number;
+        sku: string;
+      }[];
+      fba_count: number;
+      last_movement_at: string | null;
+      listing_count: number;
+      listings: components['schemas']['StockListing'][];
+      on_hand: number | null;
+      oversold: boolean;
+      reserved: number;
+      sku: string;
+      /** Format: uuid */
+      sku_id: string;
+      sync_failed: boolean;
+      /** @enum {string} */
+      sync_mode: 'auto' | 'manual' | 'mixed';
+      title: string;
+      version: number;
+    };
+    StockDetailInput: {
+      active: boolean;
+      allocation: {
+        allocated: number;
+        available: number;
+      };
+      available: number;
+      bundle: {
+        /** Format: uuid */
+        component_id: string;
+        component_sku: string;
+        pack_size: number;
+      } | null;
+      bundles: {
+        available: number;
+        /** Format: uuid */
+        id: string;
+        pack_size: number;
+        sku: string;
+      }[];
+      fba_count: number;
+      last_movement_at: string | null;
+      listing_count: number;
+      listings: components['schemas']['StockListingInput'][];
+      on_hand: number | null;
+      oversold: boolean;
+      reserved: number;
+      sku: string;
+      /** Format: uuid */
+      sku_id: string;
+      sync_failed: boolean;
+      /** @enum {string} */
+      sync_mode: 'auto' | 'manual' | 'mixed';
+      title: string;
+      version: number;
+    };
+    StockListing: {
+      buffer: number;
+      buffer_override: boolean;
+      capped_by_stock: boolean;
+      /** Format: uuid */
+      channel_account_id: string;
+      channel_qty: number | null;
+      external_id: string;
+      external_sku: string;
+      fulfilment: components['schemas']['Fulfilment'] | null;
+      /** Format: uuid */
+      id: string;
+      last_push: {
+        /** Format: date-time */
+        at: string;
+        result: components['schemas']['PushResult'];
+      } | null;
+      last_sent_qty: number | null;
+      manual: {
+        qty: number;
+        /** Format: date-time */
+        set_at: string;
+        set_by: string | null;
+        sold: number;
+      } | null;
+      mode: components['schemas']['StockMode'];
+      provider: components['schemas']['Provider'];
+      sync_failed: boolean;
+      target: number | null;
+      title: string | null;
+    };
+    StockListingInput: {
+      buffer: number;
+      buffer_override: boolean;
+      capped_by_stock: boolean;
+      /** Format: uuid */
+      channel_account_id: string;
+      channel_qty: number | null;
+      external_id: string;
+      external_sku: string;
+      fulfilment: components['schemas']['FulfilmentInput'] | null;
+      /** Format: uuid */
+      id: string;
+      last_push: {
+        /** Format: date-time */
+        at: string;
+        result: components['schemas']['PushResultInput'];
+      } | null;
+      last_sent_qty: number | null;
+      manual: {
+        qty: number;
+        /** Format: date-time */
+        set_at: string;
+        set_by: string | null;
+        sold: number;
+      } | null;
+      mode: components['schemas']['StockModeInput'];
+      provider: components['schemas']['ProviderInput'];
+      sync_failed: boolean;
+      target: number | null;
+      title: string | null;
+    };
+    /** @enum {string} */
+    StockMode: 'auto' | 'manual';
+    /** @enum {string} */
+    StockModeInput: 'auto' | 'manual';
+    StockRow: {
+      active: boolean;
+      available: number;
+      bundle: {
+        /** Format: uuid */
+        component_id: string;
+        component_sku: string;
+        pack_size: number;
+      } | null;
+      fba_count: number;
+      last_movement_at: string | null;
+      listing_count: number;
+      on_hand: number | null;
+      oversold: boolean;
+      reserved: number;
+      sku: string;
+      /** Format: uuid */
+      sku_id: string;
+      sync_failed: boolean;
+      /** @enum {string} */
+      sync_mode: 'auto' | 'manual' | 'mixed';
+      title: string;
+    };
+    StockRowInput: {
+      active: boolean;
+      available: number;
+      bundle: {
+        /** Format: uuid */
+        component_id: string;
+        component_sku: string;
+        pack_size: number;
+      } | null;
+      fba_count: number;
+      last_movement_at: string | null;
+      listing_count: number;
+      on_hand: number | null;
+      oversold: boolean;
+      reserved: number;
+      sku: string;
+      /** Format: uuid */
+      sku_id: string;
+      sync_failed: boolean;
+      /** @enum {string} */
+      sync_mode: 'auto' | 'manual' | 'mixed';
+      title: string;
     };
     Terms: {
       /** Format: uri */
@@ -6942,6 +7472,570 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['WorkspaceStatusChange'];
+        };
+      };
+    };
+  };
+  listStock: {
+    parameters: {
+      query?: {
+        filter?: 'oversold' | 'sync_failed' | 'manual' | 'bundles';
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+        q?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['StockRow'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
+        };
+      };
+    };
+  };
+  getStock: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockDetail'];
+        };
+      };
+    };
+  };
+  adjustStock: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uuid */
+          client_ref: string;
+          delta: number;
+          reason: components['schemas']['AdjustReasonInput'];
+          text?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Movement'];
+        };
+      };
+    };
+  };
+  saveAllocation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          include_bundles?: boolean;
+          listings: {
+            /** Format: uuid */
+            listing_id: string;
+            manual_qty?: number;
+            mode: components['schemas']['StockModeInput'];
+          }[];
+          version: number;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AllocationResult'];
+        };
+      };
+    };
+  };
+  backToAuto: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          include_bundles?: boolean;
+          listing_ids?: string[];
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AllocationResult'];
+        };
+      };
+    };
+  };
+  stockIn: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uuid */
+          client_ref: string;
+          notes?: string;
+          quantity: number;
+          supplier?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Movement'];
+        };
+      };
+    };
+  };
+  listBuffers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockBufferList'];
+        };
+      };
+    };
+  };
+  setAccountBuffer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          buffer: number;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockBuffer'];
+        };
+      };
+    };
+  };
+  setListingBuffer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        listingId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          buffer: number | null;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockListing'];
+        };
+      };
+    };
+  };
+  listMovements: {
+    parameters: {
+      query?: {
+        from?: string;
+        kind?: components['schemas']['MovementKindInput'];
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+        sku_id?: string;
+        source?: 'order' | 'user' | 'system';
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['Movement'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
+        };
+      };
+    };
+  };
+  exportMovements: {
+    parameters: {
+      query?: {
+        from?: string;
+        kind?: components['schemas']['MovementKindInput'];
+        sku_id?: string;
+        source?: 'order' | 'user' | 'system';
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description File content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+    };
+  };
+  importStockTake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          csv: string;
+          dry_run: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CsvImportReport'];
         };
       };
     };
