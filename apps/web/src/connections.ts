@@ -8,7 +8,7 @@ import {
   type TenantContext,
   type TenantRunner,
 } from '@omnibridge/core';
-import type { connectionRoutes } from '@omnibridge/contract';
+import type { connectionRoutes, OAuthReturnError } from '@omnibridge/contract';
 import type {
   AccountCredentials,
   AuditLog,
@@ -135,6 +135,7 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
     body: null,
     headers: { location: `${o.oauth.appOrigin}/connections?${query}` },
   });
+  const fail = (code: OAuthReturnError) => back(`error=${code}`);
 
   return {
     listConnections: async ({ tenant }) => {
@@ -204,14 +205,14 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
     oauthCallback: async ({ params, query }) => {
       const provider = params.provider;
       const workspaceId = oauthStateWorkspace(query.state);
-      if (workspaceId === undefined) return back('error=invalid_state');
+      if (workspaceId === undefined) return fail('state_invalid');
       // Single use: the state is taken first, whatever happens next.
       const taken = await o.oauth.tenancy.runWorkspace({ workspaceId }, (ctx) =>
         o.oauth.states.take(ctx, query.state, provider, now()),
       );
-      if (taken === undefined) return back('error=invalid_state');
+      if (taken === undefined) return fail('state_invalid');
       const code = query.code ?? query.spapi_oauth_code;
-      if (query.error !== undefined || code === undefined) return back('error=declined');
+      if (query.error !== undefined || code === undefined) return fail('access_denied');
       let grant;
       try {
         // The one web provider call (INT-2), with no transaction open (invariant 3).
@@ -227,7 +228,7 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
           },
           'OAuth code exchange failed',
         );
-        return back('error=exchange_failed');
+        return fail('exchange_failed');
       }
       try {
         await o.oauth.tenancy.runMember(
@@ -267,7 +268,7 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
         );
       } catch (err) {
         // No longer an admin, or no longer a member at all: the token is not stored.
-        if (err instanceof ApiError || err instanceof NotAMember) return back('error=forbidden');
+        if (err instanceof ApiError || err instanceof NotAMember) return fail('forbidden');
         throw err;
       }
       return back(`connected=${encodeURIComponent(taken.channelAccountId)}`);

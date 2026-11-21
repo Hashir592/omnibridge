@@ -675,16 +675,6 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
-    devDependencies:
-      '@omnibridge/logger':
-        specifier: workspace:*
-        version: link:../../logger
-      '@omnibridge/provider-mocks':
-        specifier: workspace:*
-        version: link:../../../mocks/provider-mocks
-      fastify:
-        specifier: 5.12.7
-        version: 5.12.7
 
   packages/providers/dpd:
     dependencies:
