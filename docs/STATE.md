@@ -9,7 +9,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M07 built** (`docs/reviews/M07-end-report.md`):
   - contract #131, merged;
   - T-0701 #133, merged, full gate green;
-  - T-0702 #134, critical, merged with the full gate green. S4 reviews it now (handoff `docs/handoffs/20261121-1909-S3-to-S4.md`);
+  - T-0702 #134, critical, merged with the full gate green. **Review (S4, 21 Nov):** FIX REQUIRED, 1 Major (F-M07-T0702-01, carrier Retry-After), 1 Minor; `docs/reviews/M07-T0702-findings.md`. S3 fixes it in its next task's first commit;
   - the follow-up with the mock-storm test and the completeness checklist.
 - **Milestone:** M07 + M08 is one S4 milestone, so the S4 milestone review comes at M08 end.
 - **Next (S3):** M08 then M09, per `docs/handoffs/20261121-2200-S1-to-S3.md`, once M07 is merged and S1 confirms.
