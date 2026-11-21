@@ -36,11 +36,21 @@ export function usageShare(u: ApiUsageToday): number | null {
 /** The OAuth return (`?connected=<id>` or `?error=<code>`), read once from the address. */
 export type OAuthReturn = { ok: true; accountId: string } | { ok: false; text: string };
 
-const OAUTH_ERROR: Record<string, string> = {
+/**
+ * Every `error` the OAuth return can carry: OAUTH_RETURN_ERRORS in the contract (S3, 21 Nov 2026).
+ * The SPA may import only the typed client (ADR-004), which does not carry that list, so it is
+ * mirrored here. Any other value gets the generic line.
+ */
+type OAuthReturnError = 'access_denied' | 'state_invalid' | 'exchange_failed' | 'forbidden';
+
+const OAUTH_ERROR: Record<OAuthReturnError, string> = {
   access_denied: 'The provider was not given access. Nothing changed.',
   state_invalid: 'That sign-in link had expired or was already used. Start again.',
   exchange_failed: 'The provider did not finish the connection. Try again in a few minutes.',
+  forbidden: 'You are no longer an admin of this workspace, so nothing was saved.',
 };
+
+const isOAuthError = (v: string): v is OAuthReturnError => Object.hasOwn(OAUTH_ERROR, v);
 
 export function oauthReturn(search: {
   connected?: string | undefined;
@@ -50,7 +60,9 @@ export function oauthReturn(search: {
   if (search.error) {
     return {
       ok: false,
-      text: OAUTH_ERROR[search.error] ?? 'The account could not be connected. Try again.',
+      text: isOAuthError(search.error)
+        ? OAUTH_ERROR[search.error]
+        : 'The account could not be connected. Try again.',
     };
   }
   return undefined;
