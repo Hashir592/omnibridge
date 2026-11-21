@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 22 Nov 2026 by S3 (M08 milestone fixes in PR #145; M09 merged).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 22 Nov 2026 by S3 (M08 milestone fixes in PR #146; M09 merged).
 
 ## Now
 
@@ -9,7 +9,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M07 built** (`docs/reviews/M07-end-report.md`): #131, #133, #134 (critical; S4 FIX REQUIRED, `docs/reviews/M07-T0702-findings.md`), #137, #138. The Major F-M07-T0702-01 is fixed in #141; the Minor goes to M15.
 - **M08 built** (`docs/reviews/M08-end-report.md`): contract #139 and T-0801 #141, merged.
 - **M09 built** (`docs/reviews/M09-end-report.md`): contract #142 and T-0901 #143, merged.
-- **S4:** the M07 + M08 milestone was BLOCKED on F-M08-end-01 (`docs/reviews/M08-end-findings.md`), fixed with both Minors in #145. The M09 + M10 milestone confirms the fix. The T-0901 critical review is still to run (`docs/handoffs/20261122-0300-S3-to-S4.md`).
+- **S4:** the M07 + M08 milestone was BLOCKED on F-M08-end-01 (`docs/reviews/M08-end-findings.md`), fixed with both Minors in #146. The M09 + M10 milestone confirms the fix. The T-0901 critical review is still to run (`docs/handoffs/20261122-0300-S3-to-S4.md`).
 - **Next (S3):** M10, when Hashir pastes it.
 - **S2:** T-0316 catalogue screens (M08 client); T-0317 stock screens (M09 client; note `docs/handoffs/20261122-0300-S3-to-S2.md`).
 
