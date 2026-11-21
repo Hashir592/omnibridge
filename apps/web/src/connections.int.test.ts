@@ -214,13 +214,31 @@ describe('Connections and the OAuth connect flow (T-0701)', () => {
 
     // The same return again: the state is spent.
     const replay = await server.inject({ method: 'GET', url: callback });
-    expect(replay.headers.location).toBe(`${APP}/connections?error=invalid_state`);
+    expect(replay.headers.location).toBe(`${APP}/connections?error=state_invalid`);
     // A made-up state goes nowhere.
     const forged = await server.inject({
       method: 'GET',
       url: `/api/oauth/ebay/callback?state=${A}.${'x'.repeat(43)}&code=abc`,
     });
-    expect(forged.headers.location).toBe(`${APP}/connections?error=invalid_state`);
+    expect(forged.headers.location).toBe(`${APP}/connections?error=state_invalid`);
+    // The seller declines on the provider page: access_denied, and nothing is stored.
+    const again = await server.inject({
+      method: 'POST',
+      url: `/api/connections/${ebay}/authorise`,
+      headers: { ...asAdmin, origin: APP },
+    });
+    const state = new URL(again.json<{ redirect_url: string }>().redirect_url).searchParams.get(
+      'state',
+    );
+    const declined = await server.inject({
+      method: 'GET',
+      url: `/api/oauth/ebay/callback?state=${state ?? ''}&error=access_denied`,
+    });
+    expect(declined.headers.location).toBe(`${APP}/connections?error=access_denied`);
+    expect(
+      (await root.query(`SELECT 1 FROM app.credentials WHERE channel_account_id = $1`, [ebay]))
+        .rows,
+    ).toHaveLength(1);
     await server.close();
   });
 
