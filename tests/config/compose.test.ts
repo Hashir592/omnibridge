@@ -150,9 +150,31 @@ describe('compose stack: isolation (NFR-1, NFR-2, OPS-7, OPS-8, OPS-9)', () => {
     const model = composeModel();
     expect(model.name).toBe('omnibridge');
     const names = Object.values(model.networks).map((n) => n.name);
-    expect(names.sort()).toEqual(['ob_app', 'ob_db', 'ob_edge', 'ob_pii', 'ob_vault', 'scan_ob']);
+    expect(names.sort()).toEqual([
+      'ob_app',
+      'ob_db',
+      'ob_edge',
+      'ob_mocks',
+      'ob_pii',
+      'ob_vault',
+      'scan_ob',
+    ]);
     expect(model.networks.ob_pii?.internal).toBe(true);
     expect(model.networks.ob_db?.internal).toBe(true);
+  });
+
+  it('[INT-3] provider-mocks is alone on the internal ob_mocks network with web and worker, which call it in mock mode', () => {
+    const model = composeModel();
+    expect(networksOf('provider-mocks')).toEqual(['ob_mocks']);
+    expect(model.networks.ob_mocks?.internal).toBe(true);
+    const onMocks = Object.keys(model.services).filter((s) => networksOf(s).includes('ob_mocks'));
+    expect(onMocks.sort()).toEqual(['provider-mocks', 'web', 'worker']);
+    for (const name of ['web', 'worker']) {
+      expect(service(name).environment).toMatchObject({
+        PROVIDER_MODE: 'mock',
+        PROVIDER_MOCKS_URL: 'http://provider-mocks:8080',
+      });
+    }
   });
 
   it('[OPS-7] the stack needs nothing outside itself (no external networks or volumes)', () => {

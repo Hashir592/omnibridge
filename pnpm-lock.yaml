@@ -376,9 +376,15 @@ importers:
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@omnibridge/provider-amazon':
+        specifier: workspace:*
+        version: link:../../packages/providers/amazon
       '@omnibridge/provider-ebay':
         specifier: workspace:*
         version: link:../../packages/providers/ebay
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../../packages/providers/kit
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -407,6 +413,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@omnibridge/provider-mocks':
+        specifier: workspace:*
+        version: link:../../mocks/provider-mocks
       '@types/qrcode':
         specifier: 1.5.6
         version: 1.5.6
@@ -440,6 +449,12 @@ importers:
       '@omnibridge/mail':
         specifier: workspace:*
         version: link:../../packages/mail
+      '@omnibridge/provider-ebay':
+        specifier: workspace:*
+        version: link:../../packages/providers/ebay
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../../packages/providers/kit
       '@omnibridge/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -462,6 +477,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@omnibridge/provider-mocks':
+        specifier: workspace:*
+        version: link:../../mocks/provider-mocks
       '@omnibridge/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit
@@ -483,6 +501,28 @@ importers:
       fastify:
         specifier: 5.12.7
         version: 5.12.7
+    devDependencies:
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
+      '@omnibridge/provider-ads':
+        specifier: workspace:*
+        version: link:../../packages/providers/ads
+      '@omnibridge/provider-amazon':
+        specifier: workspace:*
+        version: link:../../packages/providers/amazon
+      '@omnibridge/provider-dpd':
+        specifier: workspace:*
+        version: link:../../packages/providers/dpd
+      '@omnibridge/provider-evri':
+        specifier: workspace:*
+        version: link:../../packages/providers/evri
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../../packages/providers/kit
+      '@omnibridge/provider-website':
+        specifier: workspace:*
+        version: link:../../packages/providers/website
 
   packages/contract:
     dependencies:
@@ -589,10 +629,26 @@ importers:
         specifier: workspace:*
         version: link:../testkit
 
-  packages/providers/ads: {}
+  packages/providers/ads:
+    dependencies:
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../crypto
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../kit
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/providers/amazon:
     dependencies:
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../crypto
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../kit
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -607,13 +663,65 @@ importers:
         specifier: 5.12.7
         version: 5.12.7
 
-  packages/providers/dpd: {}
+  packages/providers/dpd:
+    dependencies:
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../crypto
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../kit
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
-  packages/providers/ebay: {}
+  packages/providers/ebay:
+    dependencies:
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../crypto
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../kit
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
-  packages/providers/evri: {}
+  packages/providers/evri:
+    dependencies:
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../crypto
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../kit
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
-  packages/providers/website: {}
+  packages/providers/kit:
+    dependencies:
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../crypto
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
+  packages/providers/website:
+    dependencies:
+      '@omnibridge/crypto':
+        specifier: workspace:*
+        version: link:../../crypto
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../kit
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/queue:
     dependencies:

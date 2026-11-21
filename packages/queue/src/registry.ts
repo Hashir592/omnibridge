@@ -154,6 +154,23 @@ export const workspaceCloseJob = defineJob({
   expireInSeconds: 300,
 });
 
+/** The incremental sync streams (INT-8); each adds its name here with its module. */
+export const SYNC_STREAMS = ['ebay.orders'] as const;
+export type SyncStreamName = (typeof SYNC_STREAMS)[number];
+
+/**
+ * One incremental poll of one account and stream (T-0701: INT-2, INT-8): the job → governor →
+ * parser → cursor path. Polls of one account run one at a time, in order. A parser failure ends
+ * the job at once (PermanentJobError, INT-5). M10 and later schedule the streams.
+ */
+export const syncPollJob = defineJob({
+  type: 'sync.poll',
+  payload: z.object({ stream: z.enum(SYNC_STREAMS) }).strict(),
+  serialPerAccount: true,
+  retry: { limit: 4, delaySeconds: 60, backoff: true, maxDelaySeconds: 1_800 },
+  expireInSeconds: 600,
+});
+
 /**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
@@ -173,6 +190,7 @@ export const JOBS: readonly JobDefinition[] = [
   securityScanJob,
   notifyRetentionJob,
   workspaceCloseJob,
+  syncPollJob,
 ];
 
 /**

@@ -55,6 +55,14 @@ export const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
   // Provider webhooks (T-0602): the notice topic and whether it verified, never its ids.
   'topic',
   'verified',
+  // Providers (T-0701, INT-5): names, versions, field paths and stable codes, never a value.
+  'provider',
+  'api',
+  'stream',
+  'parser',
+  'parserVersion',
+  'fieldPath',
+  'errorCode',
 ]);
 
 const REDACTED = '[REDACTED]';

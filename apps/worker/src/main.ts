@@ -1,7 +1,13 @@
-import { Notifier, readSecretFile, requireEnv } from '@omnibridge/core';
+import { Notifier, providerModeFrom, readSecretFile, requireEnv } from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  AccountCredentials,
+  AppSecretStore,
+  ConnectionRepository,
+  CredentialRepository,
+  PlatformKeys,
+  SyncCursorRepository,
   DeletionLog,
   AuditLog,
   AuthStore,
@@ -24,7 +30,9 @@ import {
 import { createLogger } from '@omnibridge/logger';
 import { Mailer } from '@omnibridge/mail';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
-import { emailOnRaise, JOBS, JobQueue, queueMetrics } from '@omnibridge/queue';
+import { createEbayAdapter, ebayOrderStream } from '@omnibridge/provider-ebay';
+import { AccessTokenCache, ProviderHttp } from '@omnibridge/provider-kit';
+import { emailOnRaise, JOBS, JobQueue, PermanentJobError, queueMetrics } from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
 import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
@@ -48,6 +56,7 @@ import { createWorkerBoss, startHeartbeat } from './heartbeat.ts';
 import { startMetricsServer } from './metrics-server.ts';
 import { startPlatformJobs } from './platform-jobs.ts';
 import { scanFileHandler } from './scan.ts';
+import { countingSink, syncPollHandler } from './sync.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
 const log = createLogger({ service: 'worker', version });
@@ -136,6 +145,35 @@ const deletionDeps = {
 };
 // The platform console's jobs (T-0504): workspace closure, notification retention, the digest.
 const housekeeping = new PlatformHousekeeping(handlerDb.db);
+// Providers (T-0701): every call goes through the one HTTP client and its egress allowlist
+// (invariant 17). PROVIDER_MODE is mock unless set; mock mode reaches provider-mocks only.
+const providerMode = providerModeFrom(process.env.PROVIDER_MODE);
+const providerHttp = new ProviderHttp({
+  mode: providerMode,
+  ...(process.env.PROVIDER_MOCKS_URL ? { mocksUrl: process.env.PROVIDER_MOCKS_URL } : {}),
+});
+const connections = new ConnectionRepository(handlerDb.db, { environment: providerMode });
+const appSecrets = new AppSecretStore(
+  handlerDb.db,
+  new PlatformKeys(new AuthStore(handlerDb.db), secretsKeyring),
+);
+const appSecret = async (name: Parameters<AppSecretStore['get']>[0]) => {
+  const value = await appSecrets.get(name);
+  if (value === undefined) throw new PermanentJobError('provider.not_configured');
+  return value;
+};
+const syncPorts = {
+  tenancy: new Tenancy(handlerDb.db),
+  accounts: connections,
+  credentials: new AccountCredentials(
+    handlerDb.db,
+    new CredentialRepository({ keyring: secretsKeyring, logger: log, environment: providerMode }),
+  ),
+  cursors: new SyncCursorRepository(handlerDb.db),
+  health: connections,
+  notifier,
+  tokens: new AccessTokenCache(),
+};
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -188,6 +226,21 @@ await registerHandlers(queue, {
   }),
   'notify.retention': notifyRetentionHandler({ housekeeping, logger: log }),
   'workspace.close': workspaceCloseHandler({ queue, housekeeping, logger: log }),
+  'sync.poll': syncPollHandler({
+    ports: syncPorts,
+    streams: {
+      'ebay.orders': async () =>
+        ebayOrderStream(
+          createEbayAdapter({
+            http: providerHttp,
+            clientId: await appSecret('ebay.client_id'),
+            clientSecret: await appSecret('ebay.client_secret'),
+          }),
+          countingSink(log),
+        ),
+    },
+    logger: log,
+  }),
   'notify.email': notifyEmailHandler({
     tenancy: new Tenancy(handlerDb.db),
     notifications,
