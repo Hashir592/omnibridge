@@ -36,7 +36,7 @@ import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
 import { catalogueHandlers, type CatalogueOptions } from './catalogue.ts';
-import { stockHandlers } from './stock.ts';
+import { stockHandlers, type StockOptions } from './stock.ts';
 import { connectionHandlers, type ConnectionOptions } from './connections.ts';
 import { platformHandlers, type PlatformOptions } from './platform.ts';
 import { privacyHandlers, type PrivacyOptions } from './privacy.ts';
@@ -136,6 +136,8 @@ export interface WebAppOptions {
   connections?: ConnectionOptions;
   /** The catalogue (T-0801); without it those routes answer 404. */
   catalogue?: CatalogueOptions;
+  /** The stock engine (T-0901); without it those routes answer 404. */
+  stock?: StockOptions;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
@@ -174,6 +176,7 @@ export function buildWebApp({
   platform,
   connections,
   catalogue,
+  stock,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
@@ -229,7 +232,7 @@ export function buildWebApp({
     ...platformHandlers(platform),
     ...connectionHandlers(connections),
     ...catalogueHandlers(catalogue),
-    ...stockHandlers(),
+    ...stockHandlers(stock),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';

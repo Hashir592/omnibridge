@@ -1042,7 +1042,7 @@ export class StockEngine {
       INSERT INTO app.stock_movements
         (workspace_id, id, master_sku_id, kind, source_kind, source_id, on_hand_change,
          reserved_change, on_hand_after, reserved_after, reason, note, supplier, actor_user_id,
-         listing_id, company_id, created_at)
+         listing_id, order_company_id, created_at)
       VALUES (${ctx.workspaceId}::uuid, ${id}::uuid, ${skuId}::uuid, ${m.kind}, ${m.sourceKind},
               ${m.sourceId}, ${m.onHand}, ${reservedChange}, ${onHandAfter}, ${reservedAfter},
               ${m.reason ?? null}, ${m.note ?? null}, ${m.supplier ?? null}, ${m.userId ?? null},
@@ -1541,7 +1541,7 @@ function movementSelect(ctx: TenantContext) {
     SELECT m.id, m.created_at, m.master_sku_id, s.sku, m.kind, m.on_hand_change,
            m.reserved_change, m.on_hand_after, m.reason, m.note, m.supplier, m.source_kind,
            m.actor_user_id,
-           (m.company_id IS NULL OR m.company_id = ANY (
+           (m.order_company_id IS NULL OR m.order_company_id = ANY (
               coalesce(nullif(current_setting('app.company_ids', true), '')::uuid[],
                        '{}'::uuid[]))) AS company_visible,
            coalesce(p.pending, 0) AS pending, coalesce(p.sent, 0) AS sent,

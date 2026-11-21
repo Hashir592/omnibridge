@@ -62,7 +62,7 @@ CREATE TABLE app.stock_movements (
   listing_id uuid,
   -- The company of the order a movement names, so the change log shows its reference only to a
   -- user who can see that company (ARCHITECTURE 6.1). No order data is copied here.
-  company_id uuid,
+  order_company_id uuid,
   created_at timestamptz NOT NULL,
   PRIMARY KEY (workspace_id, id),
   CONSTRAINT stock_movements_once UNIQUE (workspace_id, source_kind, source_id, kind),

@@ -4,6 +4,7 @@ import type { Logger } from '@omnibridge/logger';
 import {
   jobsRetentionJob,
   notifyRetentionJob,
+  stockRetentionJob,
   type JobHandler,
   type JobQueue,
 } from '@omnibridge/queue';
@@ -72,6 +73,11 @@ export async function sweepHousekeeping({
     await queue.send(jobsRetentionJob, {
       ctx: { workspaceId, companyIds: [] },
       idempotencyKey: `jobs.retention:${day}`,
+      payload: {},
+    });
+    await queue.send(stockRetentionJob, {
+      ctx: { workspaceId, companyIds: [] },
+      idempotencyKey: `stock.retention:${day}`,
       payload: {},
     });
     await queue.send(notifyRetentionJob, {

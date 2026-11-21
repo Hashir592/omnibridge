@@ -18,6 +18,8 @@ export const ERROR_CODES = [
   'service_unavailable',
   // A-001 (ADR-069): a search matched more than one answer holds; narrow it and search again.
   'too_many_matches',
+  // C7.2 (T-0901): the record changed while the user was editing; read it again and review.
+  'version_conflict',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

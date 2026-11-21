@@ -30,6 +30,7 @@ import {
   UserRepository,
   WorkspaceRepository,
   CatalogueRepository,
+  StockEngine,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import { Mailer } from '@omnibridge/mail';
@@ -219,6 +220,8 @@ const syncPorts = {
 // Every automated provider write goes through one send path (T-0702, invariant 20).
 const outboundWrites = new OutboundWriteRepository(handlerDb.db);
 const outbound = new OutboundQueue({ queue, writes: outboundWrites });
+// The stock engine (T-0901): movements, targets and pushes through the outbound path above.
+const stockEngine = new StockEngine(handlerDb.db, { pushes: outbound, notifier });
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -288,6 +291,8 @@ await registerHandlers(queue, {
       ebay: ebayAdapter,
       website: () => Promise.resolve(createWebsiteAdapter({ http: providerHttp })),
     }),
+    // INV-8: a settled stock write records what was sent, or sets Sync failed.
+    settled: (ctx, writeId) => stockEngine.recordPushResult(ctx, writeId),
     logger: log,
   }),
   'outbound.recover': outboundRecoverHandler({
@@ -295,7 +300,12 @@ await registerHandlers(queue, {
     maintenance: (ctx) => connections.maintenance(ctx),
   }),
   // The catalogue (T-0801): CAT-6 listeners (M09 and M10 add theirs) and CAT-5 discovery.
-  'catalogue.listing_mapped': listingMappedHandler({ listeners: [] }),
+  'catalogue.listing_mapped': listingMappedHandler({
+    // M09: back-fill the movements and push the target; reset a remapped listing (C7.3).
+    listeners: [
+      { name: 'stock', onMapped: (ctx, change) => stockEngine.onListingMapped(ctx, change) },
+    ],
+  }),
   'listings.discover': listingsDiscoverHandler({
     ports: syncPorts,
     adapters: {
@@ -304,8 +314,14 @@ await registerHandlers(queue, {
     },
     catalogue: new CatalogueRepository(handlerDb.db),
     queue,
+    // C7.3 and INV-7: ended listings lose their manual settings; the nightly scan reconciles.
+    ended: { onEnded: (ctx, ids) => stockEngine.onListingsEnded(ctx, ids) },
+    reconcile: async (ctx, accountId, startedAt) => {
+      await stockEngine.reconcile(ctx, accountId, startedAt);
+    },
     logger: log,
   }),
+  'stock.retention': async (job) => ({ deleted: await stockEngine.purgeExpired(job.ctx) }),
   'listings.discover_accounts': listingsDiscoverAccountsHandler({ connections, queue }),
   'notify.email': notifyEmailHandler({
     tenancy: new Tenancy(handlerDb.db),

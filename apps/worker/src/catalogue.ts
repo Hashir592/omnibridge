@@ -96,6 +96,8 @@ export function listingsDiscoverHandler(deps: {
   catalogue: Pick<CatalogueRepository, 'upsertDiscovered' | 'endUnseen'>;
   queue: Pick<JobQueue, 'send'>;
   ended?: ListingsEndedListener;
+  /** INV-7 (M09): after a complete scan, compare each listing's channel quantity with its target. */
+  reconcile?: (ctx: TenantContext, channelAccountId: string, scanStartedAt: Date) => Promise<void>;
   logger: Logger;
 }): PhasedHandler<Record<string, never>, ScanResult> {
   const now = deps.ports.now ?? (() => new Date());
@@ -136,6 +138,7 @@ export function listingsDiscoverHandler(deps: {
             complete: async (ctx, accountId, startedAt) => {
               const ended = await deps.catalogue.endUnseen(ctx, accountId, startedAt, now());
               if (ended.length > 0) await deps.ended?.onEnded(ctx, ended);
+              await deps.reconcile?.(ctx, accountId, startedAt);
             },
           },
           { workspaceId, channelAccountId },
