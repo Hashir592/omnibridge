@@ -30,12 +30,18 @@ export interface ListingScan {
     items: readonly ListingInfo[],
     startedAt: Date,
   ): Promise<void>;
-  /** After the last page of a complete scan, in the same transaction as the health record. */
-  complete(ctx: TenantContext, channelAccountId: string, startedAt: Date): Promise<void>;
+  /** In the scan's first transaction: records that a scan of the account started. */
+  begin?(ctx: TenantContext, channelAccountId: string, startedAt: Date): Promise<void>;
+  /**
+   * After the last page of a complete scan, in the same transaction as the health record.
+   * Answers whether it concluded (false when a newer scan of the account started meanwhile).
+   */
+  complete(ctx: TenantContext, channelAccountId: string, startedAt: Date): Promise<boolean>;
 }
 
 export type ScanResult =
-  { skipped: 'disconnected' } | { pages: number; listings: number; complete: boolean };
+  | { skipped: 'disconnected' }
+  | { pages: number; listings: number; complete: boolean; concluded: boolean };
 
 /**
  * Reads every page of an account's listings (CAT-5) through the governor, with short transactions
@@ -46,20 +52,30 @@ export type ScanResult =
 export async function runListingScan(
   ports: Omit<SyncPorts, 'cursors'>,
   scan: ListingScan,
-  job: { workspaceId: string; channelAccountId: string },
+  job: {
+    workspaceId: string;
+    channelAccountId: string;
+    /**
+     * Stop reading pages at this time, without concluding, so a scan never outlives its job and
+     * overlaps the retry (F-M08-end-01). The next scan reads everything again.
+     */
+    deadline?: Date;
+  },
 ): Promise<ScanResult> {
   const now = ports.now ?? (() => new Date());
   const actor = { workspaceId: job.workspaceId };
   const accountId = job.channelAccountId;
+  const startedAt = now();
   const start = await ports.tenancy.runWorkspace(actor, async (ctx) => {
     const account = await ports.accounts.get(ctx, accountId, now());
     if (account === undefined || account.status === 'disconnected') return undefined;
     const credential = await ports.credentials.read(ctx, accountId, scan.provider);
-    return credential === undefined ? undefined : { account, credential };
+    if (credential === undefined) return undefined;
+    await scan.begin?.(ctx, accountId, startedAt);
+    return { account, credential };
   });
   if (start === undefined) return { skipped: 'disconnected' };
   const { account, credential } = start;
-  const startedAt = now();
 
   const calls = new Map<string, number>();
   const input = (api: string) => ({
@@ -134,12 +150,17 @@ export async function runListingScan(
         await recordCalls(ctx);
       });
       page = result.next;
-    } while (page !== undefined && pages < MAX_SCAN_PAGES);
+    } while (
+      page !== undefined &&
+      pages < MAX_SCAN_PAGES &&
+      (job.deadline === undefined || now().getTime() < job.deadline.getTime())
+    );
     const complete = page === undefined;
+    let concluded = false;
     await ports.tenancy.runWorkspace(actor, async (ctx) => {
       // An empty answer is more likely a provider hiccup than every listing ending at once:
       // only a scan that found something concludes (the listings it did not see have ended).
-      if (complete && listings > 0) await scan.complete(ctx, accountId, startedAt);
+      if (complete && listings > 0) concluded = await scan.complete(ctx, accountId, startedAt);
       const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
         tokenRefreshed: auth.refreshed,
       });
@@ -151,7 +172,7 @@ export async function runListingScan(
       }
       await recordCalls(ctx);
     });
-    return { pages, listings, complete };
+    return { pages, listings, complete, concluded };
   } catch (err) {
     await ports.tenancy.runWorkspace(actor, async (ctx) => {
       if (err instanceof AuthFailed) {

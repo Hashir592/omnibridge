@@ -74,6 +74,12 @@ export function sendMappingChanged(
   });
 }
 
+/**
+ * A scan stops reading this long after it starts, well inside listings.discover's 30-minute job
+ * expiry, so the retry of an expired job never runs beside it (F-M08-end-01).
+ */
+export const DISCOVERY_MAX_RUN_MS = 25 * 60_000;
+
 /** Builds an adapter when a job needs it: app secrets are read then, not at boot. */
 export type DiscoveryAdapters = Partial<
   Record<'ebay' | 'website', () => Promise<Pick<ChannelAdapter, 'authenticate' | 'listListings'>>>
@@ -93,9 +99,11 @@ const SCAN_APIS: Record<'ebay' | 'website', { api: string; authApi?: string }> =
 export function listingsDiscoverHandler(deps: {
   ports: Omit<SyncPorts, 'cursors'>;
   adapters: DiscoveryAdapters;
-  catalogue: Pick<CatalogueRepository, 'upsertDiscovered' | 'endUnseen'>;
+  catalogue: Pick<CatalogueRepository, 'upsertDiscovered' | 'beginScan' | 'concludeScan'>;
   queue: Pick<JobQueue, 'send'>;
   ended?: ListingsEndedListener;
+  /** How long one scan may read before it stops unconcluded; default 25 minutes. */
+  maxRunMs?: number;
   /** INV-7 (M09): after a complete scan, compare each listing's channel quantity with its target. */
   reconcile?: (ctx: TenantContext, channelAccountId: string, scanStartedAt: Date) => Promise<void>;
   logger: Logger;
@@ -135,13 +143,23 @@ export function listingsDiscoverHandler(deps: {
                 await sendMappingChanged(deps.queue, ctx, change, 'auto');
               }
             },
+            begin: (ctx, accountId, startedAt) =>
+              deps.catalogue.beginScan(ctx, accountId, startedAt),
             complete: async (ctx, accountId, startedAt) => {
-              const ended = await deps.catalogue.endUnseen(ctx, accountId, startedAt, now());
+              // Only the newest scan of the account concludes (F-M08-end-01): an older one that a
+              // retry overlapped ends nothing and reconciles nothing.
+              const ended = await deps.catalogue.concludeScan(ctx, accountId, startedAt, now());
+              if (ended === undefined) return false;
               if (ended.length > 0) await deps.ended?.onEnded(ctx, ended);
               await deps.reconcile?.(ctx, accountId, startedAt);
+              return true;
             },
           },
-          { workspaceId, channelAccountId },
+          {
+            workspaceId,
+            channelAccountId,
+            deadline: new Date(now().getTime() + (deps.maxRunMs ?? DISCOVERY_MAX_RUN_MS)),
+          },
         );
       } catch (err) {
         if (err instanceof ProviderParserError) {

@@ -22,8 +22,11 @@ export const MAX_SEND_ATTEMPTS = 6;
 const DAILY_LIMIT_WAIT_MS = 60 * 60_000;
 
 /** After the n-th failed attempt: 1, 2, 4, 8 ... minutes, at most an hour. */
+/** The longest a write waits before its next attempt, whatever the provider asks (RL-4). */
+export const MAX_DEFER_MS = 60 * 60_000;
+
 export function retryDelayMs(attempts: number): number {
-  return Math.min(60 * 60_000, 60_000 * 2 ** Math.max(0, attempts - 1));
+  return Math.min(MAX_DEFER_MS, 60_000 * 2 ** Math.max(0, attempts - 1));
 }
 
 /** One kind of provider write: its payload schema (IDs and numbers only) and how to send it. */
@@ -303,9 +306,11 @@ export async function runOutboundSend(
         await ports.writes.fail(ctx, write.id, { code, attempted: true, at: now() });
         return { failed: code };
       }
+      // A provider's Retry-After is honoured up to the retry ceiling (60 minutes): a week, or a
+      // far date, would hold a stock write silently, as a deferral is not a failure (F-M08-end-03).
       const wait =
         err instanceof RateLimited && err.retryAfterMs !== undefined
-          ? Math.max(err.retryAfterMs, retryDelayMs(write.attempts + 1))
+          ? Math.min(MAX_DEFER_MS, Math.max(err.retryAfterMs, retryDelayMs(write.attempts + 1)))
           : retryDelayMs(write.attempts + 1);
       const until = new Date(now().getTime() + wait);
       const { dispatchSeq } = await ports.writes.defer(ctx, write.id, {
