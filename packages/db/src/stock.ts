@@ -260,8 +260,15 @@ export class StockEngine {
            SET last_order_at = ${now},
                manual_sold = CASE WHEN stock_mode = 'manual'
                                   THEN manual_sold + ${move.quantity} ELSE manual_sold END,
-               last_queued_qty = CASE WHEN last_queued_qty IS NULL THEN NULL
-                                      ELSE greatest(0, last_queued_qty - ${move.quantity}) END,
+               -- Only when no write is on its way: a waiting write still carries the old number
+               -- and would land after the sale, so the recompute must replace it.
+               last_queued_qty = CASE
+                 WHEN last_queued_qty IS NULL THEN NULL
+                 WHEN EXISTS (SELECT 1 FROM app.outbound_writes w
+                               WHERE w.workspace_id = app.listings.workspace_id
+                                 AND w.id = app.listings.pending_write_id
+                                 AND w.state IN ('pending', 'sending')) THEN last_queued_qty
+                 ELSE greatest(0, last_queued_qty - ${move.quantity}) END,
                updated_at = ${now}
          WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${move.listingId}::uuid`.execute(
         trx,
@@ -285,9 +292,14 @@ export class StockEngine {
     return this.#orderMove(ctx, move, 'release', async (trx, now) => {
       await sql`
         UPDATE app.listings
-           SET manual_sold = CASE WHEN stock_mode = 'manual'
-                                  THEN greatest(0, manual_sold - ${move.quantity})
-                                  ELSE manual_sold END,
+           SET manual_sold = CASE
+                 WHEN stock_mode = 'manual' AND EXISTS (
+                   SELECT 1 FROM app.stock_movements m
+                    WHERE m.workspace_id = app.listings.workspace_id
+                      AND m.source_kind = 'order_line' AND m.source_id = ${move.orderLineId}
+                      AND m.kind = 'reserve' AND m.created_at >= app.listings.manual_set_at)
+                 THEN greatest(0, manual_sold - ${move.quantity})
+                 ELSE manual_sold END,
                updated_at = ${now}
          WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${move.listingId}::uuid`.execute(
         trx,
@@ -428,6 +440,9 @@ export class StockEngine {
   ): Promise<void> {
     await this.#tx(ctx, async (trx, ctx) => {
       const now = this.#now();
+      // The stock row first, then the listing: the order every movement takes (no deadlock).
+      const sku = await this.#listingSku(trx, ctx, listingId);
+      if (sku !== undefined) await this.#lock(trx, ctx, sku.component, now);
       const { numAffectedRows } = await sql`
         UPDATE app.listings SET buffer_override = ${buffer === null ? null : units(buffer)},
                updated_at = ${now}
@@ -528,6 +543,13 @@ export class StockEngine {
   ): Promise<void> {
     await this.#tx(ctx, async (trx, ctx) => {
       const now = this.#now();
+      // Stock rows before the listing row, in a fixed order (no deadlock with a movement).
+      await this.#lockComponents(
+        trx,
+        ctx,
+        [change.previousMasterSkuId, change.masterSkuId].flatMap((id) => (id === null ? [] : [id])),
+        now,
+      );
       if (change.previousMasterSkuId !== null) {
         const wasManual = await this.#clearListing(trx, ctx, change.listingId, now);
         if (wasManual && change.masterSkuId !== null) {
@@ -573,7 +595,11 @@ export class StockEngine {
   async onListingsEnded(ctx: TenantContext, listingIds: readonly string[]): Promise<void> {
     await this.#tx(ctx, async (trx, ctx) => {
       const now = this.#now();
-      for (const id of listingIds) await this.#clearListing(trx, ctx, id, now);
+      for (const id of listingIds) {
+        const sku = await this.#listingSku(trx, ctx, id);
+        if (sku !== undefined) await this.#lock(trx, ctx, sku.component, now);
+        await this.#clearListing(trx, ctx, id, now);
+      }
     });
   }
 
@@ -621,6 +647,7 @@ export class StockEngine {
         } else {
           await this.#notifier.resolve(ctx, 'inventory.sync_failed', record);
         }
+        await this.#reorderGuard(trx, ctx, writeId, row.listing_id, now);
         return;
       }
       if (row.state === 'failed' || row.state === 'sent') {
@@ -637,6 +664,33 @@ export class StockEngine {
         });
       }
     });
+  }
+
+  /**
+   * An older write that was already sending when a newer one was queued may land after it: the
+   * channel then shows the older number. When that happens, the listing's target is sent again.
+   */
+  async #reorderGuard(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    writeId: string,
+    listingId: string,
+    now: Date,
+  ): Promise<void> {
+    const { rows } = await sql<{ component: string }>`
+      SELECT coalesce(s.bundle_component_id, s.id) AS component
+        FROM app.listings l
+        JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
+        JOIN app.outbound_writes x ON x.workspace_id = l.workspace_id AND x.id = ${writeId}::uuid
+        JOIN app.outbound_writes cur
+          ON cur.workspace_id = l.workspace_id AND cur.id = l.pending_write_id
+       WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.id = ${listingId}::uuid
+         AND l.pending_write_id <> ${writeId}::uuid
+         AND cur.state = 'sent' AND cur.sent_at <= x.sent_at`.execute(trx);
+    const component = rows[0]?.component;
+    if (component === undefined) return;
+    await this.#lock(trx, ctx, component, now);
+    await this.#recompute(trx, ctx, component, undefined, now, new Set([listingId]));
   }
 
   // ---- Reconciliation (INV-7) and bulk push (SAFE-1) -------------------------------------------
@@ -668,6 +722,12 @@ export class StockEngine {
            AND l.channel_qty IS NOT NULL AND l.last_seen_at >= ${scanStartedAt}
            AND (l.last_order_at IS NULL OR l.last_order_at < ${quiet})
            AND (w.id IS NULL OR w.state NOT IN ('pending', 'sending'))
+           -- A write that reached the channel after the scan read it: the read is stale.
+           AND NOT EXISTS (SELECT 1 FROM app.listing_writes lw
+                             JOIN app.outbound_writes sw
+                               ON sw.workspace_id = lw.workspace_id AND sw.id = lw.outbound_write_id
+                            WHERE lw.workspace_id = l.workspace_id AND lw.listing_id = l.id
+                              AND sw.sent_at >= ${scanStartedAt})
          ORDER BY component, l.id`.execute(trx);
       let drifted = 0;
       const byComponent = new Map<string, { id: string; channelQty: number }[]>();
@@ -1060,6 +1120,21 @@ export class StockEngine {
     return { id, onHandAfter, reservedAfter };
   }
 
+  /** Locks the stock rows of these SKUs' components, in id order. */
+  async #lockComponents(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    skuIds: readonly string[],
+    now: Date,
+  ): Promise<void> {
+    if (skuIds.length === 0) return;
+    const { rows } = await sql<{ component: string }>`
+      SELECT DISTINCT coalesce(bundle_component_id, id) AS component FROM app.master_skus
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ANY (${sql.val(skuIds)}::uuid[])
+       ORDER BY component`.execute(trx);
+    for (const r of rows) await this.#lock(trx, ctx, r.component, now);
+  }
+
   /** The SKU a listing is mapped to, as its component and pack (1 for a plain SKU). */
   async #listingSku(
     trx: Transaction<MainDb>,
@@ -1208,7 +1283,8 @@ export class StockEngine {
       SELECT l.id, l.channel_account_id, l.provider, l.external_sku, l.fulfilment, l.stock_mode,
              l.manual_qty, l.manual_sold, l.last_queued_qty, l.pending_write_id, l.push_seq,
              s.pack_size AS pack, coalesce(l.buffer_override, cs.buffer, 0) AS buffer,
-             (a.paused_at IS NOT NULL) AS paused
+             (a.paused_at IS NOT NULL
+              OR (SELECT ms.maintenance FROM app.maintenance_state() ms)) AS paused
         FROM app.listings l
         JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
         LEFT JOIN app.channel_stock_settings cs

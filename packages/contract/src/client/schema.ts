@@ -7643,7 +7643,6 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': {
-          include_bundles?: boolean;
           listings: {
             /** Format: uuid */
             listing_id: string;

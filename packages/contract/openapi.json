@@ -10536,8 +10536,7 @@
                       "required": ["listing_id", "mode"],
                       "additionalProperties": false
                     }
-                  },
-                  "include_bundles": { "type": "boolean" }
+                  }
                 },
                 "required": ["version", "listings"],
                 "additionalProperties": false

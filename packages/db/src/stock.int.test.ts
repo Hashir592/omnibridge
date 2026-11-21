@@ -745,6 +745,8 @@ describe('stock engine (T-0901)', () => {
 
   it('[INV-5] the change log shows the listings pushed after a movement, by result', async () => {
     const w = await world(10);
+    // The first writes were sent, so only the sale's pushes are counted.
+    await sendAll(w);
     await sell(w, w.listings.ebay1, 1);
     const log = await engine().listMovements(
       w.ctx,
@@ -781,6 +783,75 @@ describe('stock engine (T-0901)', () => {
     await engine().onListingMapped(w.ctx, change);
     expect(await stock(w)).toMatchObject({ onHand: 9, reserved: 2, available: 7 });
     expect((await latest(w)).get(w.listings.website)).toBe(7);
+  });
+
+  it('[INV-4] a sale on a listing whose write is still waiting replaces that write', async () => {
+    const w = await world(10);
+    // The website's first write (10) is still pending when the website sells 1.
+    await sell(w, w.listings.website, 1);
+    const site = (await queued(w)).filter((r) => r.listing_id === w.listings.website);
+    expect(site.find((r) => r.state === 'pending')?.quantity).toBe('9');
+    expect(site.some((r) => r.state === 'cancelled' && r.quantity === '10')).toBe(true);
+  });
+
+  it('[INV-4] an older write that lands after a newer one is corrected with a fresh write', async () => {
+    const w = await world(10);
+    await sendAll(w);
+    await sell(w, w.listings.ebay1, 1);
+    const first = (await queued(w)).find(
+      (r) => r.listing_id === w.listings.website && r.state === 'pending',
+    );
+    const mark = (id: string, state: string, sentAt?: Date) =>
+      withTenantTransaction(db, w.ctx, (trx) =>
+        sql`UPDATE app.outbound_writes SET state = ${state}, sent_at = ${sentAt ?? null},
+              result = ${state === 'sent' ? '{"accepted":1,"refused":[]}' : null}
+             WHERE id = ${id}::uuid`.execute(trx),
+      );
+    await mark(first?.id ?? '', 'sending');
+    await sell(w, w.listings.ebay1, 1);
+    const second = (await queued(w)).find(
+      (r) => r.listing_id === w.listings.website && r.state === 'pending',
+    );
+    expect(second?.quantity).toBe('8');
+    await mark(second?.id ?? '', 'sent', new Date('2026-11-22T10:00:01Z'));
+    await engine().recordPushResult(w.ctx, second?.id ?? '');
+    await mark(first?.id ?? '', 'sent', new Date('2026-11-22T10:00:02Z'));
+    await engine().recordPushResult(w.ctx, first?.id ?? '');
+    const third = (await queued(w)).find(
+      (r) => r.listing_id === w.listings.website && r.state === 'pending',
+    );
+    expect(third?.quantity).toBe('8');
+  });
+
+  it('[INV-3] buffer changes and sales of one SKU at the same time all complete (one lock order)', async () => {
+    const w = await world(100);
+    const work = Array.from({ length: 6 }, (_, i) =>
+      i % 2 === 0
+        ? engine().setListingBuffer(w.ctx, w.listings.website, i)
+        : sell(w, w.listings.ebay1, 1).then(() => undefined),
+    );
+    await expect(Promise.all(work)).resolves.toBeDefined();
+    expect(await stock(w)).toMatchObject({ reserved: 3 });
+  });
+
+  it('[INV-10] cancelling an order placed before the allocation was set leaves manual_sold alone', async () => {
+    const w = await world(50);
+    const before = order();
+    await sell(w, w.listings.ebay1, 2, before);
+    clock = new Date(NOW.getTime() + 60_000);
+    await engine().saveAllocation(w.ctx, w.sku, {
+      version: (await stock(w)).version,
+      listings: [{ listingId: w.listings.ebay1, mode: 'manual', manualQty: 10 }],
+      userId: null,
+    });
+    await sell(w, w.listings.ebay1, 3);
+    await engine().release(w.ctx, {
+      orderLineId: before,
+      listingId: w.listings.ebay1,
+      quantity: 2,
+    });
+    expect((await stock(w)).listings.find((l) => l.id === w.listings.ebay1)?.manual?.sold).toBe(3);
+    clock = NOW;
   });
 
   it('[TEN-6] one workspace’s stock is invisible to another', async () => {

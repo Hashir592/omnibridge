@@ -102,9 +102,13 @@ export function outboundSendHandler(deps: {
       return result;
     },
     commit: async (job, result) => {
-      if ('sent' in result || 'failed' in result) {
-        await deps.settled?.(job.ctx, job.payload.write_id);
-      }
+      // A retry after a failed commit finds the write already settled (skipped): tell it again,
+      // the hook is idempotent.
+      const settled =
+        'sent' in result ||
+        'failed' in result ||
+        ('skipped' in result && (result.skipped === 'sent' || result.skipped === 'failed'));
+      if (settled) await deps.settled?.(job.ctx, job.payload.write_id);
       return result;
     },
   };
