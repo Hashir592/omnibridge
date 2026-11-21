@@ -202,10 +202,11 @@ describe('incremental sync: job, governor, parser and cursor (INT-1, INT-5, INT-
     const h = harness(new Date('2026-11-21T12:00:00.000Z'));
     const order: string[] = [];
     h.ports.governor = {
-      beforeCall: (input) => {
+      admit: (input) => {
         order.push(`governor:${input.api}`);
-        return Promise.resolve();
+        return Promise.resolve({ ok: true, usageRecorded: false });
       },
+      run: (_input, fn) => fn(),
     };
     const s = stream(() => {
       order.push('fetch');
@@ -213,5 +214,24 @@ describe('incremental sync: job, governor, parser and cursor (INT-1, INT-5, INT-
     }, []);
     await runIncrementalSync(h.ports, s, job);
     expect(order).toEqual(['governor:auth', 'governor:sell.fulfillment', 'fetch']);
+  });
+  it('[INT-2] a governor that says wait stops the run before anything is sent, as a rate limit', async () => {
+    const h = harness(new Date('2026-11-21T12:00:00.000Z'));
+    let fetched = false;
+    h.ports.governor = {
+      admit: () => Promise.resolve({ ok: false, retryAt: new Date('2026-11-21T13:00:00.000Z') }),
+      run: (_input, fn) => fn(),
+    };
+    const s = stream(() => {
+      fetched = true;
+      return [];
+    }, []);
+    await expect(runIncrementalSync(h.ports, s, job)).rejects.toMatchObject({
+      name: 'RateLimited',
+      retryAfterMs: 3_600_000,
+      daily: true,
+    });
+    expect(fetched).toBe(false);
+    expect(h.health.errors).toEqual(['provider.rate_limited']);
   });
 });

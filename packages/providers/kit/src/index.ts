@@ -49,9 +49,24 @@ export { defineParser, parserRecordKind, type VersionedParser } from './parser.t
 export { readJson, retryAfterMs } from './respond.ts';
 export {
   runIncrementalSync,
-  type CallGovernor,
   type SyncPorts,
   type SyncResult,
   type SyncStream,
 } from './sync.ts';
 export { AccessTokenCache } from './tokens.ts';
+export { passThroughGovernor, type CallInput, type ProviderGovernor } from './governor.ts';
+export {
+  MAX_SEND_ATTEMPTS,
+  retryDelayMs,
+  runOutboundSend,
+  type OutboundOperation,
+  type OutboundPorts,
+  type OutboundResult,
+  type OutboundWriteView,
+} from './outbound.ts';
+export {
+  CARRIER_CONCURRENCY,
+  carrierBackoff,
+  withCarrierSlot,
+  type SlotLimiter,
+} from './carrier.ts';

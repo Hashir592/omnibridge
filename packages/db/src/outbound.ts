@@ -143,11 +143,11 @@ export class OutboundWriteRepository {
   pausedIds(
     ctx: TenantContext,
     filter: { channelAccountId?: string; reason: PauseReason },
-  ): Promise<string[]> {
+  ): Promise<{ id: string; channelAccountId: string }[]> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       let q = trx
         .selectFrom('app.outbound_writes')
-        .select('id')
+        .select(['id', 'channel_account_id'])
         .where('workspace_id', '=', ctx.workspaceId)
         .where('state', '=', 'pending')
         .where('paused_reason', '=', filter.reason);
@@ -155,7 +155,7 @@ export class OutboundWriteRepository {
         q = q.where('channel_account_id', '=', filter.channelAccountId);
       }
       const rows = await q.orderBy('created_at').orderBy('id').execute();
-      return rows.map((r) => r.id);
+      return rows.map((r) => ({ id: r.id, channelAccountId: r.channel_account_id }));
     });
   }
 
@@ -250,14 +250,14 @@ export class OutboundWriteRepository {
   recoverable(
     ctx: TenantContext,
     input: { staleBefore: Date; maintenance: boolean },
-  ): Promise<string[]> {
+  ): Promise<{ id: string; channelAccountId: string }[]> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const rows = await trx
         .selectFrom('app.outbound_writes as w')
         .innerJoin('app.channel_accounts as a', (j) =>
           j.onRef('a.workspace_id', '=', 'w.workspace_id').onRef('a.id', '=', 'w.channel_account_id'),
         )
-        .select('w.id')
+        .select(['w.id', 'w.channel_account_id'])
         .where('w.workspace_id', '=', ctx.workspaceId)
         .where((eb) =>
           eb.or([
@@ -280,7 +280,7 @@ export class OutboundWriteRepository {
         .orderBy('w.created_at')
         .limit(1000)
         .execute();
-      return rows.map((r) => r.id);
+      return rows.map((r) => ({ id: r.id, channelAccountId: r.channel_account_id }));
     });
   }
 

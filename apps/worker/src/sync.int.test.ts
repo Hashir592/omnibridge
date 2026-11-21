@@ -129,10 +129,11 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
       notifier: new Notifier({ store: new NotificationRepository(db.db) }),
       tokens: new AccessTokenCache(),
       governor: {
-        beforeCall: (input) => {
+        admit: (input) => {
           governed.push(`${input.provider}:${input.api}`);
-          return Promise.resolve();
+          return Promise.resolve({ ok: true, usageRecorded: false });
         },
+        run: (_input, fn) => fn(),
       },
       now: () => new Date('2026-11-21T12:00:00.000Z'),
     };
@@ -166,7 +167,11 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
   it('[INT-8] polls through the governor, parses, stores the cursor; a re-poll inside the overlap adds nothing', async () => {
     const first = await handler().prepare(job());
     expect(first).toEqual({ fetched: 3, fresh: 3, cursorAt: '2026-11-20T12:00:00.000Z' });
-    expect(governed).toEqual(['ebay:auth', 'ebay:sell.fulfillment', 'ebay:sell.fulfillment']);
+    expect(governed).toEqual([
+      'ebay:identity.user_token',
+      'ebay:sell.fulfillment',
+      'ebay:sell.fulfillment',
+    ]);
     const again = await handler().prepare(job());
     expect(again).toEqual({ fetched: 1, fresh: 0, cursorAt: '2026-11-20T12:00:00.000Z' });
     expect(received.map((o) => o.externalId)).toEqual(['MOCK-1001', 'MOCK-1002', 'MOCK-1003']);
@@ -180,7 +185,7 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
       [account],
     );
     expect(usage.rows).toEqual([
-      { api: 'auth', calls: '1' },
+      { api: 'identity.user_token', calls: '1' },
       { api: 'sell.fulfillment', calls: '3' },
     ]);
     expect(JSON.stringify(received)).not.toContain('PIIMARK');

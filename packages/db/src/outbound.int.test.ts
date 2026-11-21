@@ -139,7 +139,7 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     const again = await asTenant(ctx, () => writes.insert(ctx, input, now));
     expect(again).toEqual({ id: first.id, created: false });
     await asTenant(ctx, () => writes.pause(ctx, first.id, 'kill_switch', now));
-    expect(await asTenant(ctx, () => writes.pausedIds(ctx, { channelAccountId: account, reason: 'kill_switch' }))).toEqual([first.id]);
+    expect(await asTenant(ctx, () => writes.pausedIds(ctx, { channelAccountId: account, reason: 'kill_switch' }))).toEqual([{ id: first.id, channelAccountId: account }]);
     expect(await asTenant(ctx, () => writes.unpause(ctx, first.id, now))).toBe(1);
     expect(await asTenant(ctx, () => writes.claim(ctx, first.id, now))).toBe(true);
     // A second worker cannot claim it while it is being sent.

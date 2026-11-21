@@ -226,6 +226,7 @@ export function ebayOrderStream(
     stream: 'ebay.orders',
     provider: 'ebay',
     api: EBAY_APIS.orders,
+    authApi: EBAY_APIS.identity,
     lookbackMs: 30 * 86_400_000,
     authenticate: (credential) => adapter.authenticate(credential),
     fetchPage: (token, since, page) => adapter.ordersUpdatedSince(token, since, page),
