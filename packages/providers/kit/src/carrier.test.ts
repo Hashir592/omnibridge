@@ -1,6 +1,7 @@
 import type { TenantContext } from '@omnibridge/core';
 import { describe, expect, it } from 'vitest';
 import {
+  CARRIER_MAX_WAIT_MS,
   carrierBackoff,
   CARRIER_CONCURRENCY,
   withCarrierSlot,
@@ -86,5 +87,45 @@ describe('carrier and website concurrency cap (RL-4)', () => {
         sleep: () => Promise.resolve(),
       }),
     ).rejects.toBeInstanceOf(ProviderRejected);
+  });
+
+  it('[RL-4] a Retry-After longer than the in-place cap is not slept: the 429 goes back to be deferred', async () => {
+    const waits: number[] = [];
+    let calls = 0;
+    const asked = new RateLimited('website', { retryAfterMs: 300_000 });
+    await expect(
+      carrierBackoff(
+        () => {
+          calls += 1;
+          return Promise.reject(asked);
+        },
+        {
+          sleep: (ms) => {
+            waits.push(ms);
+            return Promise.resolve();
+          },
+        },
+      ),
+    ).rejects.toBe(asked);
+    // One call, no sleep: the slot is released and runOutboundSend defers the write 300 s.
+    expect(calls).toBe(1);
+    expect(waits).toEqual([]);
+    // A computed backoff never exceeds the cap either.
+    const capped: number[] = [];
+    let n = 0;
+    await carrierBackoff(
+      () => {
+        n += 1;
+        return n < 3 ? Promise.reject(new ProviderUnavailable('evri', 503)) : Promise.resolve('ok');
+      },
+      {
+        baseMs: 8_000,
+        sleep: (ms) => {
+          capped.push(ms);
+          return Promise.resolve();
+        },
+      },
+    );
+    expect(capped).toEqual([8_000, CARRIER_MAX_WAIT_MS]);
   });
 });
