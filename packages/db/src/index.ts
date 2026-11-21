@@ -185,3 +185,18 @@ export {
   type VatRateRow,
   type VatTypeEntry,
 } from './catalogue.ts';
+export {
+  StockEngine,
+  StockRefused,
+  type AllocationChange,
+  type AllocationPush,
+  type MovementFilter,
+  type OrderLineMove,
+  type StockDetailView,
+  type StockListingView,
+  type StockMovement,
+  type StockPushQueue,
+  type StockRefusal,
+  type StockRowView,
+  type UnmappedDemand,
+} from './stock.ts';

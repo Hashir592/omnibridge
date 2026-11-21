@@ -120,6 +120,24 @@ export const NOTIFICATION_TYPES: readonly NotificationType[] = [
     'stock-catalogue',
     'INV-7, INV-8',
   ),
+  // C7.2 (INV-10): a manual allocation reached 0; the listing stays manual until topped up.
+  t(
+    'inventory.allocation_used_up',
+    'Manual allocation used up',
+    ['info'],
+    ['derived'],
+    'stock-catalogue',
+    'INV-10',
+  ),
+  // C7.3: a listing mapped to another SKU went back to Auto.
+  t(
+    'inventory.mode_reset',
+    'Listing back to automatic stock after a remap',
+    ['info'],
+    ['derived'],
+    'stock-catalogue',
+    'INV-10',
+  ),
   t(
     'ebay.revision_hold',
     'eBay listing held by the revision limit',

@@ -100,6 +100,8 @@ describe('db-main roles and migrations', () => {
       '0040_validate_outbound_governors',
       '0041_m05_minors',
       '0042_catalogue',
+      '0043_stock_engine',
+      '0044_validate_stock_engine',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });
