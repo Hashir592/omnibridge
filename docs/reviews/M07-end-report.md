@@ -8,7 +8,7 @@ M07, the integration framework, outbound pipeline and governors, ran under the A
 |---|---|---|---|
 | Contract (every M07 route and schema) | light | #131 | merged |
 | T-0701 integration framework | high | #133 | merged, full gate green (incl. build, stack and e2e) |
-| T-0702 outbound path, switches, governors | critical | #134 | CI fix pushed, auto-merge on |
+| T-0702 outbound path, switches, governors | critical | #134 | merged, full gate green |
 
 ## How each was built
 
@@ -87,7 +87,7 @@ M07, the integration framework, outbound pipeline and governors, ran under the A
 - **Locally:**
   - T-0702's touched integration files: 26 of 26;
   - `verify.sh --quick`, depcruise and the arch tests all pass.
-- **CI:** #133's full gate is green. #134's run is in progress.
+- **CI:** #133 and #134 merged with the full gate green.
 - **Code review (high):**
   - T-0701: 7 findings, 6 fixed, 1 skipped by decision (environment in the credentials unique index).
   - T-0702: 6 findings, 3 fixed, 3 left as the follow-ups 4 to 6 below.
@@ -143,7 +143,7 @@ Every scope and acceptance line of T-0701 and T-0702, and every item of the M07 
 | Carrier and website semaphore, 4 per account, backoff on 429 or 5xx | DONE. carrier.test "[RL-4] at most 4 requests run at once per account" and "[RL-4] a carrier 429 or 5xx is retried with growing waits"; db "[RL-4] a fifth parallel request to one carrier account waits for a free slot"; worker governor.test "[RL-4] website calls run inside the account cap of 4" (new) |
 | Usage written in real time, after every send | DONE. outbound.test "[RL-5] usage is written with the result of every send, the failed ones too, unless the governor already wrote it" (new); switches.int.test "[RL-5] live usage shows today's calls per account and API" |
 | S4 reviews this PR after merge | Pending. The block is in `docs/handoffs/20261121-1909-S3-to-S4.md` |
-| CI full gate green at merge | Pending. #134's CI was red because audit-retention.int.test lacked the `outbound.recover-sweep` handler; fixed and pushed, auto-merge on |
+| CI full gate green at merge | DONE. #134 merged at f8d2152 with every check green, after the fix for the missing `outbound.recover-sweep` handler in audit-retention.int.test. The mock-storm test and this checklist came in the follow-up PR |
 
 ### M07 paste extras
 
