@@ -35,7 +35,7 @@ import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
-import { catalogueHandlers } from './catalogue.ts';
+import { catalogueHandlers, type CatalogueOptions } from './catalogue.ts';
 import { connectionHandlers, type ConnectionOptions } from './connections.ts';
 import { platformHandlers, type PlatformOptions } from './platform.ts';
 import { privacyHandlers, type PrivacyOptions } from './privacy.ts';
@@ -133,6 +133,8 @@ export interface WebAppOptions {
   platform?: PlatformOptions;
   /** Connections and the OAuth connect flow (T-0701); without it they answer 404 / 503. */
   connections?: ConnectionOptions;
+  /** The catalogue (T-0801); without it those routes answer 404. */
+  catalogue?: CatalogueOptions;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
@@ -170,6 +172,7 @@ export function buildWebApp({
   notifications,
   platform,
   connections,
+  catalogue,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
@@ -224,7 +227,7 @@ export function buildWebApp({
     ...notificationHandlers(notifications),
     ...platformHandlers(platform),
     ...connectionHandlers(connections),
-    ...catalogueHandlers(),
+    ...catalogueHandlers(catalogue),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';

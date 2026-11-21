@@ -112,6 +112,8 @@ export interface SkuFields {
 }
 
 export interface NewSku extends SkuFields {
+  /** Chosen by the caller only for seed data with fixed ids. */
+  id?: string;
   sku: string;
   /** Required for a plain SKU; refused for a bundle, which follows its component. */
   vatType?: VatType;
@@ -377,7 +379,7 @@ export class CatalogueRepository {
     if (input.bundle !== undefined && (input.vatType !== undefined || input.firstCogs)) {
       throw new CatalogueRefused('bundle_locked');
     }
-    const id = randomUUID();
+    const id = input.id ?? randomUUID();
     const today = input.firstCogs?.effectiveFrom;
     return this.#write(ctx, async (trx) => {
       if (input.bundle !== undefined) {

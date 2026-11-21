@@ -3,10 +3,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { contractRoutes } from '@omnibridge/contract';
-import { checkRaise, Notifier, type TenantContext } from '@omnibridge/core';
+import { checkRaise, Notifier, pence, type TenantContext } from '@omnibridge/core';
 import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
+  CatalogueRepository,
   AccountCredentials,
   AppSecretStore,
   ConnectionRepository,
@@ -79,9 +80,10 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     erasure: '',
     notification: '',
   };
-  const a = { company: '', job: '' };
-  // M08: B's Master SKU and listing. T-0801 seeds the rows; the contract PR walks the IDs.
-  const catalogueB = { sku: randomUUID(), listing: randomUUID() };
+  const a = { company: '', job: '', sku: randomUUID() };
+  // M08: B's Master SKU and listing, seeded in beforeAll (T-0801).
+  const catalogueB: { sku: string; listing: string } = { sku: randomUUID(), listing: randomUUID() };
+  const TODAY = '2026-11-21';
 
   const repos = () => ({
     workspaces: new WorkspaceRepository(main.db),
@@ -95,25 +97,43 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
   const snapshotB = () =>
     tenancy.runWorkspace({ workspaceId: B }, async (ctx: TenantContext) => {
       const r = repos();
-      return JSON.stringify({
-        workspace: await r.workspaces.get(ctx),
-        companies: await r.companies.list(ctx),
-        job: await r.jobs.get(ctx, b.job),
-        file: await new FileRepository(main.db).get(ctx, b.file),
-        accounts: await new ChannelAccountRepository(main.db).list(ctx),
-        users: await r.users.list(ctx),
-        audit: await new AuditLog(main.db).list(ctx, {}, { limit: 200 }),
-        members: await new MemberAccessRepository(main.db).list(ctx),
-        invites: await new InviteRepository(main.db).pending(ctx),
-        reviews: await new AccessReviewRepository(main.db).list(ctx),
-        erasures: await new ErasureRequestRepository(main.db).list(ctx),
-        notifications: await new NotificationRepository(main.db).list(
-          ctx,
-          { userId: userB, tabs: 'all' },
-          {},
-          { limit: 200 },
-        ),
-      });
+      return JSON.stringify(
+        {
+          workspace: await r.workspaces.get(ctx),
+          companies: await r.companies.list(ctx),
+          job: await r.jobs.get(ctx, b.job),
+          file: await new FileRepository(main.db).get(ctx, b.file),
+          accounts: await new ChannelAccountRepository(main.db).list(ctx),
+          users: await r.users.list(ctx),
+          audit: await new AuditLog(main.db).list(ctx, {}, { limit: 200 }),
+          members: await new MemberAccessRepository(main.db).list(ctx),
+          invites: await new InviteRepository(main.db).pending(ctx),
+          reviews: await new AccessReviewRepository(main.db).list(ctx),
+          erasures: await new ErasureRequestRepository(main.db).list(ctx),
+          notifications: await new NotificationRepository(main.db).list(
+            ctx,
+            { userId: userB, tabs: 'all' },
+            {},
+            { limit: 200 },
+          ),
+          // M08: the catalogue is workspace-shared, so all of it is B's.
+          skus: await new CatalogueRepository(main.db).listSkus(
+            ctx,
+            { offset: 0, limit: 100 },
+            TODAY,
+            1000,
+          ),
+          sku: await new CatalogueRepository(main.db).getSku(ctx, catalogueB.sku, TODAY),
+          listings: await new CatalogueRepository(main.db).listListings(
+            ctx,
+            { offset: 0, limit: 100 },
+            1000,
+          ),
+          vatRates: await new CatalogueRepository(main.db).vatRates(ctx),
+        },
+        // Pence are bigint; the snapshot only needs them as text.
+        (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value),
+      );
     });
 
   beforeAll(async () => {
@@ -213,6 +233,58 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         provider: 'ebay',
         displayName: `${MARKER} ebay`,
       }),
+    );
+    // M08: B's Master SKU with a COGS, and a listing of B's account mapped to it.
+    await tenancy.runWorkspace({ workspaceId: B }, async (ctx) => {
+      const catalogue = new CatalogueRepository(main.db);
+      await catalogue.createSku(
+        ctx,
+        {
+          id: catalogueB.sku,
+          sku: `${MARKER}-SKU`,
+          title: `${MARKER} product`,
+          shortDescription: MARKER,
+          weightG: 100,
+          manufacturer: `${MARKER} maker`,
+          vatType: 'standard',
+          firstCogs: { cogsPence: pence(123n), effectiveFrom: '2026-01-01' },
+        },
+        null,
+        new Date(),
+      );
+      await catalogue.upsertDiscovered(
+        ctx,
+        b.account,
+        'ebay',
+        [
+          {
+            externalSku: `${MARKER}-SKU`,
+            externalId: `${MARKER}-item`,
+            title: MARKER,
+            fulfilment: null,
+            inventoryApi: true,
+            quantity: 3,
+          },
+        ],
+        new Date(),
+      );
+      const found = await catalogue.listListings(ctx, { offset: 0, limit: 1 }, 10);
+      catalogueB.listing = found.items[0]?.id ?? catalogueB.listing;
+    });
+    await tenancy.runWorkspace({ workspaceId: A }, (ctx) =>
+      new CatalogueRepository(main.db).createSku(
+        ctx,
+        {
+          id: a.sku,
+          sku: 'A-OWN-1',
+          title: 'Own product',
+          shortDescription: 'Own',
+          weightG: 1,
+          vatType: 'reduced',
+        },
+        null,
+        new Date(),
+      ),
     );
     const job = (ws: string) =>
       tenancy.runWorkspace(
@@ -372,6 +444,12 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           },
         },
         logger,
+      },
+      // T-0801: the catalogue. A mapping change in the walk would be a write to B: it fails.
+      catalogue: {
+        catalogue: new CatalogueRepository(main.db),
+        audit: new AuditLog(main.db),
+        mappingChanged: () => Promise.reject(new Error('a mapping changed in the isolation walk')),
       },
       // T-0504: the console, with a stand-in queue that holds one dead job of B's.
       platform: {
@@ -617,6 +695,8 @@ ${catalogueB.listing},${MARKER}`,
         b.erasure,
         b.notification,
         userB,
+        catalogueB.sku,
+        catalogueB.listing,
       ],
     });
   }
@@ -667,6 +747,19 @@ ${catalogueB.listing},${MARKER}`,
     expect(own.statusCode).toBe(200);
     const list = await server.inject({ method: 'GET', url: '/api/companies', headers: sessionA });
     expect(list.json()).toEqual({ items: [expect.objectContaining({ id: a.company })] });
+    // T-0801: A's own Master SKU answers 200, and A's catalogue list holds only it.
+    const sku = await server.inject({
+      method: 'GET',
+      url: `/api/catalogue/skus/${a.sku}`,
+      headers: sessionA,
+    });
+    expect(sku.statusCode).toBe(200);
+    const skus = await server.inject({
+      method: 'GET',
+      url: '/api/catalogue/skus',
+      headers: sessionA,
+    });
+    expect(skus.json<{ items: { id: string }[] }>().items.map((i) => i.id)).toEqual([a.sku]);
 
     const created = await server.inject({
       method: 'POST',
