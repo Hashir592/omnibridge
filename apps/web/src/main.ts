@@ -29,6 +29,7 @@ import {
   Tenancy,
   WorkspaceRepository,
   CatalogueRepository,
+  StockEngine,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
@@ -44,6 +45,7 @@ import {
   listingsDiscoverJob,
 } from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
+import { z } from 'zod';
 import { buildWebApp } from './app.ts';
 import { parseIpAllowlist } from './auth/ip-allowlist.ts';
 import { queueNotifier } from './auth/notifier.ts';
@@ -142,6 +144,11 @@ async function piiVaultHealthy(): Promise<boolean> {
 const spa = loadSpa(process.env.UI_DIST_DIR ?? fileURLToPath(new URL('../ui/', import.meta.url)));
 
 const checks = { dbMain: () => ping(main.pool), dbPii: piiVaultHealthy };
+// The stock engine (T-0901), shared by the stock routes and the bulk stock push (SAFE-1).
+const stockEngine = new StockEngine(main.db, {
+  pushes: new OutboundQueue({ queue, writes: new OutboundWriteRepository(main.db) }),
+  notifier: new Notifier({ store: new NotificationRepository(main.db) }),
+});
 const app = buildWebApp({
   logger,
   version,
@@ -185,7 +192,21 @@ const app = buildWebApp({
       outbound: new OutboundQueue({ queue, writes: new OutboundWriteRepository(main.db) }),
       audit: new AuditLog(main.db),
       // SAFE-1: the modules register their bulk actions (M09 stock_push, M12, M19).
-      bulk: { confirmations: new BulkConfirmationRepository(main.db), actions: {} },
+      bulk: {
+        confirmations: new BulkConfirmationRepository(main.db),
+        actions: {
+          // SAFE-1 (T-0901): send every listing of the confirmed accounts its target now.
+          stock_push: {
+            tab: 'stock-catalogue',
+            params: z.object({}).strict(),
+            run: (ctx, input) =>
+              stockEngine.pushAccounts(
+                ctx,
+                input.accounts.map((a) => a.id),
+              ),
+          },
+        },
+      },
       oauth: {
         flows: createOAuthFlows({
           mode,
@@ -218,6 +239,12 @@ const app = buildWebApp({
       logger,
     };
   })(),
+  // The stock engine (T-0901): movements, targets and pushes through the outbound path.
+  stock: {
+    engine: stockEngine,
+    catalogue: new CatalogueRepository(main.db),
+    audit: new AuditLog(main.db),
+  },
   // The catalogue (T-0801: CAT-1 to CAT-6). A mapping change is told to M09 and M10 through a
   // job sent in the request's transaction (CAT-6).
   catalogue: {

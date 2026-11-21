@@ -1,3 +1,4 @@
+import type { TenantContext } from '@omnibridge/core';
 import type { Logger } from '@omnibridge/logger';
 import {
   runOutboundSend,
@@ -76,6 +77,11 @@ export function outboundOperations(adapters: {
 export function outboundSendHandler(deps: {
   ports: OutboundPorts;
   operations: Readonly<Record<string, OutboundOperation<unknown>>>;
+  /**
+   * INV-8 (T-0901): told once a write is settled (sent or given up), in a short transaction of
+   * its own, so the stock engine records the quantity sent or sets Sync failed.
+   */
+  settled?: (ctx: TenantContext, writeId: string) => Promise<void>;
   logger: Logger;
 }): PhasedHandler<{ write_id: string }, OutboundResult> {
   return {
@@ -95,7 +101,16 @@ export function outboundSendHandler(deps: {
       );
       return result;
     },
-    commit: (_job, result) => Promise.resolve(result),
+    commit: async (job, result) => {
+      // A retry after a failed commit finds the write already settled (skipped): tell it again,
+      // the hook is idempotent.
+      const settled =
+        'sent' in result ||
+        'failed' in result ||
+        ('skipped' in result && (result.skipped === 'sent' || result.skipped === 'failed'));
+      if (settled) await deps.settled?.(job.ctx, job.payload.write_id);
+      return result;
+    },
   };
 }
 

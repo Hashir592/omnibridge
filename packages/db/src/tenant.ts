@@ -91,6 +91,26 @@ export function withTenantTransaction<T>(
 }
 
 /**
+ * Like `withTenantTransaction`, and also hands `fn` a context bound to that transaction, so the
+ * ports it passes the context to (the outbound queue, the notifier) join the same transaction
+ * instead of opening their own. With a context from `Tenancy` it joins that one.
+ */
+export function withBoundTenant<T>(
+  db: Kysely<MainDb>,
+  ctx: TenantContext,
+  fn: (trx: Transaction<MainDb>, ctx: TenantContext) => Promise<T>,
+): Promise<T> {
+  const joined = bound.get(ctx);
+  if (joined !== undefined) return fn(joined, ctx);
+  const problem = contextProblem(ctx);
+  if (problem !== undefined) return Promise.reject(problem);
+  return db.transaction().execute(async (trx) => {
+    await setTenant(trx, ctx);
+    return runBound(trx, ctx, (scoped) => fn(trx, scoped));
+  });
+}
+
+/**
  * Runs `fn` in a new tenant transaction that commits on its own, even when `ctx` is bound to an
  * open request or job transaction. Only for a write that must be visible to other transactions
  * before the caller goes on, such as claiming an erasure request before its deletion is queued

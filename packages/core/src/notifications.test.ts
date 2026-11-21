@@ -14,8 +14,12 @@ const ctx = { workspaceId: ID, companyIds: [] };
 
 describe('notification types', () => {
   it('[NTF-1] every PRD section 6 type (and the SEC-12 security types) is registered once, with a severity and a tab or platform scope', () => {
-    expect(NOTIFICATION_TYPES).toHaveLength(31);
-    expect(new Set(NOTIFICATION_TYPES.map((t) => t.code)).size).toBe(31);
+    // 31 until T-0901 added the two INV-10 notices (allocation used up, mode reset on remap).
+    expect(NOTIFICATION_TYPES).toHaveLength(33);
+    expect(new Set(NOTIFICATION_TYPES.map((t) => t.code)).size).toBe(33);
+    expect(NOTIFICATION_TYPES.map((t) => t.code)).toEqual(
+      expect.arrayContaining(['inventory.allocation_used_up', 'inventory.mode_reset']),
+    );
     for (const t of NOTIFICATION_TYPES) {
       expect(t.severities.length).toBeGreaterThan(0);
       expect(t.scope === 'platform' ? t.tab : typeof t.tab).toBe(

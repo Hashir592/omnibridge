@@ -8,6 +8,7 @@ import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
   CatalogueRepository,
+  StockEngine,
   AccountCredentials,
   AppSecretStore,
   ConnectionRepository,
@@ -85,6 +86,12 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
   const catalogueB: { sku: string; listing: string } = { sku: randomUUID(), listing: randomUUID() };
   const TODAY = '2026-11-21';
 
+  /** A stock write in the walk would be a write to B: the queue refuses it. */
+  const stockEngine = () =>
+    new StockEngine(main.db, {
+      pushes: { enqueue: () => Promise.reject(new Error('a stock write in the isolation walk')) },
+      notifier: new Notifier({ store: new NotificationRepository(main.db) }),
+    });
   const repos = () => ({
     workspaces: new WorkspaceRepository(main.db),
     companies: new CompanyRepository(main.db),
@@ -130,6 +137,11 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
             1000,
           ),
           vatRates: await new CatalogueRepository(main.db).vatRates(ctx),
+          // M09: B's stock, change log and buffers.
+          stock: await stockEngine().listStock(ctx, { offset: 0, limit: 100 }, 1000),
+          stockDetail: await stockEngine().getStock(ctx, catalogueB.sku),
+          movements: await stockEngine().listMovements(ctx, { offset: 0, limit: 100 }, 1000),
+          buffers: await stockEngine().buffers(ctx),
         },
         // Pence are bigint; the snapshot only needs them as text.
         (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value),
@@ -450,6 +462,12 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         catalogue: new CatalogueRepository(main.db),
         audit: new AuditLog(main.db),
         mappingChanged: () => Promise.reject(new Error('a mapping changed in the isolation walk')),
+      },
+      // T-0901: the stock engine.
+      stock: {
+        engine: stockEngine(),
+        catalogue: new CatalogueRepository(main.db),
+        audit: new AuditLog(main.db),
       },
       // T-0504: the console, with a stand-in queue that holds one dead job of B's.
       platform: {

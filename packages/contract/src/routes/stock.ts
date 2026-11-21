@@ -337,7 +337,8 @@ export const AllocationResultSchema = z
   .meta({ id: 'AllocationResult' });
 
 /**
- * One save of a SKU's allocation (C7.2): each named listing's mode and manual quantity, checked
+ * One save of a SKU's allocation (C7.2): each named listing's mode and manual quantity (bundle
+ * listings of this SKU included: the client names the ones the product switch covers), checked
  * against `version` in one transaction. 409 `version_conflict` when stock or settings changed
  * since the form was read; FBA (INV-9) and unmapped listings are refused.
  */
@@ -363,8 +364,6 @@ export const saveAllocation = defineRoute({
         )
         .min(1)
         .max(200),
-      /** C7.3: the product switch may include the listings of this SKU's bundles. */
-      include_bundles: z.boolean().optional(),
     })
     .strict(),
   responses: { 200: AllocationResultSchema },

@@ -68,6 +68,12 @@ export const AUDIT_EVENTS = {
   'stock.adjusted': spec('master_sku', ['delta', 'on_hand_after', 'reason_code'], {
     reasonRequired: true,
   }),
+  // Stock (T-0901): stock-in, a stock-take import (one row), safety buffers (INV-2) and manual
+  // allocation (INV-10, C7.2: every mode change and number).
+  'stock.stocked_in': spec('master_sku', ['quantity', 'on_hand_after']),
+  'stock.stock_take_imported': spec('stock_take', ['row_count']),
+  'stock.buffer_changed': spec('stock_buffer', ['channel_account_id', 'listing_id', 'buffer']),
+  'stock.allocation_changed': spec('listing', ['mode', 'manual_qty']),
   // Catalogue and COGS (T-0801). A SKU's create and edit, its VAT-type history (CAT-2) and
   // COGS (CAT-4); a VAT rate (admins); a listing's mapping (CAT-5); a CSV import, as one row.
   'catalogue.changed': spec('master_sku', [

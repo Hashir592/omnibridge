@@ -87,6 +87,14 @@ export const jobsRetentionJob = defineJob({
   expireInSeconds: 300,
 });
 
+/** INV-5: the stock change log of one workspace past its 3 years, sent by the housekeeping sweep. */
+export const stockRetentionJob = defineJob({
+  type: 'stock.retention',
+  payload: z.object({}).strict(),
+  retry: { limit: 5, delaySeconds: 60, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 300,
+});
+
 /**
  * One run of the deletion service (DEL-1): the vault hard-deletes the scope, then db-main keeps
  * the run log and tombstones (T-0403). The payload is a trigger and IDs, never PII (invariant 7a).
@@ -235,6 +243,7 @@ export const JOBS: readonly JobDefinition[] = [
   listingMappedJob,
   listingsDiscoverJob,
   listingsDiscoverAccountsJob,
+  stockRetentionJob,
 ];
 
 /**

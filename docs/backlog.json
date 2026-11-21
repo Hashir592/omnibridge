@@ -2073,7 +2073,7 @@
         "CI full gate green at merge"
       ],
       "risk": "critical",
-      "status": "in_progress"
+      "status": "done"
     },
     {
       "id": "T-0316",

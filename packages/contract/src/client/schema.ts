@@ -2929,7 +2929,8 @@ export interface components {
         | 'rate_limited'
         | 'internal_error'
         | 'service_unavailable'
-        | 'too_many_matches';
+        | 'too_many_matches'
+        | 'version_conflict';
       detail?: string;
       errors?: {
         /** @enum {string} */
@@ -2958,7 +2959,8 @@ export interface components {
         | 'rate_limited'
         | 'internal_error'
         | 'service_unavailable'
-        | 'too_many_matches';
+        | 'too_many_matches'
+        | 'version_conflict';
       detail?: string;
       errors?: {
         /** @enum {string} */
@@ -3608,6 +3610,10 @@ export interface operations {
           | 'workspace.module_changed'
           | 'kill_switch.changed'
           | 'stock.adjusted'
+          | 'stock.stocked_in'
+          | 'stock.stock_take_imported'
+          | 'stock.buffer_changed'
+          | 'stock.allocation_changed'
           | 'catalogue.changed'
           | 'cogs.changed'
           | 'vat_rate.created'
@@ -3636,8 +3642,10 @@ export interface operations {
           | 'channel_account'
           | 'workspace'
           | 'master_sku'
-          | 'vat_rate'
+          | 'stock_take'
+          | 'stock_buffer'
           | 'listing'
+          | 'vat_rate'
           | 'catalogue_import'
           | 'finance_record'
           | 'intercompany_transfer'
@@ -3714,6 +3722,10 @@ export interface operations {
           | 'workspace.module_changed'
           | 'kill_switch.changed'
           | 'stock.adjusted'
+          | 'stock.stocked_in'
+          | 'stock.stock_take_imported'
+          | 'stock.buffer_changed'
+          | 'stock.allocation_changed'
           | 'catalogue.changed'
           | 'cogs.changed'
           | 'vat_rate.created'
@@ -3740,8 +3752,10 @@ export interface operations {
           | 'channel_account'
           | 'workspace'
           | 'master_sku'
-          | 'vat_rate'
+          | 'stock_take'
+          | 'stock_buffer'
           | 'listing'
+          | 'vat_rate'
           | 'catalogue_import'
           | 'finance_record'
           | 'intercompany_transfer'
@@ -7629,7 +7643,6 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': {
-          include_bundles?: boolean;
           listings: {
             /** Format: uuid */
             listing_id: string;

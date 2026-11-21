@@ -28,6 +28,12 @@ export {
 } from './money.ts';
 export { parseCsv, toCsv, type CsvRow } from './csv.ts';
 export {
+  listingTarget,
+  remainingAllocation,
+  type StockMode,
+  type TargetInput,
+} from './stock-targets.ts';
+export {
   checkRaise,
   emailDefaultOn,
   emailDefaultOnTypes,
