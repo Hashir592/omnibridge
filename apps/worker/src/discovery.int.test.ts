@@ -82,8 +82,9 @@ describe('listings.discover against the eBay and website mocks (CAT-5, CAT-6)', 
     attempt: 1,
     progress: () => Promise.resolve(),
   });
-  const handler = () =>
+  const handler = (maxRunMs?: number) =>
     listingsDiscoverHandler({
+      ...(maxRunMs === undefined ? {} : { maxRunMs }),
       ports,
       adapters: {
         ebay: () =>
@@ -201,7 +202,7 @@ describe('listings.discover against the eBay and website mocks (CAT-5, CAT-6)', 
     sent.length = 0;
     const result = await handler().prepare(job(accounts.ebay));
     // The mock serves 2 per page: the scan reads both pages before it concludes.
-    expect(result).toEqual({ pages: 2, listings: 3, complete: true });
+    expect(result).toEqual({ pages: 2, listings: 3, complete: true, concluded: true });
     expect(governed).toEqual(
       expect.arrayContaining(['ebay:identity.user_token', 'ebay:sell.inventory']),
     );
@@ -226,6 +227,34 @@ describe('listings.discover against the eBay and website mocks (CAT-5, CAT-6)', 
       catalogue.listListings(c, { channelAccountId: accounts.ebay, offset: 0, limit: 50 }, 100),
     );
     expect(again.total).toBe(4);
+  });
+
+  it('[CAT-5] a scan that reaches its deadline stops without concluding: nothing is ended', async () => {
+    await inA((c) =>
+      catalogue.upsertDiscovered(
+        c,
+        accounts.ebay,
+        'ebay',
+        [
+          {
+            externalSku: 'STILL-LIVE-1',
+            externalId: 'STILL-LIVE-1',
+            title: null,
+            fulfilment: null,
+            inventoryApi: true,
+            quantity: 1,
+          },
+        ],
+        new Date('2026-11-20T03:15:00.000Z'),
+      ),
+    );
+    // No time left: it reads one page (the mock serves two) and stops.
+    const result = await handler(0).prepare(job(accounts.ebay));
+    expect(result).toMatchObject({ pages: 1, complete: false, concluded: false });
+    const listed = await inA((c) =>
+      catalogue.listListings(c, { channelAccountId: accounts.ebay, offset: 0, limit: 50 }, 100),
+    );
+    expect(listed.items.find((l) => l.externalSku === 'STILL-LIVE-1')?.endedAt).toBeNull();
   });
 
   it('[CAT-5] the website scan stores its products the same way', async () => {

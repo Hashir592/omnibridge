@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { bundleAvailable, pence, type TenantContext } from '@omnibridge/core';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
-import { Kysely, PostgresDialect } from 'kysely';
+import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CatalogueRefused, CatalogueRepository, type NewSku } from './catalogue.ts';
@@ -463,6 +463,45 @@ describe('catalogue (T-0801)', () => {
     expect(result).toMatchObject({ created: 1, skipped: 1 });
     const stored = await repo.listListings(ctx, { offset: 0, limit: 10 }, 100);
     expect(stored.items[0]?.title).toHaveLength(500);
+  });
+
+  it('[CAT-5] overlapping scans: an older page never moves last_seen back, and only the newest scan concludes', async () => {
+    const ctx = await workspace();
+    const ebay = await account(ctx);
+    const item = (sku: string) => ({
+      externalSku: sku,
+      externalId: sku,
+      title: null,
+      fulfilment: null,
+      inventoryApi: true,
+      quantity: 1,
+    });
+    const t0 = new Date('2026-11-22T03:15:00Z');
+    const t1 = new Date('2026-11-22T03:45:00Z');
+    // Scan A starts and stores L and M; its retry B starts 30 minutes later and stores them too.
+    await repo.beginScan(ctx, ebay, t0);
+    await repo.upsertDiscovered(ctx, ebay, 'ebay', [item('L-1'), item('M-1')], t0);
+    await repo.beginScan(ctx, ebay, t1);
+    await repo.upsertDiscovered(ctx, ebay, 'ebay', [item('L-1'), item('M-1')], t1);
+    // A's later page lands after B's: it must not move L back to t0.
+    await repo.upsertDiscovered(ctx, ebay, 'ebay', [{ ...item('L-1'), quantity: 9 }], t0);
+    // N was listed before both scans and is gone now: B ends it on completion.
+    await repo.upsertDiscovered(ctx, ebay, 'ebay', [item('N-1')], new Date('2026-11-21T03:15:00Z'));
+    // B completes: it ends nothing either scan saw, only N.
+    const ended = await repo.concludeScan(ctx, ebay, t1, t1);
+    expect(ended).toHaveLength(1);
+    // A late page of A that still lists N does not bring it back.
+    await repo.upsertDiscovered(ctx, ebay, 'ebay', [item('N-1')], t0);
+    // A completes later: a newer scan started, so A concludes nothing.
+    expect(await repo.concludeScan(ctx, ebay, t0, t1)).toBeUndefined();
+    const live = await repo.listListings(ctx, { mapped: false, offset: 0, limit: 10 }, 100);
+    expect(live.items.map((l) => l.externalSku).sort()).toEqual(['L-1', 'M-1']);
+    // And the older page's quantity did not replace the newer one's.
+    const { rows } = await withTenantTransaction(db, ctx, (trx) =>
+      sql<{ channel_qty: string }>`SELECT channel_qty FROM app.listings
+                                    WHERE external_sku = 'L-1'`.execute(trx),
+    );
+    expect(rows[0]?.channel_qty).toBe('1');
   });
 
   it('[TEN-6] the catalogue of one workspace is invisible to another', async () => {

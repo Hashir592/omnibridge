@@ -26,7 +26,7 @@ describe('definers never rely on RLS alone for workspace scope (F-M05e-02)', () 
     await cluster.container.stop();
   });
 
-  it('[TEN-1][PLAT-3] every app-callable definer reading a setting-gated table filters its scope explicitly', async () => {
+  it('[TEN-1][PLAT-3] every definer ob_app, ob_worker or ob_ops can call that reads a setting-gated table filters its scope explicitly', async () => {
     const { rows: policies } = await owner.query<{ table: string; qual: string }>(
       `SELECT tablename AS table, qual FROM pg_policies
         WHERE schemaname = 'app' AND qual ~ 'current_setting'
@@ -48,7 +48,10 @@ describe('definers never rely on RLS alone for workspace scope (F-M05e-02)', () 
       `SELECT p.proname AS name, p.prosrc AS src
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'app' AND p.prosecdef
-          AND has_function_privilege('ob_app', p.oid, 'EXECUTE')`,
+          -- F-M08-end-02: every login that can preset a transaction setting, not only ob_app.
+          AND EXISTS (SELECT 1 FROM pg_roles r
+                       WHERE r.rolname IN ('ob_app', 'ob_worker', 'ob_ops')
+                         AND has_function_privilege(r.oid, p.oid, 'EXECUTE'))`,
     );
     expect(definers.length).toBeGreaterThan(20);
 
@@ -59,7 +62,9 @@ describe('definers never rely on RLS alone for workspace scope (F-M05e-02)', () 
         if (!new RegExp(`\\bapp\\.${table}\\b`).test(d.src)) continue;
         const ownReader = [...settings].some((s) => d.src.includes(`'${s}'`));
         const console = d.src.includes('app.console_require');
-        if (!ownReader && !console && !explicitScope.test(d.src)) {
+        // On app.workspaces itself the scope is its key: `id = p_workspace` names one workspace.
+        const ownKey = table === 'workspaces' && /\bid\s*=\s*p_[a-z_]+\b/.test(d.src);
+        if (!ownReader && !console && !ownKey && !explicitScope.test(d.src)) {
           offenders.push(`${d.name} reads app.${table}`);
         }
       }

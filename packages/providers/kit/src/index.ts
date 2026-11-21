@@ -53,6 +53,7 @@ export { runListingScan, type ListingScan, type ScanResult } from './scan.ts';
 export { AccessTokenCache } from './tokens.ts';
 export { passThroughGovernor, type CallInput, type ProviderGovernor } from './governor.ts';
 export {
+  MAX_DEFER_MS,
   MAX_SEND_ATTEMPTS,
   retryDelayMs,
   runOutboundSend,

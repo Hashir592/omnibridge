@@ -195,6 +195,9 @@ const num = (value: string | number): number => Number(value);
 const numOrNull = (value: string | number | null): number | null =>
   value === null ? null : Number(value);
 
+/** The cursor stream that records each account's latest listing scan (CAT-5). */
+const SCAN_STREAM = 'listings.discover';
+
 const isUniqueViolation = (err: unknown): boolean => pgCode(err) === '23505';
 const constraintOf = (err: unknown): string | undefined =>
   typeof err === 'object' &&
@@ -822,20 +825,32 @@ export class CatalogueRepository {
             updated_at: seenAt,
           })
           .onConflict((oc) =>
-            oc.columns(['workspace_id', 'channel_account_id', 'external_sku']).doUpdateSet({
-              external_id: item.externalId,
-              title: item.title,
-              fulfilment: item.fulfilment,
-              inventory_api: item.inventoryApi,
-              channel_qty: item.quantity,
-              last_seen_at: seenAt,
-              ended_at: null,
-              updated_at: seenAt,
-            }),
+            oc
+              .columns(['workspace_id', 'channel_account_id', 'external_sku'])
+              .doUpdateSet({
+                external_id: item.externalId,
+                title: item.title,
+                fulfilment: item.fulfilment,
+                inventory_api: item.inventoryApi,
+                channel_qty: item.quantity,
+                last_seen_at: seenAt,
+                ended_at: null,
+                updated_at: seenAt,
+              })
+              // F-M08-end-01: a page of an older scan that lands after a newer one never moves
+              // last_seen_at back, nor replaces the newer quantity.
+              .where('app.listings.last_seen_at', '<=', seenAt)
+              // Nor revives a listing that a newer scan ended after this page was read.
+              .where((eb) =>
+                eb.or([
+                  eb('app.listings.ended_at', 'is', null),
+                  eb('app.listings.ended_at', '<', seenAt),
+                ]),
+              ),
           )
           .returning(['id', 'master_sku_id', sql<boolean>`xmax = 0`.as('inserted')])
-          .executeTakeFirstOrThrow();
-        if (row.inserted) {
+          .executeTakeFirst();
+        if (row?.inserted === true) {
           created += 1;
           if (row.master_sku_id !== null) {
             autoMapped.push({
@@ -848,6 +863,55 @@ export class CatalogueRepository {
       }
       return { created, skipped, autoMapped };
     });
+  }
+
+  /**
+   * Records that a listing scan of the account started (CAT-5). Kept as the account's
+   * `listings.discover` cursor, which only moves forward, so a scan can tell whether a newer one
+   * started after it (F-M08-end-01).
+   */
+  async beginScan(ctx: TenantContext, channelAccountId: string, startedAt: Date): Promise<void> {
+    await withTenantTransaction(this.#db, ctx, (trx) =>
+      sql`
+        INSERT INTO app.sync_cursors (workspace_id, channel_account_id, stream, cursor_at,
+                                      last_run_at, updated_at)
+        VALUES (${ctx.workspaceId}::uuid, ${channelAccountId}::uuid, ${SCAN_STREAM}, ${startedAt},
+                ${startedAt}, ${startedAt})
+        ON CONFLICT (workspace_id, channel_account_id, stream) DO UPDATE
+          SET cursor_at = greatest(app.sync_cursors.cursor_at, excluded.cursor_at),
+              last_run_at = excluded.last_run_at, updated_at = excluded.updated_at`.execute(trx),
+    );
+  }
+
+  /**
+   * A complete scan concludes: the account's listings it did not see have ended. Only the newest
+   * scan of the account may conclude (under the cursor's row lock); an older one that overlapped
+   * a newer one concludes nothing and gets undefined (F-M08-end-01).
+   */
+  async concludeScan(
+    ctx: TenantContext,
+    channelAccountId: string,
+    startedAt: Date,
+    now: Date,
+  ): Promise<string[] | undefined> {
+    const latest = await withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{ cursor_at: Date | null }>`
+        SELECT cursor_at FROM app.sync_cursors
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid AND stream = ${SCAN_STREAM}
+         FOR UPDATE`.execute(trx);
+      const cursor = rows[0]?.cursor_at ?? null;
+      if (cursor !== null && cursor.getTime() > startedAt.getTime()) return false;
+      await sql`
+        UPDATE app.sync_cursors SET last_success_at = ${now}, updated_at = ${now}
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid AND stream = ${SCAN_STREAM}`.execute(
+        trx,
+      );
+      return true;
+    });
+    if (!latest) return undefined;
+    return this.endUnseen(ctx, channelAccountId, startedAt, now);
   }
 
   /**

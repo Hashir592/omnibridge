@@ -36,7 +36,14 @@ Required fix:
 - A scan concludes only if no newer scan of the account has started. For example, record the scan start per account (or check `max(last_seen_at) <= startedAt` for the account under a lock in `complete`), and skip `endUnseen` when a newer one exists. Also stop a scan without concluding once it nears the job's expiry, so a retry never overlaps it.
 - Test, citing `[CAT-5]`: two overlapping scans where the older one's last page lands after the newer one's; the newer scan's completion ends no listing either scan saw.
 
-Resolution: (S3 fills in)
+Resolution: fixed on branch `task/M08-end-fixes` (S3, 22 Nov 2026).
+- The upsert never moves `last_seen_at` back, never replaces a newer quantity, and never revives a listing that a newer scan ended (DO UPDATE ... WHERE `last_seen_at <= seenAt` AND (`ended_at IS NULL OR ended_at < seenAt`)).
+- Each scan records its start as the account's `listings.discover` cursor, which only moves forward (`beginScan`). `concludeScan` locks that row and concludes only when no newer scan has started; an older scan ends and reconciles nothing, and reports `concluded: false`.
+- A scan stops reading after 25 minutes without concluding (`DISCOVERY_MAX_RUN_MS`, inside the 30-minute job expiry), so a retry never runs beside it.
+- Tests:
+  - `packages/db/src/catalogue.int.test.ts`, "[CAT-5] overlapping scans: an older page never moves last_seen back, and only the newest scan concludes";
+  - `apps/worker/src/discovery.int.test.ts`, "[CAT-5] a scan that reaches its deadline stops without concluding: nothing is ended".
+- Follow-up: an account whose scan always needs more than 25 minutes never concludes, so it should resume across runs.
 
 ## F-M08-end-02 — Minor — The F-M05e-02 definers test checks only the definers `ob_app` can call
 Area: Tenancy  IDs: TEN-1, PLAT-3
@@ -45,7 +52,7 @@ Evidence: `packages/db/src/definers.int.test.ts:51` selects definers with `has_f
 
 Required fix: run the same check for each of `ob_app`, `ob_worker` and `ob_ops` (or for any role with LOGIN and without BYPASSRLS).
 
-Resolution: (S3 fills in)
+Resolution: fixed in the same branch. The check now covers every definer that `ob_app`, `ob_worker` or `ob_ops` can call. It found one more definer, `workspace_set_module` (ob_ops only), which scopes by its own key (`w.id = p_workspace`). The test now accepts that on `app.workspaces` only.
 
 ## F-M08-end-03 — Minor — A provider's Retry-After defers an outbound write for as long as it asks
 Area: Rate limits  IDs: RL-4, INV-8
@@ -56,7 +63,7 @@ Failure: a website answers 429 with `Retry-After: 604800` (or a far date). The s
 
 Required fix: cap the deferral at the retry ceiling (`min(retryAfterMs, 60 minutes)`, the same as `retryDelayMs`'s cap), and a test citing `[RL-4]`.
 
-Resolution: (S3 fills in)
+Resolution: fixed in the same branch. A Retry-After deferral is capped at `MAX_DEFER_MS` (60 minutes), the same ceiling as `retryDelayMs`. Test: `packages/providers/kit/src/outbound.test.ts`, "[RL-4] a Retry-After of a week defers the write by the 60-minute ceiling, not a week".
 
 ## Acceptance (T-0801)
 

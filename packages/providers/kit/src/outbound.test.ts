@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { ProviderRejected, ProviderUnavailable, RateLimited } from './errors.ts';
 import { passThroughGovernor, type ProviderGovernor } from './governor.ts';
 import {
+  MAX_DEFER_MS,
   MAX_SEND_ATTEMPTS,
   runOutboundSend,
   type OutboundOperation,
@@ -219,6 +220,14 @@ describe('the outbound send path (SAFE-2, SAFE-3, INT-2)', () => {
     // Each retry waits longer.
     const waits = h.dispatched.map((d) => (d.startAfter?.getTime() ?? 0) - NOW.getTime());
     expect(waits).toEqual([...waits].sort((a, b) => a - b));
+  });
+
+  it('[RL-4] a Retry-After of a week defers the write by the 60-minute ceiling, not a week', async () => {
+    const h = harness({
+      send: () => Promise.reject(new RateLimited('website', { retryAfterMs: 7 * 86_400_000 })),
+    });
+    expect(await h.run()).toEqual({ deferred: 'retry' });
+    expect(h.dispatched.at(-1)?.startAfter).toEqual(new Date(NOW.getTime() + MAX_DEFER_MS));
   });
 
   it('[INT-2] a write whose attempts were spent by dead workers is given up, never sent again', async () => {
