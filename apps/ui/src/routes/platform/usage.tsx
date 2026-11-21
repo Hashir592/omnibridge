@@ -6,10 +6,140 @@ import { StatusLabel } from '../../kit/Badge.tsx';
 import { Select } from '../../kit/Select.tsx';
 import { EmptyState } from '../../kit/states.tsx';
 import { addDays, formatUkDate, todayLondon } from '../../lib/dates.ts';
-import { formatDateTime, formatInt } from '../../lib/format.ts';
+import { formatDateTime, formatInt, formatTime } from '../../lib/format.ts';
 import { CONSOLE, ConsoleFailure, Loading } from './parts.tsx';
-import { capShare, daysUntil, SECRET_LABEL } from './rules.ts';
+import { capShare, daysUntil, LIVE_POLL_MS, SECRET_LABEL } from './rules.ts';
 import { useWorkspaceNames } from './workspaces.tsx';
+
+/**
+ * RL-5: usage against limits right now. Each call writes its row as it is made, so polling every
+ * 15 seconds is real time. eBay's app-wide budget shows where non-urgent work stops (80%) and
+ * where everything stops (95%).
+ */
+export function LiveUsageSection() {
+  const name = useWorkspaceNames();
+  const live = useQuery({
+    queryKey: [CONSOLE, 'api-usage-live'],
+    queryFn: platformApi.liveUsage,
+    refetchInterval: LIVE_POLL_MS,
+  });
+
+  return (
+    <Card
+      title="Today, live"
+      aside={
+        live.data && (
+          <span className="text-xs text-ink-muted" aria-live="off">
+            Updated {formatTime(new Date(live.dataUpdatedAt).toISOString())}, every 15 seconds
+          </span>
+        )
+      }
+    >
+      {live.isError ? (
+        <ConsoleFailure error={live.error} retry={() => void live.refetch()} />
+      ) : live.isPending ? (
+        <Loading />
+      ) : (
+        <>
+          {live.data.ebay_budget.length > 0 && (
+            <section aria-label="eBay daily budget" className="border-b border-divider px-5 py-3">
+              <h3 className="mb-2 text-sm font-semibold">eBay daily budget (US Pacific day)</h3>
+              <ul className="flex flex-col gap-3">
+                {live.data.ebay_budget.map((b) => {
+                  const share = capShare(b.calls, b.cap) ?? 0;
+                  const tone =
+                    b.calls >= b.hard_limit
+                      ? 'danger'
+                      : b.calls >= b.non_urgent_limit
+                        ? 'warning'
+                        : null;
+                  return (
+                    <li key={b.api} className="text-13">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="font-mono text-xs">{b.api}</span>
+                        <span className="num">
+                          {formatInt(b.calls)} of {formatInt(b.cap)} ({String(share)}%)
+                        </span>
+                      </div>
+                      <span
+                        className="relative mt-1 block h-1.5 overflow-hidden rounded-full bg-[#e2e5ea]"
+                        role="meter"
+                        aria-valuenow={share}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`${b.api}: ${String(share)}% of eBay's daily budget`}
+                      >
+                        <span
+                          className={
+                            tone === 'danger'
+                              ? 'block h-full bg-danger'
+                              : tone === 'warning'
+                                ? 'block h-full bg-warning'
+                                : 'block h-full bg-brand-600'
+                          }
+                          style={{ width: `${String(Math.min(share, 100))}%` }}
+                        />
+                      </span>
+                      {tone && (
+                        <span className="mt-1 block">
+                          <StatusLabel tone={tone}>
+                            {tone === 'danger'
+                              ? 'Hard limit reached: every call waits until the day resets.'
+                              : 'Above 80%: non-urgent work waits.'}
+                          </StatusLabel>
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+          {live.data.items.length === 0 ? (
+            <EmptyState title="No API calls yet today" body="Rows appear as each call is made." />
+          ) : (
+            <SimpleTable
+              label="Calls today"
+              head={[
+                { label: 'Workspace' },
+                { label: 'Provider and API' },
+                { label: 'Calls', align: 'right' },
+                { label: 'Daily cap', align: 'right' },
+                { label: 'Last call', align: 'right' },
+              ]}
+            >
+              {live.data.items.map((u) => (
+                <Tr key={`${u.channel_account_id}-${u.api}`}>
+                  <Td>
+                    <Stack
+                      value={name(u.workspace_id)}
+                      sub={`Account ${u.channel_account_id.slice(0, 8)}`}
+                    />
+                  </Td>
+                  <Td>
+                    <Stack
+                      value={PROVIDER[u.provider] ?? u.provider}
+                      sub={<span className="font-mono">{u.api}</span>}
+                    />
+                  </Td>
+                  <Td align="right">{formatInt(u.calls)}</Td>
+                  <Td align="right">
+                    {u.cap === null ? (
+                      <span className="text-ink-muted">None</span>
+                    ) : (
+                      formatInt(u.cap)
+                    )}
+                  </Td>
+                  <Td align="right">{formatTime(u.updated_at)}</Td>
+                </Tr>
+              ))}
+            </SimpleTable>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
 
 const RANGES = [
   { value: '7', label: 'Last 7 days' },
@@ -17,7 +147,12 @@ const RANGES = [
   { value: '92', label: 'Last 92 days' },
 ];
 
-const PROVIDER: Record<string, string> = { amazon: 'Amazon', ads: 'Amazon Ads', ebay: 'eBay' };
+const PROVIDER: Record<string, string> = {
+  amazon: 'Amazon',
+  ads: 'Amazon Ads',
+  amazon_ads: 'Amazon Ads',
+  ebay: 'eBay',
+};
 
 /** PLAT-2: API calls per provider, API and account, per the provider's own day, against the cap. */
 export function UsageSection() {
@@ -32,7 +167,7 @@ export function UsageSection() {
 
   return (
     <Card
-      title="API usage"
+      title="API usage history"
       aside={
         <>
           <span className="hidden text-xs text-ink-muted sm:inline">

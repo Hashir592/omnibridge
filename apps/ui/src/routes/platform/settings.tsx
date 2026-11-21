@@ -244,3 +244,93 @@ export function FlagsSection() {
     </Card>
   );
 }
+
+const MAINTENANCE_KEY = [CONSOLE, 'maintenance'] as const;
+
+/**
+ * SAFE-3: the global maintenance switch. On, every outbound write of every workspace waits; reads
+ * go on. Turning it off sends what waited. Asks first both ways; audited by the server.
+ */
+export function MaintenanceSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const state = useQuery({ queryKey: MAINTENANCE_KEY, queryFn: platformApi.maintenance });
+  const [asking, setAsking] = useState(false);
+  const [error, setError] = useState<string>();
+  const save = useMutation({
+    mutationFn: (on: boolean) => platformApi.setMaintenance(on),
+    onSuccess: (r, on) => {
+      if (r.ok) {
+        setError(undefined);
+        toast({
+          title: on ? 'Maintenance on' : 'Maintenance off',
+          description: on ? 'Every workspace’s writes now wait.' : 'Waiting writes are being sent.',
+          tone: on ? 'info' : 'success',
+        });
+      } else setError(refusal(r.status) ?? 'The switch could not be changed. Try again.');
+    },
+    onError: () => {
+      setError('The switch could not be changed. Try again.');
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: MAINTENANCE_KEY }),
+  });
+  const on = state.data?.maintenance ?? false;
+
+  return (
+    <Card title="Maintenance">
+      {state.isError ? (
+        <ConsoleFailure error={state.error} retry={() => void state.refetch()} />
+      ) : state.isPending ? (
+        <Loading />
+      ) : (
+        <div className="max-w-xl px-5 py-2">
+          <p className="py-2 text-13 text-ink-muted">
+            Pauses every write to Amazon, eBay, Amazon Ads, websites and carriers for every
+            workspace. Orders and other reads continue. Workspace admins see it on Connections.
+          </p>
+          <dl>
+            <DetailRow label="Maintenance switch">
+              <span className={on ? 'font-medium text-danger' : undefined}>
+                {on ? 'On: all writes wait' : 'Off'}
+              </span>
+            </DetailRow>
+            <DetailRow label="Last changed">
+              {state.data.updated_at ? formatDateTime(state.data.updated_at) : 'Never'}
+            </DetailRow>
+          </dl>
+          <div className="flex justify-end py-3">
+            <Button
+              variant={on ? 'primary' : 'danger'}
+              disabled={save.isPending}
+              onClick={() => {
+                setAsking(true);
+              }}
+            >
+              {on ? 'Turn maintenance off' : 'Turn maintenance on'}
+            </Button>
+          </div>
+          {error && (
+            <p role="alert" className="py-2 text-13 text-danger">
+              {error}
+            </p>
+          )}
+          <ConfirmDialog
+            open={asking}
+            onOpenChange={setAsking}
+            destructive={!on}
+            title={on ? 'Turn maintenance off?' : 'Turn maintenance on?'}
+            description={
+              on
+                ? 'Every write that waited is sent now, for every workspace.'
+                : 'Every write to every provider, for every workspace, stops at once and waits until you turn it off.'
+            }
+            confirmLabel={on ? 'Turn off and send' : 'Pause all writes'}
+            onConfirm={() => {
+              save.mutate(!on);
+            }}
+          />
+        </div>
+      )}
+    </Card>
+  );
+}

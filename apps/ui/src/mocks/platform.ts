@@ -12,6 +12,8 @@ import type {
   ConsoleWorkspace,
   CredentialExpiry,
   DeadLetter,
+  EbayBudget,
+  Maintenance,
   PlatformFlags,
   QueueOverview,
 } from '../auth/api.ts';
@@ -38,6 +40,13 @@ let consoleMode = false;
 let incident: Incident | null = null;
 let workspaces: ConsoleWorkspace[] = [];
 let flags: PlatformFlags = { public_signup: false, updated_at: null };
+let maintenance: Maintenance = { maintenance: false, updated_at: null };
+
+/** SAFE-3, as GET /connections shows it to workspace users. */
+export const maintenanceMock = () => ({
+  on: maintenance.maintenance,
+  since: maintenance.maintenance ? maintenance.updated_at : null,
+});
 let deadLetters: DeadLetter[] = [];
 let secrets: AppSecretStatus[] = [];
 
@@ -53,6 +62,7 @@ export function resetPlatformMock(): void {
   consoleMode = false;
   incident = null;
   flags = { public_signup: false, updated_at: null };
+  maintenance = { maintenance: false, updated_at: null };
   workspaces = [
     {
       id: MOCK_WS.demo,
@@ -172,6 +182,26 @@ function usage(from: string, to: string): ApiUsage[] {
   return rows;
 }
 
+/** RL-5: today's rows, each stamped as its call is made; calls tick up between polls. */
+function liveUsage() {
+  const tick = Math.floor(Date.now() / 15_000) % 40;
+  const items = usage(ymd(0), ymd(0)).map((u, i) => ({
+    ...u,
+    calls: u.calls + tick * (i + 1) * 3,
+    updated_at: iso(-(i + 1) * 4_000),
+  }));
+  const budget: EbayBudget[] = [
+    { api: 'sell.fulfillment', calls: 2_480_000 + tick * 900, cap: 5_000_000 },
+    { api: 'sell.inventory', calls: 4_120_000 + tick * 700, cap: 5_000_000 },
+  ].map((b) => ({
+    ...b,
+    day: ymd(0),
+    non_urgent_limit: Math.floor(b.cap * 0.8),
+    hard_limit: Math.floor(b.cap * 0.95),
+  }));
+  return { ebay_budget: budget, items };
+}
+
 function expiry(withinDays: number): CredentialExpiry[] {
   const rows: CredentialExpiry[] = [
     {
@@ -253,6 +283,16 @@ export const platformHandlers = [
     flags = { public_signup: body.public_signup, updated_at: new Date().toISOString() };
     return HttpResponse.json(flags);
   }),
+
+  http.get('*/api/platform/maintenance', () => gate() ?? HttpResponse.json(maintenance)),
+  http.put('*/api/platform/maintenance', async ({ request }) => {
+    const denied = gate();
+    if (denied) return denied;
+    const body = (await request.json()) as { maintenance: boolean };
+    maintenance = { maintenance: body.maintenance, updated_at: new Date().toISOString() };
+    return HttpResponse.json(maintenance);
+  }),
+  http.get('*/api/platform/api-usage/live', () => gate() ?? HttpResponse.json(liveUsage())),
 
   http.get('*/api/platform/jobs', () => gate() ?? HttpResponse.json({ items: jobs() })),
   http.get(
