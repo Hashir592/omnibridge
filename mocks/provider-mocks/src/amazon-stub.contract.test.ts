@@ -1,7 +1,7 @@
 import { createLogger } from '@omnibridge/logger';
-import { buildMockServer } from '@omnibridge/provider-mocks';
+import { createAmazonStubAdapter } from '@omnibridge/provider-amazon';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createAmazonStubAdapter } from './index.ts';
+import { buildMockServer } from './server.ts';
 
 describe('amazon stub adapter against provider-mocks', () => {
   let mock: ReturnType<typeof buildMockServer>;

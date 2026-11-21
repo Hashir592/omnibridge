@@ -20,10 +20,5 @@
     "@omnibridge/crypto": "workspace:*",
     "@omnibridge/provider-kit": "workspace:*",
     "zod": "4.6.7"
-  },
-  "devDependencies": {
-    "@omnibridge/logger": "workspace:*",
-    "@omnibridge/provider-mocks": "workspace:*",
-    "fastify": "5.12.7"
   }
 }
