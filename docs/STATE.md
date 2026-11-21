@@ -1,19 +1,23 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Nov 2026 by S3 (M07 end; T-0701 and T-0702 done).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 22 Nov 2026 by S3 (M08 end; T-0801 in PR #141; M09 next).
 
 ## Now
 
 - **Phase:** B, local Docker only. Plan of 12 Nov 2026 (ADR-054), fast lane from M07 (ADR-077). Module order is in `docs/plan/MODULES.md`.
 - **Closed:** M01 to M05 (S4 M05 end APPROVED, `docs/reviews/M05-end.md`). The M06 site pieces are merged; it waits on the client's legal details.
-- **M07 built** (`docs/reviews/M07-end-report.md`):
-  - contract #131, merged;
-  - T-0701 #133, merged, full gate green;
-  - T-0702 #134, critical, merged with the full gate green. **Review (S4, 21 Nov):** FIX REQUIRED, 1 Major (F-M07-T0702-01, carrier Retry-After), 1 Minor; `docs/reviews/M07-T0702-findings.md`. S3 fixes it in its next task's first commit;
-  - the follow-up with the mock-storm test and the completeness checklist.
-- **Milestone:** M07 + M08 is one S4 milestone, so the S4 milestone review comes at M08 end.
-- **Next (S3):** M08 then M09, per `docs/handoffs/20261121-2200-S1-to-S3.md`, once M07 is merged and S1 confirms.
-- **S2:** T-0314 Connections screens are in PR #132, on the M07 client. S3's answers to S2's OAuth and CS-6 questions are in `docs/handoffs/20261121-1900-S3-to-S2.md`.
+- **M07 built** (`docs/reviews/M07-end-report.md`): #131, #133, #134 (critical; S4 FIX REQUIRED, `docs/reviews/M07-T0702-findings.md`), #137, #138. The Major F-M07-T0702-01 is fixed in #141; the Minor goes to M15.
+- **M08 built** (`docs/reviews/M08-end-report.md`): contract #139 merged; T-0801 #141 (auto-merge, full gate in CI).
+- **Milestone:** S4 reviews M07 + M08 now (`docs/handoffs/20261122-0100-S3-to-S4.md`). The next is M09 + M10.
+- **Next (S3):** M09: contract PR, then T-0901 (critical; Hashir's go came with the 21 Nov paste).
+- **S2:** T-0316 catalogue screens can start on the M08 client (`docs/handoffs/20261121-1950-S3-to-S2.md`).
+
+## M08 in short (what later modules use)
+
+- **Catalogue repository:** `CatalogueRepository` (`packages/db/src/catalogue.ts`). Its lookups `cogsOn`, `vatTypeOn` and `vatRateOn` take a London day and are what M10's write-once snapshots read. A bundle follows its component.
+- **Money:** `packages/core/src/money.ts` (`parsePounds`, `formatPounds`, `divHalfUp`). Pence are bigint inside and numbers on the wire.
+- **CAT-6:** `catalogue.listing_mapped` (IDs only), sent in the changing transaction. Register a `ListingMappedListener` in the worker (`apps/worker/src/catalogue.ts`). A `ListingsEndedListener` hears listings that a complete scan no longer found.
+- **Discovery:** `listings.discover` per account (daily and on an eBay connect) through `runListingScan`. Amazon joins in M18 (seller ID).
 
 ## M07 in short (what later modules use)
 
@@ -50,7 +54,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - Amazon 429 retries should be re-metered;
   - the token refresh race;
   - environment in the credentials unique index (M22).
-- **ADR-078 point 1:** the two M05 Minors are the first commit of M08 (S1 paste).
+- **From M08:** share one call-session helper between `runIncrementalSync` and `runListingScan`; the Disconnect route should end the account's listings (C7.3). **M15:** the eBay offer's listing ID as `external_id`; F-M07-T0702-02 (the eBay cap set by the caller). **M18:** Amazon discovery and `amazon.stock_push` with the seller ID.
 - **ADR-068, for M08 and M10:** expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first.
 - **M07 and M08:** Amazon revocation and eBay termination call `requestDeletion` with the channel account. The eBay key fetch cap (5 a minute) is per web process.
 - **M10:**
