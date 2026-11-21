@@ -107,7 +107,7 @@ Every scope and acceptance line of T-0701 and T-0702, and every item of the M07 
 | Sync cursors, 5-minute overlap, de-duplication by external ID | DONE. `app.sync_cursors`, `kit/src/cursor.ts`; cursor.test "[INT-8] a re-poll inside the overlap creates no duplicate"; sync-cursors.int.test |
 | One reference adapter proving job, governor, parser, cursor | DONE. eBay; sync.int.test "[INT-8] polls through the governor, parses, stores the cursor; a re-poll inside the overlap adds nothing" |
 | provider-mocks for the Release 1 modules, from the official specs | DONE for M07's scope. Per Hashir's ruling: the framework plus what M07 uses; each module adds its own endpoints. Each route cites its official doc and API version |
-| Mocks checked against official OpenAPI models where they exist | MISSING. It needs the official model files in the repo (Amazon SP-API models, eBay OpenAPI), which is a download, so it waits for Hashir's yes. Today the mocks are checked by the adapters' own parsers (adapters.contract.test) |
+| Mocks checked against official OpenAPI models where they exist | DEFERRED (S1, 21 Nov 2026: not now; follow-up 9 below). Originally MISSING. It needs the official model files in the repo (Amazon SP-API models, eBay OpenAPI), which is a download, so it waits for Hashir's yes. Today the mocks are checked by the adapters' own parsers (adapters.contract.test) |
 | Scenario switches: 429 storm, INVALID parcel, invalid_grant, revocation, eBay cap | DONE. `mocks/provider-mocks/src/scenarios.ts`; adapters.contract.test, one test per provider, plus "[INT-3] a scenario switch is set and cleared over HTTP" |
 | Egress allowlist (network plus client allowlist); production hosts in config for M22 | DONE. `kit/src/http.ts` lists the hosts per mode. Tests: http.test "[INT-3] in mock mode only the provider-mocks host and loopback are reachable" and "[INT-3] a live provider host is refused unless PROVIDER_MODE=live"; compose.test "[INT-3] provider-mocks is alone on the internal ob_mocks network with web and worker" |
 | INT-7 scraping scan | DONE. architecture.test "[INT-7] no package depends on a headless browser or scraping library" and "[INT-7] the scan fails on a planted dependency" |
@@ -162,6 +162,7 @@ Every scope and acceptance line of T-0701 and T-0702, and every item of the M07 
 5. **Amazon 429 retries:** the retries inside `withAmazonBackoff` take no extra bucket token and are not counted in usage.
 6. **Token refresh race (pre-existing, T-0701):** a caller that joins a refresh already in flight can refresh once more after that refresh failed.
 7. **Credentials unique index:** it does not include the environment. That is harmless while one database holds one environment; revisit at M22.
+9. **Official spec checks for the mocks (S1, 21 Nov 2026):** each module that adds real provider endpoints checks its own mocks against the official spec files then, with Hashir's yes in that module's paste: **M12** (Evri, DPD), **M15** (eBay), **M18** (Amazon). M07 is complete without it.
 8. **Process:**
    - the WIP commits on both branches used `--no-verify`; the final commits ran the hooks;
    - the local `/healthz` e2e check failed once while integration tests loaded the 7.9 GB host, and CI passed it.
