@@ -35,6 +35,7 @@ function harness(
   const sent: unknown[] = [];
   const dispatched: { seq: number; startAfter: Date | undefined }[] = [];
   const raised: RaiseInput[] = [];
+  const usage: { api: string; calls: number }[] = [];
   const ctx: TenantContext = { workspaceId: WS, companyIds: [COMPANY] };
   const op: OutboundOperation<{ levels: { sku: string; quantity: number }[] }> = {
     operation: 'ebay.stock_push',
@@ -110,7 +111,10 @@ function harness(
       recordSuccess: () => Promise.resolve({ reauthCleared: false }),
       recordAuthFailure: () => Promise.resolve({ failures: 1, marked: false }),
       recordError: () => Promise.resolve(),
-      recordCalls: () => Promise.resolve(),
+      recordCalls: (_c, input) => {
+        usage.push({ api: input.api, calls: input.calls });
+        return Promise.resolve();
+      },
     },
     notifier: {
       raise: (_c, input) => {
@@ -141,7 +145,7 @@ function harness(
   };
   const run = () =>
     runOutboundSend(ports, { 'ebay.stock_push': op }, { workspaceId: WS, writeId: WRITE });
-  return { row, switches, sent, dispatched, raised, run };
+  return { row, switches, sent, dispatched, raised, usage, run };
 }
 
 describe('the outbound send path (SAFE-2, SAFE-3, INT-2)', () => {
@@ -232,6 +236,31 @@ describe('the outbound send path (SAFE-2, SAFE-3, INT-2)', () => {
     }
     expect(h.row).toMatchObject({ state: 'pending', attempts: 0 });
     expect(h.dispatched.at(-1)?.startAfter).toEqual(new Date(NOW.getTime() + 3_600_000));
+  });
+
+  it('[RL-5] usage is written with the result of every send, the failed ones too, unless the governor already wrote it', async () => {
+    const ok = harness({});
+    expect(await ok.run()).toEqual({ sent: true });
+    // The token call and the write, each under its own API name.
+    expect(ok.usage).toEqual([
+      { api: 'auth', calls: 1 },
+      { api: 'sell.inventory', calls: 1 },
+    ]);
+    const failed = harness({ send: () => Promise.reject(new ProviderUnavailable('ebay', 503)) });
+    expect(await failed.run()).toEqual({ deferred: 'retry' });
+    expect(failed.usage).toEqual([
+      { api: 'auth', calls: 1 },
+      { api: 'sell.inventory', calls: 1 },
+    ]);
+    // eBay's reservation wrote the row itself (RL-2): not counted twice.
+    const reserved = harness({
+      governor: {
+        admit: () => Promise.resolve({ ok: true, usageRecorded: true }),
+        run: (_i, fn) => fn(),
+      },
+    });
+    expect(await reserved.run()).toEqual({ sent: true });
+    expect(reserved.usage).toEqual([]);
   });
 
   it('[INT-2] a rejection is final at once, with its stable code', async () => {

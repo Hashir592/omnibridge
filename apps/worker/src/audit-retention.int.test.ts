@@ -187,11 +187,14 @@ describe('audit retention job (AUD-3)', () => {
         'notify.platform-email-sweep': () => Promise.resolve(),
         'security.scan-sweep': () => Promise.resolve(),
         'platform.health-digest': () => Promise.resolve(),
+        'outbound.recover-sweep': () => Promise.resolve(),
       },
       logger,
     );
     expect(await boss.getSchedules()).toEqual(
       expect.arrayContaining([
+        // T-0702: the outbound safety net, every ten minutes.
+        expect.objectContaining({ name: 'outbound.recover-sweep', cron: '*/10 * * * *' }),
         expect.objectContaining({
           name: 'audit.retention-sweep',
           cron: '30 2 * * *',
