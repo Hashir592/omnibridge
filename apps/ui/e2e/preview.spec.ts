@@ -49,7 +49,7 @@ async function walkWithKeyboard(page: Page, steps = 12): Promise<void> {
 
 const screens = [
   { name: 'stock list', path: '/stock', ready: 'of 200 SKUs' },
-  { name: 'unmapped listings', path: '/stock?view=unmapped', ready: 'Suggested match' },
+  { name: 'unmapped listings', path: '/stock/listings', ready: 'Not mapped' },
   { name: 'SKU detail', path: '/stock/sku_3', ready: 'Stock by channel' },
   { name: 'sales and profit', path: '/sales-profit', ready: 'How contribution profit is made' },
   { name: 'VAT quarters', path: '/finance', ready: 'VAT payable' },
@@ -307,7 +307,7 @@ test('[WEB-1] with the website connector off, no area shows the Website channel'
   await expect(page.getByRole('menuitemcheckbox', { name: /harbourgoods/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await go('/stock', 'Stock');
-  await go('/stock?view=unmapped', 'Unmapped listings');
+  await go('/stock/listings', 'Not mapped');
   await go('/sales-profit', 'Sales & Profit');
   await go('/shipping', 'Shipping');
   await expect(page.locator('option[value="website"]')).toHaveCount(0);

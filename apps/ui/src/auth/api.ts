@@ -551,3 +551,118 @@ export const bulkApi = {
       api.POST('/bulk-writes/confirm', { body: { token }, headers: await csrfHeaders() }),
     ),
 };
+
+/* ---------- catalogue (T-0801 routes; T-0316 screens: CAT-1 to CAT-6) ---------- */
+
+export type MasterSkuSummary = components['schemas']['MasterSkuSummary'];
+export type MasterSku = components['schemas']['MasterSku'];
+export type MasterSkuCreate = components['schemas']['MasterSkuCreate'];
+export type MasterSkuUpdate = components['schemas']['MasterSkuUpdate'];
+export type VatType = components['schemas']['VatType'];
+export type VatRate = components['schemas']['VatRate'];
+export type CogsEntry = components['schemas']['CogsEntry'];
+export type CatalogueListing = components['schemas']['Listing'];
+export type CsvImportReport = components['schemas']['CsvImportReport'];
+
+export interface Paged<T> {
+  items: T[];
+  page: number;
+  limit: number;
+  total: number;
+  totalCapped: boolean;
+}
+
+export interface SkuQuery {
+  page?: number;
+  limit?: number;
+  q?: string | undefined;
+  active?: 'true' | 'false' | undefined;
+  bundles?: 'true' | 'false' | undefined;
+}
+
+export interface ListingQuery {
+  page?: number;
+  limit?: number;
+  q?: string | undefined;
+  mapped?: 'true' | 'false' | undefined;
+  channel_account_id?: string | undefined;
+}
+
+/** Drops undefined keys, so the query string carries only the filters in use. */
+function defined<T extends object>(q: T): { [K in keyof T]?: Exclude<T[K], undefined> } {
+  return Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined)) as {
+    [K in keyof T]?: Exclude<T[K], undefined>;
+  };
+}
+
+const skuPath = (skuId: string) => ({ params: { path: { skuId } } });
+const listingPath = (listingId: string) => ({ params: { path: { listingId } } });
+
+/** The catalogue is workspace-shared (ARCHITECTURE 6.1); writes carry the CSRF header (SEC-1). */
+export const catalogueApi = {
+  skus: (q: SkuQuery) =>
+    read<Paged<MasterSkuSummary>>(api.GET('/catalogue/skus', { params: { query: defined(q) } })),
+  sku: (skuId: string) => read<MasterSku>(api.GET('/catalogue/skus/{skuId}', skuPath(skuId))),
+  /** 201; 400 with field errors; 409 for a taken code or a bundle of a bundle. */
+  createSku: async (body: MasterSkuCreate) =>
+    reply<MasterSku>(api.POST('/catalogue/skus', { body, headers: await csrfHeaders() })),
+  /** 409 for a VAT change on a bundle (CAT-3). */
+  updateSku: async (skuId: string, body: MasterSkuUpdate) =>
+    reply<MasterSku>(
+      api.PATCH('/catalogue/skus/{skuId}', {
+        ...skuPath(skuId),
+        body,
+        headers: await csrfHeaders(),
+      }),
+    ),
+  manufacturers: async () =>
+    (await read<{ items: string[] }>(api.GET('/catalogue/manufacturers'))).items,
+  vatRates: async () => (await read<{ items: VatRate[] }>(api.GET('/catalogue/vat-rates'))).items,
+  /** Admins only (settings tab); 409 when the type already has a rate from that day. */
+  createVatRate: async (body: VatRate) =>
+    reply<VatRate>(api.POST('/catalogue/vat-rates', { body, headers: await csrfHeaders() })),
+  /** The same day again replaces it; 409 on a bundle (its COGS is derived, CAT-3). */
+  setCogs: async (skuId: string, body: { cogs_pence: number; effective_from: string }) =>
+    reply<CogsEntry>(
+      api.POST('/catalogue/skus/{skuId}/cogs', {
+        ...skuPath(skuId),
+        body,
+        headers: await csrfHeaders(),
+      }),
+    ),
+  importCogs: async (csv: string, dryRun: boolean) =>
+    reply<CsvImportReport>(
+      api.POST('/catalogue/cogs/import', {
+        body: { csv, dry_run: dryRun },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  listings: (q: ListingQuery) =>
+    read<Paged<CatalogueListing>>(
+      api.GET('/catalogue/listings', { params: { query: defined(q) } }),
+    ),
+  /** 409 when the listing is mapped to another SKU (CAT-5: one listing, one SKU). */
+  mapListing: async (listingId: string, masterSkuId: string) =>
+    reply<CatalogueListing>(
+      api.PUT('/catalogue/listings/{listingId}/mapping', {
+        ...listingPath(listingId),
+        body: { master_sku_id: masterSkuId },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  unmapListing: async (listingId: string) =>
+    reply<CatalogueListing>(
+      api.DELETE('/catalogue/listings/{listingId}/mapping', {
+        ...listingPath(listingId),
+        headers: await csrfHeaders(),
+      }),
+    ),
+  importMappings: async (csv: string, dryRun: boolean) =>
+    reply<CsvImportReport>(
+      api.POST('/catalogue/mappings/import', {
+        body: { csv, dry_run: dryRun },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  exportMappings: () => reply<Blob>(api.GET('/catalogue/mappings/export', { parseAs: 'blob' })),
+};

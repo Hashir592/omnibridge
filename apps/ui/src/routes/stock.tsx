@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAppState } from '../app/session.tsx';
 import { ChannelMark, CompanyBadge } from '../components/badges.tsx';
 import { PageHeader } from '../components/Card.tsx';
+import { SectionNav } from './catalogue/parts.tsx';
 import { SkuStatus, coverText } from '../components/stock.tsx';
 import { TabGate } from '../components/TabGate.tsx';
 import { Badge, SignalLabel } from '../kit/Badge.tsx';
@@ -58,7 +59,6 @@ const VIEWS: Array<{ id: StockView; label: string; alarm?: boolean }> = [
   { id: 'oversold', label: 'Oversold', alarm: true },
   { id: 'sync', label: 'Sync failed' },
   { id: 'bundles', label: 'Bundles' },
-  { id: 'unmapped', label: 'Unmapped listings' },
 ];
 
 const isTablet = () => typeof window !== 'undefined' && window.innerWidth < 1024;
@@ -342,6 +342,11 @@ function StockList() {
       replace: !('page' in patch),
     });
 
+  // The Unmapped queue moved to Listings (T-0316); old links land there.
+  useEffect(() => {
+    if (search.view === 'unmapped') void navigate({ to: '/stock/listings', replace: true });
+  }, [search.view]);
+
   useEffect(() => {
     const t = setTimeout(() => {
       if ((search.q ?? '') !== qDraft) setSearch({ q: qDraft || undefined });
@@ -478,6 +483,7 @@ function StockList() {
           </>
         }
       />
+      <SectionNav />
 
       <div className="mt-4">
         <ViewTabs

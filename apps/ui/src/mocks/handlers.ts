@@ -7,6 +7,7 @@ import { passthrough } from 'msw';
 import { HttpResponse, http } from 'msw/http';
 import { daysFromToday } from '../lib/format.ts';
 import { authHandlers } from './auth.ts';
+import { catalogueHandlers } from './catalogue.ts';
 import { connectionHandlers } from './connections.ts';
 import { orders } from './data.ts';
 import { orderDetail } from './detail.ts';
@@ -61,6 +62,7 @@ export const handlers = [
   ...authHandlers,
   ...platformHandlers,
   ...connectionHandlers,
+  ...catalogueHandlers,
   ...previewHandlers,
 
   // GET /companies (TEN-5): the user's permitted companies only, as the real route answers.

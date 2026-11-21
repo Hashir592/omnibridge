@@ -25,6 +25,8 @@ import { isSection } from './routes/platform/rules.ts';
 import type { SettingsSearch } from './routes/settings.tsx';
 import type { SalesProfitSearch } from './routes/sales-profit.tsx';
 import type { StockSearch } from './routes/stock.tsx';
+import type { ListingsSearch } from './routes/catalogue/listings.tsx';
+import type { SkusSearch } from './routes/catalogue/skus.tsx';
 
 const VIEWS = new Set(['all', 'awaiting', 'overdue', 'today', 'flagged']);
 const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined);
@@ -122,6 +124,45 @@ const stock = createRoute({
     return out;
   },
   component: lazyRouteComponent(() => import('./routes/stock.tsx'), 'StockPage'),
+});
+// T-0316 catalogue screens on the M08 routes (static paths win over /stock/$skuId).
+const catalogueSkus = createRoute({
+  getParentRoute: () => root,
+  path: '/stock/skus',
+  validateSearch: (s: Record<string, unknown>): SkusSearch => {
+    const out: SkusSearch = { ...pageParams(s) };
+    const view = oneOf(s.view, ['active', 'inactive', 'bundles'] as const);
+    if (view) out.view = view;
+    const q = str(s.q);
+    if (q) out.q = q;
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/catalogue/skus.tsx'), 'SkusPage'),
+});
+const catalogueSku = createRoute({
+  getParentRoute: () => root,
+  path: '/stock/skus/$skuId',
+  component: lazyRouteComponent(() => import('./routes/catalogue/sku-detail.tsx'), 'SkuDetailPage'),
+});
+const catalogueListings = createRoute({
+  getParentRoute: () => root,
+  path: '/stock/listings',
+  validateSearch: (s: Record<string, unknown>): ListingsSearch => {
+    const out: ListingsSearch = { ...pageParams(s) };
+    const view = oneOf(s.view, ['mapped', 'all'] as const);
+    if (view) out.view = view;
+    for (const k of ['q', 'account'] as const) {
+      const v = str(s[k]);
+      if (v) out[k] = v;
+    }
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/catalogue/listings.tsx'), 'ListingsPage'),
+});
+const vatRates = createRoute({
+  getParentRoute: () => root,
+  path: '/stock/vat-rates',
+  component: lazyRouteComponent(() => import('./routes/catalogue/vat-rates.tsx'), 'VatRatesPage'),
 });
 const stockDetail = createRoute({
   getParentRoute: () => root,
@@ -323,6 +364,10 @@ const notificationLink = createRoute({
 
 const preview = [
   stock,
+  catalogueSkus,
+  catalogueSku,
+  catalogueListings,
+  vatRates,
   stockDetail,
   salesProfit,
   finance,
