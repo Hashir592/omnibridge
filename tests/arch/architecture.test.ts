@@ -267,3 +267,17 @@ describe('provider egress in source (INT-3, INT-7, invariant 17)', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe('money in source (FIN-1, invariant 12)', () => {
+  it('[FIN-1] server code parses and rounds no money through floats: no parseFloat, toFixed or Math.round on pence', () => {
+    const FLOAT_MONEY =
+      /\bparseFloat\s*\(|\.toFixed\s*\(|Math\.round\s*\([^)]*pence|pence[A-Za-z]*\s*\*\s*\d+\.\d/i;
+    const offenders = sources([
+      'apps/web/src',
+      'apps/worker/src',
+      'apps/pii-vault/src',
+      'packages',
+    ]).filter((file) => FLOAT_MONEY.test(code(file)));
+    expect(offenders).toEqual([]);
+  });
+});

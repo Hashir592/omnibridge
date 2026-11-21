@@ -17,7 +17,16 @@ export {
   type ErrorCode,
 } from './errors.ts';
 export { runHttpHealthcheck } from './healthcheck.ts';
-export { pence, type Pence } from './money.ts';
+export {
+  bundleAvailable,
+  divHalfUp,
+  formatPounds,
+  parsePounds,
+  pence,
+  timesPack,
+  type Pence,
+} from './money.ts';
+export { parseCsv, toCsv, type CsvRow } from './csv.ts';
 export {
   checkRaise,
   emailDefaultOn,
