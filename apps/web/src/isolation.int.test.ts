@@ -80,6 +80,8 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     notification: '',
   };
   const a = { company: '', job: '' };
+  // M08: B's Master SKU and listing. T-0801 seeds the rows; the contract PR walks the IDs.
+  const catalogueB = { sku: randomUUID(), listing: randomUUID() };
 
   const repos = () => ({
     workspaces: new WorkspaceRepository(main.db),
@@ -550,6 +552,54 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           body: { action: 'stock_push', channel_account_ids: [b.account, randomUUID()] },
         },
         confirmBulkWrite: { body: { token: `${MARKER}-not-a-real-bulk-token` } },
+        // Catalogue (M08): workspace-shared, so A reads only its own; B's SKUs and listings are
+        // neither read nor changed from A (T-0801 seeds B's rows; until then the routes are 404).
+        listMasterSkus: {},
+        getMasterSku: { params: { skuId: catalogueB.sku } },
+        createMasterSku: {
+          body: {
+            sku: `${MARKER}-bundle`,
+            title: 'Walker bundle',
+            short_description: 'Walker bundle',
+            weight_g: 100,
+            bundle: { component_id: catalogueB.sku, pack_size: 2 },
+          },
+        },
+        updateMasterSku: { params: { skuId: catalogueB.sku }, body: { title: MARKER } },
+        listManufacturers: {},
+        listVatRates: {},
+        createVatRate: {
+          body: { vat_type: 'standard', rate_bp: 2000, effective_from: '2030-01-01' },
+          searchText: true,
+        },
+        listCogs: { params: { skuId: catalogueB.sku } },
+        setCogs: {
+          params: { skuId: catalogueB.sku },
+          body: { cogs_pence: 100, effective_from: '2026-01-01' },
+        },
+        importCogs: {
+          body: {
+            csv: `sku,cogs,effective_from
+${MARKER},1.00,2026-01-01`,
+            dry_run: true,
+          },
+          searchText: true,
+        },
+        listListings: {},
+        mapListing: {
+          params: { listingId: catalogueB.listing },
+          body: { master_sku_id: catalogueB.sku },
+        },
+        unmapListing: { params: { listingId: catalogueB.listing } },
+        importMappings: {
+          body: {
+            csv: `listing_id,sku
+${catalogueB.listing},${MARKER}`,
+            dry_run: true,
+          },
+          searchText: true,
+        },
+        exportMappings: {},
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {

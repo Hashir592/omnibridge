@@ -105,3 +105,4 @@ export {
 } from './routes/auth.ts';
 export * from './routes/platform.ts';
 export * from './routes/connections.ts';
+export * from './routes/catalogue.ts';

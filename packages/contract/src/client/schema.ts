@@ -443,6 +443,181 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/catalogue/cogs/import': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Import COGS from CSV */
+    post: operations['importCogs'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/catalogue/listings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List channel listings */
+    get: operations['listListings'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/catalogue/listings/{listingId}/mapping': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Map a listing to a Master SKU */
+    put: operations['mapListing'];
+    post?: never;
+    /** Unmap a listing */
+    delete: operations['unmapListing'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/catalogue/manufacturers': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Manufacturers used so far */
+    get: operations['listManufacturers'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/catalogue/mappings/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Export listing mappings as CSV */
+    get: operations['exportMappings'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/catalogue/mappings/import': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Import listing mappings from CSV */
+    post: operations['importMappings'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/catalogue/skus': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Master SKUs */
+    get: operations['listMasterSkus'];
+    put?: never;
+    /** Create a Master SKU or a bundle */
+    post: operations['createMasterSku'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/catalogue/skus/{skuId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One Master SKU with its histories and listings */
+    get: operations['getMasterSku'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Edit a Master SKU */
+    patch: operations['updateMasterSku'];
+    trace?: never;
+  };
+  '/catalogue/skus/{skuId}/cogs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** A SKU's COGS history, newest first */
+    get: operations['listCogs'];
+    put?: never;
+    /** Set the COGS from a date */
+    post: operations['setCogs'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/catalogue/vat-rates': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The workspace's VAT rates with their effective dates */
+    get: operations['listVatRates'];
+    put?: never;
+    /** Add a VAT rate from a date */
+    post: operations['createVatRate'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/channel-accounts/{id}/deletion-certificate': {
     parameters: {
       query?: never;
@@ -1488,6 +1663,18 @@ export interface components {
       expires_at: string;
       token: string;
     };
+    Bundle: {
+      /** Format: uuid */
+      component_id: string;
+      component_sku: string;
+      pack_size: number;
+    };
+    BundleInput: {
+      /** Format: uuid */
+      component_id: string;
+      component_sku: string;
+      pack_size: number;
+    };
     BuyerIdentifiers: {
       buyer?: string;
       email?: string;
@@ -1501,6 +1688,26 @@ export interface components {
       name?: string;
       phone?: string;
       postcode?: string;
+    };
+    CogsEntry: {
+      cogs_pence: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date */
+      effective_from: string;
+    };
+    CogsEntryInput: {
+      cogs_pence: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date */
+      effective_from: string;
+    };
+    CogsHistory: {
+      items: components['schemas']['CogsEntry'][];
+    };
+    CogsHistoryInput: {
+      items: components['schemas']['CogsEntryInput'][];
     };
     Company: {
       badge_colour: string;
@@ -1680,6 +1887,26 @@ export interface components {
       slot: 'current' | 'next';
       workspace_id: string | null;
     };
+    CsvImportReport: {
+      applied: boolean;
+      errors: {
+        code: string;
+        column: string | null;
+        line: number;
+      }[];
+      rows: number;
+      valid: number;
+    };
+    CsvImportReportInput: {
+      applied: boolean;
+      errors: {
+        code: string;
+        column: string | null;
+        line: number;
+      }[];
+      rows: number;
+      valid: number;
+    };
     DeadLetter: {
       attempt: number | null;
       /** Format: date-time */
@@ -1699,6 +1926,16 @@ export interface components {
       id: string;
       type: string;
       workspace_id: string | null;
+    };
+    Dimensions: {
+      height_mm: number;
+      length_mm: number;
+      width_mm: number;
+    };
+    DimensionsInput: {
+      height_mm: number;
+      length_mm: number;
+      width_mm: number;
     };
     EbayAccountDeletionNotice: {
       metadata: {
@@ -1882,6 +2119,10 @@ export interface components {
       withdrawReason:
         ('wrong_identifiers' | 'no_match' | 'duplicate' | 'buyer_withdrew' | 'other') | null;
     };
+    /** @enum {string} */
+    Fulfilment: 'mfn' | 'fba';
+    /** @enum {string} */
+    FulfilmentInput: 'mfn' | 'fba';
     Health: {
       /** @enum {string} */
       db_main: 'ok' | 'error';
@@ -1972,6 +2213,46 @@ export interface components {
       paused: boolean;
       paused_at: string | null;
     };
+    Listing: {
+      /** Format: uuid */
+      channel_account_id: string;
+      /** Format: date-time */
+      discovered_at: string;
+      external_id: string;
+      external_sku: string;
+      fulfilment: components['schemas']['Fulfilment'] | null;
+      /** Format: uuid */
+      id: string;
+      inventory_api: boolean | null;
+      mapped_at: string | null;
+      master_sku: {
+        /** Format: uuid */
+        id: string;
+        sku: string;
+      } | null;
+      provider: components['schemas']['Provider'];
+      title: string | null;
+    };
+    ListingInput: {
+      /** Format: uuid */
+      channel_account_id: string;
+      /** Format: date-time */
+      discovered_at: string;
+      external_id: string;
+      external_sku: string;
+      fulfilment: components['schemas']['FulfilmentInput'] | null;
+      /** Format: uuid */
+      id: string;
+      inventory_api: boolean | null;
+      mapped_at: string | null;
+      master_sku: {
+        /** Format: uuid */
+        id: string;
+        sku: string;
+      } | null;
+      provider: components['schemas']['ProviderInput'];
+      title: string | null;
+    };
     Maintenance: {
       maintenance: boolean;
       updated_at: string | null;
@@ -1987,6 +2268,168 @@ export interface components {
     MaintenanceStateInput: {
       on: boolean;
       since: string | null;
+    };
+    ManufacturerList: {
+      items: string[];
+    };
+    ManufacturerListInput: {
+      items: string[];
+    };
+    MasterSku: {
+      active: boolean;
+      barcode: string | null;
+      bundle: components['schemas']['Bundle'] | null;
+      cogs_history: components['schemas']['CogsEntry'][];
+      cogs_pence: number | null;
+      /** Format: date-time */
+      created_at: string;
+      dimensions: components['schemas']['Dimensions'] | null;
+      /** Format: uuid */
+      id: string;
+      image_url: string | null;
+      listing_count: number;
+      listings: components['schemas']['SkuListing'][];
+      manufacturer: string | null;
+      purchase_vat_rate_bp: number | null;
+      reorder: components['schemas']['ReorderSettings'];
+      short_description: string;
+      sku: string;
+      title: string;
+      /** Format: date-time */
+      updated_at: string;
+      vat_history: components['schemas']['VatHistoryEntry'][];
+      vat_type: components['schemas']['VatType'];
+      weight_g: number;
+    };
+    MasterSkuCreate: {
+      active?: boolean;
+      barcode?: string | null;
+      bundle?: {
+        /** Format: uuid */
+        component_id: string;
+        pack_size: number;
+      };
+      /** Format: date */
+      cogs_effective_from?: string;
+      cogs_pence?: number;
+      dimensions?: components['schemas']['Dimensions'] | null;
+      image_url?: string | null;
+      manufacturer?: string | null;
+      purchase_vat_rate_bp?: number | null;
+      reorder?: components['schemas']['ReorderSettings'];
+      short_description: string;
+      sku: string;
+      title: string;
+      vat_type?: components['schemas']['VatType'];
+      weight_g: number;
+    };
+    MasterSkuCreateInput: {
+      active?: boolean;
+      barcode?: string | null;
+      bundle?: {
+        /** Format: uuid */
+        component_id: string;
+        pack_size: number;
+      };
+      /** Format: date */
+      cogs_effective_from?: string;
+      cogs_pence?: number;
+      dimensions?: components['schemas']['DimensionsInput'] | null;
+      image_url?: string | null;
+      manufacturer?: string | null;
+      purchase_vat_rate_bp?: number | null;
+      reorder?: components['schemas']['ReorderSettingsInput'];
+      short_description: string;
+      sku: string;
+      title: string;
+      vat_type?: components['schemas']['VatTypeInput'];
+      weight_g: number;
+    };
+    MasterSkuInput: {
+      active: boolean;
+      barcode: string | null;
+      bundle: components['schemas']['BundleInput'] | null;
+      cogs_history: components['schemas']['CogsEntryInput'][];
+      cogs_pence: number | null;
+      /** Format: date-time */
+      created_at: string;
+      dimensions: components['schemas']['DimensionsInput'] | null;
+      /** Format: uuid */
+      id: string;
+      image_url: string | null;
+      listing_count: number;
+      listings: components['schemas']['SkuListingInput'][];
+      manufacturer: string | null;
+      purchase_vat_rate_bp: number | null;
+      reorder: components['schemas']['ReorderSettingsInput'];
+      short_description: string;
+      sku: string;
+      title: string;
+      /** Format: date-time */
+      updated_at: string;
+      vat_history: components['schemas']['VatHistoryEntryInput'][];
+      vat_type: components['schemas']['VatTypeInput'];
+      weight_g: number;
+    };
+    MasterSkuSummary: {
+      active: boolean;
+      bundle: components['schemas']['Bundle'] | null;
+      cogs_pence: number | null;
+      /** Format: uuid */
+      id: string;
+      listing_count: number;
+      sku: string;
+      title: string;
+      /** Format: date-time */
+      updated_at: string;
+      vat_type: components['schemas']['VatType'];
+    };
+    MasterSkuSummaryInput: {
+      active: boolean;
+      bundle: components['schemas']['BundleInput'] | null;
+      cogs_pence: number | null;
+      /** Format: uuid */
+      id: string;
+      listing_count: number;
+      sku: string;
+      title: string;
+      /** Format: date-time */
+      updated_at: string;
+      vat_type: components['schemas']['VatTypeInput'];
+    };
+    MasterSkuUpdate: {
+      active?: boolean;
+      barcode?: string | null;
+      dimensions?: components['schemas']['Dimensions'] | null;
+      image_url?: string | null;
+      manufacturer?: string | null;
+      purchase_vat_rate_bp?: number | null;
+      reorder?: components['schemas']['ReorderSettings'];
+      short_description?: string;
+      title?: string;
+      vat?: {
+        /** Format: date */
+        effective_from: string;
+        vat_type: components['schemas']['VatType'];
+      };
+      weight_g?: number;
+    };
+    MasterSkuUpdateInput: {
+      active?: boolean;
+      barcode?: string | null;
+      dimensions?: components['schemas']['DimensionsInput'] | null;
+      image_url?: string | null;
+      manufacturer?: string | null;
+      purchase_vat_rate_bp?: number | null;
+      reorder?: components['schemas']['ReorderSettingsInput'];
+      short_description?: string;
+      title?: string;
+      vat?: {
+        /** Format: date */
+        effective_from: string;
+        vat_type: components['schemas']['VatTypeInput'];
+      };
+      weight_g?: number;
     };
     MfaConfirmResult: {
       recoveryCodes: string[];
@@ -2224,6 +2667,16 @@ export interface components {
       queued: number;
       type: string;
     };
+    ReorderSettings: {
+      lead_time_days: number;
+      safety_days: number;
+      target_cover_days: number;
+    };
+    ReorderSettingsInput: {
+      lead_time_days: number;
+      safety_days: number;
+      target_cover_days: number;
+    };
     ResetTokenInfo: {
       emailMasked: string;
       /** Format: date-time */
@@ -2279,6 +2732,26 @@ export interface components {
     SignInResultInput: {
       /** @enum {string} */
       next: 'mfa_code' | 'mfa_setup';
+    };
+    SkuListing: {
+      /** Format: uuid */
+      channel_account_id: string;
+      external_id: string;
+      external_sku: string;
+      /** Format: uuid */
+      id: string;
+      provider: components['schemas']['Provider'];
+      title: string | null;
+    };
+    SkuListingInput: {
+      /** Format: uuid */
+      channel_account_id: string;
+      external_id: string;
+      external_sku: string;
+      /** Format: uuid */
+      id: string;
+      provider: components['schemas']['ProviderInput'];
+      title: string | null;
     };
     Terms: {
       /** Format: uri */
@@ -2346,6 +2819,38 @@ export interface components {
         | 'notes'
       )[];
     };
+    VatHistoryEntry: {
+      /** Format: date */
+      effective_from: string;
+      vat_type: components['schemas']['VatType'];
+    };
+    VatHistoryEntryInput: {
+      /** Format: date */
+      effective_from: string;
+      vat_type: components['schemas']['VatTypeInput'];
+    };
+    VatRate: {
+      /** Format: date */
+      effective_from: string;
+      rate_bp: number;
+      vat_type: components['schemas']['VatType'];
+    };
+    VatRateInput: {
+      /** Format: date */
+      effective_from: string;
+      rate_bp: number;
+      vat_type: components['schemas']['VatTypeInput'];
+    };
+    VatRateList: {
+      items: components['schemas']['VatRate'][];
+    };
+    VatRateListInput: {
+      items: components['schemas']['VatRateInput'][];
+    };
+    /** @enum {string} */
+    VatType: 'standard' | 'reduced' | 'zero' | 'no_vat';
+    /** @enum {string} */
+    VatTypeInput: 'standard' | 'reduced' | 'zero' | 'no_vat';
     WorkspaceChoice: {
       companies: number;
       /** Format: uuid */
@@ -3645,6 +4150,662 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['BulkPreview'];
+        };
+      };
+    };
+  };
+  importCogs: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          csv: string;
+          dry_run: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CsvImportReport'];
+        };
+      };
+    };
+  };
+  listListings: {
+    parameters: {
+      query?: {
+        channel_account_id?: string;
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        mapped?: 'true' | 'false';
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+        q?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['Listing'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
+        };
+      };
+    };
+  };
+  mapListing: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        listingId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uuid */
+          master_sku_id: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Listing'];
+        };
+      };
+    };
+  };
+  unmapListing: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        listingId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Listing'];
+        };
+      };
+    };
+  };
+  listManufacturers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ManufacturerList'];
+        };
+      };
+    };
+  };
+  exportMappings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description File content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+    };
+  };
+  importMappings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          csv: string;
+          dry_run: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CsvImportReport'];
+        };
+      };
+    };
+  };
+  listMasterSkus: {
+    parameters: {
+      query?: {
+        active?: 'true' | 'false';
+        bundles?: 'true' | 'false';
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+        q?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['MasterSkuSummary'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
+        };
+      };
+    };
+  };
+  createMasterSku: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MasterSkuCreateInput'];
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MasterSku'];
+        };
+      };
+    };
+  };
+  getMasterSku: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MasterSku'];
+        };
+      };
+    };
+  };
+  updateMasterSku: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MasterSkuUpdateInput'];
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MasterSku'];
+        };
+      };
+    };
+  };
+  listCogs: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CogsHistory'];
+        };
+      };
+    };
+  };
+  setCogs: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skuId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          cogs_pence: number;
+          /** Format: date */
+          effective_from: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CogsEntry'];
+        };
+      };
+    };
+  };
+  listVatRates: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VatRateList'];
+        };
+      };
+    };
+  };
+  createVatRate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: date */
+          effective_from: string;
+          rate_bp: number;
+          vat_type: components['schemas']['VatTypeInput'];
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VatRate'];
         };
       };
     };
