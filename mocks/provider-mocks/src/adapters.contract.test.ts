@@ -1,6 +1,7 @@
 import { Secret } from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { createAdsAdapter } from '@omnibridge/provider-ads';
+import { withAmazonBackoff } from '@omnibridge/governor-amazon';
 import { createAmazonAdapter } from '@omnibridge/provider-amazon';
 import { createDpdAdapter } from '@omnibridge/provider-dpd';
 import { createEbayAdapter } from '@omnibridge/provider-ebay';
@@ -121,6 +122,29 @@ describe('adapters against provider-mocks (INT-1)', () => {
     const revoked = account();
     on('amazon', revoked, 'invalid_grant');
     await expect(adapter.authenticate(revoked)).rejects.toMatchObject({ revoked: true });
+  });
+
+  it('[RL-1] a 429 storm from the mock backs off with full jitter and recovers, learning the rate', async () => {
+    const adapter = amazon();
+    const credential = account();
+    const token = await adapter.authenticate(credential);
+    on('amazon', credential, 'rate_limit_storm', 3);
+    const waits: number[] = [];
+    const learned: number[] = [];
+    const orders = await withAmazonBackoff(() => adapter.ordersUpdatedSince(token, since), {
+      sleep: (ms) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+      random: () => 0.5,
+      onRateLimit: (rate) => {
+        learned.push(rate);
+      },
+    });
+    expect(orders.items.map((o) => o.externalId)).toEqual(['MOCK-1002', 'MOCK-1003']);
+    // Half of 1 s, 2 s and 4 s: full jitter under the growing cap.
+    expect(waits).toEqual([500, 1_000, 2_000]);
+    expect(learned).toEqual([0.0167, 0.0167, 0.0167]);
   });
 
   it('[INT-1] Evri: services, parcel, label and tracking; an INVALID parcel is a typed rejection', async () => {

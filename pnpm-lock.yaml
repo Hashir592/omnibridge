@@ -514,6 +514,9 @@ importers:
       '@omnibridge/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
+      '@omnibridge/governor-amazon':
+        specifier: workspace:*
+        version: link:../../packages/governors/amazon
       '@omnibridge/provider-ads':
         specifier: workspace:*
         version: link:../../packages/providers/ads

@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Nov 2026 by S3 (M07 end).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 21 Nov 2026 by S3 (M07 end; T-0701 and T-0702 done).
 
 ## Now
 
@@ -9,7 +9,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M07 built** (`docs/reviews/M07-end-report.md`):
   - contract #131, merged;
   - T-0701 #133, merged, full gate green;
-  - T-0702 #134, critical, auto-merge on. S4 reviews it after it merges (handoff in `docs/handoffs/`).
+  - T-0702 #134, critical, merged with the full gate green. S4 reviews it now (handoff `docs/handoffs/20261121-1909-S3-to-S4.md`);
+  - the follow-up with the mock-storm test and the completeness checklist.
 - **Milestone:** M07 + M08 is one S4 milestone, so the S4 milestone review comes at M08 end.
 - **Next (S3):** M08 then M09, per `docs/handoffs/20261121-2200-S1-to-S3.md`, once M07 is merged and S1 confirms.
 - **S2:** T-0314 Connections screens are in PR #132, on the M07 client. S3's answers to S2's OAuth and CS-6 questions are in `docs/handoffs/20261121-1900-S3-to-S2.md`.

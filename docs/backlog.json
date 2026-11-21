@@ -1931,7 +1931,7 @@
         "CI full gate green at merge"
       ],
       "risk": "critical",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0314",
