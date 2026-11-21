@@ -373,9 +373,10 @@ export class NotificationRepository implements NotificationStore {
     return Number(rows[0]?.n ?? 0);
   }
 
-  /** The ids of open notifications of one type and record kind (rules that resolve, NTF-1). */
-  /** Open platform notices of a type and record kind, by record ID (0035 definer; the worker). */
-  /** Open platform notices of a type and record kind; with `raisedBefore`, only older ones. */
+  /**
+   * Open platform notices of a type and record kind, by record ID (0035 definer; the worker); with
+   * `raisedBefore`, only older ones.
+   */
   async openPlatformRecordIds(type: string, kind: string, raisedBefore?: Date): Promise<string[]> {
     const { rows } = await (
       raisedBefore === undefined

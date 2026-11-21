@@ -210,7 +210,7 @@ const app = buildWebApp({
           await queue.send(listingsDiscoverJob, {
             ctx,
             channelAccountId,
-            idempotencyKey: `listings.discover:connect:${String(at.getTime())}`,
+            idempotencyKey: `listings.discover:connect:${channelAccountId}:${String(at.getTime())}`,
             payload: {},
           });
         },

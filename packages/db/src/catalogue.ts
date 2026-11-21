@@ -196,6 +196,13 @@ const numOrNull = (value: string | number | null): number | null =>
   value === null ? null : Number(value);
 
 const isUniqueViolation = (err: unknown): boolean => pgCode(err) === '23505';
+const constraintOf = (err: unknown): string | undefined =>
+  typeof err === 'object' &&
+  err !== null &&
+  'constraint' in err &&
+  typeof err.constraint === 'string'
+    ? err.constraint
+    : undefined;
 
 /** The catalogue triggers' own SQLSTATE (migration 0042). */
 const isCatalogueRule = (err: unknown): boolean => pgCode(err) === 'OBK01';
@@ -595,7 +602,7 @@ export class CatalogueRepository {
             ? []
             : [
                 filter.mapped
-                  ? sql`l.master_sku_id IS NOT NULL`
+                  ? sql`l.master_sku_id IS NOT NULL AND l.ended_at IS NULL`
                   : sql`l.master_sku_id IS NULL AND l.ended_at IS NULL`,
               ]),
           ...(filter.channelAccountId === undefined
@@ -716,8 +723,11 @@ export class CatalogueRepository {
     return new Map(rows.map((r) => [r.id, { masterSkuId: r.master_sku_id }] as const));
   }
 
-  /** Every listing for the mapping CSV export, oldest first. */
-  async exportListings(ctx: TenantContext): Promise<ListingExportRow[]> {
+  /**
+   * Every listing for the mapping CSV export, oldest first; undefined when there are more than
+   * `cap`, so the caller refuses rather than export part of the catalogue.
+   */
+  async exportListings(ctx: TenantContext, cap: number): Promise<ListingExportRow[] | undefined> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       // LEFT JOIN: channel accounts are company-scoped, listings are not (ARCHITECTURE 6.1).
       const { rows } = await sql<{
@@ -738,7 +748,8 @@ export class CatalogueRepository {
             ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
          WHERE l.workspace_id = ${ctx.workspaceId}::uuid
          ORDER BY l.discovered_at, l.id
-         LIMIT 100000`.execute(trx);
+         LIMIT ${cap + 1}`.execute(trx);
+      if (rows.length > cap) return undefined;
       return rows.map((r) => ({
         id: r.id,
         accountName: r.account_name,
@@ -763,8 +774,8 @@ export class CatalogueRepository {
     provider: ListingProvider,
     items: readonly DiscoveredListing[],
     seenAt: Date,
-  ): Promise<{ created: number; autoMapped: MappingChange[] }> {
-    if (items.length === 0) return { created: 0, autoMapped: [] };
+  ): Promise<{ created: number; skipped: number; autoMapped: MappingChange[] }> {
+    if (items.length === 0) return { created: 0, skipped: 0, autoMapped: [] };
     return this.#write(ctx, async (trx) => {
       const codes = await trx
         .selectFrom('app.master_skus')
@@ -778,8 +789,16 @@ export class CatalogueRepository {
         .execute();
       const skuByCode = new Map(codes.map((c) => [c.sku, c.id] as const));
       let created = 0;
+      let skipped = 0;
       const autoMapped: MappingChange[] = [];
-      for (const item of items) {
+      for (const raw of items) {
+        // A code longer than the column cannot be matched or written to a channel: skip it.
+        if (raw.externalSku.length > 200 || raw.externalId.length > 200) {
+          skipped += 1;
+          continue;
+        }
+        // A long title is only a label: keep its start (the column holds 500).
+        const item = { ...raw, title: raw.title === null ? null : raw.title.slice(0, 500) };
         const match = skuByCode.get(item.externalSku) ?? null;
         const row = await trx
           .insertInto('app.listings')
@@ -827,7 +846,7 @@ export class CatalogueRepository {
           }
         }
       }
-      return { created, autoMapped };
+      return { created, skipped, autoMapped };
     });
   }
 
@@ -900,6 +919,7 @@ export class CatalogueRepository {
       .select(['id', 'channel_account_id', 'provider', 'external_sku', 'external_id', 'title'])
       .where('workspace_id', '=', ctx.workspaceId)
       .where('master_sku_id', '=', id)
+      .where('ended_at', 'is', null)
       .orderBy('discovered_at')
       .execute();
     const dimensions =
@@ -942,8 +962,15 @@ export class CatalogueRepository {
     try {
       return await withTenantTransaction(this.#db, ctx, fn);
     } catch (err) {
-      if (isUniqueViolation(err)) throw new CatalogueRefused('sku_taken');
-      if (isCatalogueRule(err)) throw new CatalogueRefused('bundle_locked');
+      if (isUniqueViolation(err) && constraintOf(err) === 'master_skus_code') {
+        throw new CatalogueRefused('sku_taken');
+      }
+      if (isCatalogueRule(err)) {
+        const message = err instanceof Error ? err.message : '';
+        throw new CatalogueRefused(
+          message.includes('plain SKU') ? 'component_is_bundle' : 'bundle_locked',
+        );
+      }
       throw err;
     }
   }
@@ -977,7 +1004,8 @@ function summarySelect(today: Day, extra = sql``) {
                AND h.effective_from <= ${today}::date
              ORDER BY h.effective_from DESC LIMIT 1) * coalesce(s.pack_size, 1) AS cogs_pence,
            (SELECT count(*) FROM app.listings l
-             WHERE l.workspace_id = s.workspace_id AND l.master_sku_id = s.id) AS listing_count
+             WHERE l.workspace_id = s.workspace_id AND l.master_sku_id = s.id
+               AND l.ended_at IS NULL) AS listing_count
            ${extra}
       FROM app.master_skus s
       LEFT JOIN app.master_skus c

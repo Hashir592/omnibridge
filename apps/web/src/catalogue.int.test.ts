@@ -146,6 +146,17 @@ describe('catalogue routes (T-0801)', () => {
     });
     const id = String(plain.body.id);
     expect((await call(server, 'POST', '/catalogue/skus', sku('API-1'))).status).toBe(409);
+    // A plain SKU needs a VAT type: a field error the form can point at.
+    const noVat = await call(
+      server,
+      'POST',
+      '/catalogue/skus',
+      sku('API-NOVAT', { vat_type: undefined }),
+    );
+    expect(noVat.status).toBe(400);
+    expect(noVat.body.errors).toEqual([
+      expect.objectContaining({ location: 'body', path: 'vat_type' }),
+    ]);
 
     const bundle = await call(server, 'POST', '/catalogue/skus', bundleBody('API-1-X3', id, 3));
     expect(bundle.status).toBe(201);

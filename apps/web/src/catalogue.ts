@@ -38,6 +38,7 @@ export interface CatalogueOptions {
 const notFound = () => Promise.reject(new ApiError({ status: 404, code: 'not_found' }));
 const iso = (d: Date | null) => (d === null ? null : d.toISOString());
 const MAX_IMPORT_ROWS = 20_000;
+const MAX_EXPORT_ROWS = 100_000;
 
 function refused(err: unknown): never {
   if (err instanceof CatalogueRefused) {
@@ -263,6 +264,20 @@ export function catalogueHandlers(options?: CatalogueOptions): Handlers<typeof c
     }),
 
     createMasterSku: async ({ tenant, session, body: input, request }) => {
+      // Field problems are validation errors the form can point at (ADR-049).
+      const missing =
+        input.bundle === undefined && input.vat_type === undefined
+          ? { path: 'vat_type', message: 'Choose a VAT type' }
+          : input.cogs_effective_from !== undefined && input.cogs_pence === undefined
+            ? { path: 'cogs_pence', message: 'Enter the COGS for this date' }
+            : undefined;
+      if (missing !== undefined) {
+        throw new ApiError({
+          status: 400,
+          code: 'validation_failed',
+          errors: [{ location: 'body', ...missing }],
+        });
+      }
       const at = now();
       let id: string;
       try {
@@ -617,14 +632,25 @@ export function catalogueHandlers(options?: CatalogueOptions): Handlers<typeof c
         let changed = 0;
         for (const row of wanted) {
           if (row.current === row.skuId) continue;
-          // A CSV row sets the mapping it names: a remap is an unmap then a map (CAT-5).
-          if (row.current !== null) await repo.unmapListing(tenant, row.listingId, at);
-          if (row.skuId !== null) {
-            await repo.mapListing(tenant, row.listingId, row.skuId, 'manual', session.userId, at);
-          }
+          // A CSV row sets the mapping it names: a remap is an unmap then a map (CAT-5). The
+          // previous SKU is the one the unmap found under its row lock, not the earlier read.
+          const unmapped = await repo.unmapListing(tenant, row.listingId, at);
+          const mapped =
+            row.skuId === null
+              ? null
+              : await repo.mapListing(
+                  tenant,
+                  row.listingId,
+                  row.skuId,
+                  'manual',
+                  session.userId,
+                  at,
+                );
+          const previous = unmapped?.previousMasterSkuId ?? null;
+          if (previous === row.skuId || (unmapped === null && mapped === null)) continue;
           await o.mappingChanged(
             tenant,
-            { listingId: row.listingId, masterSkuId: row.skuId, previousMasterSkuId: row.current },
+            { listingId: row.listingId, masterSkuId: row.skuId, previousMasterSkuId: previous },
             at,
           );
           changed += 1;
@@ -640,7 +666,14 @@ export function catalogueHandlers(options?: CatalogueOptions): Handlers<typeof c
     },
 
     exportMappings: async ({ tenant }) => {
-      const rows = await repo.exportListings(tenant);
+      const rows = await repo.exportListings(tenant, MAX_EXPORT_ROWS);
+      if (rows === undefined) {
+        throw new ApiError({
+          status: 400,
+          code: 'validation_failed',
+          detail: 'Too many listings for one export.',
+        });
+      }
       const text =
         UTF8_BOM +
         toCsv(

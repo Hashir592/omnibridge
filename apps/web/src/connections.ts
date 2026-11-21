@@ -257,7 +257,8 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
                 id: taken.channelAccountId,
               });
             }
-            await o.oauth.connected?.(ctx, taken.channelAccountId, now());
+            // CAT-5: a sales channel's first listing scan (Amazon joins with M18).
+            if (provider === 'ebay') await o.oauth.connected?.(ctx, taken.channelAccountId, now());
             await o.oauth.audit.record(ctx, {
               action: 'connection.reauthorised',
               actor: { kind: 'user', userId: taken.userId },

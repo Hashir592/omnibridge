@@ -137,7 +137,9 @@ export async function runListingScan(
     } while (page !== undefined && pages < MAX_SCAN_PAGES);
     const complete = page === undefined;
     await ports.tenancy.runWorkspace(actor, async (ctx) => {
-      if (complete) await scan.complete(ctx, accountId, startedAt);
+      // An empty answer is more likely a provider hiccup than every listing ending at once:
+      // only a scan that found something concludes (the listings it did not see have ended).
+      if (complete && listings > 0) await scan.complete(ctx, accountId, startedAt);
       const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
         tokenRefreshed: auth.refreshed,
       });

@@ -295,7 +295,7 @@ describe('catalogue (T-0801)', () => {
       ],
       new Date(NOW.getTime() + 60_000),
     );
-    expect(again).toEqual({ created: 0, autoMapped: [] });
+    expect(again).toEqual({ created: 0, skipped: 0, autoMapped: [] });
     expect((await repo.getListing(ctx, mapped))?.masterSku).toBeNull();
   });
 
@@ -401,6 +401,68 @@ describe('catalogue (T-0801)', () => {
     expect(ended).toHaveLength(1);
     const queue = await repo.listListings(ctx, { mapped: false, offset: 0, limit: 10 }, 100);
     expect(queue.items.map((l) => l.externalSku)).toEqual(['KEPT-1']);
+  });
+
+  it('[CAT-5] an ended listing leaves the SKU detail and its listing count', async () => {
+    const ctx = await workspace();
+    const ebay = await account(ctx);
+    const sku = await repo.createSku(ctx, plain('END-1'), null, NOW);
+    await repo.upsertDiscovered(
+      ctx,
+      ebay,
+      'ebay',
+      [
+        {
+          externalSku: 'END-1',
+          externalId: 'e1',
+          title: null,
+          fulfilment: null,
+          inventoryApi: true,
+          quantity: 1,
+        },
+      ],
+      NOW,
+    );
+    expect((await repo.getSku(ctx, sku, '2026-11-21'))?.listingCount).toBe(1);
+    const later = new Date(NOW.getTime() + 60_000);
+    await repo.endUnseen(ctx, ebay, later, later);
+    const detail = await repo.getSku(ctx, sku, '2026-11-21');
+    expect(detail?.listingCount).toBe(0);
+    expect(detail?.listings).toEqual([]);
+    const mapped = await repo.listListings(ctx, { mapped: true, offset: 0, limit: 10 }, 100);
+    expect(mapped.total).toBe(0);
+  });
+
+  it('[CAT-5] a long title is cut to fit and an over-long code is skipped, so one row never fails a page', async () => {
+    const ctx = await workspace();
+    const site = await account(ctx, 'website');
+    const result = await repo.upsertDiscovered(
+      ctx,
+      site,
+      'website',
+      [
+        {
+          externalSku: 'LONG-1',
+          externalId: 'w1',
+          title: 'T'.repeat(900),
+          fulfilment: null,
+          inventoryApi: null,
+          quantity: 1,
+        },
+        {
+          externalSku: 'S'.repeat(201),
+          externalId: 'w2',
+          title: null,
+          fulfilment: null,
+          inventoryApi: null,
+          quantity: 1,
+        },
+      ],
+      NOW,
+    );
+    expect(result).toMatchObject({ created: 1, skipped: 1 });
+    const stored = await repo.listListings(ctx, { offset: 0, limit: 10 }, 100);
+    expect(stored.items[0]?.title).toHaveLength(500);
   });
 
   it('[TEN-6] the catalogue of one workspace is invisible to another', async () => {
