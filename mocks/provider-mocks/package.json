@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@omnibridge/crypto": "workspace:*",
+    "@omnibridge/governor-amazon": "workspace:*",
     "@omnibridge/provider-ads": "workspace:*",
     "@omnibridge/provider-amazon": "workspace:*",
     "@omnibridge/provider-dpd": "workspace:*",
