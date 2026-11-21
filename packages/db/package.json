@@ -31,6 +31,8 @@
     "@omnibridge/core": "workspace:*",
     "@omnibridge/crypto": "workspace:*",
     "@omnibridge/files": "workspace:*",
+    "@omnibridge/governor-amazon": "workspace:*",
+    "@omnibridge/governor-ebay": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/queue": "workspace:*",
     "kysely": "0.29.7",

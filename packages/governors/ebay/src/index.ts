@@ -47,3 +47,11 @@ export class DailyCallBudget<Api extends string> {
     return true;
   }
 }
+
+export {
+  EBAY_DAILY_CAPS,
+  EBAY_THRESHOLDS,
+  EbayGovernor,
+  type EbayBudgetStore,
+  type EbayReservation,
+} from './budget.ts';

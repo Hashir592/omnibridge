@@ -220,6 +220,33 @@ export class ConnectionRepository {
     });
   }
 
+  /**
+   * The kill switch (SAFE-2): pauses or resumes every automated write to one account. True when
+   * it changed, so the caller writes its audit row and, on resume, sends the waiting writes.
+   */
+  async setPaused(ctx: TenantContext, id: string, paused: boolean, at: Date): Promise<boolean> {
+    const row = await withTenantTransaction(this.#db, ctx, (trx) =>
+      trx
+        .updateTable('app.channel_accounts')
+        .set({ paused_at: paused ? at : null })
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('id', '=', id)
+        .where('paused_at', paused ? 'is' : 'is not', null)
+        .returning('id')
+        .executeTakeFirst(),
+    );
+    return row !== undefined;
+  }
+
+  /** The global maintenance switch (SAFE-3), as every workspace reads it. */
+  maintenance(ctx: TenantContext): Promise<{ on: boolean; since: Date | null }> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{ maintenance: boolean; since: Date | null }>`
+        SELECT maintenance, since FROM app.maintenance_state()`.execute(trx);
+      return { on: rows[0]?.maintenance === true, since: rows[0]?.since ?? null };
+    });
+  }
+
   /** Any other failed call: a stable code only, never a provider message or a value. */
   async recordError(ctx: TenantContext, id: string, code: string, at: Date): Promise<void> {
     await withTenantTransaction(this.#db, ctx, (trx) =>

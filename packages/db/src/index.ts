@@ -144,3 +144,18 @@ export {
   oauthStateWorkspace,
   type TakenOAuthState,
 } from './oauth-states.ts';
+export {
+  OutboundWriteRepository,
+  type NewOutboundWrite,
+  type OutboundState,
+  type OutboundWrite,
+  type PauseReason,
+} from './outbound.ts';
+export {
+  BULK_TOKEN_TTL_MS,
+  BulkConfirmationRepository,
+  type BulkAction,
+  type BulkParams,
+  type BulkTake,
+} from './bulk-confirmations.ts';
+export { AmazonBucketRepository, EbayBudgetRepository } from './rate-limits.ts';
