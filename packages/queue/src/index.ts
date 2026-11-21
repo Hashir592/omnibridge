@@ -77,6 +77,7 @@ export {
   JOBS,
   listingMappedJob,
   listingsDiscoverJob,
+  listingsDiscoverAccountsJob,
   listingsDiscoverSweepJob,
   notifyEmailJob,
   notifyPlatformEmailSweepJob,

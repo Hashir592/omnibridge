@@ -3,6 +3,7 @@ import {
   accessToken,
   accountOf,
   form,
+  MOCK_LISTINGS,
   MOCK_ORDERS,
   type MockApp,
   type ScenarioStore,
@@ -117,6 +118,31 @@ export function ebayRoutes(app: MockApp, scenarios: ScenarioStore): void {
           lineItems: [
             { lineItemId: `${o.id}-1`, sku: o.sku, quantity: o.quantity, title: 'Mock item' },
           ],
+        })),
+      };
+    },
+  );
+
+  // CAT-5: the Inventory API's items (no FBA on eBay).
+  app.get<{ Querystring: { limit?: string; offset?: string } }>(
+    '/ebay/sell/inventory/v1/inventory_item',
+    (request, reply) => {
+      if (callAccount(request.headers.authorization, reply) === undefined) return reply;
+      const all = MOCK_LISTINGS.filter((l) => !l.fba);
+      const offset = Number(request.query.offset ?? '0');
+      const limit = Math.min(Number(request.query.limit ?? String(PAGE)), PAGE);
+      const page = all.slice(offset, offset + limit);
+      return {
+        total: all.length,
+        size: page.length,
+        limit,
+        offset,
+        ...(offset + limit < all.length ? { next: `mock?offset=${String(offset + limit)}` } : {}),
+        inventoryItems: page.map((l) => ({
+          sku: l.sku,
+          locale: 'en_GB',
+          product: { title: l.title },
+          availability: { shipToLocationAvailability: { quantity: l.quantity } },
         })),
       };
     },

@@ -188,6 +188,7 @@ describe('audit retention job (AUD-3)', () => {
         'security.scan-sweep': () => Promise.resolve(),
         'platform.health-digest': () => Promise.resolve(),
         'outbound.recover-sweep': () => Promise.resolve(),
+        'listings.discover-sweep': () => Promise.resolve(),
       },
       logger,
     );
@@ -195,6 +196,8 @@ describe('audit retention job (AUD-3)', () => {
       expect.arrayContaining([
         // T-0702: the outbound safety net, every ten minutes.
         expect.objectContaining({ name: 'outbound.recover-sweep', cron: '*/10 * * * *' }),
+        // T-0801: daily listing discovery (CAT-5), in the heavy window.
+        expect.objectContaining({ name: 'listings.discover-sweep', cron: '15 3 * * *' }),
         expect.objectContaining({
           name: 'audit.retention-sweep',
           cron: '30 2 * * *',

@@ -3,6 +3,7 @@ import {
   accessToken,
   accountOf,
   form,
+  MOCK_LISTINGS,
   MOCK_ORDERS,
   type MockProvider,
   type MockApp,
@@ -102,6 +103,29 @@ export function amazonRoutes(app: MockApp, scenarios: ScenarioStore): void {
             NumberOfItemsUnshipped: o.quantity,
           })),
         },
+      };
+    },
+  );
+
+  // CAT-5: searchListingsItems, with the FBA listing on its Amazon channel code.
+  app.get<{ Params: { sellerId: string } }>(
+    '/amazon/listings/2021-08-01/items/:sellerId',
+    (request, reply) => {
+      const token = request.headers['x-amz-access-token'];
+      if (
+        spApiAccount(scenarios, typeof token === 'string' ? token : undefined, reply) === undefined
+      ) {
+        return reply;
+      }
+      return {
+        numberOfResults: MOCK_LISTINGS.length,
+        items: MOCK_LISTINGS.map((l) => ({
+          sku: l.sku,
+          summaries: [{ marketplaceId: 'A1F83G8C2ARO7P', asin: `B0${l.id}`, itemName: l.title }],
+          fulfillmentAvailability: [
+            { fulfillmentChannelCode: l.fba ? 'AMAZON_EU' : 'DEFAULT', quantity: l.quantity },
+          ],
+        })),
       };
     },
   );

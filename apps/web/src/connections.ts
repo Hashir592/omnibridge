@@ -68,6 +68,8 @@ export interface ConnectionOptions {
     notifier: Pick<Notifier, 'resolve'>;
     /** https://app.example: the provider sends the browser back under it. */
     appOrigin: string;
+    /** CAT-5: queues the first listing discovery of a newly connected account (T-0801). */
+    connected?: (ctx: TenantContext, channelAccountId: string, at: Date) => Promise<void>;
   };
   logger: Logger;
   now?: () => Date;
@@ -255,6 +257,7 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
                 id: taken.channelAccountId,
               });
             }
+            await o.oauth.connected?.(ctx, taken.channelAccountId, now());
             await o.oauth.audit.record(ctx, {
               action: 'connection.reauthorised',
               actor: { kind: 'user', userId: taken.userId },

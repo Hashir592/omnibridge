@@ -3,6 +3,7 @@ import {
   accessToken,
   accountOf,
   form,
+  MOCK_LISTINGS,
   MOCK_ORDERS,
   type MockApp,
   type ScenarioStore,
@@ -179,6 +180,19 @@ export function websiteRoutes(app: MockApp, scenarios: ScenarioStore): void {
         status: 'processing',
         customer: { email: 'PIIMARK-web@example.test' },
         lines: [{ id: `${o.id}-1`, sku: o.sku, quantity: o.quantity }],
+      })),
+      next_cursor: null,
+    };
+  });
+  // CAT-5: the products the website sells (provisional until M11).
+  app.get('/website/api/products', (request, reply) => {
+    if (key(request.headers['x-api-key'], reply) === undefined) return reply;
+    return {
+      products: MOCK_LISTINGS.filter((l) => !l.fba).map((l) => ({
+        id: l.id,
+        sku: l.sku,
+        title: l.title,
+        quantity: l.quantity,
       })),
       next_cursor: null,
     };

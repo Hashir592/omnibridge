@@ -13,6 +13,7 @@ import {
   retryAfterMs,
   type AccessToken,
   type ChannelAdapter,
+  type ListingInfo,
   type OrderSummary,
   type Page,
   type ProviderHttp,
@@ -57,6 +58,32 @@ const OrdersV1 = defineParser(
       ),
       NextToken: z.string().optional(),
     }),
+  }),
+);
+
+/** CAT-5: searchListingsItems with summaries and fulfilment availability (checked in M18). */
+const ListingsSearchV1 = defineParser(
+  'amazon',
+  'listings_search',
+  1,
+  z.object({
+    items: z.array(
+      z.object({
+        sku: z.string().min(1),
+        summaries: z
+          .array(z.object({ asin: z.string().optional(), itemName: z.string().optional() }))
+          .optional(),
+        fulfillmentAvailability: z
+          .array(
+            z.object({
+              fulfillmentChannelCode: z.string(),
+              quantity: z.number().int().min(0).optional(),
+            }),
+          )
+          .optional(),
+      }),
+    ),
+    pagination: z.object({ nextToken: z.string().optional() }).optional(),
   }),
 );
 
@@ -158,6 +185,31 @@ export function createAmazonAdapter(options: AmazonAdapterOptions): ChannelAdapt
           lines: [],
         })),
         next: body.payload.NextToken,
+      };
+    },
+
+    async listListings(access, page): Promise<Page<ListingInfo>> {
+      const url = new URL(`listings/2021-08-01/items/${encodeURIComponent(options.sellerId)}`, api);
+      url.searchParams.set('marketplaceIds', UK_MARKETPLACE_ID);
+      url.searchParams.set('includedData', 'summaries,fulfillmentAvailability');
+      if (page !== undefined) url.searchParams.set('pageToken', page);
+      const res = await options.http.request('amazon', { url, headers: headers(access) });
+      const body = ListingsSearchV1.parse(await spJson(res));
+      return {
+        items: body.items.map((i) => {
+          const channel = i.fulfillmentAvailability?.[0];
+          // DEFAULT is merchant-fulfilled; any other code (AMAZON_EU, …) is FBA (INV-9).
+          const fba = channel !== undefined && channel.fulfillmentChannelCode !== 'DEFAULT';
+          return {
+            externalSku: i.sku,
+            externalId: i.summaries?.[0]?.asin ?? i.sku,
+            title: i.summaries?.[0]?.itemName ?? null,
+            fulfilment: fba ? 'fba' : 'mfn',
+            inventoryApi: null,
+            quantity: channel?.quantity ?? null,
+          };
+        }),
+        next: body.pagination?.nextToken,
       };
     },
 

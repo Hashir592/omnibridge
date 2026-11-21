@@ -202,6 +202,14 @@ export const listingsDiscoverJob = defineJob({
   expireInSeconds: 1_800,
 });
 
+/** CAT-5: the daily fan-out inside one workspace: one listings.discover job per sales account. */
+export const listingsDiscoverAccountsJob = defineJob({
+  type: 'listings.discover_accounts',
+  payload: z.object({}).strict(),
+  retry: { limit: 4, delaySeconds: 60, backoff: true, maxDelaySeconds: 1_800 },
+  expireInSeconds: 300,
+});
+
 /**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
@@ -226,6 +234,7 @@ export const JOBS: readonly JobDefinition[] = [
   outboundRecoverJob,
   listingMappedJob,
   listingsDiscoverJob,
+  listingsDiscoverAccountsJob,
 ];
 
 /**

@@ -41,6 +41,7 @@ import {
   OutboundQueue,
   QUEUE_SCHEMA,
   listingMappedJob,
+  listingsDiscoverJob,
 } from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
 import { buildWebApp } from './app.ts';
@@ -204,6 +205,15 @@ const app = buildWebApp({
         audit: new AuditLog(main.db),
         notifier: new Notifier({ store: new NotificationRepository(main.db) }),
         appOrigin: process.env.APP_ORIGIN ?? origins[0] ?? '',
+        // CAT-5: discovery runs on connect as well as daily.
+        connected: async (ctx, channelAccountId, at) => {
+          await queue.send(listingsDiscoverJob, {
+            ctx,
+            channelAccountId,
+            idempotencyKey: `listings.discover:connect:${String(at.getTime())}`,
+            payload: {},
+          });
+        },
       },
       logger,
     };
