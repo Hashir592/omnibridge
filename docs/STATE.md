@@ -1,16 +1,17 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 22 Nov 2026 by S3 (M08 end; T-0801 in PR #141; M09 next).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 22 Nov 2026 by S3 (M09 end; T-0901 in PR #143).
 
 ## Now
 
 - **Phase:** B, local Docker only. Plan of 12 Nov 2026 (ADR-054), fast lane from M07 (ADR-077). Module order is in `docs/plan/MODULES.md`.
 - **Closed:** M01 to M05 (S4 M05 end APPROVED, `docs/reviews/M05-end.md`). The M06 site pieces are merged; it waits on the client's legal details.
 - **M07 built** (`docs/reviews/M07-end-report.md`): #131, #133, #134 (critical; S4 FIX REQUIRED, `docs/reviews/M07-T0702-findings.md`), #137, #138. The Major F-M07-T0702-01 is fixed in #141; the Minor goes to M15.
-- **M08 built** (`docs/reviews/M08-end-report.md`): contract #139 merged; T-0801 #141 (auto-merge, full gate in CI).
-- **Milestone:** S4 reviews M07 + M08 now (`docs/handoffs/20261122-0100-S3-to-S4.md`). The next is M09 + M10.
-- **Next (S3):** M09: contract PR, then T-0901 (critical; Hashir's go came with the 21 Nov paste).
-- **S2:** T-0316 catalogue screens can start on the M08 client (`docs/handoffs/20261121-1950-S3-to-S2.md`).
+- **M08 built** (`docs/reviews/M08-end-report.md`): contract #139 and T-0801 #141, merged.
+- **M09 built** (`docs/reviews/M09-end-report.md`): contract #142 merged; T-0901 #143 (critical, auto-merge, full gate in CI).
+- **S4:** the milestone review of M07 + M08 (`docs/handoffs/20261122-0100-S3-to-S4.md`) and the critical review of T-0901 (`docs/handoffs/20261122-0300-S3-to-S4.md`). The next milestone is M09 + M10.
+- **Next (S3):** M10, when Hashir pastes it.
+- **S2:** T-0316 catalogue screens (M08 client); T-0317 stock screens (M09 client; note `docs/handoffs/20261122-0300-S3-to-S2.md`).
 
 ## M08 in short (what later modules use)
 
@@ -44,6 +45,13 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - Carriers and website: a cap of 4.
   - Never import one governor from the other, and never share a retry helper (RL-3, dependency-cruiser).
 - **Mocks:** `POST /_mock/scenarios {provider, account, scenario}` per account. Evri, DPD, website and Ads endpoints are provisional until their modules.
+
+## M09 in short (what later modules use)
+
+- **Stock engine:** `StockEngine` (`packages/db/src/stock.ts`) joins the caller's transaction. M10 calls `reserve` (which returns `oversold`), `release` and `dispatch` with the order line and listing; M12 calls `dispatch`; refunds call `returnToStock`.
+- **Back-fill:** M10 implements `UnmappedDemand.openLines(listingId)` for CAT-6.
+- **Pushes:** they go only through `OutboundQueue`, one write per listing, on a target change. eBay and website only; Amazon joins in M18.
+- **Push results:** the worker's `outbound.send` settle hook records them (INV-8). Reconciliation runs after each complete listing scan (INV-7).
 
 ## Follow-ups noted (for S1 to place)
 

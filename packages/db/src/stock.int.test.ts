@@ -311,7 +311,7 @@ describe('stock engine (T-0901)', () => {
     expect(pick(await latest(w), [w.listings.ebay2, w.listings.website])).toEqual([0, 0]);
   });
 
-  it('[AT-4] [INV-4] one sale queues the lower quantity for every other mapped listing; the seller gets none', async () => {
+  it('[AT-4] [INV-4] [INV-9] one sale queues the lower quantity for every other mapped listing; FBA and the seller get none', async () => {
     const w = await world(10);
     await sendAll(w);
     await sell(w, w.listings.ebay1, 1);
@@ -419,7 +419,7 @@ describe('stock engine (T-0901)', () => {
     ).rejects.toMatchObject({ code: 'version_conflict' });
   });
 
-  it('[AT-27] C7.3 FBA cannot be manual; an unmapped listing gets no writes at all', async () => {
+  it('[AT-27] [INV-9] C7.3 FBA cannot be manual; an unmapped listing gets no writes at all', async () => {
     const w = await world(30);
     await expect(
       engine().saveAllocation(w.ctx, w.sku, {
