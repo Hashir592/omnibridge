@@ -2,7 +2,7 @@ import type { RaiseInput, TenantContext } from '@omnibridge/core';
 import { Secret } from '@omnibridge/crypto';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ProviderRejected, ProviderUnavailable } from './errors.ts';
+import { ProviderRejected, ProviderUnavailable, RateLimited } from './errors.ts';
 import { passThroughGovernor, type ProviderGovernor } from './governor.ts';
 import {
   MAX_SEND_ATTEMPTS,
@@ -215,6 +215,23 @@ describe('the outbound send path (SAFE-2, SAFE-3, INT-2)', () => {
     // Each retry waits longer.
     const waits = h.dispatched.map((d) => (d.startAfter?.getTime() ?? 0) - NOW.getTime());
     expect(waits).toEqual([...waits].sort((a, b) => a - b));
+  });
+
+  it('[INT-2] a write whose attempts were spent by dead workers is given up, never sent again', async () => {
+    const h = harness({});
+    h.row.attempts = MAX_SEND_ATTEMPTS;
+    expect(await h.run()).toEqual({ failed: 'outbound.attempts_exhausted' });
+    expect(h.sent).toEqual([]);
+    expect(h.row).toMatchObject({ state: 'failed', attempts: MAX_SEND_ATTEMPTS });
+  });
+
+  it("[INT-2] eBay's own daily limit waits an hour at a time without spending an attempt", async () => {
+    const h = harness({ send: () => Promise.reject(new RateLimited('ebay', { daily: true })) });
+    for (let i = 0; i < MAX_SEND_ATTEMPTS + 2; i += 1) {
+      expect(await h.run()).toEqual({ deferred: 'rate_limit' });
+    }
+    expect(h.row).toMatchObject({ state: 'pending', attempts: 0 });
+    expect(h.dispatched.at(-1)?.startAfter).toEqual(new Date(NOW.getTime() + 3_600_000));
   });
 
   it('[INT-2] a rejection is final at once, with its stable code', async () => {

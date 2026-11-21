@@ -179,6 +179,57 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     expect(await asTenant(other, () => writes.get(other, first.id))).toBeUndefined();
   });
 
+  it('[SAFE-2] recovery never sends a finished write again, picks up a lost one, and a dead claim spends an attempt', async () => {
+    const ctx = tenant();
+    const account = await newAccount(ctx);
+    const writes = new OutboundWriteRepository(db);
+    const t0 = at('2026-11-21T12:00:00.000Z');
+    const stale = at('2026-11-21T12:10:00.000Z');
+    const write = (key: string) =>
+      asTenant(ctx, () =>
+        writes.insert(
+          ctx,
+          {
+            channelAccountId: account,
+            provider: 'ebay',
+            operation: 'ebay.stock_push',
+            urgent: false,
+            idempotencyKey: key,
+            payload: { levels: [{ sku: 'MOCK-SKU-1', quantity: 1 }] },
+          },
+          t0,
+        ),
+      );
+    // A worker finished it after the sweep listed it: it stays sent, nothing is dispatched.
+    const done = await write('recover:done');
+    await asTenant(ctx, () => writes.claim(ctx, done.id, t0));
+    await asTenant(ctx, () => writes.sent(ctx, done.id, { accepted: 1 }, t0));
+    expect(await asTenant(ctx, () => writes.redispatch(ctx, done.id, stale, stale))).toBe(
+      undefined,
+    );
+    expect(await asTenant(ctx, () => writes.get(ctx, done.id))).toMatchObject({ state: 'sent' });
+    // A claim younger than the stale line belongs to a live worker.
+    const live = await write('recover:live');
+    await asTenant(ctx, () => writes.claim(ctx, live.id, t0));
+    expect(await asTenant(ctx, () => writes.redispatch(ctx, live.id, stale, t0))).toBe(undefined);
+    // A dead worker's claim goes back to pending and counts as an attempt (it may have been sent).
+    expect(await asTenant(ctx, () => writes.redispatch(ctx, live.id, stale, stale))).toBe(1);
+    expect(await asTenant(ctx, () => writes.get(ctx, live.id))).toMatchObject({
+      state: 'pending',
+      attempts: 1,
+    });
+    // Unpausing a write no switch holds does nothing.
+    expect(await asTenant(ctx, () => writes.unpause(ctx, live.id, stale))).toBe(undefined);
+    // A pending write whose send job died is overdue after the stale line, and is recovered.
+    const lost = await write('recover:lost');
+    const listed = (staleBefore: Date) =>
+      asTenant(ctx, () => writes.recoverable(ctx, { staleBefore, maintenance: false })).then(
+        (refs) => refs.map((r) => r.id),
+      );
+    expect(await listed(t0)).not.toContain(lost.id);
+    expect(await listed(stale)).toContain(lost.id);
+  });
+
   it('[SAFE-1] a confirmation token is single use, expires, and belongs to its user and accounts', async () => {
     const ctx = tenant();
     const accounts = [await newAccount(ctx), await newAccount(ctx)].sort();

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { TenantContext } from '@omnibridge/core';
-import { sql, type Kysely } from 'kysely';
+import { sql, type Kysely, type RawBuilder } from 'kysely';
 import type { ChannelProvider, MainDb } from './schema.ts';
 import { withTenantTransaction } from './tenant.ts';
 
@@ -159,14 +159,39 @@ export class OutboundWriteRepository {
     });
   }
 
-  /** Released from a pause, to be sent again: answers the next dispatch number. */
-  unpause(ctx: TenantContext, id: string, at: Date): Promise<number> {
-    return this.#nextDispatch(ctx, id, at, { paused_reason: null, next_attempt_at: null });
+  /** Released from a pause: the next dispatch number, or undefined when no switch holds it now. */
+  unpause(ctx: TenantContext, id: string, at: Date): Promise<number | undefined> {
+    return this.#nextDispatch(
+      ctx,
+      id,
+      at,
+      { paused_reason: null, next_attempt_at: null },
+      sql<boolean>`state = 'pending' AND paused_reason IS NOT NULL`,
+    );
   }
 
-  /** Another dispatch of the same write (recovery): answers the next dispatch number. */
-  redispatch(ctx: TenantContext, id: string, at: Date): Promise<number> {
-    return this.#nextDispatch(ctx, id, at, { state: 'pending', claimed_at: null });
+  /**
+   * Recovery: a write a switch held, or one whose worker died (its claim is older than
+   * `staleBefore`; that counts as an attempt, as it may have been sent). Undefined when the write
+   * moved on since the sweep listed it, so a finished write is never sent again.
+   */
+  redispatch(
+    ctx: TenantContext,
+    id: string,
+    at: Date,
+    staleBefore: Date,
+  ): Promise<number | undefined> {
+    return this.#nextDispatch(
+      ctx,
+      id,
+      at,
+      {
+        state: 'pending',
+        claimed_at: null,
+        attempts: sql<number>`attempts + CASE WHEN state = 'sending' THEN 1 ELSE 0 END`,
+      },
+      sql<boolean>`(state = 'pending' OR (state = 'sending' AND claimed_at < ${staleBefore}))`,
+    );
   }
 
   /** Takes it for sending; false when another worker has it or it is no longer pending. */
@@ -252,7 +277,8 @@ export class OutboundWriteRepository {
 
   /**
    * The recovery sweep's work: writes a worker took but never finished (its claim is older than
-   * `staleBefore`), and writes a switch held that is now off.
+   * `staleBefore`), writes due before then whose send job died, and writes a switch held that is
+   * now off.
    */
   recoverable(
     ctx: TenantContext,
@@ -271,6 +297,12 @@ export class OutboundWriteRepository {
         .where((eb) =>
           eb.or([
             eb.and([eb('w.state', '=', 'sending'), eb('w.claimed_at', '<', input.staleBefore)]),
+            // Due long ago but never sent: its send job died before the claim.
+            eb.and([
+              eb('w.state', '=', 'pending'),
+              eb('w.paused_reason', 'is', null),
+              eb(sql<Date>`coalesce(w.next_attempt_at, w.updated_at)`, '<', input.staleBefore),
+            ]),
             eb.and([
               eb('w.state', '=', 'pending'),
               eb('w.paused_reason', '=', 'kill_switch'),
@@ -298,17 +330,19 @@ export class OutboundWriteRepository {
     id: string,
     at: Date,
     extra: Record<string, unknown>,
-  ): Promise<number> {
+    guard: RawBuilder<boolean>,
+  ): Promise<number | undefined> {
     const row = await withTenantTransaction(this.#db, ctx, (trx) =>
       trx
         .updateTable('app.outbound_writes')
         .set({ ...extra, dispatch_seq: sql<number>`dispatch_seq + 1`, updated_at: at })
         .where('workspace_id', '=', ctx.workspaceId)
         .where('id', '=', id)
+        .where(guard)
         .returning('dispatch_seq')
-        .executeTakeFirstOrThrow(),
+        .executeTakeFirst(),
     );
-    return Number(row.dispatch_seq);
+    return row === undefined ? undefined : Number(row.dispatch_seq);
   }
 
   async #update(ctx: TenantContext, id: string, set: Record<string, unknown>): Promise<void> {

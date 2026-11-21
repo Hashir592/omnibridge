@@ -215,7 +215,7 @@ describe('incremental sync: job, governor, parser and cursor (INT-1, INT-5, INT-
     await runIncrementalSync(h.ports, s, job);
     expect(order).toEqual(['governor:auth', 'governor:sell.fulfillment', 'fetch']);
   });
-  it('[INT-2] a governor that says wait stops the run before anything is sent, as a rate limit', async () => {
+  it('[INT-2] a governor that says wait stops the run before anything is sent, as a rate limit, and is not an account error', async () => {
     const h = harness(new Date('2026-11-21T12:00:00.000Z'));
     let fetched = false;
     h.ports.governor = {
@@ -232,6 +232,7 @@ describe('incremental sync: job, governor, parser and cursor (INT-1, INT-5, INT-
       daily: true,
     });
     expect(fetched).toBe(false);
-    expect(h.health.errors).toEqual(['provider.rate_limited']);
+    // Our own budget, not the account's fault: Connections does not show it as an error.
+    expect(h.health.errors).toEqual([]);
   });
 });

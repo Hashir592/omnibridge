@@ -7,6 +7,7 @@ import {
   isProviderError,
   ProviderParserError,
   providerErrorCode,
+  ProviderUnavailable,
   RateLimited,
 } from './errors.ts';
 import { parserRecordKind } from './parser.ts';
@@ -16,6 +17,9 @@ import type { CallInput, ProviderGovernor } from './governor.ts';
 
 /** A write that keeps failing in ways that may pass is given up after this many attempts. */
 export const MAX_SEND_ATTEMPTS = 6;
+
+/** A provider's daily limit is tried again this often, until its day resets. */
+const DAILY_LIMIT_WAIT_MS = 60 * 60_000;
 
 /** After the n-th failed attempt: 1, 2, 4, 8 ... minutes, at most an hour. */
 export function retryDelayMs(attempts: number): number {
@@ -110,8 +114,9 @@ class Wait extends Error {
 /** Kept on retry: the provider may well take it later (or Amazon kept answering 429). */
 const retryable = (err: unknown) =>
   err instanceof RateLimited ||
-  (err instanceof Error &&
-    (err.name === 'ProviderUnavailable' || err.name === 'AmazonBackoffSpent'));
+  err instanceof ProviderUnavailable ||
+  // The Amazon governor's own error (the kit never imports a governor, RL-3).
+  (err instanceof Error && err.name === 'AmazonBackoffSpent');
 
 /**
  * Sends one outbound write (T-0702: SAFE-2, SAFE-3, INT-2), in short transactions only, never one
@@ -148,6 +153,12 @@ export async function runOutboundSend(
       const write = await ports.writes.get(ctx, job.writeId);
       if (write === undefined) return { skipped: 'gone' };
       if (write.state !== 'pending') return { skipped: write.state };
+      // Dead workers' claims count too (recovery), so a write that keeps crashing one stops here.
+      if (write.attempts >= MAX_SEND_ATTEMPTS) {
+        const code = 'outbound.attempts_exhausted';
+        await ports.writes.fail(ctx, write.id, { code, attempted: false, at: now() });
+        return { failed: code };
+      }
       const op = operations[write.operation];
       const parsed = op?.payload.safeParse(write.payload);
       if (op === undefined || parsed === undefined || !parsed.success) {
@@ -274,6 +285,18 @@ export async function runOutboundSend(
             id: String(err.version),
           },
         });
+      }
+      if (err instanceof RateLimited && err.daily) {
+        // eBay's own daily limit: nothing passes before its day resets, so no attempt is spent.
+        const until = new Date(now().getTime() + (err.retryAfterMs ?? DAILY_LIMIT_WAIT_MS));
+        const { dispatchSeq } = await ports.writes.defer(ctx, write.id, {
+          until,
+          attempted: false,
+          at: now(),
+          errorCode: code,
+        });
+        await ports.dispatch(ctx, write, dispatchSeq, until);
+        return { deferred: 'rate_limit' };
       }
       const mayPass = retryable(err) || (err instanceof AuthFailed && !err.revoked);
       if (!mayPass || write.attempts + 1 >= MAX_SEND_ATTEMPTS) {

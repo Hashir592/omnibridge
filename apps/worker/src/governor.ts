@@ -1,4 +1,4 @@
-import { CAPPED_PROVIDERS, type Notifier, type TenantContext } from '@omnibridge/core';
+import { CAPPED_PROVIDERS, providerDay, type Notifier, type TenantContext } from '@omnibridge/core';
 import { AmazonGovernor, withAmazonBackoff } from '@omnibridge/governor-amazon';
 import { EbayGovernor } from '@omnibridge/governor-ebay';
 import type { CallInput, ProviderGovernor } from '@omnibridge/provider-kit';
@@ -56,7 +56,8 @@ export function createProviderGovernor(deps: {
             type: 'ebay.api_usage_high',
             record: {
               kind: `ebay_api_${api.replace(/[^a-z0-9]/g, '_')}`.slice(0, 40),
-              id: now().toISOString().slice(0, 10),
+              // eBay's own day (US Pacific), the day the budget counts.
+              id: providerDay('ebay', now()),
             },
           });
         }

@@ -53,8 +53,15 @@ export interface OutboundWriteStore {
     ctx: TenantContext,
     filter: { channelAccountId?: string; reason: 'kill_switch' | 'maintenance' },
   ): Promise<WriteRef[]>;
-  unpause(ctx: TenantContext, id: string, at: Date): Promise<number>;
-  redispatch(ctx: TenantContext, id: string, at: Date): Promise<number>;
+  /** Undefined when no switch holds the write any more. */
+  unpause(ctx: TenantContext, id: string, at: Date): Promise<number | undefined>;
+  /** Undefined when the write moved on since it was listed (never a second send of a sent one). */
+  redispatch(
+    ctx: TenantContext,
+    id: string,
+    at: Date,
+    staleBefore: Date,
+  ): Promise<number | undefined>;
   recoverable(
     ctx: TenantContext,
     input: { staleBefore: Date; maintenance: boolean },
@@ -122,14 +129,20 @@ export class OutboundQueue {
   /** The safety net: stale claims and writes whose switch is off are sent again. */
   async recover(ctx: TenantContext, input: { maintenance: boolean }): Promise<number> {
     const now = this.#now();
+    const staleBefore = new Date(now.getTime() - OUTBOUND_STALE_MS);
     const refs = await this.#writes.recoverable(ctx, {
-      staleBefore: new Date(now.getTime() - OUTBOUND_STALE_MS),
+      staleBefore,
       maintenance: input.maintenance,
     });
+    let sent = 0;
     for (const ref of refs) {
-      await this.dispatch(ctx, ref, await this.#writes.redispatch(ctx, ref.id, now));
+      const seq = await this.#writes.redispatch(ctx, ref.id, now, staleBefore);
+      if (seq !== undefined) {
+        await this.dispatch(ctx, ref, seq);
+        sent += 1;
+      }
     }
-    return refs.length;
+    return sent;
   }
 
   async #resume(
@@ -137,9 +150,14 @@ export class OutboundQueue {
     filter: { channelAccountId?: string; reason: 'kill_switch' | 'maintenance' },
   ): Promise<number> {
     const refs = await this.#writes.pausedIds(ctx, filter);
+    let sent = 0;
     for (const ref of refs) {
-      await this.dispatch(ctx, ref, await this.#writes.unpause(ctx, ref.id, this.#now()));
+      const seq = await this.#writes.unpause(ctx, ref.id, this.#now());
+      if (seq !== undefined) {
+        await this.dispatch(ctx, ref, seq);
+        sent += 1;
+      }
     }
-    return refs.length;
+    return sent;
   }
 }

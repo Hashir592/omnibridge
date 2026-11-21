@@ -125,6 +125,8 @@ export async function runIncrementalSync<T extends SyncItem>(
     api,
     urgent: false,
   });
+  // A governor's own wait: retried like a rate limit, but not the account's fault (INT-4).
+  let held: RateLimited | undefined;
   const governed = async (api: string) => {
     const decision = (await ports.governor?.admit(input(api))) ?? {
       ok: true,
@@ -132,10 +134,11 @@ export async function runIncrementalSync<T extends SyncItem>(
     };
     if (!decision.ok) {
       // INT-2: told to wait (an empty Amazon bucket, eBay's budget): nothing is sent this run.
-      throw new RateLimited(stream.provider, {
+      held = new RateLimited(stream.provider, {
         retryAfterMs: Math.max(0, decision.retryAt.getTime() - now().getTime()),
         daily: stream.provider === 'ebay',
       });
+      throw held;
     }
     // eBay's reservation already wrote the usage row (RL-5): never count it twice.
     if (!decision.usageRecorded) count(api);
@@ -229,7 +232,7 @@ export async function runIncrementalSync<T extends SyncItem>(
             channelAccountId: accountId,
           });
         }
-      } else if (isProviderError(err)) {
+      } else if (isProviderError(err) && err !== held) {
         // A provider failure only: a db-main error after a good call is not the account's fault.
         await ports.health.recordError(ctx, accountId, providerErrorCode(err), now());
       }
