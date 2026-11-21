@@ -21,7 +21,9 @@ export {
 export type {
   AuditActorKind,
   ChannelProvider,
+  ListingProvider,
   MainDb,
+  VatType,
   MembershipRole,
   VatPeriod,
 } from './schema.ts';
@@ -159,3 +161,27 @@ export {
   type BulkTake,
 } from './bulk-confirmations.ts';
 export { AmazonBucketRepository, EbayBudgetRepository } from './rate-limits.ts';
+export {
+  CatalogueRefused,
+  CatalogueRepository,
+  type BundleRef,
+  type CatalogueRefusal,
+  type CogsEntry,
+  type Day,
+  type Dimensions,
+  type DiscoveredListing,
+  type Listing,
+  type ListingExportRow,
+  type ListingFilter,
+  type MappingChange,
+  type NewSku,
+  type ReorderSettings,
+  type SkuDetail,
+  type SkuFields,
+  type SkuFilter,
+  type SkuListingRef,
+  type SkuPatch,
+  type SkuSummary,
+  type VatRateRow,
+  type VatTypeEntry,
+} from './catalogue.ts';

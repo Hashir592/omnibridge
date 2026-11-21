@@ -381,6 +381,86 @@ export interface AmazonRateBucketsTable {
   refilled_at: Date;
 }
 
+export type VatType = 'standard' | 'reduced' | 'zero' | 'no_vat';
+export type ListingProvider = 'amazon' | 'ebay' | 'website';
+/** A calendar day: written as 'YYYY-MM-DD', read back with to_char (no time-zone shift). */
+type DayColumn = ColumnType<Date, string, string>;
+type OptionalBigInt = ColumnType<string | null, number | null | undefined, number | null>;
+
+export interface MasterSkusTable {
+  workspace_id: string;
+  id: string;
+  sku: string;
+  title: string;
+  short_description: string;
+  barcode: string | null;
+  manufacturer: string | null;
+  weight_g: ColumnType<string, number | undefined, number>;
+  length_mm: OptionalBigInt;
+  width_mm: OptionalBigInt;
+  height_mm: OptionalBigInt;
+  image_url: string | null;
+  purchase_vat_rate_bp: OptionalBigInt;
+  active: Generated<boolean>;
+  lead_time_days: ColumnType<string, number | undefined, number>;
+  safety_days: ColumnType<string, number | undefined, number>;
+  target_cover_days: ColumnType<string, number | undefined, number>;
+  bundle_component_id: string | null;
+  pack_size: OptionalBigInt;
+  created_by: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface SkuVatTypesTable {
+  workspace_id: string;
+  master_sku_id: string;
+  vat_type: VatType;
+  effective_from: DayColumn;
+  created_by: string | null;
+  created_at: Date;
+}
+
+export interface VatRatesTable {
+  workspace_id: string;
+  vat_type: VatType;
+  effective_from: DayColumn;
+  rate_bp: BigIntColumn;
+  created_at: Date;
+}
+
+export interface CogsHistoryTable {
+  workspace_id: string;
+  master_sku_id: string;
+  effective_from: DayColumn;
+  cogs_pence: BigIntColumn;
+  created_by: string | null;
+  created_at: Date;
+}
+
+export interface ListingsTable {
+  workspace_id: string;
+  id: string;
+  /** INT-6 origin tag; for a listing it is the provider. */
+  origin: ListingProvider;
+  channel_account_id: string;
+  provider: ListingProvider;
+  external_sku: string;
+  external_id: string;
+  title: string | null;
+  fulfilment: 'mfn' | 'fba' | null;
+  inventory_api: boolean | null;
+  channel_qty: OptionalBigInt;
+  master_sku_id: string | null;
+  mapping_source: 'auto' | 'manual' | null;
+  mapped_at: Date | null;
+  mapped_by: string | null;
+  discovered_at: Date;
+  last_seen_at: Date;
+  ended_at: Date | null;
+  updated_at: Date;
+}
+
 export interface MainDb {
   'app.workspaces': WorkspacesTable;
   'app.companies': CompaniesTable;
@@ -407,4 +487,9 @@ export interface MainDb {
   'app.outbound_writes': OutboundWritesTable;
   'app.bulk_confirmations': BulkConfirmationsTable;
   'app.amazon_rate_buckets': AmazonRateBucketsTable;
+  'app.master_skus': MasterSkusTable;
+  'app.sku_vat_types': SkuVatTypesTable;
+  'app.vat_rates': VatRatesTable;
+  'app.cogs_history': CogsHistoryTable;
+  'app.listings': ListingsTable;
 }
