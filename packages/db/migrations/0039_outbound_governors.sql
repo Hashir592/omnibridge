@@ -88,7 +88,7 @@ ALTER TABLE app.platform_settings ADD CONSTRAINT platform_settings_value CHECK (
       AND value ->> 'severity' IN ('info', 'warning', 'critical'))) NOT VALID;
 -- Contract: the 0033 rules are the new ones minus the maintenance key, so dropping them removes
 -- no guarantee.
--- waiver: replaced by platform_settings_key and platform_settings_value; T-0702
+-- waiver: replaced by platform_settings_key; T-0702
 -- squawk-ignore ban-drop-constraint
 ALTER TABLE app.platform_settings DROP CONSTRAINT IF EXISTS platform_settings_key_check;
 -- waiver: replaced by platform_settings_value; T-0702

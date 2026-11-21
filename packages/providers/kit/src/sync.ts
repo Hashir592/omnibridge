@@ -126,7 +126,10 @@ export async function runIncrementalSync<T extends SyncItem>(
     urgent: false,
   });
   const governed = async (api: string) => {
-    const decision = (await ports.governor?.admit(input(api))) ?? { ok: true, usageRecorded: false };
+    const decision = (await ports.governor?.admit(input(api))) ?? {
+      ok: true,
+      usageRecorded: false,
+    };
     if (!decision.ok) {
       // INT-2: told to wait (an empty Amazon bucket, eBay's budget): nothing is sent this run.
       throw new RateLimited(stream.provider, {

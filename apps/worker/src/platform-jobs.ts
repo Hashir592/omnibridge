@@ -59,6 +59,7 @@ export async function startPlatformJobs({
   notices,
   sendDigest,
   scanPlatform,
+  recoverOutbound,
 }: {
   boss: PgBoss;
   queue: Pick<JobQueue, 'send'>;
@@ -74,6 +75,8 @@ export async function startPlatformJobs({
   sendDigest: () => Promise<number>;
   /** SEC-12: the platform-level security rule (T-0507); returns how many notices it raised. */
   scanPlatform: () => Promise<number>;
+  /** T-0702: one outbound.recover job per workspace; returns how many were sent. */
+  recoverOutbound: (directory: { listIds(): Promise<string[]> }) => Promise<number>;
 }): Promise<() => Promise<void>> {
   const platformDb = createMainDb(platformDbConfig('omnibridge-worker-fanout'), onDbError);
   const directory = new WorkspaceDirectory(platformDb.db);
@@ -103,6 +106,9 @@ export async function startPlatformJobs({
       },
       'platform.health-digest': async () => {
         await sendDigest();
+      },
+      'outbound.recover-sweep': async () => {
+        await recoverOutbound(directory);
       },
       'notify.platform-email-sweep': async () => {
         const sent = await sendPlatformEmails();

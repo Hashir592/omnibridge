@@ -26,7 +26,11 @@ describe('eBay governor (RL-2, EBAY-8)', () => {
   it('[RL-2] non-urgent work stops at 80% of the daily cap and urgent work at 95%; eBay itself is never reached', async () => {
     expect(EBAY_THRESHOLDS).toEqual({ nonUrgentPercent: 80, hardPercent: 95 });
     const store = memoryStore();
-    const governor = new EbayGovernor(store, { 'sell.inventory': 100 }, () => new Date('2026-11-21T12:00:00.000Z'));
+    const governor = new EbayGovernor(
+      store,
+      { 'sell.inventory': 100 },
+      () => new Date('2026-11-21T12:00:00.000Z'),
+    );
     const reserve = (urgent: boolean) =>
       governor.reserve(ctx, { channelAccountId: ACCOUNT, api: 'sell.inventory', urgent });
     for (let i = 0; i < 80; i += 1) expect((await reserve(false)).ok).toBe(true);
@@ -37,20 +41,36 @@ describe('eBay governor (RL-2, EBAY-8)', () => {
   });
 
   it('[EBAY-8] the call that crosses 80% says so, once, so one platform notice is raised', async () => {
-    const governor = new EbayGovernor(memoryStore(), { 'sell.inventory': 10 }, () => new Date('2026-11-21T12:00:00.000Z'));
+    const governor = new EbayGovernor(
+      memoryStore(),
+      { 'sell.inventory': 10 },
+      () => new Date('2026-11-21T12:00:00.000Z'),
+    );
     const crossed: boolean[] = [];
     for (let i = 0; i < 9; i += 1) {
-      const r = await governor.reserve(ctx, { channelAccountId: ACCOUNT, api: 'sell.inventory', urgent: true });
+      const r = await governor.reserve(ctx, {
+        channelAccountId: ACCOUNT,
+        api: 'sell.inventory',
+        urgent: true,
+      });
       crossed.push(r.ok && r.crossedNonUrgent);
     }
     expect(crossed).toEqual([false, false, false, false, false, false, false, true, false]);
   });
 
-  it('[RL-2] the day is eBay\'s US Pacific day; an unknown API is refused rather than sent uncounted', async () => {
+  it("[RL-2] the day is eBay's US Pacific day; an unknown API is refused rather than sent uncounted", async () => {
     const store = memoryStore();
     // 06:00 UTC on 21 Nov is still 20 Nov in California.
-    const governor = new EbayGovernor(store, EBAY_DAILY_CAPS, () => new Date('2026-11-21T06:00:00.000Z'));
-    await governor.reserve(ctx, { channelAccountId: ACCOUNT, api: 'sell.fulfillment', urgent: false });
+    const governor = new EbayGovernor(
+      store,
+      EBAY_DAILY_CAPS,
+      () => new Date('2026-11-21T06:00:00.000Z'),
+    );
+    await governor.reserve(ctx, {
+      channelAccountId: ACCOUNT,
+      api: 'sell.fulfillment',
+      urgent: false,
+    });
     expect([...store.calls.keys()]).toEqual(['sell.fulfillment|2026-11-20']);
     await expect(
       governor.reserve(ctx, { channelAccountId: ACCOUNT, api: 'trading.revise', urgent: false }),

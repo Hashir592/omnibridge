@@ -64,7 +64,9 @@ describe('Amazon governor (RL-1, AMZ-9)', () => {
     expect(err).toBeInstanceOf(AmazonBackoffSpent);
     expect(calls).toBe(8);
     await expect(
-      withAmazonBackoff(() => Promise.reject(new Error('boom')), { sleep: () => Promise.resolve() }),
+      withAmazonBackoff(() => Promise.reject(new Error('boom')), {
+        sleep: () => Promise.resolve(),
+      }),
     ).rejects.toThrow('boom');
   });
 
@@ -73,12 +75,17 @@ describe('Amazon governor (RL-1, AMZ-9)', () => {
     const store: AmazonBucketStore = {
       take: (_ctx, input) => {
         takes.push({ operation: input.operation, rate: input.rate, burst: input.burst });
-        return Promise.resolve(input.operation === 'orders.getOrders' ? { ok: false, waitMs: 59_880 } : { ok: true });
+        return Promise.resolve(
+          input.operation === 'orders.getOrders' ? { ok: false, waitMs: 59_880 } : { ok: true },
+        );
       },
       setRate: () => Promise.resolve(),
     };
     const governor = new AmazonGovernor(store);
-    expect(await governor.take(ctx, ACCOUNT, 'orders.getOrders')).toEqual({ ok: false, waitMs: 59_880 });
+    expect(await governor.take(ctx, ACCOUNT, 'orders.getOrders')).toEqual({
+      ok: false,
+      waitMs: 59_880,
+    });
     expect(await governor.take(ctx, ACCOUNT, 'listings.patchListingsItem')).toEqual({ ok: true });
     expect(await governor.take(ctx, ACCOUNT, 'something.new')).toEqual({ ok: true });
     // LWA token calls are not SP-API operations: no bucket.

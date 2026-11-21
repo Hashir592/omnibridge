@@ -1,6 +1,11 @@
 import type { TenantContext } from '@omnibridge/core';
 import { describe, expect, it } from 'vitest';
-import { carrierBackoff, CARRIER_CONCURRENCY, withCarrierSlot, type SlotLimiter } from './carrier.ts';
+import {
+  carrierBackoff,
+  CARRIER_CONCURRENCY,
+  withCarrierSlot,
+  type SlotLimiter,
+} from './carrier.ts';
 import { ProviderRejected, ProviderUnavailable, RateLimited } from './errors.ts';
 
 const ctx: TenantContext = { workspaceId: '00000000-0000-4000-8000-000000000001', companyIds: [] };
@@ -30,13 +35,19 @@ describe('carrier and website concurrency cap (RL-4)', () => {
     let peak = 0;
     const releases: (() => void)[] = [];
     const call = () =>
-      withCarrierSlot(limiter, ctx, ACCOUNT, async () => {
-        running += 1;
-        peak = Math.max(peak, running);
-        await new Promise<void>((resolve) => releases.push(resolve));
-        running -= 1;
-        return 'done';
-      }, { pollMs: 5 });
+      withCarrierSlot(
+        limiter,
+        ctx,
+        ACCOUNT,
+        async () => {
+          running += 1;
+          peak = Math.max(peak, running);
+          await new Promise<void>((resolve) => releases.push(resolve));
+          running -= 1;
+          return 'done';
+        },
+        { pollMs: 5 },
+      );
     const five = [call(), call(), call(), call(), call()];
     await new Promise((r) => setTimeout(r, 30));
     expect(running).toBe(4);

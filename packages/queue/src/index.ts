@@ -93,3 +93,11 @@ export {
 export { JobAdmin, type DeadLetter, type QueueOverview, type RedriveOutcome } from './admin.ts';
 export { deletionRunId, requestDeletion, type DeletionRequest } from './deletion.ts';
 export { emailOnRaise, type EmailRecipients } from './notify.ts';
+export {
+  OUTBOUND_STALE_MS,
+  OutboundQueue,
+  outboundRecoverJob,
+  outboundRecoverSweepJob,
+  outboundSendJob,
+  type OutboundWriteStore,
+} from './outbound.ts';

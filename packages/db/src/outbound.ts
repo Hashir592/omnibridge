@@ -243,6 +243,13 @@ export class OutboundWriteRepository {
     });
   }
 
+  /** SAFE-3: the workspaces holding writes for maintenance (IDs only, through a definer). */
+  async maintenanceWorkspaces(): Promise<string[]> {
+    const { rows } = await sql<{ workspace_id: string }>`
+      SELECT workspace_id FROM app.outbound_maintenance_workspaces()`.execute(this.#db);
+    return rows.map((r) => r.workspace_id);
+  }
+
   /**
    * The recovery sweep's work: writes a worker took but never finished (its claim is older than
    * `staleBefore`), and writes a switch held that is now off.
@@ -255,7 +262,9 @@ export class OutboundWriteRepository {
       const rows = await trx
         .selectFrom('app.outbound_writes as w')
         .innerJoin('app.channel_accounts as a', (j) =>
-          j.onRef('a.workspace_id', '=', 'w.workspace_id').onRef('a.id', '=', 'w.channel_account_id'),
+          j
+            .onRef('a.workspace_id', '=', 'w.workspace_id')
+            .onRef('a.id', '=', 'w.channel_account_id'),
         )
         .select(['w.id', 'w.channel_account_id'])
         .where('w.workspace_id', '=', ctx.workspaceId)

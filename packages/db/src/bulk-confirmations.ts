@@ -31,7 +31,12 @@ export class BulkConfirmationRepository {
 
   async issue(
     ctx: TenantContext,
-    input: { userId: string; action: BulkAction; accountIds: readonly string[]; params: BulkParams },
+    input: {
+      userId: string;
+      action: BulkAction;
+      accountIds: readonly string[];
+      params: BulkParams;
+    },
     now: Date,
   ): Promise<{ token: string; expiresAt: Date }> {
     const token = randomBytes(32).toString('base64url');

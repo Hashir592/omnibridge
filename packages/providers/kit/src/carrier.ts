@@ -10,7 +10,13 @@ export const CARRIER_CONCURRENCY = 4;
  * once, across every worker, with expiring leases so a dead worker frees its slot.
  */
 export interface SlotLimiter {
-  acquire(ctx: TenantContext, scopeKey: string, cap: number, holder: string, ttlSeconds: number): Promise<boolean>;
+  acquire(
+    ctx: TenantContext,
+    scopeKey: string,
+    cap: number,
+    holder: string,
+    ttlSeconds: number,
+  ): Promise<boolean>;
   release(ctx: TenantContext, scopeKey: string, holder: string): Promise<void>;
 }
 
@@ -23,7 +29,13 @@ export async function withCarrierSlot<T>(
   ctx: TenantContext,
   channelAccountId: string,
   fn: () => Promise<T>,
-  options: { cap?: number; pollMs?: number; maxWaitMs?: number; ttlSeconds?: number; provider?: 'evri' | 'dpd' | 'website' } = {},
+  options: {
+    cap?: number;
+    pollMs?: number;
+    maxWaitMs?: number;
+    ttlSeconds?: number;
+    provider?: 'evri' | 'dpd' | 'website';
+  } = {},
 ): Promise<T> {
   const scope = `http:${channelAccountId}`;
   const holder = randomUUID();
@@ -48,7 +60,12 @@ export async function withCarrierSlot<T>(
  */
 export async function carrierBackoff<T>(
   fn: () => Promise<T>,
-  options: { attempts?: number; baseMs?: number; maxMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+  options: {
+    attempts?: number;
+    baseMs?: number;
+    maxMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
 ): Promise<T> {
   const attempts = options.attempts ?? 3;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));

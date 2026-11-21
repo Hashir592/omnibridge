@@ -93,8 +93,14 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     expect(await asTenant(ctx, () => connections.setPaused(ctx, paused, true, now))).toBe(true);
     // Setting it again changes nothing.
     expect(await asTenant(ctx, () => connections.setPaused(ctx, paused, true, now))).toBe(false);
-    expect(await asTenant(ctx, () => writes.gate(ctx, paused))).toEqual({ maintenance: false, paused: true });
-    expect(await asTenant(ctx, () => writes.gate(ctx, other))).toEqual({ maintenance: false, paused: false });
+    expect(await asTenant(ctx, () => writes.gate(ctx, paused))).toEqual({
+      maintenance: false,
+      paused: true,
+    });
+    expect(await asTenant(ctx, () => writes.gate(ctx, other))).toEqual({
+      maintenance: false,
+      paused: false,
+    });
   });
 
   it('[SAFE-3] the maintenance switch closes the gate for every workspace', async () => {
@@ -103,19 +109,27 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     const accountA = await newAccount(a);
     const accountB = await newAccount(b);
     const writes = new OutboundWriteRepository(db);
-    await owner.query(
-      `INSERT INTO app.users (id, email, name) VALUES ($1, $2, 'Operator')`,
-      [a.workspaceId, `${a.workspaceId}@example.test`],
-    );
+    await owner.query(`INSERT INTO app.users (id, email, name) VALUES ($1, $2, 'Operator')`, [
+      a.workspaceId,
+      `${a.workspaceId}@example.test`,
+    ]);
     await owner.query(
       `INSERT INTO app.platform_settings (key, value, updated_at, updated_by)
        VALUES ('maintenance', 'true', now(), $1)`,
       [a.workspaceId],
     );
     try {
-      expect(await asTenant(a, () => writes.gate(a, accountA))).toEqual({ maintenance: true, paused: false });
-      expect(await asTenant(b, () => writes.gate(b, accountB))).toEqual({ maintenance: true, paused: false });
-      const { rows } = await owner.query<{ maintenance: boolean }>('SELECT maintenance FROM app.maintenance_state()');
+      expect(await asTenant(a, () => writes.gate(a, accountA))).toEqual({
+        maintenance: true,
+        paused: false,
+      });
+      expect(await asTenant(b, () => writes.gate(b, accountB))).toEqual({
+        maintenance: true,
+        paused: false,
+      });
+      const { rows } = await owner.query<{ maintenance: boolean }>(
+        'SELECT maintenance FROM app.maintenance_state()',
+      );
       expect(rows).toEqual([{ maintenance: true }]);
     } finally {
       await owner.query(`DELETE FROM app.platform_settings WHERE key = 'maintenance'`);
@@ -139,15 +153,27 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     const again = await asTenant(ctx, () => writes.insert(ctx, input, now));
     expect(again).toEqual({ id: first.id, created: false });
     await asTenant(ctx, () => writes.pause(ctx, first.id, 'kill_switch', now));
-    expect(await asTenant(ctx, () => writes.pausedIds(ctx, { channelAccountId: account, reason: 'kill_switch' }))).toEqual([{ id: first.id, channelAccountId: account }]);
+    expect(
+      await asTenant(ctx, () =>
+        writes.pausedIds(ctx, { channelAccountId: account, reason: 'kill_switch' }),
+      ),
+    ).toEqual([{ id: first.id, channelAccountId: account }]);
     expect(await asTenant(ctx, () => writes.unpause(ctx, first.id, now))).toBe(1);
     expect(await asTenant(ctx, () => writes.claim(ctx, first.id, now))).toBe(true);
     // A second worker cannot claim it while it is being sent.
     expect(await asTenant(ctx, () => writes.claim(ctx, first.id, now))).toBe(false);
-    expect(await asTenant(ctx, () => writes.defer(ctx, first.id, { until: now, attempted: false, at: now }))).toEqual({ dispatchSeq: 2, attempts: 0 });
+    expect(
+      await asTenant(ctx, () =>
+        writes.defer(ctx, first.id, { until: now, attempted: false, at: now }),
+      ),
+    ).toEqual({ dispatchSeq: 2, attempts: 0 });
     expect(await asTenant(ctx, () => writes.claim(ctx, first.id, now))).toBe(true);
     await asTenant(ctx, () => writes.sent(ctx, first.id, { accepted: 1 }, now));
-    expect(await asTenant(ctx, () => writes.get(ctx, first.id))).toMatchObject({ state: 'sent', attempts: 1, pausedReason: null });
+    expect(await asTenant(ctx, () => writes.get(ctx, first.id))).toMatchObject({
+      state: 'sent',
+      attempts: 1,
+      pausedReason: null,
+    });
     // Another workspace sees none of it.
     const other = tenant();
     expect(await asTenant(other, () => writes.get(other, first.id))).toBeUndefined();
@@ -160,24 +186,42 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     const bulk = new BulkConfirmationRepository(db);
     const now = at('2026-11-21T12:00:00.000Z');
     const { token, expiresAt } = await asTenant(ctx, () =>
-      bulk.issue(ctx, { userId: user, action: 'stock_push', accountIds: accounts, params: {} }, now),
+      bulk.issue(
+        ctx,
+        { userId: user, action: 'stock_push', accountIds: accounts, params: {} },
+        now,
+      ),
     );
     expect(expiresAt).toEqual(at('2026-11-21T12:10:00.000Z'));
-    expect(await asTenant(ctx, () => bulk.take(ctx, 'x'.repeat(43), user, now))).toEqual({ outcome: 'not_found' });
-    expect(await asTenant(ctx, () => bulk.take(ctx, token, randomUUID(), now))).toEqual({ outcome: 'conflict' });
+    expect(await asTenant(ctx, () => bulk.take(ctx, 'x'.repeat(43), user, now))).toEqual({
+      outcome: 'not_found',
+    });
+    expect(await asTenant(ctx, () => bulk.take(ctx, token, randomUUID(), now))).toEqual({
+      outcome: 'conflict',
+    });
     expect(await asTenant(ctx, () => bulk.take(ctx, token, user, now))).toEqual({
       outcome: 'ok',
       action: 'stock_push',
       accountIds: accounts,
       params: {},
     });
-    expect(await asTenant(ctx, () => bulk.take(ctx, token, user, now))).toEqual({ outcome: 'conflict' });
+    expect(await asTenant(ctx, () => bulk.take(ctx, token, user, now))).toEqual({
+      outcome: 'conflict',
+    });
     const late = await asTenant(ctx, () =>
-      bulk.issue(ctx, { userId: user, action: 'stock_push', accountIds: accounts, params: {} }, now),
+      bulk.issue(
+        ctx,
+        { userId: user, action: 'stock_push', accountIds: accounts, params: {} },
+        now,
+      ),
     );
-    expect(await asTenant(ctx, () => bulk.take(ctx, late.token, user, at('2026-11-21T12:10:01.000Z')))).toEqual({ outcome: 'conflict' });
+    expect(
+      await asTenant(ctx, () => bulk.take(ctx, late.token, user, at('2026-11-21T12:10:01.000Z'))),
+    ).toEqual({ outcome: 'conflict' });
     const other = tenant();
-    expect(await asTenant(other, () => bulk.take(other, late.token, user, now))).toEqual({ outcome: 'not_found' });
+    expect(await asTenant(other, () => bulk.take(other, late.token, user, now))).toEqual({
+      outcome: 'not_found',
+    });
   });
 
   it('[RL-1] an Amazon bucket starts full, spends one token per take, refills by time and learns a new rate', async () => {
@@ -186,13 +230,26 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     const buckets = new AmazonBucketRepository(db);
     const t0 = at('2026-11-21T12:00:00.000Z');
     const take = (now: Date, rate = 1, burst = 2) =>
-      asTenant(ctx, () => buckets.take(ctx, { channelAccountId: account, operation: 'orders.getOrders', rate, burst, now }));
+      asTenant(ctx, () =>
+        buckets.take(ctx, {
+          channelAccountId: account,
+          operation: 'orders.getOrders',
+          rate,
+          burst,
+          now,
+        }),
+      );
     expect(await take(t0)).toEqual({ ok: true });
     expect(await take(t0)).toEqual({ ok: true });
     expect(await take(t0)).toEqual({ ok: false, waitMs: 1_000 });
     expect(await take(at('2026-11-21T12:00:01.000Z'))).toEqual({ ok: true });
     await asTenant(ctx, () =>
-      buckets.setRate(ctx, { channelAccountId: account, operation: 'orders.getOrders', rate: 0.5, now: t0 }),
+      buckets.setRate(ctx, {
+        channelAccountId: account,
+        operation: 'orders.getOrders',
+        rate: 0.5,
+        now: t0,
+      }),
     );
     expect(await take(at('2026-11-21T12:00:01.000Z'))).toEqual({ ok: false, waitMs: 2_000 });
   });
@@ -202,7 +259,9 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     const b = tenant();
     const accountA = await newAccount(a);
     const accountB = await newAccount(b);
-    const governor = new EbayGovernor(new EbayBudgetRepository(db), { 'sell.inventory': 40 }, () => at('2026-11-21T20:00:00.000Z'));
+    const governor = new EbayGovernor(new EbayBudgetRepository(db), { 'sell.inventory': 40 }, () =>
+      at('2026-11-21T20:00:00.000Z'),
+    );
     // 50 callers from two workspaces race for a cap of 40: urgent work may use 95% (38 calls).
     const results = await Promise.all(
       Array.from({ length: 50 }, (_, i) => {
@@ -210,7 +269,11 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
         const account = i % 2 === 0 ? accountA : accountB;
         // Each reservation is its own short transaction, as in a worker (no outer one holding a
         // connection while it waits).
-        return governor.reserve(ctx, { channelAccountId: account, api: 'sell.inventory', urgent: true });
+        return governor.reserve(ctx, {
+          channelAccountId: account,
+          api: 'sell.inventory',
+          urgent: true,
+        });
       }),
     );
     expect(results.filter((r) => r.ok)).toHaveLength(38);
@@ -226,7 +289,11 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     expect(usage).toEqual([{ total: '38' }]);
     // Non-urgent work is already past its 80% stop.
     expect(
-      await governor.reserve(a, { channelAccountId: accountA, api: 'sell.inventory', urgent: false }),
+      await governor.reserve(a, {
+        channelAccountId: accountA,
+        api: 'sell.inventory',
+        urgent: false,
+      }),
     ).toMatchObject({ ok: false });
   });
 
@@ -237,7 +304,9 @@ describe('outbound writes, switches and rate limits (T-0702)', () => {
     const scope = `http:${account}`;
     const holders = Array.from({ length: 5 }, () => randomUUID());
     const [h1, h2, h3, h4, h5] = holders as [string, string, string, string, string];
-    const held = await Promise.all([h1, h2, h3, h4].map((h) => leases.acquire(ctx, scope, 4, h, 30)));
+    const held = await Promise.all(
+      [h1, h2, h3, h4].map((h) => leases.acquire(ctx, scope, 4, h, 30)),
+    );
     expect(held).toEqual([true, true, true, true]);
     expect(await leases.acquire(ctx, scope, 4, h5, 30)).toBe(false);
     await leases.release(ctx, scope, h2);

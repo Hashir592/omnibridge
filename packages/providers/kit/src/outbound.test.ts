@@ -27,7 +27,9 @@ interface Row {
 }
 
 /** In-memory ports with the db repositories' contracts, and a provider that counts its sends. */
-function harness(options: { governor?: ProviderGovernor; send?: () => Promise<Record<string, unknown>> } = {}) {
+function harness(
+  options: { governor?: ProviderGovernor; send?: () => Promise<Record<string, unknown>> } = {},
+) {
   const row: Row = { state: 'pending', pausedReason: null, attempts: 0, dispatchSeq: 0 };
   const switches = { maintenance: false, paused: false };
   const sent: unknown[] = [];
@@ -38,8 +40,14 @@ function harness(options: { governor?: ProviderGovernor; send?: () => Promise<Re
     operation: 'ebay.stock_push',
     provider: 'ebay',
     api: 'sell.inventory',
-    payload: z.object({ levels: z.array(z.object({ sku: z.string(), quantity: z.number().int() })) }),
-    authenticate: () => Promise.resolve({ token: new Secret('access'), expiresAt: new Date(NOW.getTime() + 7_200_000) }),
+    payload: z.object({
+      levels: z.array(z.object({ sku: z.string(), quantity: z.number().int() })),
+    }),
+    authenticate: () =>
+      Promise.resolve({
+        token: new Secret('access'),
+        expiresAt: new Date(NOW.getTime() + 7_200_000),
+      }),
     send: (_token, payload) => {
       sent.push(payload);
       return options.send?.() ?? Promise.resolve({ accepted: payload.levels.length });
@@ -94,7 +102,9 @@ function harness(options: { governor?: ProviderGovernor; send?: () => Promise<Re
       dispatched.push({ seq, startAfter });
       return Promise.resolve();
     },
-    accounts: { get: () => Promise.resolve({ provider: 'ebay', companyId: COMPANY, status: 'active' }) },
+    accounts: {
+      get: () => Promise.resolve({ provider: 'ebay', companyId: COMPANY, status: 'active' }),
+    },
     credentials: { read: () => Promise.resolve(new Secret('TOKENMARK-refresh')) },
     health: {
       recordSuccess: () => Promise.resolve({ reauthCleared: false }),
@@ -105,19 +115,32 @@ function harness(options: { governor?: ProviderGovernor; send?: () => Promise<Re
     notifier: {
       raise: (_c, input) => {
         raised.push(input);
-        return Promise.resolve({ id: 'n', version: 1, created: true, escalated: false, reopened: false });
+        return Promise.resolve({
+          id: 'n',
+          version: 1,
+          created: true,
+          escalated: false,
+          reopened: false,
+        });
       },
       resolve: () => Promise.resolve(true),
       raisePlatform: (_c, input) => {
         raised.push(input);
-        return Promise.resolve({ id: 'p', version: 1, created: true, escalated: false, reopened: false });
+        return Promise.resolve({
+          id: 'p',
+          version: 1,
+          created: true,
+          escalated: false,
+          reopened: false,
+        });
       },
     },
     tokens: new AccessTokenCache(() => NOW.getTime()),
     governor: options.governor ?? passThroughGovernor,
     now: () => NOW,
   };
-  const run = () => runOutboundSend(ports, { 'ebay.stock_push': op as OutboundOperation<unknown> }, { workspaceId: WS, writeId: WRITE });
+  const run = () =>
+    runOutboundSend(ports, { 'ebay.stock_push': op }, { workspaceId: WS, writeId: WRITE });
   return { row, switches, sent, dispatched, raised, run };
 }
 
@@ -160,7 +183,11 @@ describe('the outbound send path (SAFE-2, SAFE-3, INT-2)', () => {
     const governor: ProviderGovernor = {
       admit: (input) => {
         order.push(`admit:${input.api}`);
-        return Promise.resolve(allow ? { ok: true, usageRecorded: true } : { ok: false, retryAt: new Date(NOW.getTime() + 3_600_000) });
+        return Promise.resolve(
+          allow
+            ? { ok: true, usageRecorded: true }
+            : { ok: false, retryAt: new Date(NOW.getTime() + 3_600_000) },
+        );
       },
       run: (input, fn) => {
         order.push(`run:${input.api}`);

@@ -3,6 +3,9 @@ import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
   AccountCredentials,
+  AmazonBucketRepository,
+  EbayBudgetRepository,
+  OutboundWriteRepository,
   AppSecretStore,
   ConnectionRepository,
   CredentialRepository,
@@ -30,9 +33,19 @@ import {
 import { createLogger } from '@omnibridge/logger';
 import { Mailer } from '@omnibridge/mail';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
+import { AmazonGovernor } from '@omnibridge/governor-amazon';
+import { EbayGovernor } from '@omnibridge/governor-ebay';
 import { createEbayAdapter, ebayOrderStream } from '@omnibridge/provider-ebay';
+import { createWebsiteAdapter } from '@omnibridge/provider-website';
 import { AccessTokenCache, ProviderHttp } from '@omnibridge/provider-kit';
-import { emailOnRaise, JOBS, JobQueue, PermanentJobError, queueMetrics } from '@omnibridge/queue';
+import {
+  emailOnRaise,
+  JOBS,
+  JobQueue,
+  OutboundQueue,
+  PermanentJobError,
+  queueMetrics,
+} from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
 import { auditRetentionHandler } from './audit-retention.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
@@ -57,6 +70,13 @@ import { startMetricsServer } from './metrics-server.ts';
 import { startPlatformJobs } from './platform-jobs.ts';
 import { scanFileHandler } from './scan.ts';
 import { countingSink, syncPollHandler } from './sync.ts';
+import { createProviderGovernor } from './governor.ts';
+import {
+  outboundOperations,
+  outboundRecoverHandler,
+  outboundSendHandler,
+  sweepOutboundRecover,
+} from './outbound.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
 const log = createLogger({ service: 'worker', version });
@@ -162,7 +182,22 @@ const appSecret = async (name: Parameters<AppSecretStore['get']>[0]) => {
   if (value === undefined) throw new PermanentJobError('provider.not_configured');
   return value;
 };
+// The rate governors (T-0702): the Amazon bucket and eBay budget, each its own package (RL-3),
+// and the carrier and website cap of 4 per account on the PostgreSQL semaphore (RL-4).
+const providerGovernor = createProviderGovernor({
+  amazon: new AmazonGovernor(new AmazonBucketRepository(handlerDb.db)),
+  ebay: new EbayGovernor(new EbayBudgetRepository(handlerDb.db)),
+  limiter: new JobLeaseRepository(handlerDb.db),
+  notifier,
+});
+const ebayAdapter = async () =>
+  createEbayAdapter({
+    http: providerHttp,
+    clientId: await appSecret('ebay.client_id'),
+    clientSecret: await appSecret('ebay.client_secret'),
+  });
 const syncPorts = {
+  governor: providerGovernor,
   tenancy: new Tenancy(handlerDb.db),
   accounts: connections,
   credentials: new AccountCredentials(
@@ -174,6 +209,9 @@ const syncPorts = {
   notifier,
   tokens: new AccessTokenCache(),
 };
+// Every automated provider write goes through one send path (T-0702, invariant 20).
+const outboundWrites = new OutboundWriteRepository(handlerDb.db);
+const outbound = new OutboundQueue({ queue, writes: outboundWrites });
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -229,17 +267,25 @@ await registerHandlers(queue, {
   'sync.poll': syncPollHandler({
     ports: syncPorts,
     streams: {
-      'ebay.orders': async () =>
-        ebayOrderStream(
-          createEbayAdapter({
-            http: providerHttp,
-            clientId: await appSecret('ebay.client_id'),
-            clientSecret: await appSecret('ebay.client_secret'),
-          }),
-          countingSink(log),
-        ),
+      'ebay.orders': async () => ebayOrderStream(await ebayAdapter(), countingSink(log)),
     },
     logger: log,
+  }),
+  'outbound.send': outboundSendHandler({
+    ports: {
+      ...syncPorts,
+      writes: outboundWrites,
+      dispatch: (ctx, write, seq, startAfter) => outbound.dispatch(ctx, write, seq, startAfter),
+    },
+    operations: outboundOperations({
+      ebay: ebayAdapter,
+      website: () => Promise.resolve(createWebsiteAdapter({ http: providerHttp })),
+    }),
+    logger: log,
+  }),
+  'outbound.recover': outboundRecoverHandler({
+    outbound,
+    maintenance: (ctx) => connections.maintenance(ctx),
   }),
   'notify.email': notifyEmailHandler({
     tenancy: new Tenancy(handlerDb.db),
@@ -265,6 +311,8 @@ const closePlatformJobs = await startPlatformJobs({
       appOrigin,
       logger: log,
     }),
+  // T-0702: the outbound safety net, every ten minutes.
+  recoverOutbound: (directory) => sweepOutboundRecover({ directory, queue }),
   // SEC-12: platform admins' sign-ins, once per security sweep (T-0507, ADR-076).
   scanPlatform: () =>
     scanPlatformSecurity({

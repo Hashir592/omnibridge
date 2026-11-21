@@ -51,8 +51,16 @@ export interface OutboundPorts {
   tenancy: Pick<TenantRunner, 'runWorkspace'>;
   writes: {
     get(ctx: TenantContext, id: string): Promise<OutboundWriteView | undefined>;
-    gate(ctx: TenantContext, channelAccountId: string): Promise<{ maintenance: boolean; paused: boolean }>;
-    pause(ctx: TenantContext, id: string, reason: 'kill_switch' | 'maintenance', at: Date): Promise<void>;
+    gate(
+      ctx: TenantContext,
+      channelAccountId: string,
+    ): Promise<{ maintenance: boolean; paused: boolean }>;
+    pause(
+      ctx: TenantContext,
+      id: string,
+      reason: 'kill_switch' | 'maintenance',
+      at: Date,
+    ): Promise<void>;
     claim(ctx: TenantContext, id: string, at: Date): Promise<boolean>;
     defer(
       ctx: TenantContext,
@@ -60,7 +68,11 @@ export interface OutboundPorts {
       input: { until: Date; attempted: boolean; at: Date; errorCode?: string },
     ): Promise<{ dispatchSeq: number; attempts: number }>;
     sent(ctx: TenantContext, id: string, result: Record<string, unknown>, at: Date): Promise<void>;
-    fail(ctx: TenantContext, id: string, input: { code: string; attempted: boolean; at: Date }): Promise<void>;
+    fail(
+      ctx: TenantContext,
+      id: string,
+      input: { code: string; attempted: boolean; at: Date },
+    ): Promise<void>;
   };
   /** Sends the outbound.send job for this dispatch, in the given context's transaction. */
   dispatch(
@@ -98,7 +110,8 @@ class Wait extends Error {
 /** Kept on retry: the provider may well take it later (or Amazon kept answering 429). */
 const retryable = (err: unknown) =>
   err instanceof RateLimited ||
-  (err instanceof Error && (err.name === 'ProviderUnavailable' || err.name === 'AmazonBackoffSpent'));
+  (err instanceof Error &&
+    (err.name === 'ProviderUnavailable' || err.name === 'AmazonBackoffSpent'));
 
 /**
  * Sends one outbound write (T-0702: SAFE-2, SAFE-3, INT-2), in short transactions only, never one
@@ -129,36 +142,43 @@ export async function runOutboundSend(
     credential: Secret;
     companyId: string;
   };
-  const start = await ports.tenancy.runWorkspace(actor, async (ctx): Promise<Ready | OutboundResult> => {
-    const write = await ports.writes.get(ctx, job.writeId);
-    if (write === undefined) return { skipped: 'gone' };
-    if (write.state !== 'pending') return { skipped: write.state };
-    const op = operations[write.operation];
-    const parsed = op?.payload.safeParse(write.payload);
-    if (op === undefined || parsed === undefined || !parsed.success) {
-      const code = op === undefined ? 'outbound.unknown_operation' : 'outbound.invalid_payload';
-      await ports.writes.fail(ctx, write.id, { code, attempted: false, at: now() });
-      return { failed: code };
-    }
-    // Invariant 20: the switches as they are now, just before the send.
-    const gate = await ports.writes.gate(ctx, write.channelAccountId);
-    if (gate.maintenance || gate.paused) {
-      const reason = gate.maintenance ? 'maintenance' : 'kill_switch';
-      await ports.writes.pause(ctx, write.id, reason, now());
-      return { paused: reason };
-    }
-    const account = await ports.accounts.get(ctx, write.channelAccountId, now());
-    const credential =
-      account === undefined || account.status === 'disconnected'
-        ? undefined
-        : await ports.credentials.read(ctx, write.channelAccountId, write.provider);
-    if (account === undefined || credential === undefined) {
-      await ports.writes.fail(ctx, write.id, { code: 'provider.disconnected', attempted: false, at: now() });
-      return { failed: 'provider.disconnected' };
-    }
-    if (!(await ports.writes.claim(ctx, write.id, now()))) return { skipped: 'claimed' };
-    return { write, op, payload: parsed.data, credential, companyId: account.companyId };
-  });
+  const start = await ports.tenancy.runWorkspace(
+    actor,
+    async (ctx): Promise<Ready | OutboundResult> => {
+      const write = await ports.writes.get(ctx, job.writeId);
+      if (write === undefined) return { skipped: 'gone' };
+      if (write.state !== 'pending') return { skipped: write.state };
+      const op = operations[write.operation];
+      const parsed = op?.payload.safeParse(write.payload);
+      if (op === undefined || parsed === undefined || !parsed.success) {
+        const code = op === undefined ? 'outbound.unknown_operation' : 'outbound.invalid_payload';
+        await ports.writes.fail(ctx, write.id, { code, attempted: false, at: now() });
+        return { failed: code };
+      }
+      // Invariant 20: the switches as they are now, just before the send.
+      const gate = await ports.writes.gate(ctx, write.channelAccountId);
+      if (gate.maintenance || gate.paused) {
+        const reason = gate.maintenance ? 'maintenance' : 'kill_switch';
+        await ports.writes.pause(ctx, write.id, reason, now());
+        return { paused: reason };
+      }
+      const account = await ports.accounts.get(ctx, write.channelAccountId, now());
+      const credential =
+        account === undefined || account.status === 'disconnected'
+          ? undefined
+          : await ports.credentials.read(ctx, write.channelAccountId, write.provider);
+      if (account === undefined || credential === undefined) {
+        await ports.writes.fail(ctx, write.id, {
+          code: 'provider.disconnected',
+          attempted: false,
+          at: now(),
+        });
+        return { failed: 'provider.disconnected' };
+      }
+      if (!(await ports.writes.claim(ctx, write.id, now()))) return { skipped: 'claimed' };
+      return { write, op, payload: parsed.data, credential, companyId: account.companyId };
+    },
+  );
   if (!('write' in start)) return start;
   const { write, op, payload, credential, companyId } = start;
   const call = (api: string): CallInput => ({
@@ -226,9 +246,14 @@ export async function runOutboundSend(
       const code = providerErrorCode(err);
       if (err instanceof AuthFailed) {
         ports.tokens.invalidate(write.channelAccountId);
-        const { marked } = await ports.health.recordAuthFailure(ctx, write.channelAccountId, now(), {
-          revoked: err.revoked,
-        });
+        const { marked } = await ports.health.recordAuthFailure(
+          ctx,
+          write.channelAccountId,
+          now(),
+          {
+            revoked: err.revoked,
+          },
+        );
         if (marked) {
           await ports.notifier.raise(ctx, {
             type: 'channel.auth_lost',

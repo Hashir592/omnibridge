@@ -62,7 +62,8 @@ export const AUDIT_EVENTS = {
   'workspace.status_changed': spec('workspace', ['status']),
   'workspace.module_changed': spec('workspace', ['module', 'enabled']),
   // Kill switch (invariant 13).
-  'kill_switch.changed': spec('workspace', ['scope', 'enabled']),
+  // SAFE-2 (T-0702): one account's automated writes paused or resumed.
+  'kill_switch.changed': spec('channel_account', ['paused']),
   // Stock (INV-4): a manual adjustment needs a reason.
   'stock.adjusted': spec('master_sku', ['delta', 'on_hand_after', 'reason_code'], {
     reasonRequired: true,

@@ -2,32 +2,62 @@ import {
   ApiError,
   NotAMember,
   OAUTH_PROVIDERS,
+  type MemberAccess,
   type Notifier,
   type OAuthProvider,
+  type TenantContext,
   type TenantRunner,
 } from '@omnibridge/core';
 import type { connectionRoutes } from '@omnibridge/contract';
 import type {
   AccountCredentials,
   AuditLog,
+  BulkAction,
+  BulkConfirmationRepository,
+  BulkParams,
   Connection,
   ConnectionDetail,
   ConnectionRepository,
   OAuthStateRepository,
 } from '@omnibridge/db';
+import type { OutboundQueue } from '@omnibridge/queue';
+import type { z } from 'zod';
 import { oauthStateWorkspace } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import type { Handlers } from './contract.ts';
 import type { OAuthFlows } from './oauth-exchange.ts';
 
 /**
- * Connections (T-0701: INT-4) and the OAuth connect flow (INT-2, INT-3). The kill switch and bulk
- * confirmation are T-0702's; until then they find nothing (404).
+ * A bulk write a module offers (SAFE-1): the tab it belongs to, its params (IDs, numbers, flags)
+ * and what it queues on confirm. M09 registers stock_push, M12 tracking_resend, M19 ads_change.
+ */
+export interface BulkActionHandler {
+  readonly tab: string;
+  readonly params: z.ZodType<BulkParams>;
+  /** Queues the writes, through the outbound path, in the confirm's transaction; answers how many. */
+  run(
+    ctx: TenantContext,
+    input: { accounts: readonly Connection[]; params: BulkParams; userId: string },
+  ): Promise<number>;
+}
+
+/**
+ * Connections (T-0701: INT-4), the OAuth connect flow (INT-2, INT-3), the kill switch (SAFE-2)
+ * and bulk confirmation (SAFE-1, T-0702).
  */
 export interface ConnectionOptions {
-  connections: Pick<ConnectionRepository, 'list' | 'get' | 'recordSuccess'>;
-  /** The global maintenance switch as users see it (SAFE-3); off until T-0702 adds it. */
-  maintenance?: () => Promise<{ on: boolean; since: Date | null }>;
+  connections: Pick<
+    ConnectionRepository,
+    'list' | 'get' | 'recordSuccess' | 'setPaused' | 'maintenance'
+  >;
+  /** Sends a resumed account's waiting writes (SAFE-2). */
+  outbound?: Pick<OutboundQueue, 'resumeAccount'>;
+  /** Audit rows of the kill switch (AUD-1). */
+  audit?: Pick<AuditLog, 'record'>;
+  bulk?: {
+    confirmations: Pick<BulkConfirmationRepository, 'issue' | 'take'>;
+    actions: Readonly<Partial<Record<BulkAction, BulkActionHandler>>>;
+  };
   oauth: {
     flows: OAuthFlows;
     states: Pick<OAuthStateRepository, 'create' | 'take'>;
@@ -109,7 +139,7 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
   return {
     listConnections: async ({ tenant }) => {
       const items = await o.connections.list(tenant, now());
-      const maintenance = (await o.maintenance?.()) ?? { on: false, since: null };
+      const maintenance = await o.connections.maintenance(tenant);
       return {
         status: 200,
         body: {
@@ -125,7 +155,25 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
       return { status: 200, body: detail(found) };
     },
 
-    setKillSwitch: notFound,
+    setKillSwitch: async ({ tenant, session, params, body: input, request }) => {
+      const found = await o.connections.get(tenant, params.accountId, now());
+      if (found === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      // One transaction: the switch, its audit row and, on resume, the waiting writes' jobs.
+      if (await o.connections.setPaused(tenant, found.id, input.paused, now())) {
+        await o.audit?.record(tenant, {
+          action: 'kill_switch.changed',
+          actor: { kind: 'user', userId: session.userId },
+          entityId: found.id,
+          before: { paused: !input.paused },
+          after: { paused: input.paused },
+          ip: request.ip,
+        });
+        if (!input.paused) await o.outbound?.resumeAccount(tenant, found.id);
+      }
+      const after = await o.connections.get(tenant, found.id, now());
+      if (after === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      return { status: 200, body: body(after) };
+    },
 
     startAuthorisation: async ({ tenant, session, params }) => {
       const found = await o.connections.get(tenant, params.accountId, now());
@@ -225,7 +273,91 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
       return back(`connected=${encodeURIComponent(taken.channelAccountId)}`);
     },
 
-    previewBulkWrite: notFound,
-    confirmBulkWrite: notFound,
+    previewBulkWrite: async ({ tenant, session, access, body: input }) => {
+      const { bulk, handler } = bulkAction(input.action, access);
+      const parsed = handler.params.safeParse(input.params ?? {});
+      if (!parsed.success) {
+        throw new ApiError({ status: 400, code: 'validation_failed', detail: 'Bad params' });
+      }
+      const ids = [...new Set(input.channel_account_ids)].sort();
+      if (ids.length < 2) throw new ApiError({ status: 400, code: 'validation_failed' });
+      // Every account must be one this user may see (RLS: their permitted companies).
+      const accounts = await visible(tenant, ids);
+      if (accounts === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      const { token, expiresAt } = await bulk.confirmations.issue(
+        tenant,
+        { userId: session.userId, action: input.action, accountIds: ids, params: parsed.data },
+        now(),
+      );
+      return {
+        status: 200,
+        body: {
+          token,
+          expires_at: expiresAt.toISOString(),
+          action: input.action,
+          accounts: accounts.map((a) => ({
+            id: a.id,
+            provider: a.provider,
+            display_name: a.displayName,
+            company_id: a.companyId,
+            paused: a.pausedAt !== null,
+          })),
+        },
+      };
+    },
+
+    confirmBulkWrite: async ({ tenant, session, access, body: input }) => {
+      if (o.bulk === undefined) throw new ApiError({ status: 404, code: 'not_found' });
+      const taken = await o.bulk.confirmations.take(tenant, input.token, session.userId, now());
+      if (taken.outcome === 'not_found') throw new ApiError({ status: 404, code: 'not_found' });
+      if (taken.outcome === 'conflict') {
+        throw new ApiError({
+          status: 409,
+          code: 'conflict',
+          detail: 'This confirmation has expired, was used, or is not yours: preview again',
+        });
+      }
+      const { handler } = bulkAction(taken.action, access);
+      // Exactly the previewed accounts, all still in this user's scope; otherwise nothing runs.
+      const accounts = await visible(tenant, taken.accountIds);
+      if (accounts === undefined) {
+        throw new ApiError({ status: 409, code: 'conflict', detail: 'An account left your scope' });
+      }
+      const queued = await handler.run(tenant, {
+        accounts,
+        params: taken.params,
+        userId: session.userId,
+      });
+      return {
+        status: 202,
+        body: { action: taken.action, account_count: accounts.length, queued },
+      };
+    },
   };
+
+  /** The action's handler, for a user who may use its tab; 409 when no module offers it yet. */
+  function bulkAction(action: BulkAction, access: MemberAccess) {
+    const handler = o.bulk?.actions[action];
+    if (o.bulk === undefined || handler === undefined) {
+      throw new ApiError({
+        status: 409,
+        code: 'conflict',
+        detail: 'This bulk action is not available yet',
+      });
+    }
+    const ticked = access.tabs === 'all' || access.tabs.includes(handler.tab);
+    if (access.role !== 'admin' && !ticked) throw new ApiError({ status: 403, code: 'forbidden' });
+    return { bulk: o.bulk, handler };
+  }
+
+  /** The accounts by id, or undefined when any of them is not visible in this context. */
+  async function visible(
+    ctx: TenantContext,
+    ids: readonly string[],
+  ): Promise<Connection[] | undefined> {
+    const all = await o.connections.list(ctx, now());
+    const byId = new Map(all.map((c) => [c.id, c]));
+    const found = ids.map((id) => byId.get(id));
+    return found.every((c) => c !== undefined) ? found : undefined;
+  }
 }

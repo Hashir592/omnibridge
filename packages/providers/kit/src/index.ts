@@ -47,12 +47,7 @@ export {
 } from './http.ts';
 export { defineParser, parserRecordKind, type VersionedParser } from './parser.ts';
 export { readJson, retryAfterMs } from './respond.ts';
-export {
-  runIncrementalSync,
-  type SyncPorts,
-  type SyncResult,
-  type SyncStream,
-} from './sync.ts';
+export { runIncrementalSync, type SyncPorts, type SyncResult, type SyncStream } from './sync.ts';
 export { AccessTokenCache } from './tokens.ts';
 export { passThroughGovernor, type CallInput, type ProviderGovernor } from './governor.ts';
 export {
@@ -64,9 +59,6 @@ export {
   type OutboundResult,
   type OutboundWriteView,
 } from './outbound.ts';
-export {
-  CARRIER_CONCURRENCY,
-  carrierBackoff,
-  withCarrierSlot,
-  type SlotLimiter,
-} from './carrier.ts';
+// The carrier and website backoff and cap are a subpath of their own,
+// `@omnibridge/provider-kit/carrier`, so a build rule can keep them out of the Amazon and eBay
+// code paths (RL-3, ADR-078).

@@ -63,7 +63,12 @@ export class AmazonGovernor {
   }
 
   /** x-amzn-RateLimit-Limit: Amazon told us this seller's rate for the operation (AMZ-9). */
-  learn(ctx: TenantContext, channelAccountId: string, operation: string, rate: number): Promise<void> {
+  learn(
+    ctx: TenantContext,
+    channelAccountId: string,
+    operation: string,
+    rate: number,
+  ): Promise<void> {
     if (UNMETERED.has(operation) || !(rate > 0)) return Promise.resolve();
     return this.#store.setRate(ctx, { channelAccountId, operation, rate, now: this.#now() });
   }

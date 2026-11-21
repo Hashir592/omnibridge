@@ -691,10 +691,6 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         markPlatformNotificationRead: [404],
         // The walk archives B before this route (contract order), and archive is final.
         setWorkspaceModules: [409],
-        // M07 contract PR: built in T-0702, which removes these three.
-        getMaintenance: [503],
-        setMaintenance: [503],
-        getLiveApiUsage: [503],
       },
       // B's business data. Its workspace name and IDs may appear: the console lists workspaces,
       // and usage, expiry and dead-letter rows name accounts and jobs by ID (PLAT-2).

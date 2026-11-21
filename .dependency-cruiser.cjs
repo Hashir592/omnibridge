@@ -28,6 +28,33 @@ module.exports = {
       },
     },
     {
+      name: 'governors-no-core-retry-helper',
+      comment:
+        'RL-3, ADR-078: a governor may not import a backoff or retry helper from core either; each ' +
+        'governor keeps its own.',
+      severity: 'error',
+      from: { path: '^packages/governors/' },
+      to: { path: '^packages/core/src/[^/]*(retry|backoff)[^/]*$' },
+    },
+    {
+      name: 'providers-do-not-import-governors',
+      comment:
+        'RL-3: the worker routes each call to its own governor; no provider package imports one, ' +
+        'so the eBay path can never pick up the Amazon governor or the other way round.',
+      severity: 'error',
+      from: { path: '^packages/providers/' },
+      to: { path: '^packages/governors/' },
+    },
+    {
+      name: 'kit-carrier-backoff-only-carriers',
+      comment:
+        "RL-3, RL-4, ADR-078: the kit's carrier backoff and cap serve the carriers and the website " +
+        'only; the Amazon, Ads and eBay code paths never import them.',
+      severity: 'error',
+      from: { path: '^packages/(governors|providers/(amazon|ads|ebay))/' },
+      to: { path: '^packages/providers/kit/src/carrier\\.ts$' },
+    },
+    {
       name: 'providers-only-from-worker',
       comment:
         'INT-1, invariant 15: provider APIs are called only from packages/providers, through the ' +
