@@ -13,6 +13,7 @@ import {
   readJson,
   type AccessToken,
   type ChannelAdapter,
+  type ListingInfo,
   type OrderSummary,
   type Page,
   type ProviderHttp,
@@ -70,6 +71,33 @@ export const EbayOrdersV1 = defineParser(
         ),
       }),
     ),
+  }),
+);
+
+/** CAT-5: the Inventory API's items (SKU, title, quantity); M15 checks it against eBay's spec. */
+export const EbayInventoryItemsV1 = defineParser(
+  'ebay',
+  'inventory_items',
+  1,
+  z.object({
+    next: z.string().optional(),
+    offset: z.number().int().min(0).optional(),
+    limit: z.number().int().min(1).optional(),
+    inventoryItems: z
+      .array(
+        z.object({
+          sku: z.string().min(1),
+          product: z.object({ title: z.string().optional() }).optional(),
+          availability: z
+            .object({
+              shipToLocationAvailability: z
+                .object({ quantity: z.number().int().min(0).optional() })
+                .optional(),
+            })
+            .optional(),
+        }),
+      )
+      .default([]),
   }),
 );
 
@@ -185,6 +213,32 @@ export function createEbayAdapter(options: EbayAdapterOptions): ChannelAdapter &
           })),
         })),
         next: body.next === undefined ? undefined : String(body.offset + body.limit),
+      };
+    },
+
+    async listListings(access, page): Promise<Page<ListingInfo>> {
+      const limit = options.pageSize ?? 200;
+      const offset = Number(page ?? '0');
+      const url = new URL('sell/inventory/v1/inventory_item', base);
+      url.searchParams.set('limit', String(limit));
+      url.searchParams.set('offset', String(offset));
+      const res = await options.http.request('ebay', { url, headers: bearer(access) });
+      const body = EbayInventoryItemsV1.parse(await ebayJson(res));
+      return {
+        // An Inventory API item is keyed by its SKU; its offer's listing ID arrives with M15.
+        items: body.inventoryItems.map((i) => ({
+          externalSku: i.sku,
+          externalId: i.sku,
+          title: i.product?.title ?? null,
+          fulfilment: null,
+          inventoryApi: true,
+          quantity: i.availability?.shipToLocationAvailability?.quantity ?? null,
+        })),
+        // The page eBay actually served, which may be smaller than the one asked for.
+        next:
+          body.next === undefined
+            ? undefined
+            : String((body.offset ?? offset) + (body.limit ?? limit)),
       };
     },
 

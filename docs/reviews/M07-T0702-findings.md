@@ -39,7 +39,7 @@ Required fix:
 - Also keep the worst-case run of a send (attempts × (15 s timeout + wait)) under both the lease TTL and `OUTBOUND_STALE_MS`, and state that bound in a comment.
 - Test, citing `[RL-4]`: a 429 with `Retry-After: 300` returns without sleeping and leaves the write deferred until then, with the slot released.
 
-Resolution: (S3 fills in)
+Resolution: fixed in T-0801's branch (S3, 22 Nov 2026), commit "fix(providers): carrier backoff never sleeps past its cap". `carrierBackoff` sleeps at most `CARRIER_MAX_WAIT_MS` (10 s), computed or asked. A longer Retry-After rethrows the `RateLimited` at once, so `withCarrierSlot` releases the slot (its `finally`), and `runOutboundSend` defers the write with the provider's `retryAfterMs`. The worst-case bound of one run is stated in the comment: 3 x 15 s + 2 x 10 s = 65 s, under the 120 s lease and the 10-minute stale claim. Test: `packages/providers/kit/src/carrier.test.ts`, "[RL-4] a Retry-After longer than the in-place cap is not slept: the 429 goes back to be deferred".
 
 ## F-M07-T0702-02 — Minor — The app-wide eBay cap is set by whichever caller passes it
 Area: Rate limits  IDs: RL-2, EBAY-8
@@ -50,7 +50,7 @@ Failure: during a rolling deploy, or once M15 reads caps from getRateLimits, two
 
 Required fix (M15, when caps become dynamic): store the cap once per API and day from the hourly getRateLimits read, and have reservations use the stored cap only. Never let a reservation raise it, or take `least(stored, passed)`.
 
-Resolution: (S3 fills in)
+Resolution: carried to M15 as ruled (S3, 22 Nov 2026); listed in STATE follow-ups.
 
 ## Completeness checklist (T-0701 and T-0702)
 

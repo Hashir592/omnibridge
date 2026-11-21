@@ -9,6 +9,7 @@ export type {
   AdsProfile,
   CarrierService,
   ChannelAdapter,
+  ListingInfo,
   OrderSummary,
   Page,
   Parcel,
@@ -48,6 +49,7 @@ export {
 export { defineParser, parserRecordKind, type VersionedParser } from './parser.ts';
 export { readJson, retryAfterMs } from './respond.ts';
 export { runIncrementalSync, type SyncPorts, type SyncResult, type SyncStream } from './sync.ts';
+export { runListingScan, type ListingScan, type ScanResult } from './scan.ts';
 export { AccessTokenCache } from './tokens.ts';
 export { passThroughGovernor, type CallInput, type ProviderGovernor } from './governor.ts';
 export {

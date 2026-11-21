@@ -28,6 +28,7 @@ import {
   PlatformConsole,
   Tenancy,
   WorkspaceRepository,
+  CatalogueRepository,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
@@ -39,6 +40,8 @@ import {
   JobQueue,
   OutboundQueue,
   QUEUE_SCHEMA,
+  listingMappedJob,
+  listingsDiscoverJob,
 } from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
 import { buildWebApp } from './app.ts';
@@ -202,10 +205,36 @@ const app = buildWebApp({
         audit: new AuditLog(main.db),
         notifier: new Notifier({ store: new NotificationRepository(main.db) }),
         appOrigin: process.env.APP_ORIGIN ?? origins[0] ?? '',
+        // CAT-5: discovery runs on connect as well as daily.
+        connected: async (ctx, channelAccountId, at) => {
+          await queue.send(listingsDiscoverJob, {
+            ctx,
+            channelAccountId,
+            idempotencyKey: `listings.discover:connect:${channelAccountId}:${String(at.getTime())}`,
+            payload: {},
+          });
+        },
       },
       logger,
     };
   })(),
+  // The catalogue (T-0801: CAT-1 to CAT-6). A mapping change is told to M09 and M10 through a
+  // job sent in the request's transaction (CAT-6).
+  catalogue: {
+    catalogue: new CatalogueRepository(main.db),
+    audit: new AuditLog(main.db),
+    mappingChanged: async (ctx, change, at) => {
+      await queue.send(listingMappedJob, {
+        ctx,
+        idempotencyKey: `listing_mapped:${change.listingId}:${String(at.getTime())}`,
+        payload: {
+          listing_id: change.listingId,
+          master_sku_id: change.masterSkuId,
+          previous_master_sku_id: change.previousMasterSkuId,
+        },
+      });
+    },
+  },
   // The platform console (PLAT-1, PLAT-2): counts and IDs only, never tenant business data.
   platform: {
     console: platformConsole,

@@ -29,6 +29,7 @@ import {
   Tenancy,
   UserRepository,
   WorkspaceRepository,
+  CatalogueRepository,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import { Mailer } from '@omnibridge/mail';
@@ -48,6 +49,12 @@ import {
 } from '@omnibridge/queue';
 import { VaultClient } from '@omnibridge/vault-client';
 import { auditRetentionHandler } from './audit-retention.ts';
+import {
+  listingMappedHandler,
+  listingsDiscoverAccountsHandler,
+  listingsDiscoverHandler,
+  sweepListingsDiscover,
+} from './catalogue.ts';
 import { lockNoticeHandler, passwordResetHandler } from './auth-mail.ts';
 import { piiDeleteHandler, piiExpiryHandler } from './deletion.ts';
 import { jobsRetentionHandler } from './housekeeping.ts';
@@ -287,6 +294,19 @@ await registerHandlers(queue, {
     outbound,
     maintenance: (ctx) => connections.maintenance(ctx),
   }),
+  // The catalogue (T-0801): CAT-6 listeners (M09 and M10 add theirs) and CAT-5 discovery.
+  'catalogue.listing_mapped': listingMappedHandler({ listeners: [] }),
+  'listings.discover': listingsDiscoverHandler({
+    ports: syncPorts,
+    adapters: {
+      ebay: ebayAdapter,
+      website: () => Promise.resolve(createWebsiteAdapter({ http: providerHttp })),
+    },
+    catalogue: new CatalogueRepository(handlerDb.db),
+    queue,
+    logger: log,
+  }),
+  'listings.discover_accounts': listingsDiscoverAccountsHandler({ connections, queue }),
   'notify.email': notifyEmailHandler({
     tenancy: new Tenancy(handlerDb.db),
     notifications,
@@ -313,6 +333,8 @@ const closePlatformJobs = await startPlatformJobs({
     }),
   // T-0702: the outbound safety net, every ten minutes.
   recoverOutbound: (directory) => sweepOutboundRecover({ directory, queue }),
+  // T-0801: the daily listing discovery (CAT-5).
+  discoverListings: (directory) => sweepListingsDiscover({ directory, queue }),
   // SEC-12: platform admins' sign-ins, once per security sweep (T-0507, ADR-076).
   scanPlatform: () =>
     scanPlatformSecurity({

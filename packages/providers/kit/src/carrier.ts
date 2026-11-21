@@ -53,10 +53,20 @@ export async function withCarrierSlot<T>(
   }
 }
 
+/** The longest wait the backoff sleeps in place, holding the account's slot (F-M07-T0702-01). */
+export const CARRIER_MAX_WAIT_MS = 10_000;
+
 /**
  * The carriers' and website's own backoff on 429 or 5xx (RL-4): a few tries with exponential waits
  * (Retry-After when sent). Only for carriers and the website; the Amazon and eBay governors never
  * import it (RL-3, dependency-cruiser `kit-carrier-backoff-only-carriers`).
+ *
+ * It runs inside `withCarrierSlot`, whose lease (120 s) is never renewed, and inside an outbound
+ * claim that the sweep treats as stale after 10 minutes. So it never sleeps longer than `maxMs`
+ * (default 10 s): a provider that asks for a longer Retry-After gets its RateLimited back at once,
+ * and runOutboundSend defers the write until then with no slot or claim held. Worst case of one
+ * run, with the default 3 attempts and the client's 15 s timeout: 3 x 15 s + 2 x 10 s = 65 s, under
+ * both the lease and the stale-claim limit.
  */
 export async function carrierBackoff<T>(
   fn: () => Promise<T>,
@@ -68,6 +78,7 @@ export async function carrierBackoff<T>(
   } = {},
 ): Promise<T> {
   const attempts = options.attempts ?? 3;
+  const maxMs = options.maxMs ?? CARRIER_MAX_WAIT_MS;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -75,10 +86,10 @@ export async function carrierBackoff<T>(
     } catch (err) {
       const again = err instanceof RateLimited || err instanceof ProviderUnavailable;
       if (!again || attempt >= attempts) throw err;
-      const wait =
-        err instanceof RateLimited && err.retryAfterMs !== undefined
-          ? err.retryAfterMs
-          : Math.min(options.maxMs ?? 30_000, (options.baseMs ?? 1_000) * 2 ** (attempt - 1));
+      const asked = err instanceof RateLimited ? err.retryAfterMs : undefined;
+      // A longer Retry-After than the in-place cap goes back to the caller to defer (RL-4).
+      if (asked !== undefined && asked > maxMs) throw err;
+      const wait = asked ?? Math.min(maxMs, (options.baseMs ?? 1_000) * 2 ** (attempt - 1));
       await sleep(wait);
     }
   }

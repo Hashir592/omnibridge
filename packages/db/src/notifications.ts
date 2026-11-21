@@ -373,27 +373,39 @@ export class NotificationRepository implements NotificationStore {
     return Number(rows[0]?.n ?? 0);
   }
 
-  /** The ids of open notifications of one type and record kind (rules that resolve, NTF-1). */
-  /** Open platform notices of a type and record kind, by record ID (0035 definer; the worker). */
-  async openPlatformRecordIds(type: string, kind: string): Promise<string[]> {
-    const { rows } = await sql<{ id: string }>`
-      SELECT app.platform_notice_open_records(${type}, ${kind}) AS id`.execute(this.#db);
+  /**
+   * Open platform notices of a type and record kind, by record ID (0035 definer; the worker); with
+   * `raisedBefore`, only older ones.
+   */
+  async openPlatformRecordIds(type: string, kind: string, raisedBefore?: Date): Promise<string[]> {
+    const { rows } = await (
+      raisedBefore === undefined
+        ? sql<{ id: string }>`
+          SELECT app.platform_notice_open_records(${type}, ${kind}) AS id`
+        : sql<{ id: string }>`
+          SELECT app.platform_notice_open_records_before(${type}, ${kind}, ${raisedBefore}) AS id`
+    ).execute(this.#db);
     return rows.map((r) => r.id);
   }
 
-  async openRecordIds(ctx: TenantContext, type: string, kind: string): Promise<string[]> {
-    return withTenantTransaction(this.#db, ctx, async (trx) =>
-      (
-        await trx
-          .selectFrom('app.notifications')
-          .select('record_id')
-          .where('workspace_id', '=', ctx.workspaceId)
-          .where('type', '=', type)
-          .where('record_kind', '=', kind)
-          .where('resolved_at', 'is', null)
-          .execute()
-      ).map((r) => r.record_id),
-    );
+  /** Open notices of a type and record kind; with `raisedBefore`, only those raised before it. */
+  async openRecordIds(
+    ctx: TenantContext,
+    type: string,
+    kind: string,
+    raisedBefore?: Date,
+  ): Promise<string[]> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      let q = trx
+        .selectFrom('app.notifications')
+        .select('record_id')
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('type', '=', type)
+        .where('record_kind', '=', kind)
+        .where('resolved_at', 'is', null);
+      if (raisedBefore !== undefined) q = q.where('created_at', '<', raisedBefore);
+      return (await q.execute()).map((r) => r.record_id);
+    });
   }
 
   // Email (T-0502: NTF-3, NTF-4). One job per recipient; a sent record per notification version.

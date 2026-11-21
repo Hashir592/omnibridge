@@ -60,6 +60,7 @@ export async function startPlatformJobs({
   sendDigest,
   scanPlatform,
   recoverOutbound,
+  discoverListings,
 }: {
   boss: PgBoss;
   queue: Pick<JobQueue, 'send'>;
@@ -77,6 +78,8 @@ export async function startPlatformJobs({
   scanPlatform: () => Promise<number>;
   /** T-0702: one outbound.recover job per workspace; returns how many were sent. */
   recoverOutbound: (directory: { listIds(): Promise<string[]> }) => Promise<number>;
+  /** T-0801: one listings.discover_accounts job per workspace (CAT-5, daily). */
+  discoverListings: (directory: { listIds(): Promise<string[]> }) => Promise<number>;
 }): Promise<() => Promise<void>> {
   const platformDb = createMainDb(platformDbConfig('omnibridge-worker-fanout'), onDbError);
   const directory = new WorkspaceDirectory(platformDb.db);
@@ -109,6 +112,10 @@ export async function startPlatformJobs({
       },
       'outbound.recover-sweep': async () => {
         await recoverOutbound(directory);
+      },
+      'listings.discover-sweep': async () => {
+        const workspaces = await discoverListings(directory);
+        logger.info({ event: 'listings.discover_sweep', count: workspaces }, 'discovery sent');
       },
       'notify.platform-email-sweep': async () => {
         const sent = await sendPlatformEmails();

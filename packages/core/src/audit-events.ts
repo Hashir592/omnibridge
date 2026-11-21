@@ -68,9 +68,23 @@ export const AUDIT_EVENTS = {
   'stock.adjusted': spec('master_sku', ['delta', 'on_hand_after', 'reason_code'], {
     reasonRequired: true,
   }),
-  // Catalogue and COGS.
-  'catalogue.changed': spec('master_sku', ['sku', 'title', 'status']),
+  // Catalogue and COGS (T-0801). A SKU's create and edit, its VAT-type history (CAT-2) and
+  // COGS (CAT-4); a VAT rate (admins); a listing's mapping (CAT-5); a CSV import, as one row.
+  'catalogue.changed': spec('master_sku', [
+    'sku',
+    'title',
+    'status',
+    'active',
+    'bundle_component_id',
+    'pack_size',
+    'vat_type',
+    'vat_effective_from',
+  ]),
   'cogs.changed': spec('master_sku', ['cogs_pence', 'effective_from']),
+  'vat_rate.created': spec('vat_rate', ['vat_type', 'rate_bp', 'effective_from']),
+  'listing.mapped': spec('listing', ['master_sku_id', 'source']),
+  'listing.unmapped': spec('listing', ['master_sku_id']),
+  'catalogue.imported': spec('catalogue_import', ['kind', 'row_count']),
   // Finance (M16, M17): every create, edit and delete; moving a cost to another company needs a
   // reason (EXP-4).
   'finance.created': spec('finance_record', FINANCE_FIELDS, { finance: true }),

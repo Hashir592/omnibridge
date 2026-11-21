@@ -115,3 +115,15 @@ export const MOCK_ORDERS = [
   { id: 'MOCK-1002', updatedAt: '2026-11-20T11:00:00.000Z', sku: 'MOCK-SKU-2', quantity: 2 },
   { id: 'MOCK-1003', updatedAt: '2026-11-20T12:00:00.000Z', sku: 'MOCK-SKU-1', quantity: 3 },
 ] as const;
+
+/**
+ * The fixed synthetic listings every channel mock serves (CAT-5): two that match the seeded
+ * Master SKU codes exactly, one that matches nothing (the Unmapped queue), and on Amazon one FBA
+ * listing (INV-9). Quantities let reconciliation compare (INV-7).
+ */
+export const MOCK_LISTINGS = [
+  { sku: 'MOCK-SKU-1', id: 'MOCK-L-1', title: 'Mock bamboo bowl', quantity: 5, fba: false },
+  { sku: 'MOCK-SKU-2', id: 'MOCK-L-2', title: 'Mock bamboo spoon', quantity: 8, fba: false },
+  { sku: 'MOCK-UNMATCHED-1', id: 'MOCK-L-3', title: 'Mock odd item', quantity: 1, fba: false },
+  { sku: 'MOCK-SKU-1-FBA', id: 'MOCK-L-4', title: 'Mock bamboo bowl FBA', quantity: 12, fba: true },
+] as const;

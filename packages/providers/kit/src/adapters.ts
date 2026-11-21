@@ -37,6 +37,20 @@ export interface OrderSummary {
   }[];
 }
 
+/** A channel listing as discovery reads it (CAT-5): codes, flags and the quantity only. */
+export interface ListingInfo {
+  readonly externalSku: string;
+  /** Listing ID, ASIN or item ID. */
+  readonly externalId: string;
+  readonly title: string | null;
+  /** Amazon only: merchant- or Amazon-fulfilled. */
+  readonly fulfilment: 'mfn' | 'fba' | null;
+  /** eBay only: the listing's stock is managed through the Inventory API. */
+  readonly inventoryApi: boolean | null;
+  /** The quantity the channel shows now (INV-7), when it says. */
+  readonly quantity: number | null;
+}
+
 export interface StockLevel {
   readonly sku: string;
   readonly quantity: number;
@@ -59,6 +73,8 @@ export interface ChannelAdapter extends ProviderAdapter {
   readonly provider: 'amazon' | 'ebay' | 'website';
   ordersUpdatedSince(token: AccessToken, since: Date, page?: string): Promise<Page<OrderSummary>>;
   pushStock(token: AccessToken, levels: readonly StockLevel[]): Promise<WriteResult>;
+  /** One page of the account's listings (CAT-5); a complete scan reads every page. */
+  listListings(token: AccessToken, page?: string): Promise<Page<ListingInfo>>;
 }
 
 export interface AdsProfile {

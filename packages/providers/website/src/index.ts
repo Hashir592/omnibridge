@@ -35,6 +35,23 @@ const OrdersV1 = defineParser(
     next_cursor: z.string().nullable(),
   }),
 );
+/** CAT-5: the products the website sells (provisional until M11 defines the protocol). */
+const ProductsV1 = defineParser(
+  'website',
+  'products',
+  1,
+  z.object({
+    products: z.array(
+      z.object({
+        id: z.string().min(1),
+        sku: z.string().min(1),
+        title: z.string().nullable().optional(),
+        quantity: z.number().int().min(0).nullable().optional(),
+      }),
+    ),
+    next_cursor: z.string().nullable(),
+  }),
+);
 const StockV1 = defineParser('website', 'stock', 1, z.object({ updated: z.array(z.string()) }));
 
 export function createWebsiteAdapter(options: {
@@ -68,6 +85,27 @@ export function createWebsiteAdapter(options: {
           updatedAt: new Date(o.updated_at),
           status: o.status,
           lines: o.lines.map((l) => ({ lineId: l.id, sku: l.sku, quantity: l.quantity })),
+        })),
+        next: body.next_cursor ?? undefined,
+      };
+    },
+
+    async listListings(token, page) {
+      const url = new URL('api/products', base);
+      if (page !== undefined) url.searchParams.set('cursor', page);
+      const res = await options.http.request('website', {
+        url,
+        headers: { 'x-api-key': token.token.reveal() },
+      });
+      const body = ProductsV1.parse(await readJson('website', res));
+      return {
+        items: body.products.map((p) => ({
+          externalSku: p.sku,
+          externalId: p.id,
+          title: p.title ?? null,
+          fulfilment: null,
+          inventoryApi: null,
+          quantity: p.quantity ?? null,
         })),
         next: body.next_cursor ?? undefined,
       };
