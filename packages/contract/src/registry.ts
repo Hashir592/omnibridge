@@ -9,6 +9,7 @@ import { getJob } from './routes/jobs.ts';
 import { notificationRoutes } from './routes/notifications.ts';
 import { platformRoutes } from './routes/platform.ts';
 import { privacyRoutes } from './routes/privacy.ts';
+import { stockRoutes } from './routes/stock.ts';
 import { createCompany, createWorkspace, listCompanies } from './routes/tenancy.ts';
 import { userRoutes } from './routes/users.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
@@ -35,6 +36,7 @@ export const contractRoutes = [
   ...platformRoutes,
   ...connectionRoutes,
   ...catalogueRoutes,
+  ...stockRoutes,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;

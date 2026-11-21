@@ -678,6 +678,39 @@ ${catalogueB.listing},${MARKER}`,
           searchText: true,
         },
         exportMappings: {},
+        // Stock (M09): workspace-shared like the catalogue. B's SKU, listing and account are
+        // neither read nor moved from A (T-0901 builds the routes; until then they are 404).
+        listStock: {},
+        getStock: { params: { skuId: catalogueB.sku } },
+        listMovements: { query: { sku_id: catalogueB.sku } },
+        exportMovements: { query: { sku_id: catalogueB.sku } },
+        stockIn: {
+          params: { skuId: catalogueB.sku },
+          body: { quantity: 5, notes: MARKER, client_ref: randomUUID() },
+        },
+        adjustStock: {
+          params: { skuId: catalogueB.sku },
+          body: { delta: -1, reason: 'other', text: MARKER, client_ref: randomUUID() },
+        },
+        importStockTake: {
+          body: {
+            csv: `sku,on_hand
+${MARKER}-SKU,99`,
+            dry_run: true,
+          },
+          searchText: true,
+        },
+        listBuffers: {},
+        setAccountBuffer: { params: { accountId: b.account }, body: { buffer: 3 } },
+        setListingBuffer: { params: { listingId: catalogueB.listing }, body: { buffer: 2 } },
+        saveAllocation: {
+          params: { skuId: catalogueB.sku },
+          body: {
+            version: 0,
+            listings: [{ listing_id: catalogueB.listing, mode: 'manual', manual_qty: 1 }],
+          },
+        },
+        backToAuto: { params: { skuId: catalogueB.sku }, body: {} },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
