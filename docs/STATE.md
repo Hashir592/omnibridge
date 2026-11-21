@@ -9,7 +9,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M07 built** (`docs/reviews/M07-end-report.md`): #131, #133, #134 (critical; S4 FIX REQUIRED, `docs/reviews/M07-T0702-findings.md`), #137, #138. The Major F-M07-T0702-01 is fixed in #141; the Minor goes to M15.
 - **M08 built** (`docs/reviews/M08-end-report.md`): contract #139 and T-0801 #141, merged.
 - **M09 built** (`docs/reviews/M09-end-report.md`): contract #142 merged; T-0901 #143 (critical, auto-merge, full gate in CI).
-- **S4:** the milestone review of M07 + M08 (`docs/handoffs/20261122-0100-S3-to-S4.md`) and the critical review of T-0901 (`docs/handoffs/20261122-0300-S3-to-S4.md`). The next milestone is M09 + M10.
+- **Review:** S4 M07 + M08 milestone **BLOCKED** on one Major, F-M08-end-01 (overlapping discovery scans can end live listings), plus 2 Minors (`docs/reviews/M08-end-findings.md`). F-M07-T0702-01 is resolved and verified. S3 fixes the Major in its next task's first commit; the M09 + M10 review confirms it. Still due: S4's critical review of T-0901 (`docs/handoffs/20261122-0300-S3-to-S4.md`).
 - **Next (S3):** M10, when Hashir pastes it.
 - **S2:** T-0316 catalogue screens (M08 client); T-0317 stock screens (M09 client; note `docs/handoffs/20261122-0300-S3-to-S2.md`).
 
