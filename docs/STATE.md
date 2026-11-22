@@ -1,88 +1,84 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 22 Nov 2026 by S3 (T-0901 review fixes in PR #151).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 23 Nov 2026 by S3 (M10 built).
 
 ## Now
 
-- **Phase:** B, local Docker only. Plan of 12 Nov 2026 (ADR-054), fast lane from M07 (ADR-077). Module order is in `docs/plan/MODULES.md`.
-- **Closed:** M01 to M05 (S4 M05 end APPROVED, `docs/reviews/M05-end.md`). The M06 site pieces are merged; it waits on the client's legal details.
-- **M07 built** (`docs/reviews/M07-end-report.md`): #131, #133, #134 (critical; S4 FIX REQUIRED, `docs/reviews/M07-T0702-findings.md`), #137, #138. The Major F-M07-T0702-01 is fixed in #141; the Minor goes to M15.
-- **M08 built** (`docs/reviews/M08-end-report.md`): contract #139 and T-0801 #141, merged.
-- **M09 built** (`docs/reviews/M09-end-report.md`): contract #142 and T-0901 #143, merged.
-- **S4:** the M07 + M08 milestone was BLOCKED on F-M08-end-01 (`docs/reviews/M08-end-findings.md`), fixed with both Minors in #146. The M09 + M10 milestone confirms the fix. **Review:** T-0901 critical review FIX REQUIRED (`docs/reviews/M09-T0901-findings.md`): Major F-M09-T0901-01 (release and dispatch must work from the line's own reserve, also across a remap), fixed in M10's first commit; 2 Minors.
-- **T-0901 review** (`docs/reviews/M09-T0901-findings.md`): FIX REQUIRED on F-M09-T0901-01. Fixed with both Minors in #151, ahead of M10. #146 (the M08 milestone fix) and #150 (account and user names for S2) are merged.
-- **Next (S3):** M10, when Hashir pastes it.
-- **S2:** T-0316 (#145) and T-0317 (#149) merged; the screens now show S3's account and user names (#150). Next for S2: whatever S1 places after M09.
+- **Phase:** B, local Docker only. Plan of 12 Nov 2026 (ADR-054), fast lane from M07 (ADR-077), halfway pause (ADR-080). Module order is in `docs/plan/MODULES.md`.
+- **Closed:** M01 to M05 (S4 M05 end APPROVED). The M06 site pieces are merged; it waits on the client's legal details.
+- **M07, M08, M09 built** (end reports in `docs/reviews/`). The M08 milestone fix (#146) and the T-0901 review fixes (#151) are merged, for the M09 + M10 milestone to verify.
+- **M10 built** (`docs/reviews/M10-end-report.md`):
+  - #156 T-1000, #157 contract, #158 T-1001 (critical): merged;
+  - #159 T-1002: auto-merge on, CI running.
+- **Waiting on reviews:**
+  - S4 critical review of #158 → `docs/reviews/M10-T1001-findings.md`;
+  - S5 check of #158 → `docs/reviews/security/`;
+  - S4 M09 + M10 milestone (also verifies #141, #146, #151).
+  - Fix rule: Blockers at once; Majors in the first commit of S3's next task.
+- **Next (S3):** M11, when Hashir pastes it.
+- **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
 
-## M08 in short (what later modules use)
+## M10 in short (what later modules use)
 
-- **Catalogue repository:** `CatalogueRepository` (`packages/db/src/catalogue.ts`). Its lookups `cogsOn`, `vatTypeOn` and `vatRateOn` take a London day and are what M10's write-once snapshots read. A bundle follows its component.
-- **Money:** `packages/core/src/money.ts` (`parsePounds`, `formatPounds`, `divHalfUp`). Pence are bigint inside and numbers on the wire.
-- **CAT-6:** `catalogue.listing_mapped` (IDs only), sent in the changing transaction. Register a `ListingMappedListener` in the worker (`apps/worker/src/catalogue.ts`). A `ListingsEndedListener` hears listings that a complete scan no longer found.
-- **Discovery:** `listings.discover` per account (daily and on an eBay connect) through `runListingScan`. Amazon joins in M18 (seller ID).
+- **Ingest:** `OrderIngest.apply(ctx, account, orders)` (`packages/db/src/orders.ts`) runs in the sync transaction, after the vault-first `prepare` (`apps/worker/src/orders.ts`, `orderIngestStream`).
+  - Streams: `ebay.orders` and `website.orders`, polled every 5 minutes (`orders.sync-sweep`).
+  - M11's website push should reuse `orderIngestStream`'s vault-first step and `OrderIngest.apply`.
+- **PII:**
+  - one vault record per order, subject `<channel_account_id>:<external_order_id>` (`orders.pii_subject`);
+  - backstop: placement + 90 days; dispatch or delivery + 25 days via `orders.pii_expiry` (journalled);
+  - cancellation calls `requestDeletion`;
+  - the nightly `orders.orphan-sweep` expires orphan records older than a day;
+  - eBay tombstones are in `vault.deleted_buyers`.
+- **Status:** the FA-10 table is in `packages/core/src/order-status.ts`. M12's label and dispatch moves (label_created, the void back to awaiting_dispatch) go through `nextOrderStatus`.
+- **VAT:**
+  - `computeOrderVat` / `computeRefundVat` (`packages/core/src/vat.ts`);
+  - append-only `app.vat_ledger` rows (sale, refund, adjustment) with `group_key`, `tax_point_date` and `period_date` (`vatPeriodDate()`, the hook for filed periods in the VAT quarters module).
+- **Snapshots:** `order_lines` vat_type, vat_rate_bp, cogs_pence and master_sku_id are write-once (trigger). A provisional line counts at `provisional_rate_bp`.
+- **Stock:** reserve, release and dispatch run with the order line id.
+  - `stock_moves` is false for orders placed before the account was connected.
+  - `stock_push_held_since` holds a new account's writes until a clean reconciliation; T-1101's Connect route passes `holdStockPush: true`.
+- **Reads and groups:** `OrderReads` (`packages/db/src/order-reads.ts`) handles the list, detail, returns, export and groups.
+  - `orders.group_recompute` asks `vault.match`, then calls `applyGroups`.
+  - M12's Ship together locks the members of `order_groups` and re-checks them.
 
-## M07 in short (what later modules use)
+## M09 and M08 in short
 
-- **Provider calls:** only through `@omnibridge/provider-kit`'s `ProviderHttp`, called from the worker, except the OAuth code exchange in web (`apps/web/src/oauth-exchange.ts`).
-  - Hosts are allowlisted by `PROVIDER_MODE`: mock reaches provider-mocks only, on the internal `ob_mocks` network.
-- **Parsers:** `defineParser(provider, name, version, schema)`. A missing field raises `platform.report_failure` once per parser version and ends the job without a retry.
-- **Sync:** `runIncrementalSync` with cursors (5-minute overlap, page-cap resume). Sinks must upsert by external ID (INT-8).
-  - Stream `ebay.orders` is the reference; M10 adds the vault-first sink.
-- **Origin tags:** tables with an `external_id` call `app.add_origin_columns` (INT-6).
-- **Connections:** health and status on `channel_accounts`, in the order disconnected > needs_reauth > paused > error > active.
-  - 3 auth failures in an hour, or a revocation, set `needs_reauth` and raise `channel.auth_lost`. The next success resolves it.
-- **Credentials:** encrypted per account, tagged with their environment. `AccountCredentials.replace` keeps the old token for 7 days.
-- **Outbound writes (invariant 20):** every automated write goes through `OutboundQueue.enqueue` in the caller's transaction.
-  - Payloads hold IDs, SKUs and numbers only.
-  - Register the operation in `apps/worker/src/outbound.ts`; M07 has `ebay.stock_push` and `website.stock_push`.
-- **Switches:**
-  - kill switch: `PUT /connections/:id/kill-switch`;
-  - maintenance: `PUT /platform/maintenance`.
-  - Both are read just before each send. Held writes resume once.
-- **Bulk writes (SAFE-1):** register a `BulkActionHandler` in web's `connections.bulk.actions`. The registry is empty until M09.
-- **Governors:** the worker composes `createProviderGovernor`.
-  - Amazon: buckets and backoff in `packages/governors/amazon`; operation limits in `AMAZON_OPERATION_LIMITS`.
-  - eBay: the budget in `packages/governors/ebay`; caps in `EBAY_DAILY_CAPS`, which M15 reads from getRateLimits.
-  - Carriers and website: a cap of 4.
-  - Never import one governor from the other, and never share a retry helper (RL-3, dependency-cruiser).
-- **Mocks:** `POST /_mock/scenarios {provider, account, scenario}` per account. Evri, DPD, website and Ads endpoints are provisional until their modules.
+- **Stock engine:** `StockEngine` (`packages/db/src/stock.ts`) joins the caller's transaction. Pushes go only through `OutboundQueue`, eBay and website only. Reconciliation runs after each complete listing scan (INV-7). Refunds call `returnToStock` (not yet wired: channel refunds carry no return-to-stock flag).
+- **Catalogue:** `CatalogueRepository` (`packages/db/src/catalogue.ts`), with `cogsOn`, `vatTypeOn` and `vatRateOn` per London day. CAT-6 listeners `stock` and `orders` run in `catalogue.listing_mapped`.
+- **Money:** `packages/core/src/money.ts`; the provider kit's `penceFromAmount` reads channel amounts by text.
 
-## M09 in short (what later modules use)
+## M07 in short
 
-- **Stock engine:** `StockEngine` (`packages/db/src/stock.ts`) joins the caller's transaction. M10 calls `reserve` (which returns `oversold`), `release` and `dispatch` with the order line and listing; M12 calls `dispatch`; refunds call `returnToStock`.
-- **Back-fill:** M10 implements `UnmappedDemand.openLines(listingId)` for CAT-6.
-- **Pushes:** they go only through `OutboundQueue`, one write per listing, on a target change. eBay and website only; Amazon joins in M18.
-- **Push results:** the worker's `outbound.send` settle hook records them (INV-8). Reconciliation runs after each complete listing scan (INV-7).
+- **Provider calls:** only through `ProviderHttp` in the worker (the OAuth exchange in web excepted), with mock-only hosts by `PROVIDER_MODE`.
+- **Parsers:** `defineParser(provider, name, version, schema)`. A failure raises `platform.report_failure` once per version.
+- **Sync:** `runIncrementalSync` (5-minute overlap, page-cap resume). The optional `prepare` hook runs with no transaction open.
+- **Outbound writes:** go through `OutboundQueue.enqueue` in the caller's transaction. The kill switch and maintenance are read before each send.
+- **Governors:** Amazon buckets and the eBay budget are separate packages (RL-3). Carriers and the website have a cap of 4.
 
 ## Follow-ups noted (for S1 to place)
 
-- **From M07** (details in the end report):
-  - Connect-new-account and Disconnect routes;
-  - the CS-6 buyer messages route (M18);
-  - the carrier-cap timeout should be a governor wait;
-  - Amazon 429 retries should be re-metered;
-  - the token refresh race;
-  - environment in the credentials unique index (M22).
-- **From M08:** share one call-session helper between `runIncrementalSync` and `runListingScan`; the Disconnect route should end the account's listings (C7.3). **M15:** the eBay offer's listing ID as `external_id`; F-M07-T0702-02 (the eBay cap set by the caller). **M18:** Amazon discovery and `amazon.stock_push` with the seller ID.
-- **ADR-068, for M08 and M10:** expiry changes journalled; no re-ingest after an eBay deletion (tombstone check); eBay username reuse matched by user ID first.
-- **M07 and M08:** Amazon revocation and eBay termination call `requestDeletion` with the channel account. The eBay key fetch cap (5 a minute) is per web process.
-- **M10:**
-  - ingest is not idempotent per subject, so key buyer records by order;
-  - call `requestDeletion` on cancellation;
-  - set `delete_after` at dispatch or delivery plus pii_expiry_days (vault backstop 90 days).
+- **From M07 and M08:**
+  - Connect-new-account and Disconnect routes (T-1101): hold stock pushes, end the account's listings;
+  - the shared call-session helper (T-1101);
+  - the carrier-cap wait (T-1201);
+  - Amazon 429 metering and CS-6 (M18);
+  - token refresh race, eBay stock-push batching, F-M07-T0702-02 (T-1501);
+  - credentials environment index (M22).
+- **From M10:**
+  - the 21st same-buyer member notice (needs a notification type, M12);
+  - a settings route for `group_midnight_grace_hours` (TEN-6);
+  - a return-to-stock flag on refunds;
+  - Amazon orders and the returns report (M18);
+  - re-index vault match keys before M22 (dev records from before T-1002).
 - **M12:** the vault's `LabelFiles` hook deletes label files with their records.
-- **M15:** the eBay endpoint's token and keyset move into the app secrets store. **M18:** LWA rotation reminders. **M21:** platform-audit read route.
-- **PS-026 / picomatch:** the audit exception (GHSA-fc5q-39xc-vjpf) **expires 1 Dec 2026**. When a fix ships, bump it and delete the entry.
-- **M22 (backups):**
-  - apply `infra/backup/b2.md`;
-  - schedule `backup.sh` nightly, plus `retention.sh`;
-  - host timer for the 15-minute journal run;
-  - pin the restic image by digest, on its own `ob_backup` network;
-  - backup-age alert (OPS-4).
+- **M15:** the eBay endpoint's token and keyset move into app secrets. **M18:** LWA rotation reminders. **M21:** platform-audit read route.
+- **PS-026 / picomatch:** the audit exception **expires 1 Dec 2026**. Bump the package when a fix ships and delete the entry.
+- **M22 (backups):** apply `infra/backup/b2.md`; nightly `backup.sh` and `retention.sh`; the 15-minute journal timer (now also expiry lines); pin restic by digest on `ob_backup`; backup-age alert.
 
 ## Rules in force
 
 - **Speed (ADR-056):** never wait for CI (auto-merge); one review per PR; browser only when it proves something.
-- **Process (ADR-053, ADR-054, ADR-077):** sessions merge their own green PRs; CI is the only full gate.
+- **Process (ADR-053, ADR-054, ADR-077, ADR-080):** sessions merge their own green PRs; CI is the only full gate; S3 takes a halfway pause per module.
+- **Semgrep (ADR-079 0):** it is now a required gate job (#156).
 - **Hashir's "go":** needed only for critical tasks, and comes with the module paste.
-- **Hashir:** GitHub CLI on Hashir592. His dev machine is getting 16 GB.
+- **Hashir:** GitHub CLI on Hashir592. Docker Desktop must be running for integration tests.
