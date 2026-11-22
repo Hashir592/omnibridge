@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, getRouteApi, useNavigate } from '@tanstack/react-router';
 import { Clock, Download } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useAppState } from '../../app/session.tsx';
 import {
   saveFile,
@@ -205,7 +205,9 @@ function Movements() {
     void navigate({ search: { size: search.size }, replace: true });
   };
 
+  const [exporting, setExporting] = useState(false);
   const exportCsv = async () => {
+    setExporting(true);
     try {
       const r = await stockApi.exportMovements(filter);
       if (!r.ok) throw new Error(String(r.status));
@@ -216,6 +218,8 @@ function Movements() {
         description: 'Narrow the dates or pick a SKU, then try again.',
         tone: 'error',
       });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -224,7 +228,7 @@ function Movements() {
       <PageHeader
         title="Stock & Catalogue"
         actions={
-          <Button icon={<Download />} onClick={() => void exportCsv()}>
+          <Button icon={<Download />} busy={exporting} onClick={() => void exportCsv()}>
             Export CSV
           </Button>
         }
