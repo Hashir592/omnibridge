@@ -83,6 +83,7 @@ export {
   ordersSyncAccountsJob,
   ordersPiiExpiryJob,
   ordersOrphanSweepJob,
+  ordersGroupRecomputeJob,
   ordersSyncSweepJob,
   ordersOrphanSweepPlatformJob,
   notifyEmailJob,

@@ -106,6 +106,8 @@ describe('db-main roles and migrations', () => {
       '0046_validate_stock_line_reserves',
       '0047_stock_line_reserves_index',
       '0048_orders',
+      '0049_order_groups',
+      '0050_validate_order_groups',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

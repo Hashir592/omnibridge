@@ -28,6 +28,7 @@ export {
 } from './money.ts';
 export { parseCsv, toCsv, type CsvRow } from './csv.ts';
 export { allocateLargestRemainder } from './allocate.ts';
+export { GROUP_CAP, ordersLink, sameBuyerGroups, type GroupCandidate } from './order-groups.ts';
 export {
   computeOrderVat,
   computeRefundVat,

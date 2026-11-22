@@ -36,6 +36,7 @@ describe('order ingest (T-1001)', () => {
       calls.push({ op: 'shorten', orderId: input.orderId, detail: input.reason });
       return Promise.resolve();
     },
+    regroup: () => Promise.resolve(),
   };
   let ingest: OrderIngest;
   let stock: StockEngine;

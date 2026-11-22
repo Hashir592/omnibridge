@@ -30,6 +30,7 @@ import {
   WorkspaceRepository,
   CatalogueRepository,
   StockEngine,
+  OrderReads,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
@@ -178,6 +179,7 @@ const app = buildWebApp({
     erasures: new ErasureRequestRepository(main.db),
     queue,
     audit: new AuditLog(main.db),
+    orders: new OrderReads(main.db),
   },
   // The notification centre (NTF-1, NTF-2).
   notifications: { notifications: new NotificationRepository(main.db) },
@@ -245,6 +247,9 @@ const app = buildWebApp({
     catalogue: new CatalogueRepository(main.db),
     audit: new AuditLog(main.db),
   },
+  // Orders (T-1002): db-main reads under the user's company scope, masked and full values from
+  // pii-vault with the web token (ORD-5).
+  orders: { reads: new OrderReads(main.db), vault, audit: new AuditLog(main.db) },
   // The catalogue (T-0801: CAT-1 to CAT-6). A mapping change is told to M09 and M10 through a
   // job sent in the request's transaction (CAT-6).
   catalogue: {

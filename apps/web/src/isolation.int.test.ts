@@ -8,6 +8,8 @@ import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
   CatalogueRepository,
+  OrderIngest,
+  OrderReads,
   StockEngine,
   AccountCredentials,
   AppSecretStore,
@@ -84,6 +86,8 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
   const a = { company: '', job: '', sku: randomUUID() };
   // M08: B's Master SKU and listing, seeded in beforeAll (T-0801).
   const catalogueB: { sku: string; listing: string } = { sku: randomUUID(), listing: randomUUID() };
+  // M10: B's two orders of one buyer, in one same-buyer group (T-1002).
+  const ordersB = { first: '', second: '', group: '' };
   const TODAY = '2026-11-21';
 
   /** A stock write in the walk would be a write to B: the queue refuses it. */
@@ -142,6 +146,10 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           stockDetail: await stockEngine().getStock(ctx, catalogueB.sku),
           movements: await stockEngine().listMovements(ctx, { offset: 0, limit: 100 }, 1000),
           buffers: await stockEngine().buffers(ctx),
+          // M10: B's orders (notes, status), returns and group.
+          orders: await new OrderReads(main.db).list(ctx, {}, { offset: 0, limit: 100 }, 1000),
+          order: await new OrderReads(main.db).detail(ctx, ordersB.first),
+          group: await new OrderReads(main.db).group(ctx, ordersB.group),
         },
         // Pence are bigint; the snapshot only needs them as text.
         (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value),
@@ -282,6 +290,58 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       );
       const found = await catalogue.listListings(ctx, { offset: 0, limit: 1 }, 10);
       catalogueB.listing = found.items[0]?.id ?? catalogueB.listing;
+    });
+    // M10: two orders of one buyer on B's account, grouped (the vault's match is stood in for).
+    await tenancy.runWorkspace({ workspaceId: B }, async (ctx) => {
+      const ingest = new OrderIngest(main.db, {
+        catalogue: new CatalogueRepository(main.db),
+        ports: {
+          cancelPii: () => Promise.resolve(),
+          shortenPii: () => Promise.resolve(),
+          regroup: () => Promise.resolve(),
+        },
+      });
+      const order = (ref: string, at: string) => ({
+        externalId: ref,
+        rawStatus: 'NOT_STARTED/PAID',
+        state: 'awaiting_dispatch' as const,
+        updatedAt: new Date(at),
+        placedAt: new Date(at),
+        paidAt: new Date(at),
+        shipBy: null,
+        dispatchedAt: null,
+        deliveredAt: null,
+        cancelledAt: null,
+        discount: pence(0n),
+        shipping: pence(0n),
+        shipToCountry: 'GB',
+        fba: false,
+        lines: [
+          {
+            lineId: 'L1',
+            sku: `${MARKER}-SKU`,
+            quantity: 1,
+            title: MARKER,
+            linePrice: pence(1000n),
+          },
+        ],
+        refunds: [
+          { refundId: `${MARKER}-R`, refundedAt: new Date(at), amount: pence(100n), lines: null },
+        ],
+        pii: { kind: 'stored' as const, piiRef: randomUUID() },
+      });
+      await ingest.apply(ctx, b.account, [
+        order(`${MARKER}-ORD-1`, '2026-11-21T10:00:00Z'),
+        order(`${MARKER}-ORD-2`, '2026-11-21T11:00:00Z'),
+      ]);
+      const reads = new OrderReads(main.db);
+      const listed = await reads.list(ctx, {}, { offset: 0, limit: 10 }, 10);
+      const subjects = listed.items.map((r) => `${b.account}:${r.orderRef}`);
+      await reads.applyGroups(ctx, b.account, new Map(subjects.map((s) => [s, 'one-buyer'])));
+      const grouped = await reads.list(ctx, {}, { offset: 0, limit: 10 }, 10);
+      ordersB.first = grouped.items[0]?.id ?? '';
+      ordersB.second = grouped.items[1]?.id ?? '';
+      ordersB.group = grouped.items[0]?.group?.id ?? '';
     });
     await tenancy.runWorkspace({ workspaceId: A }, (ctx) =>
       new CatalogueRepository(main.db).createSku(
@@ -467,6 +527,17 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       stock: {
         engine: stockEngine(),
         catalogue: new CatalogueRepository(main.db),
+        audit: new AuditLog(main.db),
+      },
+      // T-1002: orders. The stand-in vault masks nothing and refuses a full read: reaching it
+      // with B's order would be the leak this walk looks for.
+      orders: {
+        reads: new OrderReads(main.db),
+        vault: {
+          mask: () => Promise.resolve({ records: [] }),
+          readFull: () => Promise.reject(new Error('a full read in the isolation walk')),
+          search: () => Promise.resolve({ matches: [], truncated: false }),
+        },
         audit: new AuditLog(main.db),
       },
       // T-0504: the console, with a stand-in queue that holds one dead job of B's.
@@ -729,18 +800,18 @@ ${MARKER}-SKU,99`,
           },
         },
         backToAuto: { params: { skuId: catalogueB.sku }, body: {} },
-        // Orders (M10): company-scoped. Until T-1001 stores orders these answer 404; T-1001 and
-        // T-1002 seed B's order and group and aim these calls at them.
+        // Orders (M10): company-scoped. B's account, orders and group are never read or changed
+        // from A: a filter on B's account is a 404, never an empty list.
         listOrders: { query: { channel_account_id: b.account } },
         searchOrders: { query: { channel_account_id: b.account }, body: { buyer_name: MARKER } },
         exportOrders: { query: { channel_account_id: b.account } },
-        getOrder: { params: { orderId: randomUUID() } },
-        viewOrderCustomer: { params: { orderId: randomUUID() } },
-        setOrderNotes: { params: { orderId: randomUUID() }, body: { notes: MARKER } },
+        getOrder: { params: { orderId: ordersB.first } },
+        viewOrderCustomer: { params: { orderId: ordersB.first } },
+        setOrderNotes: { params: { orderId: ordersB.first }, body: { notes: MARKER } },
         listReturns: { query: { channel_account_id: b.account } },
-        dismissOrderGroup: { params: { groupId: randomUUID() }, body: { reason: MARKER } },
+        dismissOrderGroup: { params: { groupId: ordersB.group }, body: { reason: MARKER } },
         removeOrderGroupMember: {
-          params: { groupId: randomUUID(), orderId: randomUUID() },
+          params: { groupId: ordersB.group, orderId: ordersB.second },
           body: { reason: MARKER },
         },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.

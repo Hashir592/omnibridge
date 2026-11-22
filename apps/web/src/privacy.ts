@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { ApiError, erasureClosed } from '@omnibridge/core';
 import type { privacyRoutes } from '@omnibridge/contract';
-import type { AuditLog, ErasureRequest, ErasureRequestRepository } from '@omnibridge/db';
+import type {
+  AuditLog,
+  ErasureRequest,
+  ErasureRequestRepository,
+  OrderReads,
+} from '@omnibridge/db';
 import { requestDeletion, type JobQueue } from '@omnibridge/queue';
 import type { VaultClient } from '@omnibridge/vault-client';
 import type { Handlers } from './contract.ts';
@@ -29,6 +34,8 @@ export interface PrivacyOptions {
   >;
   queue: Pick<JobQueue, 'send'>;
   audit: Pick<AuditLog, 'record'>;
+  /** DEL-5 (M10): the order records the buyer's vault records belong to, joined by subject. */
+  orders?: Pick<OrderReads, 'bySubjects'>;
   now?: () => Date;
   /** Most records one access export reads (default MAX_EXPORT_RECORDS); tests only. */
   maxExportRecords?: number;
@@ -305,14 +312,28 @@ export function privacyHandlers(
           fields: full.fields,
         });
       }
+      // DEL-5: the order records behind the buyer's records, by vault subject (IDs and figures).
+      const linked =
+        (await o.orders?.bySubjects(
+          tenant,
+          found.matches.filter((m) => m.subject_type === 'order').map((m) => m.subject_id),
+        )) ?? [];
+      const linkedOrders = linked.map((l) => ({
+        subjectId: l.subjectId,
+        orderRef: l.orderRef,
+        channel: l.provider,
+        channelAccountId: l.channelAccountId,
+        placedAt: l.placedAt.toISOString(),
+        status: l.status,
+        totalGrossPence: Number(l.grossPence),
+      }));
       const file = Buffer.from(
         `${JSON.stringify(
           {
             exportedAt: now().toISOString(),
             note: 'Everything OmniBridge holds about this buyer in this workspace (DEL-5).',
             records,
-            // Order records join here once orders are stored (M10): by subjectType and subjectId.
-            linkedOrders: [],
+            linkedOrders,
           },
           null,
           2,

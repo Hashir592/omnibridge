@@ -2221,7 +2221,7 @@
         "CI full gate green at merge (Semgrep included)"
       ],
       "risk": "critical",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-1002",
@@ -2266,7 +2266,7 @@
         "CI full gate green at merge (Semgrep included)"
       ],
       "risk": "high",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-0318",
