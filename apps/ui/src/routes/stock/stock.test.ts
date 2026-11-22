@@ -165,7 +165,10 @@ describe('list and change log', () => {
     expect(sourceText({ type: 'order', ref: null }, 'u1')).toBe('Order of another company');
     expect(sourceText({ type: 'order', ref: '204-1' }, 'u1')).toBe('Order 204-1');
     expect(sourceText({ type: 'user', user_id: 'u1', name: null }, 'u1')).toBe('You');
-    expect(sourceText({ type: 'user', user_id: 'u2', name: null }, 'u1')).toBe('A team member');
+    expect(sourceText({ type: 'user', user_id: 'u2', name: 'Pat Packer' }, 'u1')).toBe(
+      'Pat Packer',
+    );
+    expect(sourceText({ type: 'user', user_id: 'u3', name: null }, 'u1')).toBe('A removed user');
     expect(pushesText({ pending: 0, sent: 0, held: 0, failed: 0 }).tone).toBe('none');
     expect(pushesText({ pending: 0, sent: 2, held: 0, failed: 1 }).text).toBe('1 of 3 failed');
     expect(pushesText({ pending: 0, sent: 3, held: 0, failed: 0 }).text).toBe('3 sent');

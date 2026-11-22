@@ -24,7 +24,14 @@ import {
 } from '../../kit/table/Toolbar.tsx';
 import { formatDate, londonDayKey } from '../../lib/format.ts';
 import type { PageSize } from '../../lib/paging.ts';
-import { AccountCell, ImportCsvDialog, InlineError, SectionNav, SkuPicker } from './parts.tsx';
+import {
+  AccountCell,
+  ImportCsvDialog,
+  InlineError,
+  SectionNav,
+  SkuPicker,
+  accountLabel,
+} from './parts.tsx';
 import { refusalText } from './rules.ts';
 
 export type ListingView = 'unmapped' | 'mapped' | 'all';
@@ -412,7 +419,7 @@ function Listings() {
       {mapping && (
         <MapDialog
           listing={mapping}
-          accountName={accountName(mapping.channel_account_id)}
+          accountName={accountLabel(mapping)}
           onClose={() => {
             setMapping(null);
           }}

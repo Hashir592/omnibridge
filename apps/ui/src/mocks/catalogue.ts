@@ -17,7 +17,7 @@ import type {
   VatType,
 } from '../auth/api.ts';
 import { todayLondon } from '../lib/dates.ts';
-import { companies } from './data.ts';
+import { channelAccounts, companies } from './data.ts';
 import { uid } from './ids.ts';
 import { DAY, ago } from './random.ts';
 import { channelOn, currentSession } from './session.ts';
@@ -142,6 +142,21 @@ export function resetCatalogueMock(): void {
 }
 resetCatalogueMock();
 
+/**
+ * An account's name, or null when the user does not hold its company (ARCHITECTURE 6.1), as the
+ * server answers `channel_account_name`.
+ */
+export function accountNameFor(accountId: string): string | null {
+  const a = channelAccounts.find((x) => x.id === accountId);
+  const held = currentSession().companies.some((c) => c.id === a?.companyId);
+  return a && held ? a.name : null;
+}
+
+const withName = (l: CatalogueListing): CatalogueListing => ({
+  ...l,
+  channel_account_name: accountNameFor(l.channel_account_id),
+});
+
 /** The live catalogue state, for the stock mock (the arrays are replaced on reset). */
 export function catalogueState() {
   return { skus: catalogue, listings };
@@ -232,7 +247,7 @@ function detail(s: CatalogueSku): MasterSku {
       .map((l) => ({
         id: l.id,
         channel_account_id: l.channel_account_id,
-        channel_account_name: l.channel_account_name,
+        channel_account_name: accountNameFor(l.channel_account_id),
         provider: l.provider,
         external_sku: l.external_sku,
         external_id: l.external_id,
@@ -510,7 +525,7 @@ export const catalogueHandlers = [
             (l.title ?? '').toLowerCase().includes(q)),
       )
       .sort((a, b) => b.discovered_at.localeCompare(a.discovered_at));
-    return HttpResponse.json(paged(rows, p));
+    return HttpResponse.json(paged(rows.map(withName), p));
   }),
   http.put('*/api/catalogue/listings/:id/mapping', async ({ params, request }) => {
     if (!hasTab()) return problem(403, 'forbidden');
@@ -522,7 +537,7 @@ export const catalogueHandlers = [
       return problem(409, 'conflict', 'This listing is mapped to another SKU. Unmap it first.');
     l.master_sku = { id: s.id, sku: s.sku };
     l.mapped_at = new Date().toISOString();
-    return HttpResponse.json(l);
+    return HttpResponse.json(withName(l));
   }),
   http.delete('*/api/catalogue/listings/:id/mapping', ({ params }) => {
     if (!hasTab()) return problem(403, 'forbidden');
@@ -530,7 +545,7 @@ export const catalogueHandlers = [
     if (!l) return problem(404, 'not_found');
     l.master_sku = null;
     l.mapped_at = null;
-    return HttpResponse.json(l);
+    return HttpResponse.json(withName(l));
   }),
   http.post('*/api/catalogue/mappings/import', async ({ request }) => {
     if (!hasTab()) return problem(403, 'forbidden');

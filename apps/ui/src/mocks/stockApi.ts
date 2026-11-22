@@ -17,7 +17,7 @@ import type {
   StockListing,
   StockRow,
 } from '../auth/api.ts';
-import { catalogueState, type CatalogueSku } from './catalogue.ts';
+import { accountNameFor, catalogueState, type CatalogueSku } from './catalogue.ts';
 import { channelAccounts, companies, orders } from './data.ts';
 import { uid } from './ids.ts';
 import { HOUR, ago, rng } from './random.ts';
@@ -43,6 +43,12 @@ interface ListingStock {
 
 /** The demo admin's user id (GET /auth/session answers usr_<persona>). */
 const ME = 'usr_admin';
+/** Who booked the seeded movements: the admin, a packer, and a user since removed (name null). */
+const PEOPLE = [
+  { user_id: ME, name: 'Sam Admin' },
+  { user_id: 'usr_packer', name: 'Pat Packer' },
+  { user_id: 'usr_gone', name: null },
+] as const;
 /** "eBay · kestrel-home" is paused in the connections mock, so its writes are held. */
 const HELD_ACCOUNT = 'ca_5';
 
@@ -121,7 +127,7 @@ export function resetStockMock(): void {
         supplier: kind === 'stock_in' ? 'Marlow Supply' : null,
         source:
           kind === 'stock_in' || kind === 'adjust'
-            ? { type: 'user', user_id: ME, name: null }
+            ? { type: 'user', ...r.pick(PEOPLE) }
             : { type: 'order', ref: `${order.companyId}|${order.ref}` },
         pushes: { pending: 0, sent: change === 0 ? 0 : r.int(1, 3), held: 0, failed: 0 },
       });
@@ -236,7 +242,7 @@ function toListing(s: CatalogueSku, l: ReturnType<typeof listingsOf>[number]): S
   return {
     id: l.id,
     channel_account_id: l.channel_account_id,
-    channel_account_name: l.channel_account_name,
+    channel_account_name: accountNameFor(l.channel_account_id),
     provider: l.provider,
     external_sku: l.external_sku,
     external_id: l.external_id,
@@ -372,7 +378,7 @@ function book(
     reserved_change: 0,
     on_hand_after: st.onHand,
     ...extra,
-    source: { type: 'user', user_id: ME, name: null },
+    source: { type: 'user', user_id: ME, name: 'Sam Admin' },
     pushes: {
       pending: pushes.filter((x) => x.result === 'queued').length,
       sent: 0,
@@ -438,7 +444,11 @@ export const stockHandlers = [
           m.reason ?? '',
           m.note ?? '',
           m.supplier ?? '',
-          m.source.type === 'order' ? (m.source.ref ?? 'another company') : m.source.type,
+          m.source.type === 'order'
+            ? (m.source.ref ?? 'another company')
+            : m.source.type === 'user'
+              ? (m.source.name ?? 'removed user')
+              : 'system',
         ]
           .map(cell)
           .join(','),
@@ -652,7 +662,7 @@ export const stockHandlers = [
       reason: null,
       note: `Allocation saved for ${String(touched.size)} listing${touched.size === 1 ? '' : 's'}`,
       supplier: null,
-      source: { type: 'user', user_id: ME, name: null },
+      source: { type: 'user', user_id: ME, name: 'Sam Admin' },
       pushes: {
         pending: pushes.filter((x) => x.result === 'queued').length,
         sent: 0,
