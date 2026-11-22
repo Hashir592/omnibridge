@@ -281,22 +281,29 @@ export class Vault {
   }
 
   /**
-   * ADR-068 tombstone check: a buyer whose eBay account was deleted is never stored again. The
-   * user ID decides when the record has one; the username only when it has no ID (a username
-   * can be reused by someone else, an ID cannot).
+   * ADR-068 tombstone check: a buyer whose eBay account was deleted is never stored again. An ID
+   * is never reused, so a matching user ID always refuses. A username can be reused by someone
+   * else, so it decides only for a record with no ID, and only for an order placed before the
+   * notice (a re-poll or backfill of the deleted buyer's own orders).
    */
   async #refuseDeletedBuyer(c: PoolClient, req: IngestRequest, keys: Keys): Promise<void> {
     const id = normaliseBuyerExact(req.fields.channel_buyer_id ?? '');
     const username = normaliseBuyerExact(req.fields.channel_username ?? '');
-    let probe: [string, Buffer] | undefined;
-    if (id !== '') probe = ['ebay_user_id', keys.index.mac('ebay_user_id', id)];
-    else if (username !== '') probe = ['ebay_username', keys.index.mac('ebay_username', username)];
-    if (probe === undefined) return;
-    const hit = await c.query(
-      'SELECT 1 FROM vault.deleted_buyers WHERE workspace_id = $1 AND field = $2 AND mac = $3',
-      [req.workspace_id, probe[0], probe[1]],
-    );
-    if ((hit.rowCount ?? 0) > 0) throw new BuyerDeleted();
+    const lookup = (field: string, value: string) =>
+      c.query<{ created_at: Date }>(
+        `SELECT created_at FROM vault.deleted_buyers
+          WHERE workspace_id = $1 AND field = $2 AND mac = $3`,
+        [req.workspace_id, field, keys.index.mac(field, value)],
+      );
+    if (id !== '') {
+      if (((await lookup('ebay_user_id', id)).rowCount ?? 0) > 0) throw new BuyerDeleted();
+      return;
+    }
+    if (username === '') return;
+    const hit = (await lookup('ebay_username', username)).rows[0];
+    if (hit === undefined) return;
+    const placed = req.placed_at === undefined ? undefined : new Date(req.placed_at);
+    if (placed === undefined || placed < hit.created_at) throw new BuyerDeleted();
   }
 
   async readFull(
@@ -477,28 +484,21 @@ export class Vault {
       const page = await this.#tx(workspaceId, async (c, tx) => {
         const keys = await this.#loadKeys(tx, workspaceId, false);
         if (keys === undefined || values.length === 0) return { rows: [], more: false };
-        // ADR-068: the buyer is never stored again in this workspace (the ingest check). The
-        // user ID when the notice has one, else the username. Repeated pages add nothing.
+        // ADR-068: the buyer is never stored again in this workspace (the ingest check): the user
+        // ID always, the username for orders placed before now. Repeated pages add nothing.
         const userId = normaliseBuyerExact(req.user_id ?? '');
         const username = normaliseBuyerExact(req.username ?? '');
-        const tomb: [string, string] | undefined =
-          userId !== ''
-            ? ['ebay_user_id', userId]
-            : username !== ''
-              ? ['ebay_username', username]
-              : undefined;
-        if (tomb !== undefined && after === null) {
-          await c.query(
-            `INSERT INTO vault.deleted_buyers (workspace_id, field, mac, key_version, created_at)
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-            [
-              workspaceId,
-              tomb[0],
-              keys.index.mac(tomb[0], tomb[1]),
-              keys.index.version,
-              this.#now(),
-            ],
-          );
+        const tombs: [string, string][] = [];
+        if (userId !== '') tombs.push(['ebay_user_id', userId]);
+        if (username !== '') tombs.push(['ebay_username', username]);
+        if (after === null) {
+          for (const [field, value] of tombs) {
+            await c.query(
+              `INSERT INTO vault.deleted_buyers (workspace_id, field, mac, key_version, created_at)
+               VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+              [workspaceId, field, keys.index.mac(field, value), keys.index.version, this.#now()],
+            );
+          }
         }
         // One more than fits, so a full page knows whether this workspace has more.
         const res = await c.query<SearchResponse['matches'][number]>(

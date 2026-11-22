@@ -109,6 +109,8 @@ export interface StockMovement {
   actorName: string | null;
   /** The movement's order is in a company this user can see (or there is no order). */
   companyVisible: boolean;
+  /** INV-5: the order's reference, or null when there is none or its company is not visible. */
+  orderRef: string | null;
   pushes: { pending: number; sent: number; held: number; failed: number };
 }
 
@@ -196,6 +198,8 @@ interface TargetRow {
   pack: string | null;
   buffer: string;
   paused: boolean | null;
+  /** FA-16: the account's writes are held until its first clean reconciliation. */
+  held: boolean | null;
 }
 
 const n = (v: string | number | null | undefined): number => Number(v ?? 0);
@@ -751,6 +755,17 @@ export class StockEngine {
         this.#tx(outer, (trx, ctx) =>
           this.#reconcileComponent(trx, ctx, accountId, component, listings),
         ),
+      );
+    }
+    // FA-16 cutover: the first reconciliation that checks listings and finds no drift switches
+    // the account's stock writes on. A drifting one leaves them held for the seller to fix.
+    if (drifted === 0 && rows.length > 0) {
+      await run((outer) =>
+        this.#tx(outer, async (trx, ctx) => {
+          await sql`UPDATE app.channel_accounts SET stock_push_held_since = NULL
+                     WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${accountId}::uuid
+                       AND stock_push_held_since IS NOT NULL`.execute(trx);
+        }),
       );
     }
     return { checked: rows.length, drifted };
@@ -1472,7 +1487,8 @@ export class StockEngine {
              l.manual_qty, l.manual_sold, l.last_queued_qty, l.pending_write_id, l.push_seq,
              s.pack_size AS pack, coalesce(l.buffer_override, cs.buffer, 0) AS buffer,
              (a.paused_at IS NOT NULL
-              OR (SELECT ms.maintenance FROM app.maintenance_state() ms)) AS paused
+              OR (SELECT ms.maintenance FROM app.maintenance_state() ms)) AS paused,
+             (a.stock_push_held_since IS NOT NULL) AS held
         FROM app.listings l
         JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
         LEFT JOIN app.channel_stock_settings cs
@@ -1523,6 +1539,11 @@ export class StockEngine {
       if (!forced && t.last_queued_qty !== null && n(t.last_queued_qty) === t.target) {
         // A forced run reports only the listings it was asked about.
         if (force === undefined) pushes.push({ listingId: t.id, result: 'unchanged' });
+        continue;
+      }
+      // FA-16: a newly connected account gets no write until a reconciliation finds no drift.
+      if (t.held === true) {
+        pushes.push({ listingId: t.id, result: 'held' });
         continue;
       }
       if (t.pending_write_id !== null) await cancelPending(trx, ctx, t.pending_write_id, now);
@@ -1799,6 +1820,7 @@ interface MovementSql {
   actor_user_id: string | null;
   actor_name: string | null;
   company_visible: boolean;
+  order_ref: string | null;
   pending: string;
   sent: string;
   held: string;
@@ -1813,11 +1835,19 @@ function movementSelect(ctx: TenantContext) {
            (m.order_company_id IS NULL OR m.order_company_id = ANY (
               coalesce(nullif(current_setting('app.company_ids', true), '')::uuid[],
                        '{}'::uuid[]))) AS company_visible,
+           o.external_order_id AS order_ref,
            coalesce(p.pending, 0) AS pending, coalesce(p.sent, 0) AS sent,
            coalesce(p.held, 0) AS held, coalesce(p.failed, 0) AS failed
       FROM app.stock_movements m
       JOIN app.master_skus s ON s.workspace_id = m.workspace_id AND s.id = m.master_sku_id
       LEFT JOIN app.users u ON u.id = m.actor_user_id
+      -- INV-5 (M10): the order reference. Order rows are company-scoped, so a user who cannot see
+      -- the order's company gets null here ("another company", ARCHITECTURE 6.1).
+      LEFT JOIN app.order_lines ol
+        ON ol.workspace_id = m.workspace_id
+       AND ol.id = CASE WHEN m.order_line_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                        THEN m.order_line_id::uuid END
+      LEFT JOIN app.orders o ON o.workspace_id = ol.workspace_id AND o.id = ol.order_id
       LEFT JOIN LATERAL (
         SELECT count(*) FILTER (WHERE w.state IN ('pending', 'sending')
                                   AND w.paused_reason IS NULL) AS pending,
@@ -1869,6 +1899,7 @@ function toMovement(r: MovementSql): StockMovement {
     actorUserId: r.actor_user_id,
     actorName: r.actor_name,
     companyVisible: r.company_visible,
+    orderRef: r.company_visible ? r.order_ref : null,
     pushes: { pending: n(r.pending), sent: n(r.sent), held: n(r.held), failed: n(r.failed) },
   };
 }

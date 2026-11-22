@@ -50,6 +50,9 @@ CREATE TABLE app.orders (
   fba boolean NOT NULL DEFAULT false,
   -- VAT-6: sale VAT is written once payment is captured, never for an order cancelled before it.
   vat_recorded_at timestamptz,
+  -- INV-3: the order moves stock (reserve, release, dispatch). False for an order placed before
+  -- its account was connected (FA-16 cutover backfill: the first stock take already counts it).
+  stock_moves boolean NOT NULL,
   notes text CHECK (char_length(notes) <= 2000),
   notes_updated_at timestamptz,
   notes_updated_by uuid,
@@ -130,6 +133,9 @@ CREATE TABLE app.order_lines (
   snapshot_at timestamptz,
   oversold boolean NOT NULL DEFAULT false,
   fba boolean NOT NULL DEFAULT false,
+  -- CAT-6: the listing was unmapped when the line was stored, so it moved no stock; mapping later
+  -- back-fills the movement (UnmappedDemand).
+  stored_unmapped boolean NOT NULL,
   created_at timestamptz NOT NULL,
   PRIMARY KEY (workspace_id, id),
   CONSTRAINT order_lines_external UNIQUE (workspace_id, order_id, external_line_id),
@@ -147,7 +153,7 @@ CREATE TABLE app.order_lines (
 CREATE INDEX order_lines_order ON app.order_lines (workspace_id, order_id, line_no);
 -- CAT-6 back-fill and late snapshots: the lines of a listing that were unmapped when stored.
 CREATE INDEX order_lines_provisional ON app.order_lines (workspace_id, listing_id)
-  WHERE vat_type IS NULL;
+  WHERE vat_type IS NULL OR stored_unmapped;
 ALTER TABLE app.order_lines ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.order_lines FORCE ROW LEVEL SECURITY;
 CREATE POLICY order_lines_tenant ON app.order_lines
@@ -177,7 +183,8 @@ BEGIN
      OR NEW.unit_gross_pence IS DISTINCT FROM OLD.unit_gross_pence
      OR NEW.line_gross_pence IS DISTINCT FROM OLD.line_gross_pence
      OR NEW.order_id IS DISTINCT FROM OLD.order_id
-     OR NEW.company_id IS DISTINCT FROM OLD.company_id THEN
+     OR NEW.company_id IS DISTINCT FROM OLD.company_id
+     OR NEW.stored_unmapped IS DISTINCT FROM OLD.stored_unmapped THEN
     RAISE EXCEPTION 'order line snapshots are write-once (invariant 14)'
       USING ERRCODE = 'check_violation';
   END IF;
@@ -299,6 +306,8 @@ CREATE TABLE app.vat_ledger (
   refund_id uuid,
   entry_key text NOT NULL CHECK (char_length(entry_key) BETWEEN 1 AND 300),
   kind text NOT NULL CHECK (kind IN ('sale', 'refund', 'adjustment')),
+  -- The VAT-3 rate group: 'rate:<bp>', or 'zero:<type>' at 0% so zero-rated and No VAT stay apart.
+  group_key text NOT NULL CHECK (char_length(group_key) BETWEEN 1 AND 40),
   vat_type text CHECK (vat_type IN ('standard', 'reduced', 'zero', 'no_vat')),
   rate_bp bigint NOT NULL CHECK (rate_bp BETWEEN 0 AND 10000),
   provisional boolean NOT NULL,

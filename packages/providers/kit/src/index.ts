@@ -3,12 +3,21 @@
  * egress allowlist (invariant 17), versioned parsers (INT-5), incremental cursors and the sync
  * runner (INT-8). No provider-specific code lives here.
  */
+export { BUYER_FIELDS } from './adapters.ts';
+export { GbpAmount, PenceAmount, penceFromAmount } from './money.ts';
 export type {
   AccessToken,
   AdsAdapter,
   AdsProfile,
+  BuyerDetails,
+  BuyerField,
   CarrierService,
   ChannelAdapter,
+  ChannelOrder,
+  ChannelOrderLine,
+  ChannelOrderState,
+  ChannelRefund,
+  OrderSource,
   ListingInfo,
   OrderSummary,
   Page,

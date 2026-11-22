@@ -1,0 +1,870 @@
+import { randomUUID } from 'node:crypto';
+import {
+  computeOrderVat,
+  computeRefundVat,
+  londonDate,
+  nextOrderStatus,
+  pence,
+  type OrderStatus,
+  type OrderVat,
+  type Pence,
+  type RefundVat,
+  type SaleVatType,
+  type TenantContext,
+} from '@omnibridge/core';
+import { sql, type Kysely, type Transaction } from 'kysely';
+import type { CatalogueRepository } from './catalogue.ts';
+import type { MainDb } from './schema.ts';
+import type { StockEngine, UnmappedDemand } from './stock.ts';
+import { withBoundTenant, withTenantTransaction } from './tenant.ts';
+
+/*
+ * Order ingest (T-1001: ORD-3, ORD-4, VAT-1 to VAT-7, FA-10, FA-11, FA-12, FA-16). Runs inside
+ * the sync job's one transaction, after the vault-first step: an order arrives here with its
+ * pii_ref (or the reason it has none) and never with buyer details (invariant 7). Every write is
+ * keyed, so a replayed page, the 5-minute overlap or an out-of-order update never duplicates an
+ * order, a line, a status row, a refund, a ledger row or a stock movement.
+ */
+
+/** The channel lifecycle the adapter read (FA-10); refunds are worked out from `refunds`. */
+export type IncomingState =
+  'pending_payment' | 'awaiting_dispatch' | 'dispatched' | 'delivered' | 'cancelled';
+
+/** What the vault-first step did with the buyer details (ORD-4, FA-16, ADR-068). */
+export type IncomingPii =
+  /** Stored in pii-vault (or found there: one record per order). */
+  | { kind: 'stored'; piiRef: string }
+  /** None held: no details sent, the order was cancelled, or it is older than the PII window. */
+  | { kind: 'none' }
+  /** Refused: the buyer was deleted by an eBay account-deletion notice. */
+  | { kind: 'refused' }
+  /** The order is already stored with its outcome; nothing was sent to the vault. */
+  | { kind: 'unchanged' };
+
+export interface IncomingOrder {
+  externalId: string;
+  rawStatus: string;
+  state: IncomingState;
+  updatedAt: Date;
+  placedAt: Date;
+  paidAt: Date | null;
+  shipBy: Date | null;
+  dispatchedAt: Date | null;
+  deliveredAt: Date | null;
+  cancelledAt: Date | null;
+  discount: Pence;
+  shipping: Pence;
+  shipToCountry: string | null;
+  fba: boolean;
+  lines: readonly {
+    lineId: string;
+    sku: string | null;
+    quantity: number;
+    title: string | null;
+    /** VAT-inclusive line total (quantity × unit). */
+    linePrice: Pence;
+  }[];
+  refunds: readonly {
+    refundId: string;
+    refundedAt: Date;
+    amount: Pence;
+    lines: readonly { lineId: string; quantity: number; amount: Pence }[] | null;
+  }[];
+  pii: IncomingPii;
+}
+
+/** The jobs ingest queues in its transaction: IDs only (invariant 7a). */
+export interface OrderIngestPorts {
+  /** DEL-1: the cancelled order's buyer record is deleted (trigger `cancellation`). */
+  cancelPii(ctx: TenantContext, input: { orderId: string; piiSubject: string }): Promise<void>;
+  /** DEL-1: dispatch or delivery is known, so the live copy's expiry moves (journalled). */
+  shortenPii(
+    ctx: TenantContext,
+    input: { orderId: string; reason: 'dispatch' | 'delivery' },
+  ): Promise<void>;
+}
+
+/** The vault subject of an order: one buyer record per order, keyed by account and order ID. */
+export function piiSubject(channelAccountId: string, externalOrderId: string): string {
+  return `${channelAccountId}:${externalOrderId}`;
+}
+
+/**
+ * FA-11 / VQ-3: the date a VAT row counts on. A correction to a filed period goes to the next
+ * open period; no period can be filed until the VAT quarters module, so today it is the tax point.
+ */
+export function vatPeriodDate(taxPoint: string): string {
+  return taxPoint;
+}
+
+/** The ORD-3 status an update asks for: refunds turn a dispatched order (partly) refunded. */
+export function incomingStatus(state: IncomingState, refunded: bigint, gross: bigint): OrderStatus {
+  if ((state === 'dispatched' || state === 'delivered') && refunded > 0n) {
+    return refunded >= gross ? 'refunded' : 'partly_refunded';
+  }
+  return state;
+}
+
+const SHIPPED: readonly OrderStatus[] = [
+  'dispatched',
+  'delivered',
+  'partly_refunded',
+  'refunded',
+  'returned',
+];
+
+interface OrderRow {
+  id: string;
+  company_id: string;
+  status: OrderStatus;
+  raw_status: string;
+  pii_subject: string;
+  pii_ref: string | null;
+  pii_deleted_at: Date | null;
+  paid_at: Date | null;
+  ship_by: Date | null;
+  dispatched_at: Date | null;
+  delivered_at: Date | null;
+  cancelled_at: Date | null;
+  source_updated_at: Date;
+  tax_point_date: string;
+  discount_pence: string;
+  shipping_pence: string;
+  gross_pence: string;
+  vat_recorded_at: Date | null;
+  stock_moves: boolean;
+}
+
+interface LineRow {
+  id: string;
+  line_no: string;
+  external_line_id: string;
+  listing_id: string | null;
+  quantity: string;
+  line_gross_pence: string;
+  vat_type: SaleVatType | null;
+  vat_rate_bp: string | null;
+  provisional_rate_bp: string;
+  stored_unmapped: boolean;
+}
+
+interface Snapshot {
+  masterSkuId: string;
+  vatType: SaleVatType;
+  rateBp: number;
+  cogs: Pence | null;
+}
+
+const big = (v: string | number | bigint | null | undefined): bigint => BigInt(v ?? 0);
+const ORDER_COLUMNS = sql`id, company_id, status, raw_status, pii_subject, pii_ref, pii_deleted_at,
+  paid_at, ship_by, dispatched_at, delivered_at, cancelled_at, source_updated_at,
+  to_char(tax_point_date, 'YYYY-MM-DD') AS tax_point_date, discount_pence, shipping_pence,
+  gross_pence, vat_recorded_at, stock_moves`;
+
+/** The VAT of stored lines, recomputed exactly as at ingest (VAT-3 is deterministic). */
+function vatOf(
+  lines: readonly LineRow[],
+  order: Pick<OrderRow, 'discount_pence' | 'shipping_pence'>,
+): OrderVat {
+  return computeOrderVat({
+    lines: lines.map((l) => ({
+      lineGross: pence(big(l.line_gross_pence)),
+      rateBp: Number(l.vat_rate_bp ?? l.provisional_rate_bp),
+      vatType: l.vat_type,
+    })),
+    discount: pence(big(order.discount_pence)),
+    shipping: pence(big(order.shipping_pence)),
+  });
+}
+
+export class OrderIngest implements UnmappedDemand {
+  readonly #db: Kysely<MainDb>;
+  readonly #catalogue: Pick<CatalogueRepository, 'cogsOn' | 'vatTypeOn' | 'vatRateOn'>;
+  readonly #stock: Pick<StockEngine, 'reserve' | 'release' | 'dispatch'> | undefined;
+  readonly #ports: OrderIngestPorts;
+  readonly #now: () => Date;
+
+  constructor(
+    db: Kysely<MainDb>,
+    deps: {
+      catalogue: Pick<CatalogueRepository, 'cogsOn' | 'vatTypeOn' | 'vatRateOn'>;
+      /** Left out (web's read side), ingest is not available. */
+      stock?: Pick<StockEngine, 'reserve' | 'release' | 'dispatch'>;
+      ports: OrderIngestPorts;
+      now?: () => Date;
+    },
+  ) {
+    this.#db = db;
+    this.#catalogue = deps.catalogue;
+    this.#stock = deps.stock;
+    this.#ports = deps.ports;
+    this.#now = deps.now ?? (() => new Date());
+  }
+
+  /**
+   * For the vault-first step, before any transaction holds a lock: which of these orders are
+   * already stored with a PII outcome (a pii_ref, or deleted, or refused), so the vault is asked
+   * only about new ones, and the workspace's PII window.
+   */
+  async piiState(
+    ctx: TenantContext,
+    channelAccountId: string,
+    externalIds: readonly string[],
+  ): Promise<{ known: ReadonlySet<string>; retentionDays: number }> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{ external_order_id: string }>`
+        SELECT external_order_id FROM app.orders
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid
+           AND external_order_id = ANY (${sql.val(externalIds)}::text[])`.execute(trx);
+      const { rows: ws } = await sql<{ days: string }>`
+        SELECT pii_retention_days AS days FROM app.workspaces
+         WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
+      return {
+        known: new Set(rows.map((r) => r.external_order_id)),
+        retentionDays: Number(ws[0]?.days ?? 25),
+      };
+    });
+  }
+
+  /** Stores the orders of one sync page, in the caller's transaction. */
+  async apply(
+    ctx: TenantContext,
+    channelAccountId: string,
+    orders: readonly IncomingOrder[],
+  ): Promise<void> {
+    if (orders.length === 0) return;
+    await withBoundTenant(this.#db, ctx, async (trx, ctx) => {
+      const { rows: accounts } = await sql<{
+        company_id: string;
+        provider: string;
+        created_at: Date;
+      }>`
+        SELECT company_id, provider, created_at FROM app.channel_accounts
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${channelAccountId}::uuid`.execute(
+        trx,
+      );
+      const account = accounts[0];
+      if (account === undefined) throw new Error('channel account not found');
+      const { rows: ws } = await sql<{ rate: string }>`
+        SELECT default_vat_rate_bp AS rate FROM app.workspaces
+         WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
+      const defaultRate = Number(ws[0]?.rate ?? 2000);
+      for (const order of orders) {
+        const { rows } = await sql<OrderRow>`
+          SELECT ${ORDER_COLUMNS} FROM app.orders
+           WHERE workspace_id = ${ctx.workspaceId}::uuid
+             AND channel_account_id = ${channelAccountId}::uuid
+             AND external_order_id = ${order.externalId}
+           FOR UPDATE`.execute(trx);
+        const existing = rows[0];
+        if (existing === undefined) {
+          await this.#create(trx, ctx, { id: channelAccountId, ...account }, defaultRate, order);
+        } else {
+          await this.#update(trx, ctx, existing, order);
+        }
+      }
+      // TEN-3: the account's company is fixed once it has orders.
+      await sql`UPDATE app.channel_accounts SET orders_seen_at = ${this.#now()}
+                 WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${channelAccountId}::uuid
+                   AND orders_seen_at IS NULL`.execute(trx);
+    });
+  }
+
+  async #snapshot(
+    ctx: TenantContext,
+    masterSkuId: string,
+    day: string,
+  ): Promise<Snapshot | undefined> {
+    const vatType = await this.#catalogue.vatTypeOn(ctx, masterSkuId, day);
+    if (vatType === undefined) return undefined;
+    const rateBp = await this.#catalogue.vatRateOn(ctx, vatType, day);
+    if (rateBp === undefined) return undefined;
+    const cogs = await this.#catalogue.cogsOn(ctx, masterSkuId, day);
+    return { masterSkuId, vatType, rateBp, cogs: cogs ?? null };
+  }
+
+  async #create(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    account: { id: string; company_id: string; provider: string; created_at: Date },
+    defaultRate: number,
+    o: IncomingOrder,
+  ): Promise<void> {
+    const now = this.#now();
+    const id = randomUUID();
+    const day = londonDate(o.placedAt);
+    const resolved = [];
+    for (const line of o.lines) {
+      const { rows } =
+        line.sku === null
+          ? { rows: [] }
+          : await sql<{ id: string; master_sku_id: string | null; fulfilment: string | null }>`
+            SELECT id, master_sku_id, fulfilment FROM app.listings
+             WHERE workspace_id = ${ctx.workspaceId}::uuid
+               AND channel_account_id = ${account.id}::uuid AND external_sku = ${line.sku}`.execute(
+              trx,
+            );
+      const listing = rows[0];
+      const snap =
+        listing?.master_sku_id === null || listing === undefined
+          ? undefined
+          : await this.#snapshot(ctx, listing.master_sku_id, day);
+      resolved.push({ line, listing, snap });
+    }
+    // VAT-3 needs discount <= goods; a channel discount beyond the goods comes off the shipping.
+    const goods = resolved.reduce((a, r) => a + r.line.linePrice, 0n);
+    const discount = o.discount > goods ? goods : o.discount;
+    const shipping =
+      o.discount > goods
+        ? pence(o.shipping - (o.discount - goods) > 0n ? o.shipping - (o.discount - goods) : 0n)
+        : o.shipping;
+    const vat = computeOrderVat({
+      lines: resolved.map((r) => ({
+        lineGross: r.line.linePrice,
+        rateBp: r.snap?.rateBp ?? defaultRate,
+        vatType: r.snap?.vatType ?? null,
+      })),
+      discount: pence(discount),
+      shipping,
+    });
+    const refunded = o.refunds.reduce((a, r) => a + r.amount, 0n);
+    const status = incomingStatus(o.state, refunded, vat.gross);
+    // FA-16: an order placed before the account was connected is history the first stock take
+    // already counts; it never moves stock.
+    const stockMoves = o.placedAt >= account.created_at;
+    const piiRef = o.pii.kind === 'stored' ? o.pii.piiRef : null;
+    const piiDeletedAt = o.pii.kind === 'refused' ? now : null;
+    const unmapped = resolved.some((r) => r.listing?.master_sku_id == null);
+    const fba = o.fba || resolved.some((r) => r.listing?.fulfilment === 'fba');
+
+    await sql`
+      INSERT INTO app.orders
+        (workspace_id, id, company_id, provider, origin, channel_account_id, external_order_id,
+         pii_subject, pii_ref, pii_deleted_at, status, raw_status, placed_at, paid_at, ship_by,
+         dispatched_at, delivered_at, cancelled_at, source_updated_at, tax_point_date,
+         goods_pence, discount_pence, shipping_pence, gross_pence, vat_pence, ship_to_country,
+         unmapped, fba, stock_moves, created_at, updated_at)
+      VALUES (${ctx.workspaceId}::uuid, ${id}::uuid, ${account.company_id}::uuid, ${account.provider},
+              ${account.provider}, ${account.id}::uuid, ${o.externalId},
+              ${piiSubject(account.id, o.externalId)}, ${piiRef}::uuid, ${piiDeletedAt}, ${status},
+              ${o.rawStatus}, ${o.placedAt}, ${o.paidAt}, ${o.shipBy}, ${o.dispatchedAt},
+              ${o.deliveredAt}, ${status === 'cancelled' ? (o.cancelledAt ?? now) : null},
+              ${o.updatedAt}, ${day}::date, ${goods}, ${discount}, ${shipping}, ${vat.gross},
+              ${vat.vat}, ${o.shipToCountry}, ${unmapped}, ${fba}, ${stockMoves}, ${now}, ${now})`.execute(
+      trx,
+    );
+
+    const lineIds: string[] = [];
+    for (const [index, { line, listing, snap }] of resolved.entries()) {
+      const lineId = randomUUID();
+      lineIds.push(lineId);
+      const v = vat.lines[index];
+      await sql`
+        INSERT INTO app.order_lines
+          (workspace_id, id, company_id, order_id, line_no, external_line_id, listing_id,
+           external_sku, title, quantity, unit_gross_pence, line_gross_pence, discount_pence,
+           shipping_pence, vat_pence, master_sku_id, vat_type, vat_rate_bp, cogs_pence,
+           provisional_rate_bp, snapshot_at, fba, stored_unmapped, created_at)
+        VALUES (${ctx.workspaceId}::uuid, ${lineId}::uuid, ${account.company_id}::uuid, ${id}::uuid,
+                ${index + 1}, ${line.lineId}, ${listing?.id ?? null}::uuid, ${line.sku},
+                ${line.title}, ${line.quantity}, ${line.linePrice / BigInt(line.quantity)},
+                ${line.linePrice}, ${v?.discount ?? 0n}, ${v?.shipping ?? 0n}, ${v?.vat ?? 0n},
+                ${snap?.masterSkuId ?? null}::uuid, ${snap?.vatType ?? null}, ${snap?.rateBp ?? null},
+                ${snap?.cogs ?? null}, ${defaultRate}, ${snap === undefined ? null : now},
+                ${listing?.fulfilment === 'fba'}, ${listing?.master_sku_id == null}, ${now})`.execute(
+        trx,
+      );
+    }
+    await this.#event(trx, ctx, id, account.company_id, status, o);
+
+    // INV-3: stock moves from the order's own lines, each keyed by the line (FA-10 point 2).
+    if (stockMoves && this.#stock !== undefined && status !== 'cancelled') {
+      const shipped = SHIPPED.includes(status);
+      let oversold = false;
+      for (const [index, { line, listing }] of resolved.entries()) {
+        if (listing === undefined) continue;
+        const move = {
+          orderLineId: lineIds[index] ?? '',
+          listingId: listing.id,
+          quantity: line.quantity,
+          companyId: account.company_id,
+        };
+        if (shipped) {
+          await this.#stock.dispatch(ctx, move);
+          continue;
+        }
+        const r = await this.#stock.reserve(ctx, move);
+        if (r.oversold) {
+          oversold = true;
+          await sql`UPDATE app.order_lines SET oversold = true
+                     WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${move.orderLineId}::uuid`.execute(
+            trx,
+          );
+        }
+      }
+      if (oversold) {
+        await sql`UPDATE app.orders SET oversold = true
+                   WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${id}::uuid`.execute(trx);
+      }
+    }
+
+    const order = await this.#lock(trx, ctx, id);
+    await this.#settle(trx, ctx, order, o);
+  }
+
+  async #update(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    existing: OrderRow,
+    o: IncomingOrder,
+  ): Promise<void> {
+    const now = this.#now();
+    const refunded = o.refunds.reduce((a, r) => a + r.amount, 0n);
+    const next = nextOrderStatus(
+      existing.status,
+      incomingStatus(o.state, refunded, big(existing.gross_pence)),
+    );
+    const stale = o.updatedAt < existing.source_updated_at;
+    const dispatchedAt = existing.dispatched_at ?? o.dispatchedAt;
+    const deliveredAt = existing.delivered_at ?? o.deliveredAt;
+    const cancelledAt =
+      next === 'cancelled'
+        ? (existing.cancelled_at ?? o.cancelledAt ?? now)
+        : existing.cancelled_at;
+    const statusChanged = next !== existing.status;
+    const rawChanged = !stale && o.rawStatus !== existing.raw_status;
+    const piiRef = existing.pii_ref ?? (o.pii.kind === 'stored' ? o.pii.piiRef : null);
+
+    await sql`
+      UPDATE app.orders
+         SET status = ${next},
+             raw_status = ${stale ? existing.raw_status : o.rawStatus},
+             source_updated_at = ${stale ? existing.source_updated_at : o.updatedAt},
+             paid_at = coalesce(paid_at, ${o.paidAt}),
+             ship_by = ${stale ? existing.ship_by : (o.shipBy ?? existing.ship_by)},
+             dispatched_at = ${dispatchedAt},
+             delivered_at = ${deliveredAt},
+             cancelled_at = ${cancelledAt},
+             pii_ref = ${piiRef}::uuid,
+             updated_at = ${now}
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${existing.id}::uuid`.execute(trx);
+    if (statusChanged || rawChanged) {
+      await this.#event(trx, ctx, existing.id, existing.company_id, statusChanged ? next : null, o);
+    }
+
+    // INV-3: stock follows the status, from the line's own reservation; repeats move nothing.
+    if (existing.stock_moves && this.#stock !== undefined) {
+      const cancelledNow = statusChanged && next === 'cancelled';
+      const shippedNow =
+        existing.dispatched_at === null && dispatchedAt !== null && next !== 'cancelled';
+      if (cancelledNow || shippedNow) {
+        for (const line of await this.#lines(trx, ctx, existing.id)) {
+          if (line.listing_id === null) continue;
+          const move = {
+            orderLineId: line.id,
+            listingId: line.listing_id,
+            quantity: Number(line.quantity),
+            companyId: existing.company_id,
+          };
+          if (cancelledNow) await this.#stock.release(ctx, move);
+          else await this.#stock.dispatch(ctx, move);
+        }
+      }
+    }
+
+    // DEL-1: cancellation deletes the buyer's record; dispatch and delivery move its expiry.
+    if (piiRef !== null && existing.pii_deleted_at === null) {
+      if (statusChanged && next === 'cancelled') {
+        await this.#ports.cancelPii(ctx, {
+          orderId: existing.id,
+          piiSubject: existing.pii_subject,
+        });
+      } else if (next !== 'cancelled') {
+        if (existing.delivered_at === null && deliveredAt !== null) {
+          await this.#ports.shortenPii(ctx, { orderId: existing.id, reason: 'delivery' });
+        } else if (existing.dispatched_at === null && dispatchedAt !== null) {
+          await this.#ports.shortenPii(ctx, { orderId: existing.id, reason: 'dispatch' });
+        }
+      }
+    }
+
+    await this.#settle(trx, ctx, await this.#lock(trx, ctx, existing.id), o);
+  }
+
+  async #event(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    orderId: string,
+    companyId: string,
+    status: OrderStatus | null,
+    o: IncomingOrder,
+  ): Promise<void> {
+    await sql`
+      INSERT INTO app.order_status_events
+        (workspace_id, id, company_id, order_id, status, raw_status, source_at, created_at)
+      VALUES (${ctx.workspaceId}::uuid, ${randomUUID()}::uuid, ${companyId}::uuid, ${orderId}::uuid,
+              ${status}, ${o.rawStatus}, ${o.updatedAt}, ${this.#now()})`.execute(trx);
+  }
+
+  async #lock(trx: Transaction<MainDb>, ctx: TenantContext, id: string): Promise<OrderRow> {
+    const { rows } = await sql<OrderRow>`
+      SELECT ${ORDER_COLUMNS} FROM app.orders
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${id}::uuid
+       FOR UPDATE`.execute(trx);
+    const row = rows[0];
+    if (row === undefined) throw new Error('order vanished inside its transaction');
+    return row;
+  }
+
+  async #lines(trx: Transaction<MainDb>, ctx: TenantContext, orderId: string): Promise<LineRow[]> {
+    const { rows } = await sql<LineRow>`
+      SELECT id, line_no, external_line_id, listing_id, quantity, line_gross_pence, vat_type,
+             vat_rate_bp, provisional_rate_bp, stored_unmapped
+        FROM app.order_lines
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${orderId}::uuid
+       ORDER BY line_no`.execute(trx);
+    return rows;
+  }
+
+  /**
+   * VAT-1, VAT-5, VAT-6: sale VAT once payment is captured (never for an order cancelled before
+   * it), at the tax point; each new refund at the original rates, capped per group, in the
+   * refund date's quarter. Every row is keyed, so a repeat writes nothing.
+   */
+  async #settle(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    order: OrderRow,
+    o: IncomingOrder,
+  ): Promise<void> {
+    if (order.paid_at === null) return;
+    const lines = await this.#lines(trx, ctx, order.id);
+    const vat = vatOf(lines, order);
+    const now = this.#now();
+    if (order.vat_recorded_at === null) {
+      for (const g of vat.groups) {
+        await this.#ledger(trx, ctx, order, {
+          entryKey: `sale:${order.id}:${g.key}`,
+          kind: 'sale',
+          refundId: null,
+          groupKey: g.key,
+          vatType: g.vatType,
+          rateBp: g.rateBp,
+          provisional: g.provisional,
+          gross: g.gross,
+          vat: g.vat,
+          taxPoint: order.tax_point_date,
+        });
+      }
+      await sql`UPDATE app.orders SET vat_recorded_at = ${now}
+                 WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${order.id}::uuid`.execute(
+        trx,
+      );
+    }
+
+    for (const refund of o.refunds) {
+      const { rows: seen } = await sql<{ id: string }>`
+        SELECT id FROM app.refunds
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${order.id}::uuid
+           AND external_refund_id = ${refund.refundId}`.execute(trx);
+      if (seen.length > 0) continue;
+      const prior = await this.#refundedSoFar(trx, ctx, order.id);
+      const byExternal = new Map(lines.map((l, index) => [l.external_line_id, { l, index }]));
+      const refundLines = (refund.lines ?? []).flatMap((rl) => {
+        const hit = byExternal.get(rl.lineId);
+        return hit === undefined ? [] : [{ ...rl, line: hit }];
+      });
+      const rv = computeRefundVat({
+        order: vat,
+        refunded: prior,
+        refund: {
+          amount: refund.amount,
+          ...(refundLines.length === 0
+            ? {}
+            : { lines: refundLines.map((rl) => ({ line: rl.line.index, amount: rl.amount })) }),
+        },
+      });
+      const refundId = randomUUID();
+      const taxPoint = londonDate(refund.refundedAt);
+      await sql`
+        INSERT INTO app.refunds
+          (workspace_id, id, company_id, order_id, external_refund_id, refunded_at, tax_point_date,
+           amount_pence, vat_pence, created_at)
+        VALUES (${ctx.workspaceId}::uuid, ${refundId}::uuid, ${order.company_id}::uuid,
+                ${order.id}::uuid, ${refund.refundId}, ${refund.refundedAt}, ${taxPoint}::date,
+                ${refund.amount}, ${rv.vat}, ${now})`.execute(trx);
+      for (const rl of refundLines) {
+        await sql`
+          INSERT INTO app.refund_lines
+            (workspace_id, id, company_id, refund_id, order_line_id, quantity, amount_pence)
+          VALUES (${ctx.workspaceId}::uuid, ${randomUUID()}::uuid, ${order.company_id}::uuid,
+                  ${refundId}::uuid, ${rl.line.l.id}::uuid, ${rl.quantity}, ${rl.amount})
+          ON CONFLICT DO NOTHING`.execute(trx);
+      }
+      for (const g of rv.groups) {
+        const charged = vat.groups.find((c) => c.key === g.key);
+        await this.#ledger(trx, ctx, order, {
+          entryKey: `refund:${refundId}:${g.key}`,
+          kind: 'refund',
+          refundId,
+          groupKey: g.key,
+          vatType: g.vatType,
+          rateBp: g.rateBp,
+          provisional: charged?.provisional ?? false,
+          gross: 0n - g.gross,
+          vat: 0n - g.vat,
+          taxPoint,
+        });
+      }
+    }
+  }
+
+  /** The refunds already in the ledger, as computeRefundVat takes them (FA-12 rule 3). */
+  async #refundedSoFar(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    orderId: string,
+  ): Promise<RefundVat[]> {
+    const { rows } = await sql<{
+      group_key: string;
+      vat_type: SaleVatType | null;
+      rate_bp: string;
+      gross: string;
+      vat: string;
+    }>`
+      SELECT group_key, min(vat_type) AS vat_type, min(rate_bp) AS rate_bp,
+             -sum(gross_pence) AS gross, -sum(vat_pence) AS vat
+        FROM app.vat_ledger
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${orderId}::uuid
+         AND kind = 'refund'
+       GROUP BY group_key`.execute(trx);
+    if (rows.length === 0) return [];
+    const groups = rows.map((r) => ({
+      key: r.group_key,
+      vatType: r.vat_type,
+      rateBp: Number(r.rate_bp),
+      gross: pence(big(r.gross)),
+      vat: pence(big(r.vat)),
+    }));
+    return [
+      {
+        groups,
+        gross: pence(groups.reduce((a, g) => a + g.gross, 0n)),
+        vat: pence(groups.reduce((a, g) => a + g.vat, 0n)),
+      },
+    ];
+  }
+
+  async #ledger(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    order: Pick<OrderRow, 'id' | 'company_id'>,
+    row: {
+      entryKey: string;
+      kind: 'sale' | 'refund' | 'adjustment';
+      refundId: string | null;
+      groupKey: string;
+      vatType: SaleVatType | null;
+      rateBp: number;
+      provisional: boolean;
+      gross: bigint;
+      vat: bigint;
+      taxPoint: string;
+    },
+  ): Promise<void> {
+    await sql`
+      INSERT INTO app.vat_ledger
+        (workspace_id, id, company_id, order_id, refund_id, entry_key, kind, group_key, vat_type,
+         rate_bp, provisional, gross_pence, vat_pence, net_pence, tax_point_date, period_date,
+         created_at)
+      VALUES (${ctx.workspaceId}::uuid, ${randomUUID()}::uuid, ${order.company_id}::uuid,
+              ${order.id}::uuid, ${row.refundId}::uuid, ${row.entryKey}, ${row.kind}, ${row.groupKey},
+              ${row.vatType}, ${row.rateBp}, ${row.provisional}, ${row.gross}, ${row.vat},
+              ${row.gross - row.vat}, ${row.taxPoint}::date, ${vatPeriodDate(row.taxPoint)}::date,
+              ${this.#now()})
+      ON CONFLICT (workspace_id, entry_key) DO NOTHING`.execute(trx);
+  }
+
+  /**
+   * CAT-6 (UnmappedDemand): the lines of a listing stored while it was unmapped, on orders that
+   * move stock and are not cancelled. The stock engine back-fills their movements on mapping;
+   * its keys make a repeat move nothing.
+   */
+  async openLines(ctx: TenantContext, listingId: string) {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{
+        id: string;
+        quantity: string;
+        dispatched: boolean;
+        company_id: string;
+      }>`
+        SELECT l.id, l.quantity, (o.dispatched_at IS NOT NULL) AS dispatched, o.company_id
+          FROM app.order_lines l
+          JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
+         WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.listing_id = ${listingId}::uuid
+           AND l.stored_unmapped AND o.stock_moves AND o.status <> 'cancelled'
+         ORDER BY l.created_at, l.id`.execute(trx);
+      return rows.map((r) => ({
+        orderLineId: r.id,
+        quantity: Number(r.quantity),
+        dispatched: r.dispatched,
+        companyId: r.company_id,
+      }));
+    });
+  }
+
+  /**
+   * FA-11: a listing was mapped, so its provisional lines take the snapshot in effect on their
+   * order date, once (the trigger refuses a second write). Where sale VAT is already recorded,
+   * the difference is written as adjustment rows, dated to the open period (VQ-3).
+   */
+  async fillSnapshots(ctx: TenantContext, listingId: string): Promise<{ filled: number }> {
+    return withBoundTenant(this.#db, ctx, async (trx, ctx) => {
+      const { rows: pending } = await sql<{
+        line_id: string;
+        order_id: string;
+        master_sku_id: string;
+        day: string;
+      }>`
+        SELECT l.id AS line_id, l.order_id, li.master_sku_id,
+               to_char(o.tax_point_date, 'YYYY-MM-DD') AS day
+          FROM app.order_lines l
+          JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
+          JOIN app.listings li ON li.workspace_id = l.workspace_id AND li.id = l.listing_id
+         WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.listing_id = ${listingId}::uuid
+           AND l.vat_type IS NULL AND li.master_sku_id IS NOT NULL
+         ORDER BY l.order_id, l.line_no`.execute(trx);
+      let filled = 0;
+      const byOrder = new Map<string, typeof pending>();
+      for (const p of pending) byOrder.set(p.order_id, [...(byOrder.get(p.order_id) ?? []), p]);
+      for (const [orderId, lines] of byOrder) {
+        const order = await this.#lock(trx, ctx, orderId);
+        const before = vatOf(await this.#lines(trx, ctx, orderId), order);
+        for (const p of lines) {
+          const snap = await this.#snapshot(ctx, p.master_sku_id, p.day);
+          if (snap === undefined) continue;
+          const { numAffectedRows } = await sql`
+            UPDATE app.order_lines
+               SET master_sku_id = ${snap.masterSkuId}::uuid, vat_type = ${snap.vatType},
+                   vat_rate_bp = ${snap.rateBp}, cogs_pence = ${snap.cogs}, snapshot_at = ${this.#now()}
+             WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${p.line_id}::uuid
+               AND vat_type IS NULL`.execute(trx);
+          filled += Number(numAffectedRows ?? 0n);
+        }
+        const after = vatOf(await this.#lines(trx, ctx, orderId), order);
+        await this.#reallocate(trx, ctx, orderId, after);
+        if (order.vat_recorded_at === null) continue;
+        // The difference per group, as adjustment rows: the old provisional group comes off, the
+        // new group goes on.
+        const keys = new Set([...before.groups, ...after.groups].map((g) => g.key));
+        for (const key of keys) {
+          const b = before.groups.find((g) => g.key === key);
+          const a = after.groups.find((g) => g.key === key);
+          const gross = (a?.gross ?? 0n) - (b?.gross ?? 0n);
+          const vatDiff = (a?.vat ?? 0n) - (b?.vat ?? 0n);
+          if (
+            gross === 0n &&
+            vatDiff === 0n &&
+            (a?.provisional ?? false) === (b?.provisional ?? false)
+          )
+            continue;
+          const g = a ?? b;
+          if (g === undefined) continue;
+          await this.#ledger(trx, ctx, order, {
+            entryKey: `adjust:${orderId}:${lines.map((l) => l.line_id).join(',')}:${key}`.slice(
+              0,
+              300,
+            ),
+            kind: 'adjustment',
+            refundId: null,
+            groupKey: key,
+            vatType: g.vatType,
+            rateBp: g.rateBp,
+            provisional: a?.provisional ?? false,
+            gross,
+            vat: vatDiff,
+            taxPoint: order.tax_point_date,
+          });
+        }
+      }
+      return { filled };
+    });
+  }
+
+  /** Line VAT and the order's VAT after a snapshot filled (FA-12 rule 2: from the group). */
+  async #reallocate(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    orderId: string,
+    vat: OrderVat,
+  ): Promise<void> {
+    const lines = await this.#lines(trx, ctx, orderId);
+    for (const [index, line] of lines.entries()) {
+      const v = vat.lines[index];
+      if (v === undefined) continue;
+      await sql`UPDATE app.order_lines
+                   SET vat_pence = ${v.vat}, discount_pence = ${v.discount}, shipping_pence = ${v.shipping}
+                 WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${line.id}::uuid`.execute(
+        trx,
+      );
+    }
+    const unmapped = lines.some((l) => l.vat_type === null);
+    await sql`UPDATE app.orders SET vat_pence = ${vat.vat}, unmapped = ${unmapped}, updated_at = ${this.#now()}
+               WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${orderId}::uuid`.execute(
+      trx,
+    );
+  }
+
+  /** DEL-1: what the expiry job needs, IDs and dates only, for orders that still hold PII. */
+  async piiExpiryOf(
+    ctx: TenantContext,
+    orderIds: readonly string[],
+  ): Promise<
+    { orderId: string; piiRef: string; dispatchedAt: Date | null; deliveredAt: Date | null }[]
+  > {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{
+        id: string;
+        pii_ref: string;
+        dispatched_at: Date | null;
+        delivered_at: Date | null;
+      }>`
+        SELECT o.id, o.pii_ref, o.dispatched_at, o.delivered_at FROM app.orders o
+         WHERE o.workspace_id = ${ctx.workspaceId}::uuid AND o.id = ANY (${sql.val(orderIds)}::uuid[])
+           AND o.pii_ref IS NOT NULL AND o.pii_deleted_at IS NULL AND o.status <> 'cancelled'
+           AND NOT EXISTS (SELECT 1 FROM app.pii_tombstones t
+                            WHERE t.workspace_id = o.workspace_id AND t.pii_ref = o.pii_ref)`.execute(
+        trx,
+      );
+      return rows.map((r) => ({
+        orderId: r.id,
+        piiRef: r.pii_ref,
+        dispatchedAt: r.dispatched_at,
+        deliveredAt: r.delivered_at,
+      }));
+    });
+  }
+
+  /** The workspace's PII window in days (TEN-6: 25, fixed; PRD 7.3). */
+  async retentionDays(ctx: TenantContext): Promise<number> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{ days: string }>`
+        SELECT pii_retention_days AS days FROM app.workspaces
+         WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
+      return Number(rows[0]?.days ?? 25);
+    });
+  }
+
+  /** FA-10 orphan sweep: which of these vault refs an order points at (IDs only). */
+  async knownPiiRefs(ctx: TenantContext, piiRefs: readonly string[]): Promise<ReadonlySet<string>> {
+    if (piiRefs.length === 0) return new Set();
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<{ pii_ref: string }>`
+        SELECT pii_ref FROM app.orders
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND pii_ref = ANY (${sql.val(piiRefs)}::uuid[])`.execute(trx);
+      return new Set(rows.map((r) => r.pii_ref));
+    });
+  }
+}

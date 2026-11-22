@@ -755,6 +755,22 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       contact('603', { channel_buyer_id: `${userId}-other`, channel_username: 'reused-name' }),
     );
     expect(other.pii_ref).toMatch(/^[0-9a-f-]{36}$/);
+    // eBay orders carry the username only: an order placed before the notice is refused, one
+    // placed after it (the name reused by someone else) is stored.
+    const byName = (subject: string, placedAt: string) =>
+      clients.web.ingest({
+        workspace_id: W,
+        kind: 'buyer_contact',
+        channel_account_id: account,
+        subject_type: 'order',
+        subject_id: `${account}:${subject}`,
+        placed_at: placedAt,
+        fields: contact('604', { channel_username: 'reused-name' }),
+      });
+    const early = await byName('NAME-EARLY', '2020-01-01T00:00:00Z').catch((e: unknown) => e);
+    expect((early as VaultError).code).toBe('buyer_deleted');
+    const later = await byName('NAME-LATER', new Date(Date.now() + 60_000).toISOString());
+    expect(later.pii_ref).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('[AT-10] an eBay notice matches by user ID first: a reused username never reaches another buyer (ADR-068)', async () => {

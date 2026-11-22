@@ -79,6 +79,12 @@ export const IngestRequest = z
     subject_id: z.string().min(1).max(200),
     /** Set by the caller from delivery or dispatch + pii_expiry_days (DEL-1); may come later. */
     delete_after: z.iso.datetime({ offset: true }).optional(),
+    /**
+     * When the order was placed (orders only). ADR-068: a buyer named in an eBay deletion notice
+     * by username alone is refused for orders placed before the notice; a later order under a
+     * reused username belongs to someone else.
+     */
+    placed_at: z.iso.datetime({ offset: true }).optional(),
     fields: z.record(z.string(), fieldValue),
   })
   .strict()
@@ -103,10 +109,11 @@ export type IngestResponse = z.infer<typeof IngestResponse>;
 
 /**
  * Why an expiry moves (DEL-1): the order was dispatched or delivered, so the live copy goes
- * `pii_expiry_days` after that date. Each change is journalled off-site (ADR-068), so a restore
- * re-applies it.
+ * `pii_expiry_days` after that date; or the nightly sweep found a record no order points at
+ * (FA-10), which then goes at the next hourly expiry run. Each change is journalled off-site
+ * (ADR-068), so a restore re-applies it.
  */
-export const EXPIRY_REASONS = ['dispatch', 'delivery'] as const;
+export const EXPIRY_REASONS = ['dispatch', 'delivery', 'orphan'] as const;
 export type ExpiryReason = (typeof EXPIRY_REASONS)[number];
 
 export const ExpiryRequest = z

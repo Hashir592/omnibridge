@@ -265,7 +265,7 @@ describe('outbound writes, switches and governors against the eBay mock (SAFE-2,
       const readsBefore = reads.length;
       await runIncrementalSync(
         { ...ports, cursors: new SyncCursorRepository(db.db) },
-        ebayOrderStream(await ebay(), () => Promise.resolve()),
+        ebayOrderStream(await ebay(), { sink: () => Promise.resolve() }),
         { workspaceId: one.id, channelAccountId: one.account },
       );
       expect(reads.length).toBeGreaterThan(readsBefore);

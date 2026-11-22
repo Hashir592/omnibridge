@@ -82,6 +82,15 @@ export interface SyncStream<T extends SyncItem> {
   readonly lookbackMs: number;
   authenticate(credential: Secret): Promise<AccessToken>;
   fetchPage(token: AccessToken, since: Date, page?: string): Promise<Page<T>>;
+  /**
+   * Runs after the pages are read and before the sink's transaction, with no transaction open
+   * (invariant 3): M10's vault-first step (FA-10) stores buyer details in pii-vault here and
+   * returns the items with their `pii_ref` and without the details. Left out, items pass through.
+   */
+  prepare?(
+    job: { workspaceId: string; channelAccountId: string },
+    items: readonly T[],
+  ): Promise<readonly T[]>;
   /** Stores the new changes in the cursor's transaction. Must upsert by external ID. */
   sink(ctx: TenantContext, channelAccountId: string, items: readonly T[]): Promise<void>;
 }
@@ -195,8 +204,9 @@ export async function runIncrementalSync<T extends SyncItem>(
       if (page === undefined) break;
     }
     const { fresh, next } = applyRun(cursor, items, { since, nextPage: page });
+    const ready = stream.prepare === undefined ? fresh : await stream.prepare(job, fresh);
     await ports.tenancy.runWorkspace(actor, async (ctx) => {
-      await stream.sink(ctx, accountId, fresh);
+      await stream.sink(ctx, accountId, ready);
       await ports.cursors.save(ctx, accountId, stream.stream, next, now());
       const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
         tokenRefreshed: auth.refreshed,
