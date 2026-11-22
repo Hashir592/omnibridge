@@ -96,5 +96,12 @@ export function sameBuyerGroups(
       if (chunk.length >= 2) groups.push(chunk);
     }
   }
-  return groups.sort((x, y) => ((x[0] ?? '') < (y[0] ?? '') ? -1 : 1));
+  // Earliest group first (by its first member's placed time), so a recompute hands an existing
+  // group id to the part that keeps that group's earliest order.
+  const placed = new Map(candidates.map((c) => [c.id, c.placedAt.getTime()]));
+  return groups.sort(
+    (x, y) =>
+      (placed.get(x[0] ?? '') ?? 0) - (placed.get(y[0] ?? '') ?? 0) ||
+      ((x[0] ?? '') < (y[0] ?? '') ? -1 : 1),
+  );
 }
