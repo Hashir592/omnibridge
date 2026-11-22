@@ -89,7 +89,9 @@ function Detail({ d }: { d: StockDetail }) {
     void qc.invalidateQueries({ queryKey: ['stock'] });
     void qc.invalidateQueries({ queryKey: ['movements'] });
   };
+  const [exporting, setExporting] = useState(false);
   const exportCsv = async () => {
+    setExporting(true);
     try {
       const r = await stockApi.exportMovements({ sku_id: d.sku_id });
       if (!r.ok) throw new Error(String(r.status));
@@ -100,6 +102,8 @@ function Detail({ d }: { d: StockDetail }) {
         description: 'Try again.',
         tone: 'error',
       });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -232,7 +236,12 @@ function Detail({ d }: { d: StockDetail }) {
                   >
                     All movements
                   </Link>
-                  <Button size="sm" icon={<Download />} onClick={() => void exportCsv()}>
+                  <Button
+                    size="sm"
+                    icon={<Download />}
+                    busy={exporting}
+                    onClick={() => void exportCsv()}
+                  >
                     Export
                   </Button>
                 </>

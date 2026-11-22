@@ -538,7 +538,7 @@ function ViewTable({
                         onAuto(l);
                       }}
                     >
-                      Auto
+                      Back to Auto
                     </Button>
                   </span>
                 ) : (

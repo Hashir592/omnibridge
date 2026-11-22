@@ -14,6 +14,7 @@ import {
   parsePounds,
   parseRate,
   penceToPounds,
+  rateNumber,
   ratesOn,
   refusalText,
   reportState,
@@ -62,6 +63,7 @@ describe('money and rates', () => {
     expect(formatRate(2000)).toBe('20%');
     expect(formatRate(1750)).toBe('17.5%');
     expect(formatRate(0)).toBe('0%');
+    expect(rateNumber(1750)).toBe('17.5');
     expect(parseRate('20')).toBe(2000);
     expect(parseRate('17.5%')).toBe(1750);
     expect(parseRate('101')).toBeNull();

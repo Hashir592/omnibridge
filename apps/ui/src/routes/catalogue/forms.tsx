@@ -24,7 +24,7 @@ import {
   VAT_NAME,
   VAT_TYPES,
   fieldErrors,
-  formatRate,
+  rateNumber,
   newSkuBody,
   parsePounds,
   parseRate,
@@ -379,8 +379,7 @@ function editForm(s: MasterSku): EditForm {
     width: s.dimensions ? String(s.dimensions.width_mm) : '',
     height: s.dimensions ? String(s.dimensions.height_mm) : '',
     imageUrl: s.image_url ?? '',
-    purchaseVat:
-      s.purchase_vat_rate_bp === null ? '' : formatRate(s.purchase_vat_rate_bp).replace('%', ''),
+    purchaseVat: s.purchase_vat_rate_bp === null ? '' : rateNumber(s.purchase_vat_rate_bp),
     lead: String(s.reorder.lead_time_days),
     safety: String(s.reorder.safety_days),
     cover: String(s.reorder.target_cover_days),
