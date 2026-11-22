@@ -176,10 +176,31 @@ export function websiteRoutes(app: MockApp, scenarios: ScenarioStore): void {
     return {
       orders: MOCK_ORDERS.filter((o) => since === undefined || o.updatedAt >= since).map((o) => ({
         id: o.id,
+        created_at: o.placedAt,
         updated_at: o.updatedAt,
+        paid_at: o.placedAt,
         status: 'processing',
-        customer: { email: 'PIIMARK-web@example.test' },
-        lines: [{ id: `${o.id}-1`, sku: o.sku, quantity: o.quantity }],
+        currency: 'GBP',
+        shipping_total: o.shipping,
+        discount_total: '0.00',
+        customer: { id: `cust-${o.id}`, email: 'PIIMARK-web@example.test', phone: '07700900456' },
+        shipping_address: {
+          name: 'PIIMARK-Web Buyer',
+          line1: 'PIIMARK-2 Mock Road',
+          city: 'Testville',
+          postcode: 'TE2 2ND',
+          country: 'GB',
+        },
+        lines: [
+          {
+            id: `${o.id}-1`,
+            sku: o.sku,
+            quantity: o.quantity,
+            name: 'Mock item',
+            total: o.lineTotal,
+          },
+        ],
+        refunds: [],
       })),
       next_cursor: null,
     };

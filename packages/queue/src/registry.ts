@@ -164,13 +164,14 @@ export const workspaceCloseJob = defineJob({
 });
 
 /** The incremental sync streams (INT-8); each adds its name here with its module. */
-export const SYNC_STREAMS = ['ebay.orders'] as const;
+export const SYNC_STREAMS = ['ebay.orders', 'website.orders'] as const;
 export type SyncStreamName = (typeof SYNC_STREAMS)[number];
 
 /**
  * One incremental poll of one account and stream (T-0701: INT-2, INT-8): the job → governor →
  * parser → cursor path. Polls of one account run one at a time, in order. A parser failure ends
- * the job at once (PermanentJobError, INT-5). M10 and later schedule the streams.
+ * the job at once (PermanentJobError, INT-5). The order streams are sent every 5 minutes by
+ * `orders.sync_accounts` (M10, CAP-6).
  */
 export const syncPollJob = defineJob({
   type: 'sync.poll',
@@ -219,6 +220,40 @@ export const listingsDiscoverAccountsJob = defineJob({
 });
 
 /**
+ * M10 (CAP-6, EBAY-6): one sync.poll per connected eBay and website account for its order stream,
+ * every 5 minutes, keyed by the 5-minute slot so a second sweep in the slot sends none.
+ */
+export const ordersSyncAccountsJob = defineJob({
+  type: 'orders.sync_accounts',
+  payload: z.object({}).strict(),
+  retry: { limit: 2, delaySeconds: 30, backoff: true, maxDelaySeconds: 120 },
+  expireInSeconds: 240,
+});
+
+/**
+ * DEL-1 (ADR-068): an order was dispatched or delivered, so its buyer record's expiry moves to
+ * that date plus the PII window. IDs only (invariant 7a); the vault journals the change.
+ */
+export const ordersPiiExpiryJob = defineJob({
+  type: 'orders.pii_expiry',
+  payload: z.object({ order_id: z.uuid(), reason: z.enum(['dispatch', 'delivery']) }).strict(),
+  retry: { limit: 10, delaySeconds: 60, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 300,
+});
+
+/**
+ * FA-10: the nightly orphan sweep of one workspace. Vault order records that no db-main order
+ * points at (a db-main write failed after the vault write) are expired now, so the hourly expiry
+ * run deletes them. Compared by ID only.
+ */
+export const ordersOrphanSweepJob = defineJob({
+  type: 'orders.orphan_sweep',
+  payload: z.object({}).strict(),
+  retry: { limit: 4, delaySeconds: 300, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 1_800,
+});
+
+/**
  * Every workspace job type the app runs. The migrate job creates a queue and a dead-letter queue
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
@@ -244,6 +279,9 @@ export const JOBS: readonly JobDefinition[] = [
   listingsDiscoverJob,
   listingsDiscoverAccountsJob,
   stockRetentionJob,
+  ordersSyncAccountsJob,
+  ordersPiiExpiryJob,
+  ordersOrphanSweepJob,
 ];
 
 /**
@@ -317,6 +355,20 @@ export const listingsDiscoverSweepJob = definePlatformJob({
   heavy: true,
 });
 
+/** M10 (CAP-6): one orders.sync_accounts job per workspace every 5 minutes. Light. */
+export const ordersSyncSweepJob = definePlatformJob({
+  type: 'orders.sync-sweep',
+  cron: '*/5 * * * *',
+  heavy: false,
+});
+
+/** FA-10: the nightly orphan sweep, one orders.orphan_sweep job per workspace (03:40 London). */
+export const ordersOrphanSweepPlatformJob = definePlatformJob({
+  type: 'orders.orphan-sweep',
+  cron: '40 3 * * *',
+  heavy: true,
+});
+
 /**
  * Every platform job with a cron (no workspace). The migrate job creates their queues, and the
  * worker schedules and consumes each one.
@@ -331,4 +383,6 @@ export const PLATFORM_JOBS: readonly PlatformJobDefinition[] = [
   platformDigestJob,
   outboundRecoverSweepJob,
   listingsDiscoverSweepJob,
+  ordersSyncSweepJob,
+  ordersOrphanSweepPlatformJob,
 ];

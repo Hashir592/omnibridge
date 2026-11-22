@@ -1,8 +1,8 @@
 /**
  * eBay as a ChannelAdapter (INT-1), the M07 reference adapter: user tokens from the refresh token,
  * the Fulfillment API's "updated since" order read (INT-8) and the Inventory API's stock write.
- * Every answer goes through a versioned parser (INT-5); buyer fields are dropped by the parser and
- * never leave this file (M10 brings the vault-first ingest).
+ * Every answer goes through a versioned parser (INT-5). Buyer fields leave this file only in an
+ * order's `buyer` block, which the M10 ingest hands to pii-vault and never stores in db-main.
  */
 import { Secret } from '@omnibridge/crypto';
 import {
@@ -11,10 +11,14 @@ import {
   ProviderRejected,
   RateLimited,
   readJson,
+  GbpAmount,
   type AccessToken,
+  type BuyerDetails,
   type ChannelAdapter,
+  type ChannelOrder,
+  type ChannelOrderState,
   type ListingInfo,
-  type OrderSummary,
+  type OrderSource,
   type Page,
   type ProviderHttp,
   type StockLevel,
@@ -49,30 +53,192 @@ const TokenV1 = defineParser(
   }),
 );
 
+const Text = z.string().max(4000).optional();
+const When = z.iso.datetime({ offset: true });
+/** IDs and SKUs: db-main keeps at most 200 characters, so a longer one is a parser failure. */
+const Id = z.string().min(1).max(200);
+/** ISO 3166 alpha-2, upper-cased (db-main checks ^[A-Z]{2}$). */
+const Country = z
+  .string()
+  .regex(/^[A-Za-z]{2}$/)
+  .transform((c) => c.toUpperCase());
+
+/**
+ * The Fulfillment API's getOrders (M10: money, dates, refunds and the ship-to block). Version 2:
+ * version 1 read IDs and quantities only. Provisional until T-1501 checks it against eBay's spec.
+ */
 export const EbayOrdersV1 = defineParser(
   'ebay',
   'orders',
-  1,
+  2,
   z.object({
     next: z.string().optional(),
     offset: z.number().int().min(0),
     limit: z.number().int().min(1),
     orders: z.array(
       z.object({
-        orderId: z.string().min(1),
-        lastModifiedDate: z.iso.datetime({ offset: true }),
-        orderFulfillmentStatus: z.string(),
+        orderId: Id,
+        creationDate: When,
+        lastModifiedDate: When,
+        orderFulfillmentStatus: z.string().min(1),
+        orderPaymentStatus: z.string().min(1),
+        cancelStatus: z.object({ cancelState: z.string().optional() }).optional(),
+        buyer: z.object({ username: Text }).optional(),
+        pricingSummary: z.object({
+          deliveryCost: GbpAmount.optional(),
+          priceDiscount: GbpAmount.optional(),
+          total: GbpAmount,
+        }),
+        paymentSummary: z
+          .object({
+            payments: z.array(z.object({ paymentDate: When.optional() })).optional(),
+            refunds: z
+              .array(
+                z.object({
+                  refundId: Id,
+                  refundDate: When,
+                  refundStatus: z.string().optional(),
+                  amount: GbpAmount,
+                }),
+              )
+              .optional(),
+          })
+          .optional(),
+        fulfillmentStartInstructions: z
+          .array(
+            z.object({
+              shippingStep: z
+                .object({
+                  shipTo: z
+                    .object({
+                      fullName: Text,
+                      email: Text,
+                      primaryPhone: z.object({ phoneNumber: Text }).optional(),
+                      contactAddress: z
+                        .object({
+                          addressLine1: Text,
+                          addressLine2: Text,
+                          city: Text,
+                          stateOrProvince: Text,
+                          postalCode: Text,
+                          countryCode: Country.optional(),
+                        })
+                        .optional(),
+                    })
+                    .optional(),
+                })
+                .optional(),
+            }),
+          )
+          .optional(),
         lineItems: z.array(
           z.object({
-            lineItemId: z.string().min(1),
-            sku: z.string().optional(),
-            quantity: z.number().int().min(0),
+            lineItemId: Id,
+            sku: Id.optional(),
+            title: z.string().max(500).optional(),
+            quantity: z.number().int().min(1),
+            lineItemCost: GbpAmount,
+            lineItemFulfillmentInstructions: z.object({ shipByDate: When.optional() }).optional(),
           }),
         ),
       }),
     ),
   }),
 );
+
+type EbayOrder = ReturnType<typeof EbayOrdersV1.parse>['orders'][number];
+
+/** eBay payment statuses that mean the buyer's payment was captured. */
+const PAID_STATUSES: readonly string[] = ['PAID', 'PARTIALLY_REFUNDED', 'FULLY_REFUNDED'];
+
+/** FA-10: eBay's fulfilment, payment and cancel states onto the channel lifecycle. */
+function ebayState(o: EbayOrder): ChannelOrderState {
+  if (o.cancelStatus?.cancelState === 'CANCELED') return 'cancelled';
+  if (o.orderFulfillmentStatus === 'FULFILLED') return 'dispatched';
+  // Refunded in full before anything shipped: nothing will ship. The refund rows carry the VAT.
+  if (o.orderPaymentStatus === 'FULLY_REFUNDED') return 'cancelled';
+  if (o.orderPaymentStatus === 'PENDING' || o.orderPaymentStatus === 'FAILED') {
+    return 'pending_payment';
+  }
+  return 'awaiting_dispatch';
+}
+
+/** The ship-to block and username, for pii-vault only (ORD-4). Blank values are left out. */
+function ebayBuyer(o: EbayOrder): BuyerDetails | null {
+  const to = o.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
+  const a = to?.contactAddress;
+  const entries = Object.entries({
+    name: to?.fullName,
+    email: to?.email,
+    phone: to?.primaryPhone?.phoneNumber,
+    address_line1: a?.addressLine1,
+    address_line2: a?.addressLine2,
+    city: a?.city,
+    county: a?.stateOrProvince,
+    postcode: a?.postalCode,
+    country: a?.countryCode,
+    channel_username: o.buyer?.username,
+  }).filter((e): e is [string, string] => e[1] !== undefined && e[1].trim() !== '');
+  return entries.length === 0 ? null : Object.fromEntries(entries);
+}
+
+/** One getOrders page's orders as whole channel orders (M10); the buyer block is PII. */
+export function parseEbayOrders(body: unknown): ChannelOrder[] {
+  return EbayOrdersV1.parse(body).orders.map(ebayOrder);
+}
+
+function ebayOrder(o: EbayOrder): ChannelOrder {
+  const state = ebayState(o);
+  const paid = o.paymentSummary?.payments?.find((p) => p.paymentDate !== undefined)?.paymentDate;
+  const shipBy = o.lineItems
+    .map((l) => l.lineItemFulfillmentInstructions?.shipByDate)
+    .filter((d): d is string => d !== undefined)
+    .sort()[0];
+  return {
+    externalId: o.orderId,
+    updatedAt: new Date(o.lastModifiedDate),
+    status: [o.orderFulfillmentStatus, o.orderPaymentStatus, o.cancelStatus?.cancelState]
+      .filter((v) => v !== undefined && v !== 'NONE_REQUESTED')
+      .join('/'),
+    state,
+    placedAt: new Date(o.creationDate),
+    // VAT-6: only a captured payment counts; with no payment date, eBay's payment status decides.
+    paidAt:
+      paid !== undefined
+        ? new Date(paid)
+        : PAID_STATUSES.includes(o.orderPaymentStatus)
+          ? new Date(o.creationDate)
+          : null,
+    shipBy: shipBy === undefined ? null : new Date(shipBy),
+    // getOrders has no dispatch time: the update that first shows FULFILLED stands in for it.
+    // M12 records its own dispatch time for labels it makes.
+    dispatchedAt: state === 'dispatched' ? new Date(o.lastModifiedDate) : null,
+    deliveredAt: null,
+    cancelledAt: state === 'cancelled' ? new Date(o.lastModifiedDate) : null,
+    discountPence: o.pricingSummary.priceDiscount ?? 0,
+    shippingPence: o.pricingSummary.deliveryCost ?? 0,
+    shipToCountry:
+      o.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo?.contactAddress?.countryCode ??
+      null,
+    fba: false,
+    lines: o.lineItems.map((l) => ({
+      lineId: l.lineItemId,
+      sku: l.sku ?? null,
+      quantity: l.quantity,
+      title: l.title ?? null,
+      linePricePence: l.lineItemCost,
+    })),
+    refunds: (o.paymentSummary?.refunds ?? [])
+      .filter((r) => r.refundStatus === undefined || r.refundStatus === 'REFUNDED')
+      .map((r) => ({
+        refundId: r.refundId,
+        refundedAt: new Date(r.refundDate),
+        amountPence: r.amount,
+        lines: null,
+      })),
+    buyer: ebayBuyer(o),
+  };
+}
 
 /** CAT-5: the Inventory API's items (SKU, title, quantity); M15 checks it against eBay's spec. */
 export const EbayInventoryItemsV1 = defineParser(
@@ -135,9 +301,13 @@ async function ebayJson(res: Response): Promise<unknown> {
   return readJson('ebay', res);
 }
 
-export function createEbayAdapter(options: EbayAdapterOptions): ChannelAdapter & {
-  exchangeCode(code: string): Promise<TokenGrant>;
-} {
+export function createEbayAdapter(options: EbayAdapterOptions): Omit<
+  ChannelAdapter,
+  'ordersUpdatedSince'
+> &
+  OrderSource & {
+    exchangeCode(code: string): Promise<TokenGrant>;
+  } {
   const now = options.now ?? (() => new Date());
   const base = options.http.base('ebay', 'api');
   const basic = () =>
@@ -194,7 +364,7 @@ export function createEbayAdapter(options: EbayAdapterOptions): ChannelAdapter &
       };
     },
 
-    async ordersUpdatedSince(access, since, page): Promise<Page<OrderSummary>> {
+    async ordersUpdatedSince(access, since, page): Promise<Page<ChannelOrder>> {
       const url = new URL('sell/fulfillment/v1/order', base);
       url.searchParams.set('filter', `lastmodifieddate:[${since.toISOString()}..]`);
       url.searchParams.set('limit', String(options.pageSize ?? 200));
@@ -202,16 +372,7 @@ export function createEbayAdapter(options: EbayAdapterOptions): ChannelAdapter &
       const res = await options.http.request('ebay', { url, headers: bearer(access) });
       const body = EbayOrdersV1.parse(await ebayJson(res));
       return {
-        items: body.orders.map((o) => ({
-          externalId: o.orderId,
-          updatedAt: new Date(o.lastModifiedDate),
-          status: o.orderFulfillmentStatus,
-          lines: o.lineItems.map((l) => ({
-            lineId: l.lineItemId,
-            sku: l.sku ?? null,
-            quantity: l.quantity,
-          })),
-        })),
+        items: body.orders.map(ebayOrder),
         next: body.next === undefined ? undefined : String(body.offset + body.limit),
       };
     },
@@ -269,21 +430,25 @@ export function createEbayAdapter(options: EbayAdapterOptions): ChannelAdapter &
 }
 
 /**
- * The `ebay.orders` stream (INT-8): the reference path of M07, job → governor → parser → cursor.
- * The sink is M10's order ingest; until then the worker passes one that only counts.
+ * The `ebay.orders` stream (INT-8): job → governor → parser → vault-first prepare → sink (M10).
+ * The first poll of an account reads 90 days back (FA-16 backfill depth; FC-1 wants 90 days).
  */
 export function ebayOrderStream(
-  adapter: ChannelAdapter,
-  sink: SyncStream<OrderSummary>['sink'],
-): SyncStream<OrderSummary> {
+  adapter: Pick<ChannelAdapter, 'authenticate'> & OrderSource,
+  ingest: Pick<SyncStream<ChannelOrder>, 'sink' | 'prepare'>,
+): SyncStream<ChannelOrder> {
   return {
     stream: 'ebay.orders',
     provider: 'ebay',
     api: EBAY_APIS.orders,
     authApi: EBAY_APIS.identity,
-    lookbackMs: 30 * 86_400_000,
+    lookbackMs: ORDER_BACKFILL_MS,
     authenticate: (credential) => adapter.authenticate(credential),
     fetchPage: (token, since, page) => adapter.ordersUpdatedSince(token, since, page),
-    sink,
+    ...(ingest.prepare === undefined ? {} : { prepare: ingest.prepare }),
+    sink: ingest.sink,
   };
 }
+
+/** FA-16: how far back the first order poll of a new account reads. */
+export const ORDER_BACKFILL_MS = 90 * 86_400_000;

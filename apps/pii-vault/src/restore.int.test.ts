@@ -261,4 +261,39 @@ describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
       ),
     ).toEqual([]);
   }, 300_000);
+  it('[DEL-1][AT-8] an expiry shortened after the backup is re-applied by the restore, so the copy goes on time (ADR-068)', async () => {
+    const W = randomUUID();
+    // Stored with the 90-day backstop; the backup holds that date.
+    const shortened = await ingest(W, 'shortened');
+    const untouched = await ingest(W, 'untouched');
+    const user = cluster.container.getUsername();
+    await sh(`pg_dump -U ${user} -Fc -f /tmp/expiry.dump omnibridge_pii`);
+
+    // After the backup the order is dispatched: the live copy now goes 25 days on (journalled).
+    await clients.worker.setExpiry({
+      workspace_id: W,
+      pii_refs: [shortened],
+      delete_after: new Date(clock.getTime() + 25 * DAY).toISOString(),
+      reason: 'dispatch',
+    });
+
+    await sh(
+      `createdb -U ${user} restored_expiry && pg_restore -U ${user} -d restored_expiry /tmp/expiry.dump`,
+    );
+    clock = new Date(clock.getTime() + 26 * DAY);
+    await replay('restored_expiry');
+    const left = await rows(
+      'restored_expiry',
+      W,
+      'SELECT pii_ref FROM vault.records WHERE workspace_id = $1 AND NOT canary',
+    );
+    expect(left.map((r) => r.pii_ref)).toEqual([untouched]);
+    expect(
+      await rows(
+        'restored_expiry',
+        W,
+        `SELECT 1 FROM vault.tombstones WHERE workspace_id = $1 AND pii_ref = '${shortened}'`,
+      ),
+    ).toHaveLength(1);
+  });
 });

@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +36,12 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
   const clients = {} as Record<keyof typeof tokens, VaultClient>;
   const A = randomUUID();
   const B = randomUUID();
+  const journalDir = mkdtempSync(join(tmpdir(), 'ob-journal-'));
+  const journalLines = () =>
+    readdirSync(journalDir)
+      .flatMap((f) => readFileSync(join(journalDir, f), 'utf8').split('\n'))
+      .filter((l) => l.trim() !== '')
+      .map((l) => JSON.parse(l) as Record<string, string>);
   const account = randomUUID();
   const otherAccount = randomUUID();
 
@@ -91,6 +97,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     vault = new Vault({
       pool: appPool,
       keyring: parseKeyring('pii', generateKekLine(1)),
+      journal: new DeletionJournal(journalDir),
       onCanary: (event) => {
         logger.warn(
           { event: 'vault.canary_read', workspaceId: event.workspaceId },
@@ -106,7 +113,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       tokens: new ServiceTokens(tokens),
       deletion: new DeletionService({
         pool: appPool,
-        journal: new DeletionJournal(mkdtempSync(join(tmpdir(), 'ob-journal-'))),
+        journal: new DeletionJournal(journalDir),
       }),
     });
     await app.listen({ host: '127.0.0.1', port: 0 });
@@ -382,7 +389,12 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     const { pii_ref } = await withExpiry('exp-ok', at(90 * DAY - HOUR));
     expect(await status(withExpiry('exp-past-ok', at(-DAY + HOUR)))).toBe(200);
     const expiry = (deleteAfter: string) =>
-      clients.worker.setExpiry({ workspace_id: A, pii_refs: [pii_ref], delete_after: deleteAfter });
+      clients.worker.setExpiry({
+        workspace_id: A,
+        pii_refs: [pii_ref],
+        delete_after: deleteAfter,
+        reason: 'delivery',
+      });
     expect(await status(expiry(at(90 * DAY + HOUR)))).toBe(400);
     expect(await status(expiry(at(-DAY - HOUR)))).toBe(400);
     expect(await expiry(at(25 * DAY))).toEqual({ updated: 1 });
@@ -459,6 +471,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
         workspace_id: D,
         pii_refs: [canary, real],
         delete_after: soon,
+        reason: 'dispatch',
       }),
     ).toEqual({ updated: 1 });
     const rows = await raw(
@@ -681,6 +694,166 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(entries).toEqual([{ pii_ref: old.pii_ref }]);
     expect(entries).not.toContainEqual({ pii_ref: plain.pii_ref });
     expect(await vault.backfillBuyerExact()).toBe(0);
+  });
+
+  it('[ORD-4] one buyer record per order: a repeated ingest returns the same ref and adds nothing', async () => {
+    const W = randomUUID();
+    const subject = `${account}:ORDER-ONCE`;
+    const first = await ingest(W, subject, contact('501'));
+    const again = await ingest(W, subject, contact('502'));
+    expect(again.pii_ref).toBe(first.pii_ref);
+    const rows = await raw(
+      ownerPool,
+      W,
+      `SELECT pii_ref FROM vault.records WHERE subject_id = $1 AND NOT canary`,
+      [subject],
+    );
+    expect(rows).toEqual([{ pii_ref: first.pii_ref }]);
+    // The first details stay: the repeat changed nothing.
+    const read = await clients.web.readFull({
+      workspaceId: W,
+      piiRef: first.pii_ref,
+      purpose: 'order_detail',
+    });
+    expect(read.fields.email).toBe(`${PII_MARKER}501@example.test`);
+    // Messages and feedback are not orders: each ingest is its own record, as before.
+    const message = (n: string) =>
+      clients.web.ingest({
+        workspace_id: W,
+        kind: 'ebay_message',
+        channel_account_id: account,
+        subject_type: 'conversation',
+        subject_id: 'conv-once',
+        fields: { message_body: `${PII_MARKER}hello ${n}`, sender_username: 'someone' },
+      });
+    expect((await message('1')).pii_ref).not.toBe((await message('2')).pii_ref);
+  });
+
+  it('[DEL-1][AT-10] after an eBay deletion notice the buyer is never stored again (ADR-068 tombstone check)', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-ebay-user-${randomUUID().slice(0, 8)}`;
+    await ingest(W, `${account}:BEFORE-NOTICE`, contact('601', { channel_buyer_id: userId }));
+    const match = await clients.web.ebayUserMatch({ user_id: userId, username: 'reused-name' });
+    expect(match.workspaces.find((w) => w.workspace_id === W)?.matches).toHaveLength(1);
+    // A re-poll or backfill of the same buyer is refused with 409 and stores nothing.
+    const refused = await ingest(
+      W,
+      `${account}:AFTER-NOTICE`,
+      contact('602', { channel_buyer_id: userId }),
+    ).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(VaultError);
+    expect((refused as VaultError).status).toBe(409);
+    expect((refused as VaultError).code).toBe('buyer_deleted');
+    const stored = await raw(ownerPool, W, `SELECT 1 FROM vault.records WHERE subject_id = $1`, [
+      `${account}:AFTER-NOTICE`,
+    ]);
+    expect(stored).toEqual([]);
+    // User ID first: a different buyer who now holds the same username is stored as normal.
+    const other = await ingest(
+      W,
+      `${account}:NEW-HOLDER`,
+      contact('603', { channel_buyer_id: `${userId}-other`, channel_username: 'reused-name' }),
+    );
+    expect(other.pii_ref).toMatch(/^[0-9a-f-]{36}$/);
+    // eBay orders carry the username only: an order placed before the notice is refused, one
+    // placed after it (the name reused by someone else) is stored.
+    const byName = (subject: string, placedAt: string) =>
+      clients.web.ingest({
+        workspace_id: W,
+        kind: 'buyer_contact',
+        channel_account_id: account,
+        subject_type: 'order',
+        subject_id: `${account}:${subject}`,
+        placed_at: placedAt,
+        fields: contact('604', { channel_username: 'reused-name' }),
+      });
+    const early = await byName('NAME-EARLY', '2020-01-01T00:00:00Z').catch((e: unknown) => e);
+    expect((early as VaultError).code).toBe('buyer_deleted');
+    const later = await byName('NAME-LATER', new Date(Date.now() + 60_000).toISOString());
+    expect(later.pii_ref).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('[AT-10] an eBay notice matches by user ID first: a reused username never reaches another buyer (ADR-068)', async () => {
+    const W = randomUUID();
+    const oldUser = `PIIMARK-old-${randomUUID().slice(0, 8)}`;
+    const newUser = `PIIMARK-new-${randomUUID().slice(0, 8)}`;
+    // The old holder of the name, with an ID; the notice is for a new user who took the name.
+    const old = await ingest(
+      W,
+      `${account}:OLD-HOLDER`,
+      contact('611', { channel_buyer_id: oldUser, channel_username: 'shared-name' }),
+    );
+    const mine = await ingest(
+      W,
+      `${account}:NEW-USER`,
+      contact('612', { channel_buyer_id: newUser, channel_username: 'shared-name' }),
+    );
+    const res = await clients.web.ebayUserMatch({ user_id: newUser, username: 'shared-name' });
+    const refs = res.workspaces
+      .filter((w) => w.workspace_id === W)
+      .flatMap((w) => w.matches.map((m) => m.pii_ref));
+    expect(refs).toEqual([mine.pii_ref]);
+    expect(refs).not.toContain(old.pii_ref);
+  });
+
+  it('[DEL-1] an expiry change is journalled off-site with IDs and the date only (ADR-068)', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await ingest(W, `${account}:JOURNAL`, contact('701'));
+    const date = new Date(Date.now() + 25 * 86_400_000).toISOString();
+    const set = () =>
+      clients.worker.setExpiry({
+        workspace_id: W,
+        pii_refs: [pii_ref],
+        delete_after: date,
+        reason: 'dispatch',
+      });
+    expect(await set()).toEqual({ updated: 1 });
+    // The same date again changes nothing and journals nothing.
+    expect(await set()).toEqual({ updated: 0 });
+    const lines = journalLines().filter((l) => l.type === 'expiry' && l.pii_ref === pii_ref);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ workspace_id: W, delete_after: date, reason: 'dispatch' });
+    expect(Object.keys(lines[0] ?? {}).sort()).toEqual(
+      ['at', 'delete_after', 'pii_ref', 'reason', 'type', 'workspace_id'].sort(),
+    );
+    expect(scanTextForMarkers(journalLines().map((l) => JSON.stringify(l)))).toEqual([]);
+  });
+
+  it('[ORD-4] the orphan sweep lists order records by ID only, for the worker token alone (FA-10)', async () => {
+    const W = randomUUID();
+    const refs = new Set<string>();
+    for (const n of ['1', '2', '3']) {
+      refs.add((await ingest(W, `${account}:SWEEP-${n}`, contact(`80${n}`))).pii_ref);
+    }
+    const before = new Date(Date.now() + 1000).toISOString();
+    const first = await clients.worker.subjects({
+      workspace_id: W,
+      subject_type: 'order',
+      created_before: before,
+      limit: 2,
+    });
+    expect(first.records).toHaveLength(2);
+    expect(first.next).not.toBeNull();
+    const second = await clients.worker.subjects({
+      workspace_id: W,
+      subject_type: 'order',
+      created_before: before,
+      after: first.next ?? undefined,
+      limit: 2,
+    });
+    const listed = [...first.records, ...second.records];
+    expect(new Set(listed.map((r) => r.pii_ref))).toEqual(refs);
+    expect(Object.keys(listed[0] ?? {}).sort()).toEqual(['pii_ref', 'subject_id']);
+    const none = await clients.worker.subjects({
+      workspace_id: W,
+      subject_type: 'order',
+      created_before: new Date(Date.now() - 3_600_000).toISOString(),
+    });
+    expect(none.records).toEqual([]);
+    const refused = await clients.web
+      .subjects({ workspace_id: W, subject_type: 'order', created_before: before })
+      .catch((e: unknown) => e);
+    expect((refused as VaultError).status).toBe(403);
   });
 
   it('[DP-4] the vault holds the only db-pii credentials: web and worker cannot reach it', async () => {

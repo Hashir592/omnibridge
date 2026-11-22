@@ -27,6 +27,26 @@ export {
   type Pence,
 } from './money.ts';
 export { parseCsv, toCsv, type CsvRow } from './csv.ts';
+export { allocateLargestRemainder } from './allocate.ts';
+export {
+  computeOrderVat,
+  computeRefundVat,
+  vatInGross,
+  type OrderVat,
+  type RefundVat,
+  type RefundVatGroup,
+  type SaleVatType,
+  type VatGroup,
+  type VatLine,
+  type VatLineInput,
+} from './vat.ts';
+export {
+  canMoveOrder,
+  nextOrderStatus,
+  ORDER_MOVES,
+  ORDER_STATUSES,
+  type OrderStatus,
+} from './order-status.ts';
 export {
   listingTarget,
   remainingAllocation,

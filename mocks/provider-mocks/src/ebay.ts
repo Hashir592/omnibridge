@@ -5,9 +5,13 @@ import {
   form,
   MOCK_LISTINGS,
   MOCK_ORDERS,
+  mockOrderTotal,
   type MockApp,
   type ScenarioStore,
 } from './scenarios.ts';
+
+/** An eBay amount: a decimal string and its currency (always GBP here). */
+const gbp = (value: string) => ({ value, currency: 'GBP' });
 
 /*
  * eBay, from the official REST docs (developer.ebay.com):
@@ -107,16 +111,43 @@ export function ebayRoutes(app: MockApp, scenarios: ScenarioStore): void {
         orders: page.map((o) => ({
           orderId: o.id,
           legacyOrderId: o.id,
-          creationDate: o.updatedAt,
+          creationDate: o.placedAt,
           lastModifiedDate: o.updatedAt,
           orderFulfillmentStatus: 'NOT_STARTED',
           orderPaymentStatus: 'PAID',
-          buyer: { username: 'PIIMARK-ebay-buyer' },
+          cancelStatus: { cancelState: 'NONE_REQUESTED' },
+          buyer: { username: o.buyer },
+          pricingSummary: {
+            priceSubtotal: gbp(o.lineTotal),
+            deliveryCost: gbp(o.shipping),
+            total: gbp(mockOrderTotal(o)),
+          },
+          paymentSummary: { payments: [{ paymentDate: o.placedAt }], refunds: [] },
           fulfillmentStartInstructions: [
-            { shippingStep: { shipTo: { fullName: 'PIIMARK-Buyer Name' } } },
+            {
+              shippingStep: {
+                shipTo: {
+                  fullName: 'PIIMARK-Buyer Name',
+                  email: `${o.buyer}@example.test`,
+                  primaryPhone: { phoneNumber: '07700900123' },
+                  contactAddress: {
+                    addressLine1: 'PIIMARK-1 Mock Street',
+                    city: 'Testville',
+                    postalCode: 'TE1 1ST',
+                    countryCode: 'GB',
+                  },
+                },
+              },
+            },
           ],
           lineItems: [
-            { lineItemId: `${o.id}-1`, sku: o.sku, quantity: o.quantity, title: 'Mock item' },
+            {
+              lineItemId: `${o.id}-1`,
+              sku: o.sku,
+              quantity: o.quantity,
+              title: 'Mock item',
+              lineItemCost: gbp(o.lineTotal),
+            },
           ],
         })),
       };

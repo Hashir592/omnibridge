@@ -51,6 +51,8 @@ describe('db-pii roles and migrations', () => {
       '0005_erasure_canary',
       '0006_buyer_exact',
       '0007_security_log_retention',
+      '0008_order_ingest',
+      '0009_order_subject_index',
     ]);
     expect((await migratePii(owner)).applied).toEqual([]);
   });

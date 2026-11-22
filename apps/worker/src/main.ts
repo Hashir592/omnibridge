@@ -30,6 +30,7 @@ import {
   UserRepository,
   WorkspaceRepository,
   CatalogueRepository,
+  OrderIngest,
   StockEngine,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
@@ -38,7 +39,7 @@ import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { AmazonGovernor } from '@omnibridge/governor-amazon';
 import { EbayGovernor } from '@omnibridge/governor-ebay';
 import { createEbayAdapter, ebayOrderStream } from '@omnibridge/provider-ebay';
-import { createWebsiteAdapter } from '@omnibridge/provider-website';
+import { createWebsiteAdapter, websiteOrderStream } from '@omnibridge/provider-website';
 import { AccessTokenCache, ProviderHttp } from '@omnibridge/provider-kit';
 import {
   emailOnRaise,
@@ -77,7 +78,14 @@ import { createWorkerBoss, startHeartbeat } from './heartbeat.ts';
 import { startMetricsServer } from './metrics-server.ts';
 import { startPlatformJobs } from './platform-jobs.ts';
 import { scanFileHandler } from './scan.ts';
-import { countingSink, syncPollHandler } from './sync.ts';
+import { syncPollHandler } from './sync.ts';
+import {
+  orderIngestPorts,
+  orderIngestStream,
+  ordersOrphanSweepHandler,
+  ordersPiiExpiryHandler,
+  ordersSyncAccountsHandler,
+} from './orders.ts';
 import { createProviderGovernor } from './governor.ts';
 import {
   outboundOperations,
@@ -220,8 +228,31 @@ const syncPorts = {
 // Every automated provider write goes through one send path (T-0702, invariant 20).
 const outboundWrites = new OutboundWriteRepository(handlerDb.db);
 const outbound = new OutboundQueue({ queue, writes: outboundWrites });
-// The stock engine (T-0901): movements, targets and pushes through the outbound path above.
-const stockEngine = new StockEngine(handlerDb.db, { pushes: outbound, notifier });
+// The stock engine (T-0901): movements, targets and pushes through the outbound path above. CAT-6
+// back-fill reads the order lines stored while a listing was unmapped (M10).
+const stockEngine: StockEngine = new StockEngine(handlerDb.db, {
+  pushes: outbound,
+  notifier,
+  demand: { openLines: (ctx, listingId) => orderIngest.openLines(ctx, listingId) },
+});
+// M10 order ingest: vault first (the worker's token), then db-main in the sync transaction.
+const workerVault = new VaultClient({
+  baseUrl: requireEnv('PII_VAULT_URL'),
+  token: readSecretFile('VAULT_TOKEN'),
+});
+const catalogueRepo = new CatalogueRepository(handlerDb.db);
+const orderIngest: OrderIngest = new OrderIngest(handlerDb.db, {
+  catalogue: catalogueRepo,
+  stock: stockEngine,
+  ports: orderIngestPorts(queue),
+});
+const orderStream = orderIngestStream({
+  tenancy: syncPorts.tenancy,
+  ingest: orderIngest,
+  vault: workerVault,
+  logger: log,
+});
+const websiteAdapter = () => Promise.resolve(createWebsiteAdapter({ http: providerHttp }));
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -262,10 +293,7 @@ await registerHandlers(queue, {
   'pii.expiry': piiExpiryHandler(deletionDeps),
   // SEC-12: the vault's read counts and canary reads come through the worker's own token.
   'security.scan': securityScanHandler({
-    vault: new VaultClient({
-      baseUrl: requireEnv('PII_VAULT_URL'),
-      token: readSecretFile('VAULT_TOKEN'),
-    }),
+    vault: workerVault,
     signals: new SecuritySignals(handlerDb.db),
     notifications,
     notifier,
@@ -277,7 +305,8 @@ await registerHandlers(queue, {
   'sync.poll': syncPollHandler({
     ports: syncPorts,
     streams: {
-      'ebay.orders': async () => ebayOrderStream(await ebayAdapter(), countingSink(log)),
+      'ebay.orders': async () => ebayOrderStream(await ebayAdapter(), orderStream),
+      'website.orders': async () => websiteOrderStream(await websiteAdapter(), orderStream),
     },
     logger: log,
   }),
@@ -304,15 +333,19 @@ await registerHandlers(queue, {
     // M09: back-fill the movements and push the target; reset a remapped listing (C7.3).
     listeners: [
       { name: 'stock', onMapped: (ctx, change) => stockEngine.onListingMapped(ctx, change) },
+      // M10 (FA-11): provisional order lines take their write-once snapshots, once.
+      {
+        name: 'orders',
+        onMapped: async (ctx, change) => {
+          if (change.masterSkuId !== null) await orderIngest.fillSnapshots(ctx, change.listingId);
+        },
+      },
     ],
   }),
   'listings.discover': listingsDiscoverHandler({
     ports: syncPorts,
-    adapters: {
-      ebay: ebayAdapter,
-      website: () => Promise.resolve(createWebsiteAdapter({ http: providerHttp })),
-    },
-    catalogue: new CatalogueRepository(handlerDb.db),
+    adapters: { ebay: ebayAdapter, website: websiteAdapter },
+    catalogue: catalogueRepo,
     queue,
     // C7.3 and INV-7: ended listings lose their manual settings; the nightly scan reconciles.
     ended: { onEnded: (ctx, ids) => stockEngine.onListingsEnded(ctx, ids) },
@@ -327,6 +360,19 @@ await registerHandlers(queue, {
   }),
   'stock.retention': async (job) => ({ deleted: await stockEngine.purgeExpired(job.ctx) }),
   'listings.discover_accounts': listingsDiscoverAccountsHandler({ connections, queue }),
+  // M10: order polls every 5 minutes, expiry after dispatch or delivery, the nightly orphan sweep.
+  'orders.sync_accounts': ordersSyncAccountsHandler({ connections, queue }),
+  'orders.pii_expiry': ordersPiiExpiryHandler({
+    tenancy: syncPorts.tenancy,
+    ingest: orderIngest,
+    vault: workerVault,
+  }),
+  'orders.orphan_sweep': ordersOrphanSweepHandler({
+    tenancy: syncPorts.tenancy,
+    ingest: orderIngest,
+    vault: workerVault,
+    logger: log,
+  }),
   'notify.email': notifyEmailHandler({
     tenancy: new Tenancy(handlerDb.db),
     notifications,

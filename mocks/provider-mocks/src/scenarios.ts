@@ -111,10 +111,49 @@ export function form(body: unknown): URLSearchParams {
  * fields that carry the PIIMARK- marker, so a test can prove they never get past a parser.
  */
 export const MOCK_ORDERS = [
-  { id: 'MOCK-1001', updatedAt: '2026-11-20T10:00:00.000Z', sku: 'MOCK-SKU-1', quantity: 1 },
-  { id: 'MOCK-1002', updatedAt: '2026-11-20T11:00:00.000Z', sku: 'MOCK-SKU-2', quantity: 2 },
-  { id: 'MOCK-1003', updatedAt: '2026-11-20T12:00:00.000Z', sku: 'MOCK-SKU-1', quantity: 3 },
+  {
+    id: 'MOCK-1001',
+    placedAt: '2026-11-20T09:30:00.000Z',
+    updatedAt: '2026-11-20T10:00:00.000Z',
+    sku: 'MOCK-SKU-1',
+    quantity: 1,
+    // M10: VAT-inclusive money as the channel sends it (decimal strings, GBP).
+    lineTotal: '12.00',
+    shipping: '3.00',
+    buyer: 'PIIMARK-buyer-1001',
+  },
+  {
+    id: 'MOCK-1002',
+    placedAt: '2026-11-20T10:45:00.000Z',
+    updatedAt: '2026-11-20T11:00:00.000Z',
+    sku: 'MOCK-SKU-2',
+    quantity: 2,
+    lineTotal: '19.98',
+    shipping: '0.00',
+    buyer: 'PIIMARK-buyer-1002',
+  },
+  {
+    id: 'MOCK-1003',
+    placedAt: '2026-11-20T11:15:00.000Z',
+    updatedAt: '2026-11-20T12:00:00.000Z',
+    sku: 'MOCK-SKU-1',
+    quantity: 3,
+    lineTotal: '36.00',
+    shipping: '3.99',
+    buyer: 'PIIMARK-buyer-1003',
+  },
 ] as const;
+
+/** The VAT-inclusive total of a mock order (line plus shipping), as a decimal string. */
+export function mockOrderTotal(o: (typeof MOCK_ORDERS)[number]): string {
+  // Integer pence by text, never a float (FIN-1), even in a mock.
+  const pence = (v: string) => {
+    const [whole = '0', fraction = ''] = v.split('.');
+    return Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+  };
+  const total = pence(o.lineTotal) + pence(o.shipping);
+  return `${String(Math.floor(total / 100))}.${String(total % 100).padStart(2, '0')}`;
+}
 
 /**
  * The fixed synthetic listings every channel mock serves (CAT-5): two that match the seeded

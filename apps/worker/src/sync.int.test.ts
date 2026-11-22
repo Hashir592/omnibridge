@@ -21,7 +21,7 @@ import {
   AccessTokenCache,
   defineParser,
   ProviderHttp,
-  type OrderSummary,
+  type ChannelOrder,
   type SyncPorts,
 } from '@omnibridge/provider-kit';
 import { buildMockServer, ScenarioStore } from '@omnibridge/provider-mocks';
@@ -66,7 +66,7 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
   const A = randomUUID();
   let account = '';
   const refresh = `${TOKEN_MARKER}${randomUUID()}`;
-  const received: OrderSummary[] = [];
+  const received: ChannelOrder[] = [];
   const governed: string[] = [];
 
   const job = (
@@ -95,9 +95,11 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
   const handler = (
     stream = () =>
       Promise.resolve(
-        ebayOrderStream(ebay(), (_ctx, _id, items) => {
-          received.push(...items);
-          return Promise.resolve();
+        ebayOrderStream(ebay(), {
+          sink: (_ctx, _id, items) => {
+            received.push(...items);
+            return Promise.resolve();
+          },
         }),
       ),
   ) => syncPollHandler({ ports, streams: { 'ebay.orders': stream }, logger });
@@ -188,7 +190,12 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
       { api: 'identity.user_token', calls: '1' },
       { api: 'sell.fulfillment', calls: '3' },
     ]);
-    expect(JSON.stringify(received)).not.toContain('PIIMARK');
+    // M10: buyer fields leave the parser only in the `buyer` block, which the order ingest gives
+    // to pii-vault (and strips) before its transaction; nothing else in the order carries any.
+    expect(JSON.stringify(received.map((o) => ({ ...o, buyer: null })))).not.toContain('PIIMARK');
+    expect(received.every((o) => o.buyer?.channel_username?.startsWith('PIIMARK') === true)).toBe(
+      true,
+    );
     expect(lines.join('\n')).not.toMatch(/PIIMARK|TOKENMARK/);
   });
 
@@ -196,7 +203,7 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
     const broken = defineParser('ebay', 'orders', 9, z.object({ orderTotal: z.string() }));
     const stream = () =>
       Promise.resolve({
-        ...ebayOrderStream(ebay(), () => Promise.resolve()),
+        ...ebayOrderStream(ebay(), { sink: () => Promise.resolve() }),
         fetchPage: async () => {
           broken.parse({ orders: [] });
           return Promise.resolve({ items: [], next: undefined });
@@ -254,7 +261,7 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
     const live = new ProviderHttp({ mode: 'mock', mocksUrl: 'http://provider-mocks:8080' });
     const stream = () =>
       Promise.resolve({
-        ...ebayOrderStream(ebay(), () => Promise.resolve()),
+        ...ebayOrderStream(ebay(), { sink: () => Promise.resolve() }),
         fetchPage: () =>
           live
             .request('ebay', { url: 'https://api.ebay.com/sell/fulfillment/v1/order' })

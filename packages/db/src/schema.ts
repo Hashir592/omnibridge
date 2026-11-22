@@ -160,6 +160,8 @@ export interface ChannelAccountsTable {
   auth_failures: ColumnType<string, number | undefined, number>;
   auth_failure_times: ColumnType<Date[], Date[] | undefined, Date[]>;
   needs_reauth_at: Date | null;
+  /** FA-16 (db-main 0048): stock writes held until the first clean reconciliation. */
+  stock_push_held_since: ColumnType<Date | null, Date | null | undefined, Date | null>;
   last_error_code: string | null;
   last_error_at: Date | null;
   /** SAFE-2: set while the account's automated writes are paused. */

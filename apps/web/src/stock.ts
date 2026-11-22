@@ -149,9 +149,9 @@ function movement(m: StockMovement) {
     reason: m.reason,
     note: m.note,
     supplier: m.supplier,
-    // An order's reference arrives with M10's orders; a hidden company's never shows (6.1).
+    // INV-5: the order's reference (M10); a hidden company's never shows (6.1).
     source: ORDER_SOURCES.has(m.sourceKind)
-      ? { type: 'order' as const, ref: null }
+      ? { type: 'order' as const, ref: m.orderRef }
       : { type: 'user' as const, user_id: m.actorUserId, name: m.actorName },
     pushes: m.pushes,
   };
@@ -159,7 +159,7 @@ function movement(m: StockMovement) {
 
 function sourceLabel(m: StockMovement): string {
   if (!ORDER_SOURCES.has(m.sourceKind)) return m.actorName ?? 'a removed user';
-  return m.companyVisible ? 'order' : 'another company';
+  return m.companyVisible ? `order ${m.orderRef ?? ''}`.trim() : 'another company';
 }
 
 export function stockHandlers(options?: StockOptions): Handlers<typeof stockRoutes> {

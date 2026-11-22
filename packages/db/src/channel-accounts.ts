@@ -11,6 +11,11 @@ export interface NewChannelAccount {
   companyId: string;
   provider: ChannelProvider;
   displayName: string;
+  /**
+   * FA-16: hold stock writes until the first reconciliation shows no drift. The Connect route
+   * (T-1101) sets it for a newly connected account; seed and existing accounts push at once.
+   */
+  holdStockPush?: boolean;
 }
 
 export interface ChannelAccount {
@@ -46,6 +51,8 @@ export class ChannelAccountRepository {
           company_id: input.companyId,
           provider: input.provider,
           display_name: input.displayName,
+          // FA-16: a newly connected account holds its stock writes until a clean reconciliation.
+          ...(input.holdStockPush === true ? { stock_push_held_since: new Date() } : {}),
         })
         .execute(),
     );

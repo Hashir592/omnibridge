@@ -189,6 +189,8 @@ describe('audit retention job (AUD-3)', () => {
         'platform.health-digest': () => Promise.resolve(),
         'outbound.recover-sweep': () => Promise.resolve(),
         'listings.discover-sweep': () => Promise.resolve(),
+        'orders.sync-sweep': () => Promise.resolve(),
+        'orders.orphan-sweep': () => Promise.resolve(),
       },
       logger,
     );
@@ -198,6 +200,9 @@ describe('audit retention job (AUD-3)', () => {
         expect.objectContaining({ name: 'outbound.recover-sweep', cron: '*/10 * * * *' }),
         // T-0801: daily listing discovery (CAT-5), in the heavy window.
         expect.objectContaining({ name: 'listings.discover-sweep', cron: '15 3 * * *' }),
+        // T-1001: order polls every 5 minutes (CAP-6) and the nightly orphan sweep (FA-10).
+        expect.objectContaining({ name: 'orders.sync-sweep', cron: '*/5 * * * *' }),
+        expect.objectContaining({ name: 'orders.orphan-sweep', cron: '40 3 * * *' }),
         expect.objectContaining({
           name: 'audit.retention-sweep',
           cron: '30 2 * * *',

@@ -23,6 +23,12 @@ import { buildMockServer } from './server.ts';
  * adapters' own versioned parsers, buyer-like fields never come out, and every scenario switch
  * arrives at the adapter as its typed error.
  */
+/** An order page with each order's buyer block (the only place PII may be) cleared. */
+const withoutBuyer = (page: { items: readonly { buyer: unknown }[] }) => ({
+  ...page,
+  items: page.items.map((o) => ({ ...o, buyer: null })),
+});
+
 describe('adapters against provider-mocks (INT-1)', () => {
   const scenarios = new ScenarioStore();
   const mock = buildMockServer(
@@ -67,8 +73,12 @@ describe('adapters against provider-mocks (INT-1)', () => {
       all.next,
     );
     expect(rest.items.map((o) => o.externalId)).toEqual(['MOCK-1003']);
-    // The parser dropped the buyer fields.
-    expect(JSON.stringify([first, all, rest])).not.toContain('PIIMARK');
+    // M10: buyer fields leave the parser only in each order's `buyer` block (for pii-vault).
+    const pages = [first, all, rest];
+    expect(JSON.stringify(pages.map(withoutBuyer))).not.toContain('PIIMARK');
+    expect(pages.flatMap((p) => p.items).every((o) => o.buyer?.name?.startsWith('PIIMARK'))).toBe(
+      true,
+    );
     expect(await adapter.pushStock(token, [{ sku: 'MOCK-SKU-1', quantity: 4 }])).toEqual({
       accepted: ['MOCK-SKU-1'],
       refused: [],
@@ -219,7 +229,8 @@ describe('adapters against provider-mocks (INT-1)', () => {
     const token = await site.authenticate(key);
     const orders = await site.ordersUpdatedSince(token, since);
     expect(orders.items.map((o) => o.externalId)).toEqual(['MOCK-1002', 'MOCK-1003']);
-    expect(JSON.stringify(orders)).not.toContain('PIIMARK');
+    expect(JSON.stringify(withoutBuyer(orders))).not.toContain('PIIMARK');
+    expect(orders.items.every((o) => o.buyer?.name?.startsWith('PIIMARK'))).toBe(true);
     expect(await site.pushStock(token, [{ sku: 'MOCK-SKU-2', quantity: 1 }])).toEqual({
       accepted: ['MOCK-SKU-2'],
       refused: [],

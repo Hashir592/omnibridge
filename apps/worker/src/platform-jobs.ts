@@ -12,6 +12,7 @@ import type { PgBoss } from 'pg-boss';
 import { sweepAuditRetention } from './audit-retention.ts';
 import { sweepPiiExpiry } from './deletion.ts';
 import { sweepHousekeeping } from './housekeeping.ts';
+import { sweepOrderOrphans, sweepOrdersSync } from './orders.ts';
 import { sweepSecurityScan } from './security.ts';
 import { sweepAccessReviews } from './users-jobs.ts';
 
@@ -116,6 +117,14 @@ export async function startPlatformJobs({
       'listings.discover-sweep': async () => {
         const workspaces = await discoverListings(directory);
         logger.info({ event: 'listings.discover_sweep', count: workspaces }, 'discovery sent');
+      },
+      // M10: order polls every 5 minutes (CAP-6) and the nightly orphan sweep (FA-10).
+      'orders.sync-sweep': async () => {
+        await sweepOrdersSync({ directory, queue });
+      },
+      'orders.orphan-sweep': async () => {
+        const workspaces = await sweepOrderOrphans({ directory, queue });
+        logger.info({ event: 'orders.orphan_sweep', count: workspaces }, 'orphan sweeps sent');
       },
       'notify.platform-email-sweep': async () => {
         const sent = await sendPlatformEmails();

@@ -9,6 +9,7 @@ import {
   ReadFullRequest,
   SearchRequest,
   SignalsRequest,
+  SubjectsRequest,
   type Capability,
 } from '@omnibridge/vault-client/schemas';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
@@ -20,6 +21,7 @@ import {
   NotFound,
   PurposeRefused,
   WorkspaceClosed,
+  BuyerDeleted,
   type Caller,
   type Vault,
 } from './vault.ts';
@@ -100,6 +102,7 @@ export function buildVaultApp({
       return reply.code(403).send({ error: 'purpose_not_allowed' });
     if (err instanceof BadExpiry) return reply.code(400).send({ error: 'invalid_expiry' });
     if (err instanceof WorkspaceClosed) return reply.code(409).send({ error: 'workspace_closed' });
+    if (err instanceof BuyerDeleted) return reply.code(409).send({ error: 'buyer_deleted' });
     const status = (err as { statusCode?: number }).statusCode;
     if (status !== undefined && status >= 400 && status < 500) {
       return reply.code(status).send({ error: 'bad_request' });
@@ -121,6 +124,13 @@ export function buildVaultApp({
   app.post('/v1/expiry', async (request) => {
     authorise(request, 'ingest');
     return vault.setExpiry(parse(ExpiryRequest, request.body));
+  });
+
+  // FA-10: the nightly orphan sweep lists order records, IDs only (the worker's token).
+  app.post('/v1/subjects', async (request) => {
+    const caller = authorise(request, 'ingest');
+    if (caller !== 'worker') throw new HttpError(403, 'capability_missing');
+    return vault.subjects(parse(SubjectsRequest, request.body));
   });
 
   app.post('/v1/read', async (request) => {

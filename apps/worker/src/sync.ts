@@ -8,13 +8,13 @@ import {
   type SyncResult,
   type SyncStream,
 } from '@omnibridge/provider-kit';
-import type { OrderSummary } from '@omnibridge/provider-kit';
+import type { ChannelOrder } from '@omnibridge/provider-kit';
 import { PermanentJobError, type PhasedHandler, type SyncStreamName } from '@omnibridge/queue';
 
 type Payload = { stream: SyncStreamName };
 
 /** Builds a stream when a job needs it: app secrets (client ids) are read then, not at boot. */
-export type StreamFactory = () => Promise<SyncStream<OrderSummary>>;
+export type StreamFactory = () => Promise<SyncStream<ChannelOrder>>;
 
 /**
  * sync.poll (T-0701: INT-1, INT-2, INT-5, INT-8). The whole poll runs in `prepare`, in short
@@ -24,14 +24,16 @@ export type StreamFactory = () => Promise<SyncStream<OrderSummary>>;
  */
 export function syncPollHandler(deps: {
   ports: SyncPorts;
-  streams: Readonly<Record<SyncStreamName, StreamFactory>>;
+  streams: Readonly<Partial<Record<SyncStreamName, StreamFactory>>>;
   logger: Logger;
 }): PhasedHandler<Payload, SyncResult> {
   return {
     prepare: async (job) => {
       const channelAccountId = job.envelope.channel_account_id;
       if (channelAccountId === undefined) throw new PermanentJobError('sync.no_account');
-      const stream = await deps.streams[job.payload.stream]();
+      const factory = deps.streams[job.payload.stream];
+      if (factory === undefined) throw new PermanentJobError('sync.no_stream');
+      const stream = await factory();
       try {
         return await runIncrementalSync(deps.ports, stream, {
           workspaceId: job.envelope.workspace_id,
@@ -62,24 +64,5 @@ export function syncPollHandler(deps: {
       }
     },
     commit: (_job, result) => Promise.resolve(result),
-  };
-}
-
-/**
- * The sink of `ebay.orders` until M10's order ingest replaces it: it only counts, so the path is
- * real end to end while nothing is stored.
- */
-export function countingSink(logger: Logger): SyncStream<OrderSummary>['sink'] {
-  return (ctx, channelAccountId, items) => {
-    logger.info(
-      {
-        event: 'sync.received',
-        workspaceId: ctx.workspaceId,
-        channelAccountId,
-        count: items.length,
-      },
-      'sync changes received',
-    );
-    return Promise.resolve();
   };
 }

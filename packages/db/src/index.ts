@@ -200,3 +200,13 @@ export {
   type StockRowView,
   type UnmappedDemand,
 } from './stock.ts';
+export {
+  incomingStatus,
+  OrderIngest,
+  piiSubject,
+  vatPeriodDate,
+  type IncomingOrder,
+  type IncomingPii,
+  type IncomingState,
+  type OrderIngestPorts,
+} from './orders.ts';

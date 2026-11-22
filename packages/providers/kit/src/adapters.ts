@@ -37,6 +37,92 @@ export interface OrderSummary {
   }[];
 }
 
+/**
+ * The buyer's details as a channel sends them (ORD-4, DP-5). They go to pii-vault and nowhere
+ * else: the order ingest hands them to the vault before anything is written to db-main, and
+ * strips them from the order it stores (invariants 7 and 7a). Field names match the vault's.
+ */
+export const BUYER_FIELDS = [
+  'name',
+  'email',
+  'phone',
+  'address_line1',
+  'address_line2',
+  'address_line3',
+  'city',
+  'county',
+  'postcode',
+  'country',
+  'delivery_instructions',
+  'channel_buyer_id',
+  'channel_username',
+] as const;
+export type BuyerField = (typeof BUYER_FIELDS)[number];
+export type BuyerDetails = Readonly<Partial<Record<BuyerField, string>>>;
+
+/**
+ * The channel's own lifecycle, as the adapter reads it (FA-10). The order ingest maps it onto the
+ * ORD-3 statuses through the state table; refunds are worked out from `refunds`, not from here.
+ */
+export type ChannelOrderState =
+  'pending_payment' | 'awaiting_dispatch' | 'dispatched' | 'delivered' | 'cancelled';
+
+export interface ChannelOrderLine {
+  readonly lineId: string;
+  readonly sku: string | null;
+  readonly quantity: number;
+  readonly title: string | null;
+  /** VAT-inclusive price of the whole line (quantity × unit), in pence (VAT-2). */
+  readonly linePricePence: number;
+}
+
+export interface ChannelRefund {
+  readonly refundId: string;
+  readonly refundedAt: Date;
+  readonly amountPence: number;
+  /** Present when the channel says which lines the refund is for (VAT-5). */
+  readonly lines:
+    | readonly {
+        readonly lineId: string;
+        readonly quantity: number;
+        readonly amountPence: number;
+      }[]
+    | null;
+}
+
+/** A whole order as an "updated since" read returns it (M10): money, dates, lines and refunds. */
+export interface ChannelOrder extends OrderSummary {
+  readonly state: ChannelOrderState;
+  readonly placedAt: Date;
+  readonly paidAt: Date | null;
+  readonly shipBy: Date | null;
+  readonly dispatchedAt: Date | null;
+  readonly deliveredAt: Date | null;
+  readonly cancelledAt: Date | null;
+  /** The order-level discount. Money is GBP only (TEN-6): the parser refuses anything else. */
+  readonly discountPence: number;
+  /** Shipping charged to the buyer, VAT-inclusive (VAT-3 step 3). */
+  readonly shippingPence: number;
+  readonly shipToCountry: string | null;
+  readonly fba: boolean;
+  readonly lines: readonly ChannelOrderLine[];
+  readonly refunds: readonly ChannelRefund[];
+  /** PII: for the vault only (see BuyerDetails). Null when the channel sent none. */
+  readonly buyer: BuyerDetails | null;
+  /**
+   * Set by the order ingest's vault-first step (M10), which also clears `buyer`: the vault's
+   * pii_ref, or why there is none. Absent straight from a parser.
+   */
+  readonly pii?:
+    | { readonly kind: 'stored'; readonly piiRef: string }
+    | { readonly kind: 'none' | 'refused' | 'unchanged' };
+}
+
+/** A channel whose order read returns whole orders (eBay and the website in M10; Amazon in M18). */
+export interface OrderSource {
+  ordersUpdatedSince(token: AccessToken, since: Date, page?: string): Promise<Page<ChannelOrder>>;
+}
+
 /** A channel listing as discovery reads it (CAT-5): codes, flags and the quantity only. */
 export interface ListingInfo {
   readonly externalSku: string;

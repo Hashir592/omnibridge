@@ -748,6 +748,65 @@ describe('stock engine (T-0901)', () => {
     });
   });
 
+  it('[INV-7][INV-4] a new account holds its stock writes until a reconciliation finds no drift (FA-16 cutover)', async () => {
+    const w = await world(10);
+    await sendAll(w);
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      sql`UPDATE app.channel_accounts SET stock_push_held_since = ${clock}
+           WHERE id = ${w.accounts.ebay1}::uuid`.execute(trx),
+    );
+    await sell(w, w.listings.website, 1);
+    const pending = async () =>
+      (await queued(w)).filter((r) => r.state === 'pending').map((r) => r.listing_id);
+    // The sale pushes to every listing except the held account's.
+    expect(await pending()).toContain(w.listings.ebay2);
+    expect(await pending()).not.toContain(w.listings.ebay1);
+    await sendAll(w);
+    const scan = async (qty: number, at: Date) => {
+      await catalogue.upsertDiscovered(
+        w.ctx,
+        w.accounts.ebay1,
+        'ebay',
+        [
+          {
+            externalSku: 'BB-BAM-M100',
+            externalId: 'x',
+            title: null,
+            fulfilment: null,
+            inventoryApi: true,
+            quantity: qty,
+          },
+        ],
+        at,
+      );
+      return engine().reconcile(run(w), w.accounts.ebay1, at);
+    };
+    const held = async () =>
+      (
+        await withTenantTransaction(db, w.ctx, (trx) =>
+          sql<{ held: boolean }>`SELECT stock_push_held_since IS NOT NULL AS held
+                                   FROM app.channel_accounts WHERE id = ${w.accounts.ebay1}::uuid`.execute(
+            trx,
+          ),
+        )
+      ).rows[0]?.held;
+    // Drift: still held, and no write goes out to correct it.
+    expect(await scan(7, new Date(clock.getTime() + 3_600_000))).toEqual({
+      checked: 1,
+      drifted: 1,
+    });
+    expect(await held()).toBe(true);
+    expect(await pending()).not.toContain(w.listings.ebay1);
+    // The seller fixed the count: no drift, so writes switch on and the next sale reaches eBay.
+    expect(await scan(9, new Date(clock.getTime() + 7_200_000))).toEqual({
+      checked: 1,
+      drifted: 0,
+    });
+    expect(await held()).toBe(false);
+    await sell(w, w.listings.website, 1);
+    expect(await pending()).toContain(w.listings.ebay1);
+  });
+
   it('[INV-5] the change log shows the listings pushed after a movement, by result', async () => {
     const w = await world(10);
     // The first writes were sent, so only the sale's pushes are counted.
