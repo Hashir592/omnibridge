@@ -288,6 +288,15 @@ export function ordersHandlers(options?: OrdersOptions): Handlers<typeof ordersR
         },
         actorUserId: session.userId,
       });
+      // Never a partial list shown as whole: a search matching too many buyers must be narrowed.
+      if (found.truncated) {
+        throw new ApiError({
+          status: 400,
+          code: 'validation_failed',
+          detail: 'Too many buyers match. Add more of the name or the full postcode.',
+          errors: [{ location: 'body', path: 'buyer_name', message: 'Narrow the search' }],
+        });
+      }
       const piiRefs = found.matches.filter((m) => m.subject_type === 'order').map((m) => m.pii_ref);
       return page(tenant, { ...f, piiRefs }, query);
     },

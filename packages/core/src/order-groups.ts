@@ -44,26 +44,51 @@ export function sameBuyerGroups(
   const excluded = options.excluded ?? (() => false);
   const cap = options.cap ?? GROUP_CAP;
   const parent = new Map(candidates.map((c) => [c.id, c.id]));
+  const members = new Map(candidates.map((c) => [c.id, [c.id]]));
   const find = (id: string): string => {
     let root = id;
     while (parent.get(root) !== root) root = parent.get(root) ?? root;
     parent.set(id, root);
     return root;
   };
+  /**
+   * Merges two components unless that would put a dismissed or removed pair in one group: a pair
+   * marked "never again" is never grouped through a third order either (C3.3, ADR-057).
+   */
+  const union = (a: string, b: string) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra === rb) return;
+    const left = members.get(ra) ?? [];
+    const right = members.get(rb) ?? [];
+    if (left.some((x) => right.some((y) => excluded(x, y)))) return;
+    parent.set(ra, rb);
+    members.set(rb, [...right, ...left]);
+    members.delete(ra);
+  };
+  // Closest pairs first, so a "never again" pair keeps each order with its nearest neighbour.
+  const pairs: [GroupCandidate, GroupCandidate][] = [];
   for (let i = 0; i < candidates.length; i++) {
     for (let j = i + 1; j < candidates.length; j++) {
       const a = candidates[i];
       const b = candidates[j];
-      if (a === undefined || b === undefined) continue;
-      if (ordersLink(a, b, options.graceHours, excluded)) parent.set(find(a.id), find(b.id));
+      if (a !== undefined && b !== undefined && ordersLink(a, b, options.graceHours, excluded)) {
+        pairs.push([a, b]);
+      }
     }
   }
+  pairs.sort(
+    ([a, b], [c, d]) =>
+      Math.abs(a.placedAt.getTime() - b.placedAt.getTime()) -
+      Math.abs(c.placedAt.getTime() - d.placedAt.getTime()),
+  );
+  for (const [a, b] of pairs) union(a.id, b.id);
   const byRoot = new Map<string, GroupCandidate[]>();
   for (const c of candidates) byRoot.set(find(c.id), [...(byRoot.get(find(c.id)) ?? []), c]);
   const groups: string[][] = [];
-  for (const members of byRoot.values()) {
-    if (members.length < 2) continue;
-    const sorted = [...members].sort(
+  for (const component of byRoot.values()) {
+    if (component.length < 2) continue;
+    const sorted = [...component].sort(
       (x, y) => x.placedAt.getTime() - y.placedAt.getTime() || (x.id < y.id ? -1 : 1),
     );
     for (let k = 0; k < sorted.length; k += cap) {

@@ -267,7 +267,10 @@ function filtered(ctx: TenantContext, f: OrderFilter, now: Date) {
            o.oversold, o.unmapped, o.address_shortened, o.fba, o.pii_ref,
            (o.pii_ref IS NOT NULL AND o.pii_deleted_at IS NULL AND t.pii_ref IS NULL) AS customer_present,
            coalesce(o.pii_deleted_at, t.deleted_at) AS customer_deleted_at,
-           CASE WHEN g.state = 'open' THEN o.order_group_id END AS open_group
+           CASE WHEN g.state = 'open' THEN o.order_group_id END AS open_group,
+           -- C3.3 "+N related order not shown": the group's members this filter keeps.
+           count(*) OVER (PARTITION BY CASE WHEN g.state = 'open' THEN o.order_group_id END)
+             AS group_visible
       FROM app.orders o
       JOIN app.channel_accounts a ON a.workspace_id = o.workspace_id AND a.id = o.channel_account_id
       LEFT JOIN app.pii_tombstones t ON t.workspace_id = o.workspace_id AND t.pii_ref = o.pii_ref
@@ -275,13 +278,15 @@ function filtered(ctx: TenantContext, f: OrderFilter, now: Date) {
      WHERE ${orderWhere(ctx, f, now)}`;
 }
 
-/** Each row's SKUs and item count, and its group's size, place and visible members. */
+/**
+ * The SKUs, item count and group size and place of the rows in `src` only: the caller puts the
+ * page (or the export's rows) there first, so this never runs over a whole workspace (CAP-7).
+ */
 function enriched(ctx: TenantContext) {
   return sql`
     SELECT f.*, li.skus, li.items,
-           gs.size AS group_size, gs.position AS group_position,
-           count(*) OVER (PARTITION BY f.open_group) AS group_visible
-      FROM f
+           gs.size AS group_size, gs.position AS group_position
+      FROM src f
       LEFT JOIN LATERAL (
         SELECT array_agg(coalesce(s.sku, l.external_sku, '') ORDER BY l.line_no) AS skus,
                sum(l.quantity) AS items
@@ -335,13 +340,14 @@ export class OrderReads {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const { rows } = await sql<ListSqlRow & { unit_at: Date }>`
         WITH f AS (${filtered(ctx, f, now)}),
-             e AS (${enriched(ctx)}),
              u AS (SELECT coalesce(open_group, id) AS unit, min(placed_at) AS unit_at
                      FROM f GROUP BY 1),
              p AS (SELECT unit, unit_at FROM u ORDER BY unit_at DESC, unit LIMIT ${page.limit}
-                    OFFSET ${page.offset})
-        SELECT e.*, p.unit_at FROM e JOIN p ON p.unit = coalesce(e.open_group, e.id)
-         ORDER BY p.unit_at DESC, p.unit, e.placed_at, e.id`.execute(trx);
+                    OFFSET ${page.offset}),
+             src AS (SELECT f.*, p.unit_at FROM f JOIN p ON p.unit = coalesce(f.open_group, f.id)),
+             e AS (${enriched(ctx)})
+        SELECT e.* FROM e
+         ORDER BY e.unit_at DESC, coalesce(e.open_group, e.id), e.placed_at, e.id`.execute(trx);
       const { rows: counted } = await sql<{ n: string }>`
         WITH f AS (${filtered(ctx, f, now)})
         SELECT count(*) AS n FROM (SELECT DISTINCT coalesce(open_group, id) FROM f LIMIT ${countUpTo}) x`.execute(
@@ -360,8 +366,10 @@ export class OrderReads {
     const now = this.#now();
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const { rows } = await sql<ListSqlRow>`
-        WITH f AS (${filtered(ctx, f, now)}), e AS (${enriched(ctx)})
-        SELECT * FROM e ORDER BY placed_at DESC, id LIMIT ${cap + 1}`.execute(trx);
+        WITH f AS (${filtered(ctx, f, now)}),
+             src AS (SELECT * FROM f ORDER BY placed_at DESC, id LIMIT ${cap + 1}),
+             e AS (${enriched(ctx)})
+        SELECT * FROM e ORDER BY placed_at DESC, id`.execute(trx);
       return rows.length > cap ? undefined : rows.map(listRow);
     });
   }
@@ -371,7 +379,8 @@ export class OrderReads {
     const now = this.#now();
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const { rows } = await sql<ListSqlRow>`
-        WITH f AS (${filtered(ctx, {}, now)} AND o.id = ${orderId}::uuid), e AS (${enriched(ctx)})
+        WITH f AS (${filtered(ctx, {}, now)} AND o.id = ${orderId}::uuid),
+             src AS (SELECT * FROM f), e AS (${enriched(ctx)})
         SELECT * FROM e`.execute(trx);
       const head = rows[0];
       if (head === undefined) return undefined;
@@ -463,7 +472,10 @@ export class OrderReads {
         SELECT -sum(vat_pence) AS vat FROM app.vat_ledger
          WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${orderId}::uuid
            AND refund_id IS NOT NULL`.execute(trx);
-      const row = listRow(head);
+      const listed = listRow(head);
+      // "Hidden by a filter" is a list idea; the detail page shows the whole group.
+      const row =
+        listed.group === null ? listed : { ...listed, group: { ...listed.group, hidden: 0 } };
       return {
         ...row,
         paidAt: o.paid_at,
@@ -810,15 +822,18 @@ export class OrderReads {
       const byId = new Map(cands.map((c) => [c.id, c]));
       const company = cands[0]?.company_id;
       const grouped = new Set<string>();
+      // A group id goes to one new group only: when an old group splits, the second part is new.
+      const usedIds = new Set<string>();
       for (const members of groups) {
         const first = byId.get(members[0] ?? '');
         let groupId = first?.order_group_id ?? null;
+        if (groupId !== null && usedIds.has(groupId)) groupId = null;
         if (groupId !== null) {
           const { rows: open } = await sql`SELECT 1 FROM app.order_groups
              WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${groupId}::uuid AND state = 'open'`.execute(
             trx,
           );
-          if (open.length === 0 || members.some((m) => grouped.has(m))) groupId = null;
+          if (open.length === 0) groupId = null;
         }
         if (groupId === null) {
           groupId = randomUUID();
@@ -826,6 +841,7 @@ export class OrderReads {
                     VALUES (${ctx.workspaceId}::uuid, ${groupId}::uuid, ${first?.company_id ?? company}::uuid,
                             ${channelAccountId}::uuid, 'open', ${now})`.execute(trx);
         }
+        usedIds.add(groupId);
         for (const m of members) grouped.add(m);
         await sql`UPDATE app.orders SET order_group_id = ${groupId}::uuid
                    WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ANY (${sql.val(members)}::uuid[])

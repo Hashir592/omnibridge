@@ -56,6 +56,19 @@ describe('same-buyer groups (ORD-9, C3.1)', () => {
     expect(groups(two, 3, (x, y) => [x, y].sort().join() === 'a,b')).toEqual([]);
   });
 
+  it('[ORD-9] a dismissed pair is not grouped again through a third order of the same buyer', () => {
+    const three = [
+      at('2026-11-23T10:00:00Z', 'a'),
+      at('2026-11-23T11:00:00Z', 'b'),
+      at('2026-11-23T12:00:00Z', 'c'),
+    ];
+    const dismissed = (x: string, y: string) => [x, y].sort().join() === 'a,b';
+    const out = groups(three, 3, dismissed);
+    expect(out.some((g) => g.includes('a') && g.includes('b'))).toBe(false);
+    // C sits with its nearest neighbour, B.
+    expect(out).toEqual([['b', 'c']]);
+  });
+
   it('[ORD-9] the cap is 20: a 21st matching order starts a new group', () => {
     const many = Array.from({ length: GROUP_CAP + 2 }, (_, i) =>
       at(new Date(Date.UTC(2026, 10, 23, 8, i)).toISOString(), `o${String(i).padStart(2, '0')}`),

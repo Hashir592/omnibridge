@@ -349,6 +349,37 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
     expect(after.find((r) => r.id === r1)?.group?.id).toBe(g2);
   });
 
+  it('[ORD-9] when a group splits, each part is its own group (never one id for two groups)', async () => {
+    const ivy = buyer('Ivy Split');
+    const ids = [
+      await place(accX, 'S-1', '2026-11-24T09:00:00Z', ivy),
+      await place(accX, 'S-2', '2026-11-24T09:10:00Z', ivy),
+      await place(accX, 'S-3', '2026-11-24T09:20:00Z', ivy),
+      await place(accX, 'S-4', '2026-11-24T09:30:00Z', ivy),
+    ];
+    await regroup(accX);
+    const before = (await rows(admin)).filter((r) => ids.includes(r.id));
+    expect(new Set(before.map((r) => r.group?.id)).size).toBe(1);
+    // The vault now says S-1/S-2 and S-3/S-4 are two buyers (two match classes).
+    const subject = (ref: string) => `${accX}:${ref}`;
+    await reads.applyGroups(
+      all(),
+      accX,
+      new Map([
+        [subject('S-1'), 'one'],
+        [subject('S-2'), 'one'],
+        [subject('S-3'), 'two'],
+        [subject('S-4'), 'two'],
+      ]),
+    );
+    const after = (await rows(admin)).filter((r) => ids.includes(r.id));
+    const [g1, g2, g3, g4] = ids.map((id) => after.find((r) => r.id === id)?.group?.id);
+    expect(g1).toBe(g2);
+    expect(g3).toBe(g4);
+    expect(g1).not.toBe(g3);
+    expect(g1).toBe(before[0]?.group?.id);
+  });
+
   it('[ORD-5][DP-7] lists show masked values; every full view is logged in the vault and the audit log', async () => {
     const id = await place(accX, 'P-1', '2026-11-19T09:00:00Z', buyer('Pat Viewer'));
     const row = (await rows(child)).find((r) => r.id === id);
