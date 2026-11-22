@@ -24,7 +24,8 @@ import type { PlatformSearch } from './routes/platform/console.tsx';
 import { isSection } from './routes/platform/rules.ts';
 import type { SettingsSearch } from './routes/settings.tsx';
 import type { SalesProfitSearch } from './routes/sales-profit.tsx';
-import type { StockSearch } from './routes/stock.tsx';
+import type { StockSearch } from './routes/stock/list.tsx';
+import type { MovementsSearch } from './routes/stock/movements.tsx';
 import type { ListingsSearch } from './routes/catalogue/listings.tsx';
 import type { SkusSearch } from './routes/catalogue/skus.tsx';
 
@@ -108,22 +109,55 @@ const pageParams = (s: Record<string, unknown>) => {
 const oneOf = <T extends string>(v: unknown, xs: readonly T[]): T | undefined =>
   typeof v === 'string' && (xs as readonly string[]).includes(v) ? (v as T) : undefined;
 
-// T-0305 client preview screens (mock-ups on MSW data).
-const STOCK_VIEWS = ['all', 'low', 'oversold', 'sync', 'bundles', 'unmapped'] as const;
+// T-0317 stock screens on the M09 routes. 'unmapped' is an old link: the page sends it to Listings.
+const STOCK_VIEWS = ['oversold', 'sync', 'manual', 'bundles', 'unmapped'] as const;
 const stock = createRoute({
   getParentRoute: () => root,
   path: '/stock',
   validateSearch: (s: Record<string, unknown>): StockSearch => {
     const out: StockSearch = { ...pageParams(s) };
     const view = oneOf(s.view, STOCK_VIEWS);
-    if (view && view !== 'all') out.view = view;
-    for (const k of ['q', 'vat', 'channel'] as const) {
+    if (view) out.view = view;
+    const q = str(s.q);
+    if (q) out.q = q;
+    return out;
+  },
+  component: lazyRouteComponent(() => import('./routes/stock/list.tsx'), 'StockPage'),
+});
+const MOVEMENT_KINDS = [
+  'reserve',
+  'release',
+  'dispatch',
+  'return',
+  'stock_in',
+  'adjust',
+  'stock_take',
+  'allocation',
+] as const;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const stockMovements = createRoute({
+  getParentRoute: () => root,
+  path: '/stock/movements',
+  validateSearch: (s: Record<string, unknown>): MovementsSearch => {
+    const out: MovementsSearch = { ...pageParams(s) };
+    const sku = str(s.sku);
+    if (sku) out.sku = sku;
+    const kind = oneOf(s.kind, MOVEMENT_KINDS);
+    if (kind) out.kind = kind;
+    const source = oneOf(s.source, ['order', 'user', 'system'] as const);
+    if (source) out.source = source;
+    for (const k of ['from', 'to'] as const) {
       const v = str(s[k]);
-      if (v) out[k] = v;
+      if (v && DAY.test(v)) out[k] = v;
     }
     return out;
   },
-  component: lazyRouteComponent(() => import('./routes/stock.tsx'), 'StockPage'),
+  component: lazyRouteComponent(() => import('./routes/stock/movements.tsx'), 'MovementsPage'),
+});
+const stockBuffers = createRoute({
+  getParentRoute: () => root,
+  path: '/stock/buffers',
+  component: lazyRouteComponent(() => import('./routes/stock/buffers.tsx'), 'BuffersPage'),
 });
 // T-0316 catalogue screens on the M08 routes (static paths win over /stock/$skuId).
 const catalogueSkus = createRoute({
@@ -167,7 +201,7 @@ const vatRates = createRoute({
 const stockDetail = createRoute({
   getParentRoute: () => root,
   path: '/stock/$skuId',
-  component: lazyRouteComponent(() => import('./routes/stock-detail.tsx'), 'StockDetailPage'),
+  component: lazyRouteComponent(() => import('./routes/stock/detail.tsx'), 'StockDetailPage'),
 });
 
 const salesProfit = createRoute({
@@ -364,6 +398,8 @@ const notificationLink = createRoute({
 
 const preview = [
   stock,
+  stockMovements,
+  stockBuffers,
   catalogueSkus,
   catalogueSku,
   catalogueListings,

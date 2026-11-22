@@ -666,3 +666,120 @@ export const catalogueApi = {
     ),
   exportMappings: () => reply<Blob>(api.GET('/catalogue/mappings/export', { parseAs: 'blob' })),
 };
+
+/* ---------- stock (T-0901 routes; T-0317 screens: INV-1 to INV-10, AT-27) ---------- */
+
+export type StockRow = components['schemas']['StockRow'];
+export type StockDetail = components['schemas']['StockDetail'];
+export type StockListing = components['schemas']['StockListing'];
+export type StockMode = components['schemas']['StockMode'];
+export type PushResult = components['schemas']['PushResult'];
+export type Movement = components['schemas']['Movement'];
+export type MovementKind = components['schemas']['MovementKind'];
+export type AdjustReason = components['schemas']['AdjustReason'];
+export type StockBuffer = components['schemas']['StockBuffer'];
+export type AllocationResult = components['schemas']['AllocationResult'];
+export type AllocationPush = components['schemas']['AllocationPush'];
+export type StockFilter = 'oversold' | 'sync_failed' | 'manual' | 'bundles';
+
+export interface StockQuery {
+  page?: number;
+  limit?: number;
+  q?: string | undefined;
+  filter?: StockFilter | undefined;
+}
+
+export interface MovementFilter {
+  sku_id?: string | undefined;
+  kind?: MovementKind | undefined;
+  source?: 'order' | 'user' | 'system' | undefined;
+  /** London days, YYYY-MM-DD, inclusive. */
+  from?: string | undefined;
+  to?: string | undefined;
+}
+
+const stockSkuPath = (skuId: string) => ({ params: { path: { skuId } } });
+
+/** The stock engine's routes (M09). Hand movements carry a client_ref, so a resend is harmless. */
+export const stockApi = {
+  list: (q: StockQuery) =>
+    read<Paged<StockRow>>(api.GET('/stock', { params: { query: defined(q) } })),
+  get: (skuId: string) => read<StockDetail>(api.GET('/stock/{skuId}', stockSkuPath(skuId))),
+  movements: (q: MovementFilter & { page?: number; limit?: number }) =>
+    read<Paged<Movement>>(api.GET('/stock/movements', { params: { query: defined(q) } })),
+  exportMovements: (q: MovementFilter) =>
+    reply<Blob>(
+      api.GET('/stock/movements/export', { params: { query: defined(q) }, parseAs: 'blob' }),
+    ),
+  /** 409 on a bundle (no stock of its own). */
+  stockIn: async (
+    skuId: string,
+    body: { quantity: number; supplier?: string; notes?: string; client_ref: string },
+  ) =>
+    reply<Movement>(
+      api.POST('/stock/{skuId}/stock-in', {
+        ...stockSkuPath(skuId),
+        body,
+        headers: await csrfHeaders(),
+      }),
+    ),
+  adjust: async (
+    skuId: string,
+    body: { delta: number; reason: AdjustReason; text?: string; client_ref: string },
+  ) =>
+    reply<Movement>(
+      api.POST('/stock/{skuId}/adjustments', {
+        ...stockSkuPath(skuId),
+        body,
+        headers: await csrfHeaders(),
+      }),
+    ),
+  importStockTake: async (csv: string, dryRun: boolean) =>
+    reply<CsvImportReport>(
+      api.POST('/stock/stock-take/import', {
+        body: { csv, dry_run: dryRun },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  buffers: async () => (await read<{ items: StockBuffer[] }>(api.GET('/stock/buffers'))).items,
+  setAccountBuffer: async (accountId: string, buffer: number) =>
+    reply<StockBuffer>(
+      api.PUT('/stock/buffers/{accountId}', {
+        params: { path: { accountId } },
+        body: { buffer },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** null goes back to the account's buffer. */
+  setListingBuffer: async (listingId: string, buffer: number | null) =>
+    reply<StockListing>(
+      api.PUT('/stock/listings/{listingId}/buffer', {
+        params: { path: { listingId } },
+        body: { buffer },
+        headers: await csrfHeaders(),
+      }),
+    ),
+  /** C7.2: 409 `version_conflict` when stock or settings changed since the form was read. */
+  saveAllocation: async (
+    skuId: string,
+    body: {
+      version: number;
+      listings: Array<{ listing_id: string; mode: StockMode; manual_qty?: number }>;
+    },
+  ) =>
+    reply<AllocationResult>(
+      api.PUT('/stock/{skuId}/allocation', {
+        ...stockSkuPath(skuId),
+        body,
+        headers: await csrfHeaders(),
+      }),
+    ),
+  backToAuto: async (skuId: string, body: { listing_ids?: string[]; include_bundles?: boolean }) =>
+    reply<AllocationResult>(
+      api.POST('/stock/{skuId}/allocation/auto', {
+        ...stockSkuPath(skuId),
+        body,
+        headers: await csrfHeaders(),
+      }),
+    ),
+};
