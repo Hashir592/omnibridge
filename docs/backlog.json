@@ -2138,6 +2138,453 @@
       "status": "done"
     },
     {
+      "id": "T-1000",
+      "module": "M10",
+      "session": "S3",
+      "title": "Semgrep in the required merge gate (ADR-079 0)",
+      "goal": "A red Semgrep scan blocks a merge like any other gate job.",
+      "prd_ids": [],
+      "supports": [
+        "SEC-16"
+      ],
+      "scope": [
+        "Add semgrep to verify's needs in .github/workflows/ci.yml; verify requires semgrep success on pull_request (skipped allowed on push)",
+        "tests/config/ci.test.ts: every gate job, Semgrep included, is in verify's needs"
+      ],
+      "out_of_scope": [
+        "Changing Semgrep rules"
+      ],
+      "depends_on": [],
+      "acceptance": [
+        "The CI config test fails when a gate job is left out of needs",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "light",
+      "status": "todo"
+    },
+    {
+      "id": "T-1001",
+      "module": "M10",
+      "session": "S3",
+      "title": "Order ingest and sales VAT",
+      "goal": "Every channel order is stored once, in two tiers, with immutable VAT and COGS snapshots, correct VAT to the penny, and exact stock movements.",
+      "prd_ids": [
+        "ORD-3",
+        "ORD-4",
+        "VAT-1",
+        "VAT-2",
+        "VAT-3",
+        "VAT-4",
+        "VAT-5",
+        "VAT-6",
+        "VAT-7",
+        "AT-6",
+        "AT-15",
+        "AT-16"
+      ],
+      "supports": [
+        "DP-4",
+        "DP-6",
+        "DEL-1",
+        "INV-3",
+        "INV-6",
+        "CAT-4",
+        "CAT-6",
+        "INT-8",
+        "AT-8",
+        "AT-9",
+        "FIN-1"
+      ],
+      "scope": [
+        "CRITICAL (ADR-077): own PR, tests first, /code-review high, Hashir's go with the module paste; S4 reviews this PR alone after merge; S5 checks it (MODULES)",
+        "Contract PR first: every M10 route (orders list and filters, detail, full-PII view, status history, returns and refunds, export, groups and dismiss); then the PASTE INTO SESSION 2 block for T-0318",
+        "Order state table (FA-10): allowed moves listed; never backwards unless listed; raw channel status kept; late, repeated or out-of-order updates are safe",
+        "Two-tier storage (ORD-4): vault first with provisional delete_after = placement + 90 days, then db-main, both keyed by channel account and external order ID; one buyer record per order (a retried ingest adds none); nightly orphan sweep comparing vault and db-main references by ID only",
+        "PII lifecycle: cancellation calls requestDeletion; dispatch and delivery shorten delete_after to date + pii_expiry_days, journalled; a tombstone check refuses re-ingest of a buyer deleted by an eBay notice; eBay buyers matched by user ID first (ADR-068)",
+        "Write-once snapshots (FA-11): VAT type, rate and COGS from vatTypeOn, vatRateOn and cogsOn on the order date; an unmapped line counts at the workspace default rate and is provisional; mapping fills it once; a correction to a filed period goes to the next open period",
+        "VAT engine (VAT-1 to VAT-7, FA-12): tax point = placed date; per rate group with discounts and shipping pro-rata, rounded once per group; largest-remainder pennies with ties by line order; line VAT allocated from the group; refunds at the original rates, split pro-rata without line detail, in the refund date's quarter, capped per group; cancelled before capture excluded; zero-rated and No VAT kept apart",
+        "Stock: StockEngine.reserve, release and dispatch with the order line id; oversold flag stored on the line; UnmappedDemand implemented; order references supplied to the change log",
+        "Cutover (FA-16): backfill depth per stream; orders older than the PII window stored with no vault record; stock push off per account until the first clean reconciliation",
+        "Ingest through the M07 adapters and cursors from the eBay and website mocks"
+      ],
+      "out_of_scope": [
+        "Order screens (T-1002, T-0318)",
+        "Labels and dispatch events (M12)",
+        "Website inbound (T-1101)"
+      ],
+      "depends_on": [
+        "T-0901",
+        "T-1000"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [AT-15] the £12 / £6 / £3 example gives £2.33 and £0; [AT-16] a £6 refund on a £12 standard line reduces VAT by £1.00 in the refund quarter; property tests that allocations sum to the whole and refunds never exceed VAT charged; [AT-6] a COGS change leaves earlier orders' profit alone; a replayed or out-of-order update never duplicates an order, a line or a movement; a db-main failure after the vault write leaves an orphan the sweep deletes; marker scan clean",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "critical",
+      "status": "todo"
+    },
+    {
+      "id": "T-1002",
+      "module": "M10",
+      "session": "S3",
+      "title": "Order list, detail, returns, export and same-buyer groups",
+      "goal": "One masked list of every order with fast filters, a detail page that logs every full PII view, returns, a PII-free export and same-buyer groups.",
+      "prd_ids": [
+        "ORD-1",
+        "ORD-2",
+        "ORD-5",
+        "ORD-6",
+        "ORD-7",
+        "ORD-8",
+        "ORD-9",
+        "AT-26"
+      ],
+      "supports": [
+        "DP-7",
+        "DEL-5",
+        "PERM-3",
+        "TEN-5"
+      ],
+      "scope": [
+        "List with every ORD-1 column and flag; ORD-2 filters; buyer name or postcode search through the vault while the PII exists",
+        "Masked values in lists (ORD-5); full PII only on detail and the shipping desk, for the Orders or Shipping tab, each view logged",
+        "Detail (ORD-6): lines, money breakdown, status history, labels and tracking placeholders for M12, notes with the no-customer-details warning, 'Customer details deleted on {date}' once gone",
+        "Returns view (ORD-7): refunds from every channel now; Amazon returns report joins in M18",
+        "CSV export with no PII (ORD-8)",
+        "Same-buyer groups (ORD-9, C3): matched by the vault match capability; db-main holds only the group link; dismiss as 'Not the same buyer'; the Ship together action comes in T-1201",
+        "The access export's linkedOrders joined by subject (M04 follow-up)"
+      ],
+      "out_of_scope": [
+        "Screens (T-0318)",
+        "Ship together labels (T-1201)"
+      ],
+      "depends_on": [
+        "T-1001"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [AT-26] 23:59 and 00:01 London on one account form one group; two accounts or a different name do not; [ORD-5] every full view writes an access-log row; [ORD-8] export marker scan clean; route walker and child company scoping on every order route",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0318",
+      "module": "M03",
+      "session": "S2",
+      "title": "Orders screens",
+      "goal": "Sellers see every order in one fast list, open the detail, and work returns and groups.",
+      "prd_ids": [],
+      "supports": [
+        "ORD-1",
+        "ORD-2",
+        "ORD-5",
+        "ORD-6",
+        "ORD-7",
+        "ORD-9"
+      ],
+      "scope": [
+        "From the M10 contract PR: orders list with columns, flags and URL filters; detail page with the full-PII reveal; returns view; group display and dismiss",
+        "Masked values in lists; nothing with PII stored in the browser"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-1001"
+      ],
+      "acceptance": [
+        "Tests cite ORD-1 and ORD-5",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-1101",
+      "module": "M11",
+      "session": "S3",
+      "title": "Website connector, Disconnect route and shared call session",
+      "goal": "The client's website exchanges orders, stock and tracking with OmniBridge through one signed, idempotent contract.",
+      "prd_ids": [
+        "WEB-1",
+        "WEB-2",
+        "WEB-3",
+        "WEB-4",
+        "WEB-5",
+        "WEB-6",
+        "OPS-12",
+        "AT-14"
+      ],
+      "supports": [
+        "INV-4",
+        "TRK-1",
+        "DEL-1",
+        "PLAT-2"
+      ],
+      "scope": [
+        "Contract PR first: website setup, inbound and outbound shapes, Disconnect; then the PASTE INTO SESSION 2 block for T-0319",
+        "Setup (WEB-1): connection ID, inbound key shown once, signing secret, base URL and outbound key; module toggle website_connector off means every website route answers 404 (ADR-059)",
+        "Signing both ways (WEB-2) with timestamp window and idempotency keys; inbound processed in the request, vault first, nothing with PII in any inbox (ADR-054, FA-04)",
+        "Outbound (WEB-4, WEB-5) through the M07 outbound path: retries back off from 1 minute to 24 hours, then the dead-letter queue and an alert; no eBay data ever sent to the website (WEB-6)",
+        "Generic Disconnect route for any channel account: ends its listings (C7.3), stops writes, keeps history; Amazon and eBay deletion triggers stay with their modules",
+        "One call-session helper shared by the order sync and the listing scan (ADR-079 2)"
+      ],
+      "out_of_scope": [
+        "JeezMart's side (dev team)",
+        "Screens (T-0319)"
+      ],
+      "depends_on": [
+        "T-1002"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [AT-14] a replayed request with the same key creates no duplicate; a bad signature or a timestamp over 5 minutes old is rejected; toggle off answers 404 on every website route; outbound retries end in the dead-letter queue with one alert",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0319",
+      "module": "M03",
+      "session": "S2",
+      "title": "Website setup screen",
+      "goal": "An admin connects the website and copies its keys once.",
+      "prd_ids": [],
+      "supports": [
+        "WEB-1"
+      ],
+      "scope": [
+        "Website account setup with the show-once key and secret, from the M11 contract PR; Disconnect confirmation for any account"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-1101"
+      ],
+      "acceptance": [
+        "Tests cite WEB-1",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "light",
+      "status": "todo"
+    },
+    {
+      "id": "T-1201",
+      "module": "M12",
+      "session": "S3",
+      "title": "Labels: ShippingProvider, Evri, label files and the Ship together lock",
+      "goal": "A label is bought once per parcel, its file is held only in the vault and deleted on time, and errors read plainly.",
+      "prd_ids": [
+        "SHIP-1",
+        "SHIP-2",
+        "SHIP-3",
+        "SHIP-4",
+        "EVRI-1",
+        "EVRI-2",
+        "EVRI-3",
+        "EVRI-4",
+        "EVRI-5",
+        "EVRI-6",
+        "EVRI-7",
+        "SHP-5",
+        "SHP-7",
+        "SHP-9",
+        "AT-12"
+      ],
+      "supports": [
+        "DEL-1",
+        "DP-8",
+        "RL-4",
+        "ORD-9",
+        "AT-26"
+      ],
+      "scope": [
+        "CRITICAL (ADR-077): own PR, tests first, /code-review high, Hashir's go with the module paste; S4 reviews this PR alone after merge; S5 checks it (MODULES)",
+        "Contract PR first: every M12 route (carrier accounts, services and cost table, rules, desk queue, label create, batch, reprint, void, reconcile list, packing slip, tracking state, re-send); then the PASTE INTO SESSION 2 block for T-0320",
+        "ShippingProvider (SHIP-3) and carrier accounts owned by one company, usable by every company (SHIP-1, ARCHITECTURE 6.1)",
+        "Evri adapter (EVRI-1 to EVRI-6): connect flow, POST /parcels, the 32-character re-flow or 'Address shortened' flag, INVALID parcel handling inside a 200, labels by barcode with the right Accept header, reprint never creates a parcel, internal void plus the reconcile list; runbook contacts (EVRI-7); mock checked against the myHermes spec v1.4",
+        "Label creation idempotent per parcel; carrier errors shown in plain words with the raw code; only the label's PII sent (SHIP-4); a full carrier cap is a governor wait (ADR-079 2)",
+        "Label files made by the worker and stored by the vault, merged on download; vault 256 MB with a 200-label test (FA-15); deleted through the M04 LabelFiles hook",
+        "Label cost table per service, ex VAT with a VAT rate (SHP-7)",
+        "Ship together (SHP-9, C3.4): members locked and re-checked; one label; same tracking pushed to every member; cost split with remainder pence to the earliest; void returns every member"
+      ],
+      "out_of_scope": [
+        "Desk, rules and tracking loop (T-1202)",
+        "DPD (M13)"
+      ],
+      "depends_on": [
+        "T-1101"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [AT-12] one INVALID parcel in a 200 shows that parcel failed; a 33-character line re-flows or is flagged; a reprint creates no parcel; [AT-26] two users pressing Ship together at once make exactly one label; 200 labels merge inside the vault memory limit; label files absent from backups and gone after expiry; marker scan clean",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "critical",
+      "status": "todo"
+    },
+    {
+      "id": "T-1202",
+      "module": "M12",
+      "session": "S3",
+      "title": "Shipping desk, rules, batches, packing slips, partial dispatch and the tracking loop",
+      "goal": "Packers work one queue, labels go out in batches, and every label leads to a confirmed tracking push or a loud alert.",
+      "prd_ids": [
+        "SHP-1",
+        "SHP-2",
+        "SHP-3",
+        "SHP-4",
+        "SHP-6",
+        "SHP-8",
+        "TRK-1",
+        "TRK-2",
+        "TRK-3",
+        "AT-13"
+      ],
+      "supports": [
+        "INV-3",
+        "ORD-3",
+        "NTF-1"
+      ],
+      "scope": [
+        "Desk queue (SHP-1) and batches up to 200 (SHP-2); ordered shipping rules with manual override (SHP-3)",
+        "On label creation: Label created, then Dispatched when auto_dispatch_on_label is on; StockEngine.dispatch with the order line id; tracking job queued (SHP-4, TRK-1)",
+        "Packing slip rendered on demand, never stored (SHP-6); partial dispatch where the channel allows it (SHP-8)",
+        "Tracking loop (TRK-2, TRK-3): retries at 1, 5, 15, 60, 180 and 360 minutes; the 4-hour critical alert; dead-letter queue with admin re-send; Pending, Sent, Confirmed, Failed with the last error"
+      ],
+      "out_of_scope": [
+        "Screens (T-0320)"
+      ],
+      "depends_on": [
+        "T-1201"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [AT-13] every label queues a channel tracking push and an unconfirmed push raises a critical alert at 4 hours; [SHP-4] dispatch moves stock once; [SHP-6] no slip stored (marker scan)",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-0320",
+      "module": "M03",
+      "session": "S2",
+      "title": "Shipping desk screens",
+      "goal": "Packers ship fast on desktop and tablet.",
+      "prd_ids": [],
+      "supports": [
+        "SHP-1",
+        "SHP-2",
+        "SHP-3",
+        "SHP-5",
+        "SHP-9",
+        "TRK-3"
+      ],
+      "scope": [
+        "From the M12 contract PR: desk queue, batch labels and print, reprint and void, reconcile list, rules editor, cost table, carrier account setup, Ship together, tracking state on the order"
+      ],
+      "out_of_scope": [
+        "Server logic"
+      ],
+      "depends_on": [
+        "T-1201"
+      ],
+      "acceptance": [
+        "Tests cite SHP-1 and SHP-9",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
+      "id": "T-1501",
+      "module": "M15",
+      "session": "S3",
+      "title": "eBay core: connect, listings, orders, stock with revision guard, tracking, governor and restrictions",
+      "goal": "Sellers connect eBay accounts and OmniBridge runs listings, orders, stock and tracking within every eBay limit.",
+      "prd_ids": [
+        "EBAY-1",
+        "EBAY-3",
+        "EBAY-4",
+        "EBAY-5",
+        "EBAY-6",
+        "EBAY-7",
+        "EBAY-8",
+        "EBAY-9",
+        "EBAY-10",
+        "EBAY-11",
+        "RL-2",
+        "AT-7"
+      ],
+      "supports": [
+        "EBAY-2",
+        "INT-3",
+        "INV-4",
+        "TRK-1",
+        "ORD-4",
+        "DEL-1"
+      ],
+      "scope": [
+        "First marketplace (ADR-079 6). Contract PR first if any route is new",
+        "Connect (EBAY-1, EBAY-3, EBAY-4) with the RuName settings and scopes; tokens (EBAY-5): refresh on expiry or invalid token, 30-day expiry warning, revocation marks Needs re-authorisation; the token refresh race fixed",
+        "Listings: discovery with the offer's listing ID as external_id and the Inventory-API flag (EBAY-7); a discovery scan that resumes across runs",
+        "Orders through the M10 ingest; stock push with the revision guard (EBAY-9: hold at 240, alert at 200) and batching when the budget is tight; tracking push through the M12 loop",
+        "Governor (EBAY-8, RL-2): getRateLimits and getUserRateLimits read hourly into the console; F-M07-T0702-02",
+        "Freshness (EBAY-10) shown as data age; restrictions (EBAY-11) enforced",
+        "The ebay.account_deletion.too_large platform notice",
+        "Mock endpoints checked against eBay's official OpenAPI files (Hashir's yes in the module paste)"
+      ],
+      "out_of_scope": [
+        "Messages, feedback, health and finances (T-1502)"
+      ],
+      "depends_on": [
+        "T-1202"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: [AT-7] the 241st revision of one listing in a day is held and released after the reset; the governor never sends above 95% of any daily cap (simulated); revocation marks the account within the hour",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "high",
+      "status": "todo"
+    },
+    {
+      "id": "T-1502",
+      "module": "M15",
+      "session": "S3",
+      "title": "eBay messages, feedback, health and finances (Release 2/3)",
+      "goal": "Sellers answer eBay buyers, see feedback, account health and finances, with message content held only in the vault.",
+      "prd_ids": [
+        "CS-1",
+        "CS-2",
+        "CS-3",
+        "HLT-2",
+        "HLT-3",
+        "HLT-4",
+        "HLT-5"
+      ],
+      "supports": [
+        "EBAY-6",
+        "DP-5"
+      ],
+      "scope": [
+        "Messages inbox per account (CS-1) with content in the vault, deleted 30 days after the conversation's last activity (CS-2)",
+        "Seller feedback (CS-3); health card per account (HLT-2), never side by side with Amazon (HLT-3), band and status alerts (HLT-4), data age on every card (HLT-5); finances reads"
+      ],
+      "out_of_scope": [
+        "Amazon health (M18)"
+      ],
+      "depends_on": [
+        "T-1501"
+      ],
+      "acceptance": [
+        "Tests first, citing IDs: message content only in the vault and gone at 30 days; [AT-22] no eBay and Amazon metrics side by side",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "normal",
+      "status": "todo"
+    },
+    {
       "id": "T-0307",
       "module": "M03",
       "session": "S2",
