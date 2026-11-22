@@ -12,7 +12,7 @@ CREATE TABLE vault.deleted_buyers (
   workspace_id uuid NOT NULL,
   field text NOT NULL CHECK (field IN ('ebay_user_id', 'ebay_username')),
   mac bytea NOT NULL CHECK (octet_length(mac) = 32),
-  key_version integer NOT NULL,
+  key_version bigint NOT NULL CHECK (key_version > 0),
   created_at timestamptz NOT NULL,
   PRIMARY KEY (workspace_id, field, mac)
 );
