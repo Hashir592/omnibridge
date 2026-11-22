@@ -21,13 +21,18 @@ export const VAT_NAME: Record<VatType, string> = {
   no_vat: 'No VAT',
 };
 
-/** 2000 → "20%", 1750 → "17.5%", 0 → "0%". */
-export function formatRate(bp: number): string {
+/** 2000 → "20", 1750 → "17.5", 0 → "0": the number alone, for a form field. */
+export function rateNumber(bp: number): string {
   const whole = Math.trunc(bp / 100);
   const frac = String(bp % 100)
     .padStart(2, '0')
     .replace(/0+$/, '');
-  return `${String(whole)}${frac ? `.${frac}` : ''}%`;
+  return `${String(whole)}${frac ? `.${frac}` : ''}`;
+}
+
+/** 2000 → "20%", 1750 → "17.5%", 0 → "0%". */
+export function formatRate(bp: number): string {
+  return `${rateNumber(bp)}%`;
 }
 
 /** "20", "17.5" or "17.50%" → basis points; null when it is not 0 to 100 with up to 2 decimals. */

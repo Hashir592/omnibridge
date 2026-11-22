@@ -17,7 +17,8 @@ async function expectNoSeriousA11yIssues(page: Page): Promise<void> {
 }
 
 const allocation = (page: Page, account: string) =>
-  page.getByRole('textbox', { name: new RegExp(`^Allocation for ${account}`) });
+  // A plain string name matches as a substring, so no pattern is built from input.
+  page.getByRole('textbox', { name: `Allocation for ${account}` });
 
 test('[INV-6] the Oversold view lists the oversold SKU and its page says so', async ({ page }) => {
   await page.goto('/stock?view=oversold');
