@@ -107,3 +107,4 @@ export * from './routes/platform.ts';
 export * from './routes/connections.ts';
 export * from './routes/catalogue.ts';
 export * from './routes/stock.ts';
+export * from './routes/orders.ts';

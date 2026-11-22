@@ -729,6 +729,20 @@ ${MARKER}-SKU,99`,
           },
         },
         backToAuto: { params: { skuId: catalogueB.sku }, body: {} },
+        // Orders (M10): company-scoped. Until T-1001 stores orders these answer 404; T-1001 and
+        // T-1002 seed B's order and group and aim these calls at them.
+        listOrders: { query: { channel_account_id: b.account } },
+        searchOrders: { query: { channel_account_id: b.account }, body: { buyer_name: MARKER } },
+        exportOrders: { query: { channel_account_id: b.account } },
+        getOrder: { params: { orderId: randomUUID() } },
+        viewOrderCustomer: { params: { orderId: randomUUID() } },
+        setOrderNotes: { params: { orderId: randomUUID() }, body: { notes: MARKER } },
+        listReturns: { query: { channel_account_id: b.account } },
+        dismissOrderGroup: { params: { groupId: randomUUID() }, body: { reason: MARKER } },
+        removeOrderGroupMember: {
+          params: { groupId: randomUUID(), orderId: randomUUID() },
+          body: { reason: MARKER },
+        },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {

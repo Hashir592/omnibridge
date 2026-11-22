@@ -1198,6 +1198,630 @@
         },
         "required": ["items"]
       },
+      "OrderStatusInput": {
+        "type": "string",
+        "enum": [
+          "pending_payment",
+          "awaiting_dispatch",
+          "label_created",
+          "dispatched",
+          "delivered",
+          "cancelled",
+          "partly_refunded",
+          "refunded",
+          "returned"
+        ]
+      },
+      "OrderFlagInput": {
+        "type": "string",
+        "enum": ["oversold", "unmapped", "address_shortened", "tracking_not_confirmed", "fba"]
+      },
+      "SaleVatTypeInput": { "type": "string", "enum": ["standard", "reduced", "zero", "no_vat"] },
+      "CustomerStateInput": { "type": "string", "enum": ["present", "deleted", "none"] },
+      "MaskedBuyerInput": {
+        "type": "object",
+        "properties": {
+          "name": { "type": ["string", "null"] },
+          "postcode": { "type": ["string", "null"] }
+        },
+        "required": ["name", "postcode"]
+      },
+      "OrderGroupRefInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "size": { "type": "integer", "minimum": 2, "maximum": 20 },
+          "position": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+          "hidden": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["id", "size", "position", "hidden"]
+      },
+      "OrderRowInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/ProviderInput" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_name": { "type": ["string", "null"] },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "first_sku": { "type": ["string", "null"] },
+          "more_skus": { "type": "array", "items": { "type": "string" } },
+          "status": { "$ref": "#/components/schemas/OrderStatusInput" },
+          "raw_status": { "type": "string" },
+          "item_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "total_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "shipping_status": { "type": ["string", "null"] },
+          "tracking_state": {
+            "anyOf": [
+              { "type": "string", "enum": ["pending", "confirmed", "not_confirmed"] },
+              { "type": "null" }
+            ]
+          },
+          "flags": { "type": "array", "items": { "$ref": "#/components/schemas/OrderFlagInput" } },
+          "customer_state": { "$ref": "#/components/schemas/CustomerStateInput" },
+          "buyer": {
+            "anyOf": [{ "$ref": "#/components/schemas/MaskedBuyerInput" }, { "type": "null" }]
+          },
+          "group": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderGroupRefInput" }, { "type": "null" }]
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "channel_account_id",
+          "channel_account_name",
+          "company_id",
+          "order_ref",
+          "placed_at",
+          "first_sku",
+          "more_skus",
+          "status",
+          "raw_status",
+          "item_count",
+          "total_gross_pence",
+          "ship_by",
+          "shipping_status",
+          "tracking_state",
+          "flags",
+          "customer_state",
+          "buyer",
+          "group"
+        ]
+      },
+      "OrderLineInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "external_line_id": { "type": "string" },
+          "sku_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "sku": { "type": ["string", "null"] },
+          "external_sku": { "type": ["string", "null"] },
+          "title": { "type": ["string", "null"] },
+          "quantity": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+          "unit_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "line_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "discount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "shipping_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_type": {
+            "anyOf": [{ "$ref": "#/components/schemas/SaleVatTypeInput" }, { "type": "null" }]
+          },
+          "vat_rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "cogs_pence": {
+            "anyOf": [
+              { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              { "type": "null" }
+            ]
+          },
+          "provisional": { "type": "boolean" },
+          "oversold": { "type": "boolean" }
+        },
+        "required": [
+          "id",
+          "external_line_id",
+          "sku_id",
+          "sku",
+          "external_sku",
+          "title",
+          "quantity",
+          "unit_gross_pence",
+          "line_gross_pence",
+          "discount_pence",
+          "shipping_pence",
+          "vat_type",
+          "vat_rate_bp",
+          "vat_pence",
+          "cogs_pence",
+          "provisional",
+          "oversold"
+        ]
+      },
+      "VatGroupInput": {
+        "type": "object",
+        "properties": {
+          "vat_type": {
+            "anyOf": [{ "$ref": "#/components/schemas/SaleVatTypeInput" }, { "type": "null" }]
+          },
+          "rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "net_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "provisional": { "type": "boolean" }
+        },
+        "required": ["vat_type", "rate_bp", "gross_pence", "vat_pence", "net_pence", "provisional"]
+      },
+      "RefundInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "external_refund_id": { "type": "string" },
+          "refunded_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "amount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "order_line_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "sku": { "type": ["string", "null"] },
+                "quantity": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                "amount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 }
+              },
+              "required": ["order_line_id", "sku", "quantity", "amount_pence"]
+            }
+          },
+          "return_to_stock": { "type": "boolean" }
+        },
+        "required": [
+          "id",
+          "external_refund_id",
+          "refunded_at",
+          "amount_pence",
+          "vat_pence",
+          "lines",
+          "return_to_stock"
+        ]
+      },
+      "OrderHistoryEntryInput": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "status": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderStatusInput" }, { "type": "null" }]
+          },
+          "raw_status": { "type": "string" }
+        },
+        "required": ["at", "status", "raw_status"]
+      },
+      "OrderGroupMemberInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "status": { "$ref": "#/components/schemas/OrderStatusInput" },
+          "ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["id", "order_ref", "placed_at", "status", "ship_by"]
+      },
+      "OrderGroupInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "state": { "type": "string", "enum": ["open", "dismissed", "closed"] },
+          "members": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OrderGroupMemberInput" }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["different_ship_by", "different_service", "address_shortened", "unmapped"]
+            }
+          },
+          "earliest_ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["id", "channel_account_id", "state", "members", "warnings", "earliest_ship_by"]
+      },
+      "OrderDetailInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/ProviderInput" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_name": { "type": ["string", "null"] },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "first_sku": { "type": ["string", "null"] },
+          "more_skus": { "type": "array", "items": { "type": "string" } },
+          "status": { "$ref": "#/components/schemas/OrderStatusInput" },
+          "raw_status": { "type": "string" },
+          "item_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "total_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "shipping_status": { "type": ["string", "null"] },
+          "tracking_state": {
+            "anyOf": [
+              { "type": "string", "enum": ["pending", "confirmed", "not_confirmed"] },
+              { "type": "null" }
+            ]
+          },
+          "flags": { "type": "array", "items": { "$ref": "#/components/schemas/OrderFlagInput" } },
+          "customer_state": { "$ref": "#/components/schemas/CustomerStateInput" },
+          "buyer": {
+            "anyOf": [{ "$ref": "#/components/schemas/MaskedBuyerInput" }, { "type": "null" }]
+          },
+          "group": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderGroupRefInput" }, { "type": "null" }]
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "dispatched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "tax_point_date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "ship_to_country": {
+            "anyOf": [{ "type": "string", "minLength": 2, "maxLength": 2 }, { "type": "null" }]
+          },
+          "lines": { "type": "array", "items": { "$ref": "#/components/schemas/OrderLineInput" } },
+          "money": {
+            "type": "object",
+            "properties": {
+              "goods_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "discount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "shipping_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "net_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "refunded_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "refunded_vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "vat_groups": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/VatGroupInput" }
+              }
+            },
+            "required": [
+              "goods_pence",
+              "discount_pence",
+              "shipping_pence",
+              "gross_pence",
+              "vat_pence",
+              "net_pence",
+              "refunded_pence",
+              "refunded_vat_pence",
+              "vat_groups"
+            ]
+          },
+          "history": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OrderHistoryEntryInput" }
+          },
+          "refunds": { "type": "array", "items": { "$ref": "#/components/schemas/RefundInput" } },
+          "notes": { "type": ["string", "null"] },
+          "notes_updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "customer_deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "same_buyer": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderGroupInput" }, { "type": "null" }]
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "channel_account_id",
+          "channel_account_name",
+          "company_id",
+          "order_ref",
+          "placed_at",
+          "first_sku",
+          "more_skus",
+          "status",
+          "raw_status",
+          "item_count",
+          "total_gross_pence",
+          "ship_by",
+          "shipping_status",
+          "tracking_state",
+          "flags",
+          "customer_state",
+          "buyer",
+          "group",
+          "paid_at",
+          "dispatched_at",
+          "delivered_at",
+          "cancelled_at",
+          "tax_point_date",
+          "ship_to_country",
+          "lines",
+          "money",
+          "history",
+          "refunds",
+          "notes",
+          "notes_updated_at",
+          "customer_deleted_at",
+          "same_buyer"
+        ]
+      },
+      "OrderCustomerInput": {
+        "type": "object",
+        "properties": {
+          "name": { "type": ["string", "null"] },
+          "address_line1": { "type": ["string", "null"] },
+          "address_line2": { "type": ["string", "null"] },
+          "town": { "type": ["string", "null"] },
+          "county": { "type": ["string", "null"] },
+          "postcode": { "type": ["string", "null"] },
+          "country": { "type": ["string", "null"] },
+          "phone": { "type": ["string", "null"] },
+          "email": { "type": ["string", "null"] },
+          "buyer_username": { "type": ["string", "null"] },
+          "delivery_instructions": { "type": ["string", "null"] }
+        },
+        "required": [
+          "name",
+          "address_line1",
+          "address_line2",
+          "town",
+          "county",
+          "postcode",
+          "country",
+          "phone",
+          "email",
+          "buyer_username",
+          "delivery_instructions"
+        ]
+      },
+      "ReturnRowInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": { "type": "string", "enum": ["refund", "amazon_return"] },
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "provider": { "$ref": "#/components/schemas/ProviderInput" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_name": { "type": ["string", "null"] },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "amount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "skus": { "type": "array", "items": { "type": "string" } },
+          "return_to_stock": { "type": "boolean" },
+          "reason": { "type": ["string", "null"] },
+          "return_status": { "type": ["string", "null"] },
+          "a_to_z": { "type": ["boolean", "null"] },
+          "claim_deadline_estimate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "order_id",
+          "order_ref",
+          "provider",
+          "channel_account_id",
+          "channel_account_name",
+          "company_id",
+          "at",
+          "amount_pence",
+          "vat_pence",
+          "skus",
+          "return_to_stock",
+          "reason",
+          "return_status",
+          "a_to_z",
+          "claim_deadline_estimate"
+        ]
+      },
       "ConsoleWorkspaceInput": {
         "type": "object",
         "properties": {
@@ -3685,6 +4309,651 @@
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/EmailPreference" } }
         },
         "required": ["items"],
+        "additionalProperties": false
+      },
+      "OrderStatus": {
+        "type": "string",
+        "enum": [
+          "pending_payment",
+          "awaiting_dispatch",
+          "label_created",
+          "dispatched",
+          "delivered",
+          "cancelled",
+          "partly_refunded",
+          "refunded",
+          "returned"
+        ]
+      },
+      "OrderFlag": {
+        "type": "string",
+        "enum": ["oversold", "unmapped", "address_shortened", "tracking_not_confirmed", "fba"]
+      },
+      "SaleVatType": { "type": "string", "enum": ["standard", "reduced", "zero", "no_vat"] },
+      "CustomerState": { "type": "string", "enum": ["present", "deleted", "none"] },
+      "MaskedBuyer": {
+        "type": "object",
+        "properties": {
+          "name": { "type": ["string", "null"] },
+          "postcode": { "type": ["string", "null"] }
+        },
+        "required": ["name", "postcode"],
+        "additionalProperties": false
+      },
+      "OrderGroupRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "size": { "type": "integer", "minimum": 2, "maximum": 20 },
+          "position": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+          "hidden": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["id", "size", "position", "hidden"],
+        "additionalProperties": false
+      },
+      "OrderRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/Provider" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_name": { "type": ["string", "null"] },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "first_sku": { "type": ["string", "null"] },
+          "more_skus": { "type": "array", "items": { "type": "string" } },
+          "status": { "$ref": "#/components/schemas/OrderStatus" },
+          "raw_status": { "type": "string" },
+          "item_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "total_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "shipping_status": { "type": ["string", "null"] },
+          "tracking_state": {
+            "anyOf": [
+              { "type": "string", "enum": ["pending", "confirmed", "not_confirmed"] },
+              { "type": "null" }
+            ]
+          },
+          "flags": { "type": "array", "items": { "$ref": "#/components/schemas/OrderFlag" } },
+          "customer_state": { "$ref": "#/components/schemas/CustomerState" },
+          "buyer": {
+            "anyOf": [{ "$ref": "#/components/schemas/MaskedBuyer" }, { "type": "null" }]
+          },
+          "group": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderGroupRef" }, { "type": "null" }]
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "channel_account_id",
+          "channel_account_name",
+          "company_id",
+          "order_ref",
+          "placed_at",
+          "first_sku",
+          "more_skus",
+          "status",
+          "raw_status",
+          "item_count",
+          "total_gross_pence",
+          "ship_by",
+          "shipping_status",
+          "tracking_state",
+          "flags",
+          "customer_state",
+          "buyer",
+          "group"
+        ],
+        "additionalProperties": false
+      },
+      "OrderLine": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "external_line_id": { "type": "string" },
+          "sku_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "sku": { "type": ["string", "null"] },
+          "external_sku": { "type": ["string", "null"] },
+          "title": { "type": ["string", "null"] },
+          "quantity": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+          "unit_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "line_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "discount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "shipping_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_type": {
+            "anyOf": [{ "$ref": "#/components/schemas/SaleVatType" }, { "type": "null" }]
+          },
+          "vat_rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "cogs_pence": {
+            "anyOf": [
+              { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              { "type": "null" }
+            ]
+          },
+          "provisional": { "type": "boolean" },
+          "oversold": { "type": "boolean" }
+        },
+        "required": [
+          "id",
+          "external_line_id",
+          "sku_id",
+          "sku",
+          "external_sku",
+          "title",
+          "quantity",
+          "unit_gross_pence",
+          "line_gross_pence",
+          "discount_pence",
+          "shipping_pence",
+          "vat_type",
+          "vat_rate_bp",
+          "vat_pence",
+          "cogs_pence",
+          "provisional",
+          "oversold"
+        ],
+        "additionalProperties": false
+      },
+      "VatGroup": {
+        "type": "object",
+        "properties": {
+          "vat_type": {
+            "anyOf": [{ "$ref": "#/components/schemas/SaleVatType" }, { "type": "null" }]
+          },
+          "rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "net_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "provisional": { "type": "boolean" }
+        },
+        "required": ["vat_type", "rate_bp", "gross_pence", "vat_pence", "net_pence", "provisional"],
+        "additionalProperties": false
+      },
+      "Refund": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "external_refund_id": { "type": "string" },
+          "refunded_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "amount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "order_line_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "sku": { "type": ["string", "null"] },
+                "quantity": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                "amount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 }
+              },
+              "required": ["order_line_id", "sku", "quantity", "amount_pence"],
+              "additionalProperties": false
+            }
+          },
+          "return_to_stock": { "type": "boolean" }
+        },
+        "required": [
+          "id",
+          "external_refund_id",
+          "refunded_at",
+          "amount_pence",
+          "vat_pence",
+          "lines",
+          "return_to_stock"
+        ],
+        "additionalProperties": false
+      },
+      "OrderHistoryEntry": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "status": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderStatus" }, { "type": "null" }]
+          },
+          "raw_status": { "type": "string" }
+        },
+        "required": ["at", "status", "raw_status"],
+        "additionalProperties": false
+      },
+      "OrderGroupMember": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "status": { "$ref": "#/components/schemas/OrderStatus" },
+          "ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["id", "order_ref", "placed_at", "status", "ship_by"],
+        "additionalProperties": false
+      },
+      "OrderGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "state": { "type": "string", "enum": ["open", "dismissed", "closed"] },
+          "members": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OrderGroupMember" }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["different_ship_by", "different_service", "address_shortened", "unmapped"]
+            }
+          },
+          "earliest_ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "channel_account_id",
+          "state",
+          "members",
+          "warnings",
+          "earliest_ship_by"
+        ],
+        "additionalProperties": false
+      },
+      "OrderDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/Provider" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_name": { "type": ["string", "null"] },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "first_sku": { "type": ["string", "null"] },
+          "more_skus": { "type": "array", "items": { "type": "string" } },
+          "status": { "$ref": "#/components/schemas/OrderStatus" },
+          "raw_status": { "type": "string" },
+          "item_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "total_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "shipping_status": { "type": ["string", "null"] },
+          "tracking_state": {
+            "anyOf": [
+              { "type": "string", "enum": ["pending", "confirmed", "not_confirmed"] },
+              { "type": "null" }
+            ]
+          },
+          "flags": { "type": "array", "items": { "$ref": "#/components/schemas/OrderFlag" } },
+          "customer_state": { "$ref": "#/components/schemas/CustomerState" },
+          "buyer": {
+            "anyOf": [{ "$ref": "#/components/schemas/MaskedBuyer" }, { "type": "null" }]
+          },
+          "group": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderGroupRef" }, { "type": "null" }]
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "dispatched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "tax_point_date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "ship_to_country": {
+            "anyOf": [{ "type": "string", "minLength": 2, "maxLength": 2 }, { "type": "null" }]
+          },
+          "lines": { "type": "array", "items": { "$ref": "#/components/schemas/OrderLine" } },
+          "money": {
+            "type": "object",
+            "properties": {
+              "goods_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "discount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "shipping_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "net_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "refunded_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "refunded_vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "vat_groups": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/VatGroup" }
+              }
+            },
+            "required": [
+              "goods_pence",
+              "discount_pence",
+              "shipping_pence",
+              "gross_pence",
+              "vat_pence",
+              "net_pence",
+              "refunded_pence",
+              "refunded_vat_pence",
+              "vat_groups"
+            ],
+            "additionalProperties": false
+          },
+          "history": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OrderHistoryEntry" }
+          },
+          "refunds": { "type": "array", "items": { "$ref": "#/components/schemas/Refund" } },
+          "notes": { "type": ["string", "null"] },
+          "notes_updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "customer_deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "same_buyer": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderGroup" }, { "type": "null" }]
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "channel_account_id",
+          "channel_account_name",
+          "company_id",
+          "order_ref",
+          "placed_at",
+          "first_sku",
+          "more_skus",
+          "status",
+          "raw_status",
+          "item_count",
+          "total_gross_pence",
+          "ship_by",
+          "shipping_status",
+          "tracking_state",
+          "flags",
+          "customer_state",
+          "buyer",
+          "group",
+          "paid_at",
+          "dispatched_at",
+          "delivered_at",
+          "cancelled_at",
+          "tax_point_date",
+          "ship_to_country",
+          "lines",
+          "money",
+          "history",
+          "refunds",
+          "notes",
+          "notes_updated_at",
+          "customer_deleted_at",
+          "same_buyer"
+        ],
+        "additionalProperties": false
+      },
+      "OrderCustomer": {
+        "type": "object",
+        "properties": {
+          "name": { "type": ["string", "null"] },
+          "address_line1": { "type": ["string", "null"] },
+          "address_line2": { "type": ["string", "null"] },
+          "town": { "type": ["string", "null"] },
+          "county": { "type": ["string", "null"] },
+          "postcode": { "type": ["string", "null"] },
+          "country": { "type": ["string", "null"] },
+          "phone": { "type": ["string", "null"] },
+          "email": { "type": ["string", "null"] },
+          "buyer_username": { "type": ["string", "null"] },
+          "delivery_instructions": { "type": ["string", "null"] }
+        },
+        "required": [
+          "name",
+          "address_line1",
+          "address_line2",
+          "town",
+          "county",
+          "postcode",
+          "country",
+          "phone",
+          "email",
+          "buyer_username",
+          "delivery_instructions"
+        ],
+        "additionalProperties": false
+      },
+      "ReturnRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": { "type": "string", "enum": ["refund", "amazon_return"] },
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "provider": { "$ref": "#/components/schemas/Provider" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_name": { "type": ["string", "null"] },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "amount_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "skus": { "type": "array", "items": { "type": "string" } },
+          "return_to_stock": { "type": "boolean" },
+          "reason": { "type": ["string", "null"] },
+          "return_status": { "type": ["string", "null"] },
+          "a_to_z": { "type": ["boolean", "null"] },
+          "claim_deadline_estimate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "order_id",
+          "order_ref",
+          "provider",
+          "channel_account_id",
+          "channel_account_name",
+          "company_id",
+          "at",
+          "amount_pence",
+          "vat_pence",
+          "skus",
+          "return_to_stock",
+          "reason",
+          "return_status",
+          "a_to_z",
+          "claim_deadline_estimate"
+        ],
         "additionalProperties": false
       },
       "ConsoleWorkspace": {
@@ -10656,6 +11925,771 @@
             "description": "Default Response",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/AllocationResult" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/orders": {
+      "get": {
+        "operationId": "listOrders",
+        "summary": "List orders across channels and permitted companies",
+        "parameters": [
+          {
+            "schema": { "default": 1, "type": "integer", "minimum": 1, "maximum": 500 },
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "description": "Page number, from 1 to 500"
+          },
+          {
+            "schema": { "default": 50, "type": "number" },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Rows per page: 20, 50, 100 (default 50)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "company_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "channel_account_id",
+            "required": false
+          },
+          {
+            "schema": { "$ref": "#/components/schemas/OrderStatusInput" },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "enum": ["today", "overdue"] },
+            "in": "query",
+            "name": "ship_by",
+            "required": false
+          },
+          {
+            "schema": { "$ref": "#/components/schemas/OrderFlagInput" },
+            "in": "query",
+            "name": "flag",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "in": "query",
+            "name": "q",
+            "required": false
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/OrderRow" }
+                    },
+                    "page": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "total": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    "totalCapped": { "type": "boolean" }
+                  },
+                  "required": ["items", "page", "limit", "total", "totalCapped"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/orders/search": {
+      "post": {
+        "operationId": "searchOrders",
+        "summary": "Search orders by buyer name or postcode",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "buyer_name": { "type": "string", "minLength": 2, "maxLength": 100 },
+                  "buyer_postcode": { "type": "string", "minLength": 2, "maxLength": 10 }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": { "default": 1, "type": "integer", "minimum": 1, "maximum": 500 },
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "description": "Page number, from 1 to 500"
+          },
+          {
+            "schema": { "default": 50, "type": "number" },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Rows per page: 20, 50, 100 (default 50)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "company_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "channel_account_id",
+            "required": false
+          },
+          {
+            "schema": { "$ref": "#/components/schemas/OrderStatusInput" },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "enum": ["today", "overdue"] },
+            "in": "query",
+            "name": "ship_by",
+            "required": false
+          },
+          {
+            "schema": { "$ref": "#/components/schemas/OrderFlagInput" },
+            "in": "query",
+            "name": "flag",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "in": "query",
+            "name": "q",
+            "required": false
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/OrderRow" }
+                    },
+                    "page": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "total": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    "totalCapped": { "type": "boolean" }
+                  },
+                  "required": ["items", "page", "limit", "total", "totalCapped"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/orders/export": {
+      "get": {
+        "operationId": "exportOrders",
+        "summary": "Export orders as CSV (no customer details)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "company_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "channel_account_id",
+            "required": false
+          },
+          {
+            "schema": { "$ref": "#/components/schemas/OrderStatusInput" },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "enum": ["today", "overdue"] },
+            "in": "query",
+            "name": "ship_by",
+            "required": false
+          },
+          {
+            "schema": { "$ref": "#/components/schemas/OrderFlagInput" },
+            "in": "query",
+            "name": "flag",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "in": "query",
+            "name": "q",
+            "required": false
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary", "description": "File bytes" }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{orderId}": {
+      "get": {
+        "operationId": "getOrder",
+        "summary": "Order detail: lines, money, VAT groups, history, refunds and notes",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "orderId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OrderDetail" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{orderId}/customer": {
+      "post": {
+        "operationId": "viewOrderCustomer",
+        "summary": "Show the buyer's full details (logged)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "orderId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OrderCustomer" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{orderId}/notes": {
+      "put": {
+        "operationId": "setOrderNotes",
+        "summary": "Save the internal notes on an order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "notes": { "type": "string", "maxLength": 2000 } },
+                "required": ["notes"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "orderId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notes": { "type": ["string", "null"] },
+                    "notes_updated_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    }
+                  },
+                  "required": ["notes", "notes_updated_at"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/returns": {
+      "get": {
+        "operationId": "listReturns",
+        "summary": "Refunds and returns from every channel, newest first (read-only)",
+        "parameters": [
+          {
+            "schema": { "default": 1, "type": "integer", "minimum": 1, "maximum": 500 },
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "description": "Page number, from 1 to 500"
+          },
+          {
+            "schema": { "default": 50, "type": "number" },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Rows per page: 20, 50, 100 (default 50)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "company_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "channel_account_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ReturnRow" }
+                    },
+                    "page": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "total": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    "totalCapped": { "type": "boolean" }
+                  },
+                  "required": ["items", "page", "limit", "total", "totalCapped"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/order-groups/{groupId}/dismiss": {
+      "post": {
+        "operationId": "dismissOrderGroup",
+        "summary": "Dismiss a same-buyer group as not the same buyer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "reason": { "type": "string", "minLength": 1, "maxLength": 500 } },
+                "required": ["reason"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "groupId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/order-groups/{groupId}/members/{orderId}/remove": {
+      "post": {
+        "operationId": "removeOrderGroupMember",
+        "summary": "Remove one order from its same-buyer group",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "reason": { "type": "string", "minLength": 1, "maxLength": 500 } },
+                "required": ["reason"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "groupId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "orderId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "orders",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OrderGroup" } }
             }
           },
           "4XX": {
