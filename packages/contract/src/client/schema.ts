@@ -2444,6 +2444,7 @@ export interface components {
     Listing: {
       /** Format: uuid */
       channel_account_id: string;
+      channel_account_name: string | null;
       /** Format: date-time */
       discovered_at: string;
       external_id: string;
@@ -2464,6 +2465,7 @@ export interface components {
     ListingInput: {
       /** Format: uuid */
       channel_account_id: string;
+      channel_account_name: string | null;
       /** Format: date-time */
       discovered_at: string;
       external_id: string;
@@ -2712,6 +2714,7 @@ export interface components {
             type: 'order';
           }
         | {
+            name: string | null;
             /** @constant */
             type: 'user';
             user_id: string | null;
@@ -2749,6 +2752,7 @@ export interface components {
             type: 'order';
           }
         | {
+            name: string | null;
             /** @constant */
             type: 'user';
             user_id: string | null;
@@ -3064,6 +3068,7 @@ export interface components {
     SkuListing: {
       /** Format: uuid */
       channel_account_id: string;
+      channel_account_name: string | null;
       external_id: string;
       external_sku: string;
       /** Format: uuid */
@@ -3074,6 +3079,7 @@ export interface components {
     SkuListingInput: {
       /** Format: uuid */
       channel_account_id: string;
+      channel_account_name: string | null;
       external_id: string;
       external_sku: string;
       /** Format: uuid */
@@ -3179,6 +3185,7 @@ export interface components {
       capped_by_stock: boolean;
       /** Format: uuid */
       channel_account_id: string;
+      channel_account_name: string | null;
       channel_qty: number | null;
       external_id: string;
       external_sku: string;
@@ -3210,6 +3217,7 @@ export interface components {
       capped_by_stock: boolean;
       /** Format: uuid */
       channel_account_id: string;
+      channel_account_name: string | null;
       channel_qty: number | null;
       external_id: string;
       external_sku: string;

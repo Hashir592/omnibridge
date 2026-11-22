@@ -713,12 +713,21 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
+          "channel_account_name": { "type": ["string", "null"] },
           "provider": { "$ref": "#/components/schemas/ProviderInput" },
           "external_sku": { "type": "string" },
           "external_id": { "type": "string" },
           "title": { "type": ["string", "null"] }
         },
-        "required": ["id", "channel_account_id", "provider", "external_sku", "external_id", "title"]
+        "required": [
+          "id",
+          "channel_account_id",
+          "channel_account_name",
+          "provider",
+          "external_sku",
+          "external_id",
+          "title"
+        ]
       },
       "MasterSkuInput": {
         "type": "object",
@@ -932,6 +941,7 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
+          "channel_account_name": { "type": ["string", "null"] },
           "provider": { "$ref": "#/components/schemas/ProviderInput" },
           "external_sku": { "type": "string" },
           "external_id": { "type": "string" },
@@ -976,6 +986,7 @@
         "required": [
           "id",
           "channel_account_id",
+          "channel_account_name",
           "provider",
           "external_sku",
           "external_id",
@@ -1833,6 +1844,7 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
+          "channel_account_name": { "type": ["string", "null"] },
           "provider": { "$ref": "#/components/schemas/ProviderInput" },
           "external_sku": { "type": "string" },
           "external_id": { "type": "string" },
@@ -1903,6 +1915,7 @@
         "required": [
           "id",
           "channel_account_id",
+          "channel_account_name",
           "provider",
           "external_sku",
           "external_id",
@@ -2124,9 +2137,10 @@
                       },
                       { "type": "null" }
                     ]
-                  }
+                  },
+                  "name": { "type": ["string", "null"] }
                 },
-                "required": ["type", "user_id"]
+                "required": ["type", "user_id", "name"]
               },
               {
                 "type": "object",
@@ -3177,6 +3191,7 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
+          "channel_account_name": { "type": ["string", "null"] },
           "provider": { "$ref": "#/components/schemas/Provider" },
           "external_sku": { "type": "string" },
           "external_id": { "type": "string" },
@@ -3185,6 +3200,7 @@
         "required": [
           "id",
           "channel_account_id",
+          "channel_account_name",
           "provider",
           "external_sku",
           "external_id",
@@ -3404,6 +3420,7 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
+          "channel_account_name": { "type": ["string", "null"] },
           "provider": { "$ref": "#/components/schemas/Provider" },
           "external_sku": { "type": "string" },
           "external_id": { "type": "string" },
@@ -3449,6 +3466,7 @@
         "required": [
           "id",
           "channel_account_id",
+          "channel_account_name",
           "provider",
           "external_sku",
           "external_id",
@@ -4349,6 +4367,7 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
+          "channel_account_name": { "type": ["string", "null"] },
           "provider": { "$ref": "#/components/schemas/Provider" },
           "external_sku": { "type": "string" },
           "external_id": { "type": "string" },
@@ -4421,6 +4440,7 @@
         "required": [
           "id",
           "channel_account_id",
+          "channel_account_name",
           "provider",
           "external_sku",
           "external_id",
@@ -4645,9 +4665,10 @@
                       },
                       { "type": "null" }
                     ]
-                  }
+                  },
+                  "name": { "type": ["string", "null"] }
                 },
-                "required": ["type", "user_id"],
+                "required": ["type", "user_id", "name"],
                 "additionalProperties": false
               },
               {

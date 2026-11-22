@@ -97,6 +97,8 @@ export const SkuListingSchema = z
   .object({
     id: z.uuid(),
     channel_account_id: z.uuid(),
+    /** The account's name; null when the user cannot see its company (ARCHITECTURE 6.1). */
+    channel_account_name: z.string().nullable(),
     provider: ProviderSchema,
     external_sku: z.string(),
     external_id: z.string(),
@@ -210,6 +212,8 @@ export const ListingSchema = z
   .object({
     id: z.uuid(),
     channel_account_id: z.uuid(),
+    /** The account's name; null when the user cannot see its company (ARCHITECTURE 6.1). */
+    channel_account_name: z.string().nullable(),
     provider: ProviderSchema,
     external_sku: z.string(),
     /** Listing ID, ASIN or item ID. */

@@ -63,6 +63,8 @@ export const StockListingSchema = z
   .object({
     id: z.uuid(),
     channel_account_id: z.uuid(),
+    /** The account's name; null when the user cannot see its company (ARCHITECTURE 6.1). */
+    channel_account_name: z.string().nullable(),
     provider: ProviderSchema,
     external_sku: z.string(),
     external_id: z.string(),
@@ -144,7 +146,12 @@ export const MovementSchema = z
      */
     source: z.discriminatedUnion('type', [
       z.object({ type: z.literal('order'), ref: z.string().nullable() }),
-      z.object({ type: z.literal('user'), user_id: z.uuid().nullable() }),
+      z.object({
+        type: z.literal('user'),
+        user_id: z.uuid().nullable(),
+        /** INV-5: who moved it; null for a removed user. */
+        name: z.string().nullable(),
+      }),
       z.object({ type: z.literal('system') }),
     ]),
     /** The writes queued for listings after this movement, by their result now (INV-5). */

@@ -91,6 +91,7 @@ function listing(l: StockListingView) {
   return {
     id: l.id,
     channel_account_id: l.channelAccountId,
+    channel_account_name: l.channelAccountName,
     provider: l.provider,
     external_sku: l.externalSku,
     external_id: l.externalId,
@@ -151,13 +152,13 @@ function movement(m: StockMovement) {
     // An order's reference arrives with M10's orders; a hidden company's never shows (6.1).
     source: ORDER_SOURCES.has(m.sourceKind)
       ? { type: 'order' as const, ref: null }
-      : { type: 'user' as const, user_id: m.actorUserId },
+      : { type: 'user' as const, user_id: m.actorUserId, name: m.actorName },
     pushes: m.pushes,
   };
 }
 
 function sourceLabel(m: StockMovement): string {
-  if (!ORDER_SOURCES.has(m.sourceKind)) return 'user';
+  if (!ORDER_SOURCES.has(m.sourceKind)) return m.actorName ?? 'a removed user';
   return m.companyVisible ? 'order' : 'another company';
 }
 

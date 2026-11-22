@@ -105,6 +105,8 @@ export interface StockMovement {
   supplier: string | null;
   sourceKind: 'order_line' | 'refund_line' | 'user' | 'stock_take' | 'allocation';
   actorUserId: string | null;
+  /** INV-5: who moved it; null for a removed user. */
+  actorName: string | null;
   /** The movement's order is in a company this user can see (or there is no order). */
   companyVisible: boolean;
   pushes: { pending: number; sent: number; held: number; failed: number };
@@ -115,6 +117,8 @@ type PushResult = 'pending' | 'sent' | 'held' | 'failed';
 export interface StockListingView {
   id: string;
   channelAccountId: string;
+  /** Null when the user cannot see the account's company (ARCHITECTURE 6.1). */
+  channelAccountName: string | null;
   provider: ChannelProvider;
   externalSku: string;
   externalId: string;
@@ -1396,6 +1400,7 @@ export class StockEngine {
       provider: ChannelProvider;
       external_sku: string;
       external_id: string;
+      account_name: string | null;
       title: string | null;
       fulfilment: 'mfn' | 'fba' | null;
       buffer_override: string | null;
@@ -1414,7 +1419,7 @@ export class StockEngine {
       push_paused: string | null;
       push_refused: number | null;
     }>`
-      SELECT l.id, l.channel_account_id, l.provider, l.external_sku, l.external_id, l.title,
+      SELECT l.id, l.channel_account_id, acc.display_name AS account_name, l.provider, l.external_sku, l.external_id, l.title,
              l.fulfilment, l.buffer_override, cs.buffer AS account_buffer, s.pack_size AS pack,
              l.stock_mode, l.manual_qty, l.manual_sold, l.manual_set_at, l.manual_set_by,
              l.last_sent_qty, l.channel_qty, l.sync_failed_at,
@@ -1424,6 +1429,8 @@ export class StockEngine {
         JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
         LEFT JOIN app.channel_stock_settings cs
           ON cs.workspace_id = l.workspace_id AND cs.channel_account_id = l.channel_account_id
+        LEFT JOIN app.channel_accounts acc
+          ON acc.workspace_id = l.workspace_id AND acc.id = l.channel_account_id
         LEFT JOIN LATERAL (
           SELECT lw.created_at, w.state, w.paused_reason,
                  coalesce(jsonb_array_length(w.result -> 'refused'), 0) AS refused
@@ -1458,6 +1465,7 @@ export class StockEngine {
       return {
         id: r.id,
         channelAccountId: r.channel_account_id,
+        channelAccountName: r.account_name,
         provider: r.provider,
         externalSku: r.external_sku,
         externalId: r.external_id,
@@ -1605,6 +1613,7 @@ interface MovementSql {
   supplier: string | null;
   source_kind: StockMovement['sourceKind'];
   actor_user_id: string | null;
+  actor_name: string | null;
   company_visible: boolean;
   pending: string;
   sent: string;
@@ -1616,7 +1625,7 @@ function movementSelect(ctx: TenantContext) {
   return sql`
     SELECT m.id, m.created_at, m.master_sku_id, s.sku, m.kind, m.on_hand_change,
            m.reserved_change, m.on_hand_after, m.reason, m.note, m.supplier, m.source_kind,
-           m.actor_user_id,
+           m.actor_user_id, u.name AS actor_name,
            (m.order_company_id IS NULL OR m.order_company_id = ANY (
               coalesce(nullif(current_setting('app.company_ids', true), '')::uuid[],
                        '{}'::uuid[]))) AS company_visible,
@@ -1624,6 +1633,7 @@ function movementSelect(ctx: TenantContext) {
            coalesce(p.held, 0) AS held, coalesce(p.failed, 0) AS failed
       FROM app.stock_movements m
       JOIN app.master_skus s ON s.workspace_id = m.workspace_id AND s.id = m.master_sku_id
+      LEFT JOIN app.users u ON u.id = m.actor_user_id
       LEFT JOIN LATERAL (
         SELECT count(*) FILTER (WHERE w.state IN ('pending', 'sending')
                                   AND w.paused_reason IS NULL) AS pending,
@@ -1673,6 +1683,7 @@ function toMovement(r: MovementSql): StockMovement {
     supplier: r.supplier,
     sourceKind: r.source_kind,
     actorUserId: r.actor_user_id,
+    actorName: r.actor_name,
     companyVisible: r.company_visible,
     pushes: { pending: n(r.pending), sent: n(r.sent), held: n(r.held), failed: n(r.failed) },
   };

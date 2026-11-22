@@ -109,6 +109,7 @@ export function resetCatalogueMock(): void {
       listings.push({
         id: uid(l.id),
         channel_account_id: l.channelAccountId,
+        channel_account_name: null,
         provider: l.channel,
         external_sku: l.externalSku,
         external_id: l.externalId,
@@ -126,6 +127,7 @@ export function resetCatalogueMock(): void {
     listings.push({
       id: uid(u.id),
       channel_account_id: u.channelAccountId,
+      channel_account_name: null,
       provider: u.channel,
       external_sku: u.externalSku,
       external_id: u.externalId,
@@ -230,6 +232,7 @@ function detail(s: CatalogueSku): MasterSku {
       .map((l) => ({
         id: l.id,
         channel_account_id: l.channel_account_id,
+        channel_account_name: l.channel_account_name,
         provider: l.provider,
         external_sku: l.external_sku,
         external_id: l.external_id,

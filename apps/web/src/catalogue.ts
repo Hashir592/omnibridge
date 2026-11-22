@@ -116,6 +116,7 @@ function detail(s: SkuDetail) {
     listings: s.listings.map((l) => ({
       id: l.id,
       channel_account_id: l.channelAccountId,
+      channel_account_name: l.channelAccountName,
       provider: l.provider,
       external_sku: l.externalSku,
       external_id: l.externalId,
@@ -129,6 +130,7 @@ function listing(l: Listing) {
   return {
     id: l.id,
     channel_account_id: l.channelAccountId,
+    channel_account_name: l.channelAccountName,
     provider: l.provider,
     external_sku: l.externalSku,
     external_id: l.externalId,
