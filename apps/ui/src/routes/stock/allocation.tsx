@@ -23,7 +23,7 @@ import { ConfirmDialog } from '../../kit/Dialog.tsx';
 import { EmptyState } from '../../kit/states.tsx';
 import { cn } from '../../lib/cn.ts';
 import { formatInt } from '../../lib/format.ts';
-import { AccountCell, InlineError } from '../catalogue/parts.tsx';
+import { AccountCell, InlineError, accountLabel } from '../catalogue/parts.tsx';
 import { refusalText } from '../catalogue/rules.ts';
 import { ListingBufferDialog } from './dialogs.tsx';
 import { LastPush } from './parts.tsx';
@@ -167,8 +167,7 @@ export function StockByChannel({ d }: { d: StockDetail }) {
     }
   };
 
-  const accountName = (l: Pick<StockListing, 'channel_account_id' | 'provider'>) =>
-    session?.channelAccounts.find((a) => a.id === l.channel_account_id)?.name ?? l.provider;
+  const accountName = accountLabel;
   const allListings = [...d.listings, ...bundleListings.flatMap((b) => b.listings)];
 
   if (d.listings.length === 0)

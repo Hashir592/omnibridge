@@ -60,14 +60,17 @@ export function InlineError({ children }: { children: ReactNode }) {
   );
 }
 
+/** The account's name, or a plain stand-in when the user cannot see its company (6.1). */
+export function accountLabel(l: { channel_account_name: string | null }): string {
+  return l.channel_account_name ?? 'Another company’s account';
+}
+
 /** Provider glyph and account name; a member may not hold the account's company (6.1). */
 export function AccountCell({
   listing,
 }: {
-  listing: Pick<CatalogueListing, 'provider' | 'channel_account_id'>;
+  listing: Pick<CatalogueListing, 'provider' | 'channel_account_name'>;
 }) {
-  const { session } = useAppState();
-  const name = session?.channelAccounts.find((a) => a.id === listing.channel_account_id)?.name;
   const channel = listing.provider === 'amazon_ads' ? 'amazon' : listing.provider;
   return (
     <span className="grid min-w-0 grid-cols-[18px_minmax(0,1fr)] items-center gap-x-2">
@@ -76,7 +79,7 @@ export function AccountCell({
       ) : (
         <span className="col-span-2 text-13">{listing.provider}</span>
       )}
-      <Sub className="col-start-2">{name ?? 'Another company’s account'}</Sub>
+      <Sub className="col-start-2">{accountLabel(listing)}</Sub>
     </span>
   );
 }

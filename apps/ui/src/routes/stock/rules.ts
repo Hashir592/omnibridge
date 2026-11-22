@@ -171,7 +171,8 @@ export function signed(n: number): string {
 export function sourceText(m: Movement['source'], me: string | undefined): string {
   if (m.type === 'order') return m.ref === null ? 'Order of another company' : `Order ${m.ref}`;
   if (m.type === 'system') return 'OmniBridge';
-  return m.user_id !== null && m.user_id === me ? 'You' : 'A team member';
+  if (m.user_id !== null && m.user_id === me) return 'You';
+  return m.name ?? 'A removed user';
 }
 
 /** The pushes a movement queued, by their result now (INV-5). */

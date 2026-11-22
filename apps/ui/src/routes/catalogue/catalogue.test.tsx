@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ApiReply, CsvImportReport, VatRate } from '../../auth/api.ts';
 import { editBody } from './forms.tsx';
 import { fulfilmentText, mappedParam } from './listings.tsx';
-import { ImportCsvDialog } from './parts.tsx';
+import { ImportCsvDialog, accountLabel } from './parts.tsx';
 import {
   csvErrorText,
   currentOf,
@@ -181,6 +181,13 @@ describe('listings and mapping', () => {
     expect(mappedParam('unmapped')).toBe('false');
     expect(mappedParam('mapped')).toBe('true');
     expect(mappedParam('all')).toBeUndefined();
+  });
+
+  it('[CAT-5] names the account, or "Another company’s account" when the user cannot see it', () => {
+    expect(accountLabel({ channel_account_name: 'eBay · northfield-trading' })).toBe(
+      'eBay · northfield-trading',
+    );
+    expect(accountLabel({ channel_account_name: null })).toBe('Another company’s account');
   });
 
   it('[CAT-5] names Amazon fulfilment and eBay Inventory API listings', () => {
