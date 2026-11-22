@@ -9,7 +9,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M07 built** (`docs/reviews/M07-end-report.md`): #131, #133, #134 (critical; S4 FIX REQUIRED, `docs/reviews/M07-T0702-findings.md`), #137, #138. The Major F-M07-T0702-01 is fixed in #141; the Minor goes to M15.
 - **M08 built** (`docs/reviews/M08-end-report.md`): contract #139 and T-0801 #141, merged.
 - **M09 built** (`docs/reviews/M09-end-report.md`): contract #142 and T-0901 #143, merged.
-- **S4:** the M07 + M08 milestone was BLOCKED on F-M08-end-01 (`docs/reviews/M08-end-findings.md`), fixed with both Minors in #146. The M09 + M10 milestone confirms the fix. The T-0901 critical review is still to run (`docs/handoffs/20261122-0300-S3-to-S4.md`).
+- **S4:** the M07 + M08 milestone was BLOCKED on F-M08-end-01 (`docs/reviews/M08-end-findings.md`), fixed with both Minors in #146. The M09 + M10 milestone confirms the fix. **Review:** T-0901 critical review FIX REQUIRED (`docs/reviews/M09-T0901-findings.md`): Major F-M09-T0901-01 (release and dispatch must work from the line's own reserve, also across a remap), fixed in M10's first commit; 2 Minors.
 - **Next (S3):** M10, when Hashir pastes it.
 - **S2:** T-0316 catalogue screens built (PR, auto-merge; S3 ask for `channel_account_name` in `docs/handoffs/20261122-0131-S2-to-S3.md`). Next: T-0317 stock screens (M09 client; note `docs/handoffs/20261122-0300-S3-to-S2.md`).
 
