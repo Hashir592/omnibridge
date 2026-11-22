@@ -301,7 +301,10 @@ async function ebayJson(res: Response): Promise<unknown> {
   return readJson('ebay', res);
 }
 
-export function createEbayAdapter(options: EbayAdapterOptions): ChannelAdapter &
+export function createEbayAdapter(options: EbayAdapterOptions): Omit<
+  ChannelAdapter,
+  'ordersUpdatedSince'
+> &
   OrderSource & {
     exchangeCode(code: string): Promise<TokenGrant>;
   } {

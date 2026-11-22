@@ -554,7 +554,7 @@ describe('order ingest (T-1001)', () => {
     ]);
   });
 
-  it('[VAT-5][FA-11] a refund recorded while a line was provisional is re-based when the listing is mapped', async () => {
+  it('[VAT-5][CAT-6] a refund recorded while a line was provisional is re-based when the listing is mapped (FA-11)', async () => {
     const w = await world();
     const o = order({
       lines: [{ lineId: 'L1', sku: 'NEW-ITEM', quantity: 1, title: null, linePrice: p(1200) }],

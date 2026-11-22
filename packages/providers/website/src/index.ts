@@ -204,7 +204,7 @@ const StockV1 = defineParser('website', 'stock', 1, z.object({ updated: z.array(
 export function createWebsiteAdapter(options: {
   http: ProviderHttp;
   now?: () => Date;
-}): ChannelAdapter & OrderSource {
+}): Omit<ChannelAdapter, 'ordersUpdatedSince'> & OrderSource {
   const now = options.now ?? (() => new Date());
   const base = options.http.base('website', 'api');
   return {
