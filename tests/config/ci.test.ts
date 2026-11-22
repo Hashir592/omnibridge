@@ -52,7 +52,7 @@ describe('CI workflow and gate', () => {
   it('[SEC-4] the required check keeps its name and needs every gate job', () => {
     expect(workflow).toContain('name: verify (full gate)');
     expect(workflow).toMatch(
-      /needs: \[changes, docs, static, tests, ui, stack\]\n\s+if: always\(\)/,
+      /needs: \[changes, docs, static, tests, ui, stack, semgrep\]\n\s+if: always\(\)/,
     );
     expect(workflow).toContain('run: bash scripts/verify.sh --docs');
     expect(workflow).toContain("if: needs.changes.outputs.lane == 'docs'");
@@ -60,6 +60,23 @@ describe('CI workflow and gate', () => {
     // A push to main is always the full lane, and its run is never cancelled by the next merge.
     expect(workflow).toContain('echo "lane=full" >> "$GITHUB_OUTPUT"');
     expect(workflow).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
+  });
+
+  // ADR-079 (0): a gate job left out of verify's needs could go red without blocking a merge.
+  it('[SEC-16] every gate job, Semgrep included, is in verify (full gate) needs', () => {
+    const jobsBlock = workflow.slice(workflow.indexOf('\njobs:\n'));
+    const jobIds = [...jobsBlock.matchAll(/^ {2}([\w-]+):\s*$/gm)].map((m) => m[1] ?? '');
+    expect(jobIds).toContain('semgrep');
+    const needs = (/needs: \[([^\]]*)\]\n\s+if: always\(\)/.exec(workflow)?.[1] ?? '')
+      .split(',')
+      .map((job) => job.trim())
+      .filter(Boolean);
+    expect([...needs].sort()).toEqual(jobIds.filter((job) => job !== 'verify').sort());
+    // On a pull request Semgrep must be success; only a push (where it does not run) may skip it.
+    expect(workflow).toContain('SEMGREP: ${{ needs.semgrep.result }}');
+    expect(workflow).toMatch(
+      /if \[\[ "\$EVENT" == pull_request \]\]; then\n\s+\[\[ "\$SEMGREP" == success \]\] \|\| exit 1/,
+    );
   });
 
   // ADR-056
