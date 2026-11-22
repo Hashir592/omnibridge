@@ -105,7 +105,7 @@ export function listingsDiscoverHandler(deps: {
   /** How long one scan may read before it stops unconcluded; default 25 minutes. */
   maxRunMs?: number;
   /** INV-7 (M09): after a complete scan, compare each listing's channel quantity with its target. */
-  reconcile?: (ctx: TenantContext, channelAccountId: string, scanStartedAt: Date) => Promise<void>;
+  reconcile?: (workspaceId: string, channelAccountId: string, scanStartedAt: Date) => Promise<void>;
   logger: Logger;
 }): PhasedHandler<Record<string, never>, ScanResult> {
   const now = deps.ports.now ?? (() => new Date());
@@ -123,8 +123,11 @@ export function listingsDiscoverHandler(deps: {
       const factory = deps.adapters[provider];
       if (factory === undefined) return { skipped: 'disconnected' };
       const adapter = await factory();
+      // Set when this scan concluded: reconciliation then runs after it, in short transactions
+      // of its own (one per SKU), never inside the scan's (F-M09-T0901-03).
+      let concludedAt: Date | undefined;
       try {
-        return await runListingScan(
+        const result = await runListingScan(
           deps.ports,
           {
             provider,
@@ -151,7 +154,7 @@ export function listingsDiscoverHandler(deps: {
               const ended = await deps.catalogue.concludeScan(ctx, accountId, startedAt, now());
               if (ended === undefined) return false;
               if (ended.length > 0) await deps.ended?.onEnded(ctx, ended);
-              await deps.reconcile?.(ctx, accountId, startedAt);
+              concludedAt = startedAt;
               return true;
             },
           },
@@ -161,6 +164,19 @@ export function listingsDiscoverHandler(deps: {
             deadline: new Date(now().getTime() + (deps.maxRunMs ?? DISCOVERY_MAX_RUN_MS)),
           },
         );
+        if (concludedAt !== undefined) {
+          // The scan itself concluded: a reconcile failure is logged, never a reason to read
+          // every page from the provider again. The next nightly run reconciles.
+          try {
+            await deps.reconcile?.(workspaceId, channelAccountId, concludedAt);
+          } catch (err) {
+            deps.logger.error(
+              { event: 'stock.reconcile_failed', workspaceId, channelAccountId, err },
+              'reconciliation failed after a complete listing scan',
+            );
+          }
+        }
+        return result;
       } catch (err) {
         if (err instanceof ProviderParserError) {
           deps.logger.error(

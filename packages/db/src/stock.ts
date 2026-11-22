@@ -103,7 +103,7 @@ export interface StockMovement {
   reason: 'damaged' | 'count_correction' | 'lost' | 'other' | null;
   note: string | null;
   supplier: string | null;
-  sourceKind: 'order_line' | 'refund_line' | 'user' | 'stock_take' | 'allocation';
+  sourceKind: 'order_line' | 'refund_line' | 'user' | 'stock_take' | 'allocation' | 'remap';
   actorUserId: string | null;
   /** INV-5: who moved it; null for a removed user. */
   actorName: string | null;
@@ -251,6 +251,7 @@ export class StockEngine {
         kind: 'reserve',
         sourceKind: 'order_line',
         sourceId: move.orderLineId,
+        orderLineId: move.orderLineId,
         onHand: 0,
         reserved: qty,
         listingId: move.listingId,
@@ -291,7 +292,11 @@ export class StockEngine {
     });
   }
 
-  /** Order cancelled: release, and manual_sold goes back down, never below 0 (C7.1). */
+  /**
+   * Order cancelled: the line's own live reservation is released, wherever it is now (a remap
+   * moves it). No live reservation (never reserved, already released or dispatched): nothing
+   * changes. manual_sold goes back down, never below 0 (C7.1).
+   */
   async release(ctx: TenantContext, move: OrderLineMove): Promise<{ applied: boolean }> {
     return this.#orderMove(ctx, move, 'release', async (trx, now) => {
       await sql`
@@ -311,7 +316,11 @@ export class StockEngine {
     });
   }
 
-  /** Order dispatched: on hand and reserved both down (INV-3). */
+  /**
+   * Order dispatched (INV-3): on hand down, and the line's own live reservation released. A line
+   * with no live reservation (first seen shipped, or cancelled first) moves on hand only, so other
+   * orders' reserved units are never taken (F-M09-T0901-01).
+   */
   async dispatch(ctx: TenantContext, move: OrderLineMove): Promise<{ applied: boolean }> {
     return this.#orderMove(ctx, move, 'dispatch');
   }
@@ -566,11 +575,22 @@ export class StockEngine {
       if (change.masterSkuId === null) return;
       const sku = await this.#listingSku(trx, ctx, change.listingId);
       if (sku === undefined) return;
+      if (change.previousMasterSkuId !== null) {
+        await this.#moveOpenReserves(
+          trx,
+          ctx,
+          change.listingId,
+          change.previousMasterSkuId,
+          sku,
+          now,
+        );
+      }
       for (const line of (await this.#demand?.openLines(ctx, change.listingId)) ?? []) {
         const qty = units(line.quantity) * sku.pack;
         const base = {
           sourceKind: 'order_line' as const,
           sourceId: line.orderLineId,
+          orderLineId: line.orderLineId,
           listingId: change.listingId,
           companyId: line.companyId,
           now,
@@ -581,12 +601,13 @@ export class StockEngine {
           onHand: 0,
           reserved: qty,
         });
+        // A line already shipped goes through the same line-based dispatch (F-M09-T0901-01).
         if (line.dispatched) {
-          await this.#move(trx, ctx, sku.component, {
-            ...base,
-            kind: 'dispatch',
-            onHand: -qty,
-            reserved: -qty,
+          await this.dispatch(ctx, {
+            orderLineId: line.orderLineId,
+            listingId: change.listingId,
+            quantity: line.quantity,
+            companyId: line.companyId,
           });
         }
       }
@@ -636,6 +657,9 @@ export class StockEngine {
       const row = rows[0];
       if (row === undefined) return;
       const now = this.#now();
+      // The stock row before the listing row: the order every movement takes (F-M09-T0901-02).
+      const sku = await this.#listingSku(trx, ctx, row.listing_id);
+      if (sku !== undefined) await this.#lock(trx, ctx, sku.component, now);
       const record = { kind: 'listing', id: row.listing_id };
       if (row.state === 'sent' && n(row.refused) === 0) {
         const { numAffectedRows } = await sql`
@@ -706,14 +730,40 @@ export class StockEngine {
    * two runs in a row raises the notice.
    */
   async reconcile(
-    ctx: TenantContext,
+    run: <T>(fn: (ctx: TenantContext) => Promise<T>) => Promise<T>,
     accountId: string,
     scanStartedAt: Date,
   ): Promise<{ checked: number; drifted: number }> {
-    return this.#tx(ctx, async (trx, ctx) => {
-      const now = this.#now();
-      const quiet = new Date(scanStartedAt.getTime() - 15 * 60_000);
-      const { rows } = await sql<{ id: string; component: string; channel_qty: string }>`
+    // One short transaction to read, then one per SKU, so no SKU's stock row waits on the whole
+    // account's run (F-M09-T0901-03). `run` opens each (the worker's tenancy).
+    const rows = await run((outer) =>
+      this.#tx(outer, (trx, ctx) => this.#driftCandidates(trx, ctx, accountId, scanStartedAt)),
+    );
+    const byComponent = new Map<string, { id: string; channelQty: number }[]>();
+    for (const r of rows) {
+      const list = byComponent.get(r.component) ?? [];
+      list.push({ id: r.id, channelQty: n(r.channel_qty) });
+      byComponent.set(r.component, list);
+    }
+    let drifted = 0;
+    for (const [component, listings] of byComponent) {
+      drifted += await run((outer) =>
+        this.#tx(outer, (trx, ctx) =>
+          this.#reconcileComponent(trx, ctx, accountId, component, listings),
+        ),
+      );
+    }
+    return { checked: rows.length, drifted };
+  }
+
+  async #driftCandidates(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    accountId: string,
+    scanStartedAt: Date,
+  ) {
+    const quiet = new Date(scanStartedAt.getTime() - 15 * 60_000);
+    const { rows } = await sql<{ id: string; component: string; channel_qty: string }>`
         SELECT l.id, coalesce(s.bundle_component_id, s.id) AS component, l.channel_qty
           FROM app.listings l
           JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
@@ -733,56 +783,59 @@ export class StockEngine {
                             WHERE lw.workspace_id = l.workspace_id AND lw.listing_id = l.id
                               AND sw.sent_at >= ${scanStartedAt})
          ORDER BY component, l.id`.execute(trx);
-      let drifted = 0;
-      const byComponent = new Map<string, { id: string; channelQty: number }[]>();
-      for (const r of rows) {
-        const list = byComponent.get(r.component) ?? [];
-        list.push({ id: r.id, channelQty: n(r.channel_qty) });
-        byComponent.set(r.component, list);
-      }
-      for (const [component, listings] of byComponent) {
-        const level = await this.#lock(trx, ctx, component, now);
-        const targets = await this.#targets(trx, ctx, component, level);
-        const off = new Set<string>();
-        for (const l of listings) {
-          const t = targets.get(l.id);
-          if (t === undefined) continue;
-          if (t.target === l.channelQty) {
-            const { numAffectedRows } = await sql`
+    return rows;
+  }
+
+  /** One SKU's part of the reconciliation, in its own transaction. Answers how many drifted. */
+  async #reconcileComponent(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    accountId: string,
+    component: string,
+    listings: readonly { id: string; channelQty: number }[],
+  ): Promise<number> {
+    const now = this.#now();
+    let drifted = 0;
+    const level = await this.#lock(trx, ctx, component, now);
+    const targets = await this.#targets(trx, ctx, component, level);
+    const off = new Set<string>();
+    for (const l of listings) {
+      const t = targets.get(l.id);
+      if (t === undefined) continue;
+      if (t.target === l.channelQty) {
+        const { numAffectedRows } = await sql`
               UPDATE app.listings SET drift_count = 0
                WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${l.id}::uuid
                  AND drift_count > 0`.execute(trx);
-            if (numAffectedRows !== undefined && numAffectedRows > 0n) {
-              await this.#notifier.resolve(ctx, 'inventory.sync_failed', {
-                kind: 'listing_drift',
-                id: l.id,
-              });
-            }
-            continue;
-          }
-          off.add(l.id);
-          drifted += 1;
-          await sql`
+        if (numAffectedRows !== undefined && numAffectedRows > 0n) {
+          await this.#notifier.resolve(ctx, 'inventory.sync_failed', {
+            kind: 'listing_drift',
+            id: l.id,
+          });
+        }
+        continue;
+      }
+      off.add(l.id);
+      drifted += 1;
+      await sql`
             INSERT INTO app.stock_reconciliations
               (workspace_id, id, channel_account_id, listing_id, channel_qty, target, created_at)
             VALUES (${ctx.workspaceId}::uuid, ${randomUUID()}::uuid, ${accountId}::uuid,
                     ${l.id}::uuid, ${l.channelQty}, ${t.target}, ${now})`.execute(trx);
-          const { rows: counted } = await sql<{ drift_count: string }>`
+      const { rows: counted } = await sql<{ drift_count: string }>`
             UPDATE app.listings SET drift_count = drift_count + 1, updated_at = ${now}
              WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${l.id}::uuid
             RETURNING drift_count`.execute(trx);
-          if (n(counted[0]?.drift_count) >= 2) {
-            await this.#notifier.raise(ctx, {
-              type: 'inventory.sync_failed',
-              record: { kind: 'listing_drift', id: l.id },
-              channelAccountId: accountId,
-            });
-          }
-        }
-        if (off.size > 0) await this.#recompute(trx, ctx, component, undefined, now, off);
+      if (n(counted[0]?.drift_count) >= 2) {
+        await this.#notifier.raise(ctx, {
+          type: 'inventory.sync_failed',
+          record: { kind: 'listing_drift', id: l.id },
+          channelAccountId: accountId,
+        });
       }
-      return { checked: rows.length, drifted };
-    });
+    }
+    if (off.size > 0) await this.#recompute(trx, ctx, component, undefined, now, off);
+    return drifted;
   }
 
   /** SAFE-1 bulk stock push: every listing of these accounts gets its target sent now. */
@@ -993,23 +1046,47 @@ export class StockEngine {
     after?: (trx: Transaction<MainDb>, now: Date) => Promise<void>,
   ): Promise<{ applied: boolean }> {
     return this.#tx(ctx, async (trx, ctx) => {
-      const sku = await this.#listingSku(trx, ctx, move.listingId);
-      if (sku === undefined) return { applied: false };
-      const qty = units(move.quantity) * sku.pack;
       const now = this.#now();
-      const moved = await this.#move(trx, ctx, sku.component, {
+      const line = move.orderLineId;
+      // The line's own SKU: where it is reserved now, else where it was first reserved, else (a
+      // line first seen shipped) the listing's mapping. A remap moves a reservation only under
+      // both stock rows' locks, so look, lock, and look again until they agree.
+      const first = await this.#lineHistory(trx, ctx, line);
+      const listing =
+        first.reserveSku === null ? await this.#listingSku(trx, ctx, move.listingId) : undefined;
+      let component = first.live?.component ?? first.reserveSku ?? listing?.component;
+      if (component === undefined) return { applied: false };
+      let live = first.live;
+      for (let tries = 0; tries < 3; tries += 1) {
+        await this.#lock(trx, ctx, component, now);
+        live = (await this.#lineHistory(trx, ctx, line)).live;
+        if (live === undefined || live.component === component) break;
+        component = live.component;
+      }
+      const reserved = live?.component === component ? live.reserved : 0;
+      if (kind === 'release' && reserved === 0) return { applied: false };
+      // A dispatch ships what the line reserved; with nothing reserved, what it first reserved,
+      // or (never reserved) the quantity given in the listing's units.
+      const shipped =
+        reserved > 0
+          ? reserved
+          : first.reservedAtFirst > 0
+            ? first.reservedAtFirst
+            : units(move.quantity) * (listing?.pack ?? 1);
+      const moved = await this.#move(trx, ctx, component, {
         kind,
         sourceKind: 'order_line',
-        sourceId: move.orderLineId,
-        onHand: kind === 'dispatch' ? -qty : 0,
-        reserved: -qty,
+        sourceId: line,
+        orderLineId: line,
+        onHand: kind === 'dispatch' ? -shipped : 0,
+        reserved: -reserved,
         listingId: move.listingId,
         companyId: move.companyId ?? null,
         now,
       });
       if (moved === undefined) return { applied: false };
       await after?.(trx, now);
-      await this.#recompute(trx, ctx, sku.component, moved.id, now);
+      await this.#recompute(trx, ctx, component, moved.id, now);
       return { applied: true };
     });
   }
@@ -1093,6 +1170,8 @@ export class StockEngine {
       userId?: string | null;
       listingId?: string;
       companyId?: string | null;
+      /** The order line this movement belongs to (its live reservation is the sum of these). */
+      orderLineId?: string;
       now: Date;
     },
   ): Promise<{ id: string; onHandAfter: number; reservedAfter: number } | undefined> {
@@ -1106,11 +1185,11 @@ export class StockEngine {
       INSERT INTO app.stock_movements
         (workspace_id, id, master_sku_id, kind, source_kind, source_id, on_hand_change,
          reserved_change, on_hand_after, reserved_after, reason, note, supplier, actor_user_id,
-         listing_id, order_company_id, created_at)
+         listing_id, order_company_id, order_line_id, created_at)
       VALUES (${ctx.workspaceId}::uuid, ${id}::uuid, ${skuId}::uuid, ${m.kind}, ${m.sourceKind},
               ${m.sourceId}, ${m.onHand}, ${reservedChange}, ${onHandAfter}, ${reservedAfter},
               ${m.reason ?? null}, ${m.note ?? null}, ${m.supplier ?? null}, ${m.userId ?? null},
-              ${m.listingId ?? null}, ${m.companyId ?? null}, ${m.now})
+              ${m.listingId ?? null}, ${m.companyId ?? null}, ${m.orderLineId ?? null}, ${m.now})
       ON CONFLICT (workspace_id, source_kind, source_id, kind) DO NOTHING
       RETURNING id`.execute(trx);
     if (rows.length === 0) return undefined;
@@ -1122,6 +1201,111 @@ export class StockEngine {
       trx,
     );
     return { id, onHandAfter, reservedAfter };
+  }
+
+  /**
+   * An order line's stock so far (F-M09-T0901-01): where it is reserved now and how much (the sum
+   * of its reserved changes per SKU), the SKU of its first reserve and what that reserved.
+   */
+  async #lineHistory(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    line: string,
+  ): Promise<{
+    live: { component: string; reserved: number } | undefined;
+    reserveSku: string | null;
+    reservedAtFirst: number;
+  }> {
+    const { rows } = await sql<{
+      master_sku_id: string;
+      reserved: string;
+      first_reserve: string | null;
+      first_at: Date | null;
+    }>`
+      SELECT master_sku_id, sum(reserved_change) AS reserved,
+             (array_agg(reserved_change ORDER BY created_at)
+                FILTER (WHERE kind = 'reserve' AND source_kind = 'order_line'))[1] AS first_reserve,
+             min(created_at) FILTER (WHERE kind = 'reserve' AND source_kind = 'order_line')
+               AS first_at
+        FROM app.stock_movements
+       WHERE workspace_id = ${ctx.workspaceId}::uuid
+         -- Two indexed branches (0047's line index, the unique key), never a scan of the log.
+         AND (order_line_id = ${line}
+              OR (order_line_id IS NULL AND source_kind = 'order_line' AND source_id = ${line}))
+       GROUP BY master_sku_id`.execute(trx);
+    const live = rows.find((r) => n(r.reserved) > 0);
+    const first = rows
+      .filter((r) => r.first_at !== null)
+      .sort((a, b) => (a.first_at?.getTime() ?? 0) - (b.first_at?.getTime() ?? 0))[0];
+    return {
+      live:
+        live === undefined
+          ? undefined
+          : { component: live.master_sku_id, reserved: n(live.reserved) },
+      reserveSku: first?.master_sku_id ?? null,
+      reservedAtFirst: n(first?.first_reserve ?? 0),
+    };
+  }
+
+  /**
+   * A remap (CAT-5, F-M09-T0901-01): each open order line of the listing takes its live
+   * reservation to the new SKU, as a release on the old SKU and a reserve on the new one (source
+   * kind remap), converted through the pack sizes. Both stock rows are locked by the caller.
+   */
+  async #moveOpenReserves(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    listingId: string,
+    previousSkuId: string,
+    next: SkuRef,
+    now: Date,
+  ): Promise<void> {
+    const { rows: prev } = await sql<{ component: string; pack: string }>`
+      SELECT coalesce(bundle_component_id, id) AS component, coalesce(pack_size, 1) AS pack
+        FROM app.master_skus
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${previousSkuId}::uuid`.execute(trx);
+    const old = prev[0];
+    if (old === undefined) return;
+    const { rows: open } = await sql<{ line: string; reserved: string }>`
+      SELECT coalesce(order_line_id, source_id) AS line, sum(reserved_change) AS reserved
+        FROM app.stock_movements
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND master_sku_id = ${old.component}::uuid
+         AND (order_line_id IS NOT NULL OR source_kind = 'order_line')
+       GROUP BY coalesce(order_line_id, source_id)
+      -- The old SKU's movements (indexed by SKU), keeping the lines of this listing.
+      HAVING sum(reserved_change) > 0 AND bool_or(listing_id = ${listingId}::uuid)
+       ORDER BY 1`.execute(trx);
+    let movedAny = false;
+    for (const o of open) {
+      const reserved = n(o.reserved);
+      // Units of the listing: what the order bought, in packs for a bundle listing.
+      const bought = Math.floor(reserved / n(old.pack));
+      const key = `${o.line}:${randomUUID()}`;
+      await this.#move(trx, ctx, old.component, {
+        kind: 'release',
+        sourceKind: 'remap',
+        sourceId: key,
+        orderLineId: o.line,
+        onHand: 0,
+        reserved: -reserved,
+        listingId,
+        note: 'moved to the newly mapped SKU',
+        now,
+      });
+      await this.#move(trx, ctx, next.component, {
+        kind: 'reserve',
+        sourceKind: 'remap',
+        sourceId: key,
+        orderLineId: o.line,
+        onHand: 0,
+        reserved: bought * next.pack,
+        listingId,
+        note: 'moved from the previously mapped SKU',
+        now,
+      });
+      movedAny = true;
+    }
+    if (movedAny) await this.#recompute(trx, ctx, old.component, undefined, now);
   }
 
   /** Locks the stock rows of these SKUs' components, in id order. */
