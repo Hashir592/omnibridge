@@ -1,3 +1,4 @@
+import { LoaderCircle } from 'lucide-react';
 import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react';
 import { cn } from '../lib/cn.ts';
 
@@ -34,6 +35,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
   /** A lucide icon element, shown before the label. */
   icon?: ReactNode;
+  /** While its action runs: disabled, a spinner in place of the icon, and aria-busy. */
+  busy?: boolean;
   ref?: Ref<HTMLButtonElement>;
 }
 
@@ -41,17 +44,31 @@ export function Button({
   variant = 'secondary',
   size = 'md',
   icon,
+  busy = false,
   className,
   children,
   type = 'button',
+  disabled,
   ...rest
 }: ButtonProps) {
   return (
-    <button type={type} className={cn(buttonClass(variant, size), className)} {...rest}>
-      {icon && (
+    <button
+      type={type}
+      className={cn(buttonClass(variant, size), busy && 'disabled:opacity-70', className)}
+      disabled={disabled === true || busy}
+      aria-busy={busy || undefined}
+      {...rest}
+    >
+      {busy ? (
         <span aria-hidden className="flex [&>svg]:size-4">
-          {icon}
+          <LoaderCircle className="motion-safe:animate-spin" />
         </span>
+      ) : (
+        icon && (
+          <span aria-hidden className="flex [&>svg]:size-4">
+            {icon}
+          </span>
+        )
       )}
       {children}
     </button>

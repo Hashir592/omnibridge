@@ -263,7 +263,9 @@ function Listings() {
       },
     });
 
+  const [exporting, setExporting] = useState(false);
   const exportCsv = async () => {
+    setExporting(true);
     try {
       const r = await catalogueApi.exportMappings();
       if (!r.ok) throw new Error(String(r.status));
@@ -274,6 +276,8 @@ function Listings() {
         description: 'Try again.',
         tone: 'error',
       });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -313,6 +317,7 @@ function Listings() {
             <Button
               icon={<Download />}
               className="hidden md:inline-flex"
+              busy={exporting}
               onClick={() => void exportCsv()}
             >
               Export mappings

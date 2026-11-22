@@ -38,7 +38,7 @@ test('[CAT-5] mapping a listing from the Unmapped queue takes it off the queue',
 test('[CAT-5] a mapped listing unmaps back to the queue after asking', async ({ page }) => {
   await page.goto('/stock/listings?view=mapped');
   const first = page.getByRole('button', { name: /^Unmap listing / }).first();
-  const name = (await first.getAttribute('aria-label'))?.replace('Unmap listing ', '') ?? '';
+  const name = (await first.getAttribute('aria-label'))?.slice('Unmap listing '.length) ?? '';
   await first.click();
   await expect(page.getByRole('alertdialog')).toContainText('goes back to the Unmapped queue');
   await page.getByRole('button', { name: 'Unmap listing', exact: true }).click();

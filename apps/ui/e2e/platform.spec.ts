@@ -44,7 +44,8 @@ test('[PLAT-1] [NFR-8] every console section has no serious accessibility issues
   }
   for (const tab of ['Health', 'Incident banner', 'Maintenance', 'Flags']) {
     await page.getByRole('tab', { name: tab }).click();
-    await expect(page.getByRole('tabpanel')).not.toContainText('Loading');
+    // By name: while a tab changes, the panel leaving is still in the page for a moment.
+    await expect(page.getByRole('tabpanel', { name: tab })).not.toContainText('Loading');
     await expectNoSeriousA11yIssues(page);
   }
 });

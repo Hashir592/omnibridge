@@ -68,6 +68,13 @@
 }
 
 @layer base {
+  /* Tailwind v4 leaves buttons on the default arrow; every enabled control shows the hand. */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  select:not(:disabled),
+  label:has(> input[type='checkbox'], > input[type='radio'], > input[type='file']) {
+    cursor: pointer;
+  }
   html {
     font-size: 16px;
     -webkit-font-smoothing: antialiased;
