@@ -101,11 +101,20 @@ export type IngestRequest = z.infer<typeof IngestRequest>;
 export const IngestResponse = z.object({ pii_ref: uuid }).strict();
 export type IngestResponse = z.infer<typeof IngestResponse>;
 
+/**
+ * Why an expiry moves (DEL-1): the order was dispatched or delivered, so the live copy goes
+ * `pii_expiry_days` after that date. Each change is journalled off-site (ADR-068), so a restore
+ * re-applies it.
+ */
+export const EXPIRY_REASONS = ['dispatch', 'delivery'] as const;
+export type ExpiryReason = (typeof EXPIRY_REASONS)[number];
+
 export const ExpiryRequest = z
   .object({
     workspace_id: uuid,
     pii_refs: z.array(uuid).min(1).max(500),
     delete_after: z.iso.datetime({ offset: true }),
+    reason: z.enum(EXPIRY_REASONS),
   })
   .strict();
 export type ExpiryRequest = z.infer<typeof ExpiryRequest>;
@@ -317,3 +326,26 @@ export const DeleteResponse = z
   })
   .strict();
 export type DeleteResponse = z.infer<typeof DeleteResponse>;
+
+/**
+ * The nightly orphan sweep (FA-10): order records older than `created_before`, IDs only, in
+ * pii_ref order from `after`. The worker compares them with db-main's order references and queues
+ * the ones no order points at for deletion.
+ */
+export const SubjectsRequest = z
+  .object({
+    workspace_id: uuid,
+    subject_type: z.literal('order'),
+    created_before: z.iso.datetime({ offset: true }),
+    after: uuid.optional(),
+    limit: z.number().int().min(1).max(5000).default(1000),
+  })
+  .strict();
+export type SubjectsRequest = z.input<typeof SubjectsRequest>;
+export const SubjectsResponse = z
+  .object({
+    records: z.array(z.object({ pii_ref: uuid, subject_id: z.string() }).strict()),
+    next: uuid.nullable(),
+  })
+  .strict();
+export type SubjectsResponse = z.infer<typeof SubjectsResponse>;

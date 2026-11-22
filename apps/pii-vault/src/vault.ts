@@ -22,6 +22,8 @@ import {
   type SearchResponse,
   type SignalsRequest,
   type SignalsResponse,
+  type SubjectsRequest,
+  type SubjectsResponse,
 } from '@omnibridge/vault-client/schemas';
 import {
   BUYER_SOURCE_FIELDS,
@@ -51,6 +53,17 @@ export class BadExpiry extends Error {}
 
 /** Ingest for a workspace that was closed (ADR-065): 409, and no new keys. */
 export class WorkspaceClosed extends Error {}
+
+/**
+ * Ingest of a buyer an eBay account-deletion notice removed (ADR-068 tombstone check): 409, and
+ * nothing is stored. The caller keeps the order with no customer details.
+ */
+export class BuyerDeleted extends Error {}
+
+/** The off-site journal (invariant 10, ADR-068): IDs and dates only, fsynced before commit. */
+export interface Journal {
+  append(lines: readonly Record<string, string | null>[]): Promise<void>;
+}
 
 interface Keys {
   data: DataKey;
@@ -114,6 +127,7 @@ export class Vault {
   readonly #keys = new Map<string, Keys>();
 
   readonly #onCanary: (event: CanaryEvent) => void;
+  readonly #journal: Journal | undefined;
 
   constructor(options: {
     pool: Pool;
@@ -121,11 +135,14 @@ export class Vault {
     now?: () => Date;
     /** Called after a canary read is recorded (SEC-12); the app logs it at warn. */
     onCanary?: (event: CanaryEvent) => void;
+    /** Expiry changes are journalled here (ADR-068): the deletion journal's directory. */
+    journal?: Journal;
   }) {
     this.#pool = options.pool;
     this.#keyring = options.keyring;
     this.#now = options.now ?? (() => new Date());
     this.#onCanary = options.onCanary ?? (() => undefined);
+    this.#journal = options.journal;
   }
 
   /** A closed workspace's keys are deleted with it; the cached copies go too. */
@@ -152,11 +169,16 @@ export class Vault {
       const keys = await this.#loadKeys(tx, req.workspace_id, true);
       if (keys === undefined) throw new Error('keys were not created');
       if (tx.created === true) await this.#insertCanary(c, req.workspace_id, keys);
+      if (req.kind === 'buyer_contact') await this.#refuseDeletedBuyer(c, req, keys);
       // pii_ref defaults to uuidv7() (PostgreSQL 18): time-ordered, so the key index stays compact.
+      // ORD-4 (ADR-079 3): one buyer record per order. A retried or repeated ingest of the same
+      // order finds the record already there and gets its ref back; nothing is added or changed.
       const inserted = await c.query<{ pii_ref: string }>(
         `INSERT INTO vault.records (workspace_id, kind, channel_account_id, subject_type,
                                     subject_id, data_key_version, delete_after, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (workspace_id, kind, subject_type, subject_id)
+           WHERE subject_type = 'order' AND NOT canary DO NOTHING
          RETURNING pii_ref`,
         [
           req.workspace_id,
@@ -170,6 +192,17 @@ export class Vault {
           this.#now(),
         ],
       );
+      if (inserted.rows.length === 0) {
+        const existing = await c.query<{ pii_ref: string }>(
+          `SELECT pii_ref FROM vault.records
+            WHERE workspace_id = $1 AND kind = $2 AND subject_type = $3 AND subject_id = $4
+              AND NOT canary`,
+          [req.workspace_id, req.kind, req.subject_type, req.subject_id],
+        );
+        const ref = existing.rows[0]?.pii_ref;
+        if (ref === undefined) throw new Error('order record conflict without a record');
+        return { pii_ref: ref };
+      }
       const piiRef = inserted.rows[0]?.pii_ref ?? '';
       const aad = (field: string) => ({
         workspaceId: req.workspace_id,
@@ -200,13 +233,70 @@ export class Vault {
   async setExpiry(req: ExpiryRequest): Promise<{ updated: number }> {
     this.#checkExpiry(req.delete_after);
     return this.#tx(req.workspace_id, async (c) => {
-      const res = await c.query(
+      const res = await c.query<{ pii_ref: string }>(
         `UPDATE vault.records SET delete_after = $3
-          WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[]) AND NOT canary`,
+          WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[]) AND NOT canary
+            AND delete_after IS DISTINCT FROM $3::timestamptz
+          RETURNING pii_ref`,
         [req.workspace_id, req.pii_refs, req.delete_after],
+      );
+      // ADR-068: every change is journalled off-site before it commits, so a restore of an older
+      // backup re-applies it and no copy outlives its date. IDs and the date only.
+      const at = this.#now().toISOString();
+      const deleteAfter = new Date(req.delete_after).toISOString();
+      await this.#journal?.append(
+        res.rows.map((r) => ({
+          type: 'expiry',
+          workspace_id: req.workspace_id,
+          pii_ref: r.pii_ref,
+          delete_after: deleteAfter,
+          reason: req.reason,
+          at,
+        })),
       );
       return { updated: res.rowCount ?? 0 };
     });
+  }
+
+  /**
+   * FA-10: the nightly orphan sweep's list. Order records created before a time, IDs only, in
+   * pii_ref order; `next` is the last ref when the page is full.
+   */
+  async subjects(req: SubjectsRequest): Promise<SubjectsResponse> {
+    const limit = req.limit ?? 1000;
+    return this.#tx(req.workspace_id, async (c) => {
+      const res = await c.query<{ pii_ref: string; subject_id: string }>(
+        `SELECT pii_ref, subject_id FROM vault.records
+          WHERE workspace_id = $1 AND subject_type = $2 AND NOT canary AND created_at < $3
+            AND ($4::uuid IS NULL OR pii_ref > $4::uuid)
+          ORDER BY pii_ref
+          LIMIT $5`,
+        [req.workspace_id, req.subject_type, req.created_before, req.after ?? null, limit],
+      );
+      return {
+        records: res.rows,
+        next: res.rows.length === limit ? (res.rows.at(-1)?.pii_ref ?? null) : null,
+      };
+    });
+  }
+
+  /**
+   * ADR-068 tombstone check: a buyer whose eBay account was deleted is never stored again. The
+   * user ID decides when the record has one; the username only when it has no ID (a username
+   * can be reused by someone else, an ID cannot).
+   */
+  async #refuseDeletedBuyer(c: PoolClient, req: IngestRequest, keys: Keys): Promise<void> {
+    const id = normaliseBuyerExact(req.fields.channel_buyer_id ?? '');
+    const username = normaliseBuyerExact(req.fields.channel_username ?? '');
+    let probe: [string, Buffer] | undefined;
+    if (id !== '') probe = ['ebay_user_id', keys.index.mac('ebay_user_id', id)];
+    else if (username !== '') probe = ['ebay_username', keys.index.mac('ebay_username', username)];
+    if (probe === undefined) return;
+    const hit = await c.query(
+      'SELECT 1 FROM vault.deleted_buyers WHERE workspace_id = $1 AND field = $2 AND mac = $3',
+      [req.workspace_id, probe[0], probe[1]],
+    );
+    if ((hit.rowCount ?? 0) > 0) throw new BuyerDeleted();
   }
 
   async readFull(
@@ -387,6 +477,29 @@ export class Vault {
       const page = await this.#tx(workspaceId, async (c, tx) => {
         const keys = await this.#loadKeys(tx, workspaceId, false);
         if (keys === undefined || values.length === 0) return { rows: [], more: false };
+        // ADR-068: the buyer is never stored again in this workspace (the ingest check). The
+        // user ID when the notice has one, else the username. Repeated pages add nothing.
+        const userId = normaliseBuyerExact(req.user_id ?? '');
+        const username = normaliseBuyerExact(req.username ?? '');
+        const tomb: [string, string] | undefined =
+          userId !== ''
+            ? ['ebay_user_id', userId]
+            : username !== ''
+              ? ['ebay_username', username]
+              : undefined;
+        if (tomb !== undefined && after === null) {
+          await c.query(
+            `INSERT INTO vault.deleted_buyers (workspace_id, field, mac, key_version, created_at)
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+            [
+              workspaceId,
+              tomb[0],
+              keys.index.mac(tomb[0], tomb[1]),
+              keys.index.version,
+              this.#now(),
+            ],
+          );
+        }
         // One more than fits, so a full page knows whether this workspace has more.
         const res = await c.query<SearchResponse['matches'][number]>(
           `SELECT r.pii_ref, r.kind, r.subject_type, r.subject_id, r.channel_account_id

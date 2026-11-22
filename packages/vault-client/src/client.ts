@@ -10,6 +10,7 @@ import {
   MatchResponse,
   ReadFullResponse,
   SearchResponse,
+  SubjectsResponse,
   type DeleteRequest,
   type EbayUserMatchRequest,
   type ExpiryRequest,
@@ -17,6 +18,7 @@ import {
   type ReadPurpose,
   type SearchPurpose,
   type SearchRequest,
+  type SubjectsRequest,
 } from './schemas.ts';
 
 /** A vault answer other than success. `status` is the HTTP status; `code` the vault's error code. */
@@ -65,6 +67,11 @@ export class VaultClient {
 
   setExpiry(request: ExpiryRequest): Promise<ExpiryResponse> {
     return this.#post('/v1/expiry', request, ExpiryResponse);
+  }
+
+  /** FA-10: order records older than a time, IDs only, for the orphan sweep (worker token). */
+  subjects(request: SubjectsRequest): Promise<SubjectsResponse> {
+    return this.#post('/v1/subjects', request, SubjectsResponse);
   }
 
   readFull(request: {

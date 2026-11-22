@@ -23,10 +23,14 @@ const tokens = new ServiceTokens({
   worker: readSecretFile('VAULT_TOKEN_WORKER'),
   deletion: readSecretFile('VAULT_TOKEN_DELETION'),
 });
+// DEL-1: tombstones are journalled to this directory (invariant 10), a volume shipped off-site
+// by the backup job (T-0405); expiry changes go there too (ADR-068).
+const journal = new DeletionJournal(requireEnv('DELETION_JOURNAL_DIR'));
 // SEC-12: a canary read is an alarm; IDs only, at warn, for M05's alerts.
 const vault = new Vault({
   pool,
   keyring: piiKeyring,
+  journal,
   onCanary: (event) => {
     logger.warn(
       { event: 'vault.canary_read', workspaceId: event.workspaceId },
@@ -53,11 +57,9 @@ try {
     'exact buyer index backfill failed',
   );
 }
-// DEL-1: tombstones are also journalled to this directory (invariant 10), a volume shipped
-// off-site by the backup job (T-0405).
 const deletion = new DeletionService({
   pool,
-  journal: new DeletionJournal(requireEnv('DELETION_JOURNAL_DIR')),
+  journal,
   onWorkspaceClosed: (workspaceId) => {
     vault.forgetKeys(workspaceId);
   },

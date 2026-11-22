@@ -19,7 +19,7 @@ SELECT DISTINCT ON (workspace_id, pii_ref) workspace_id, pii_ref, run_id, delete
     SELECT (j->>'workspace_id')::uuid AS workspace_id, (j->>'pii_ref')::uuid AS pii_ref,
            (j->>'run_id')::uuid AS run_id, (j->>'at')::timestamptz AS deleted_at,
            nullif(j->>'channel_account_id', '')::uuid AS channel_account_id
-      FROM replay_lines WHERE j ? 'pii_ref'
+      FROM replay_lines WHERE j ? 'pii_ref' AND (j->>'type') IS DISTINCT FROM 'expiry'
     UNION ALL
     SELECT workspace_id, pii_ref, run_id, deleted_at, channel_account_id FROM replay_main
   ) AS t
@@ -31,6 +31,17 @@ SELECT (j->>'workspace_id')::uuid, min((j->>'at')::timestamptz)
   FROM replay_lines WHERE j->>'type' = 'workspace_closed'
  GROUP BY 1
 ON CONFLICT DO NOTHING;
+
+-- Expiry changes made after the backup (ADR-068): each record takes its newest journalled
+-- delete_after, so a restored copy never outlives the date the vault last set for it.
+UPDATE vault.records r SET delete_after = e.delete_after
+  FROM (SELECT DISTINCT ON (workspace_id, pii_ref)
+               (j->>'workspace_id')::uuid AS workspace_id, (j->>'pii_ref')::uuid AS pii_ref,
+               (j->>'delete_after')::timestamptz AS delete_after
+          FROM replay_lines WHERE j->>'type' = 'expiry'
+         ORDER BY workspace_id, pii_ref, (j->>'at')::timestamptz DESC) AS e
+ WHERE r.workspace_id = e.workspace_id AND r.pii_ref = e.pii_ref AND NOT r.canary
+   AND r.delete_after IS DISTINCT FROM e.delete_after;
 
 -- What must not survive: a tombstoned ref, anything of a closed workspace, anything past its
 -- delete_after (the expiry job re-run, FA-21).
