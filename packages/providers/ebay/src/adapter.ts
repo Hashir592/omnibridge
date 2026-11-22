@@ -55,6 +55,13 @@ const TokenV1 = defineParser(
 
 const Text = z.string().max(4000).optional();
 const When = z.iso.datetime({ offset: true });
+/** IDs and SKUs: db-main keeps at most 200 characters, so a longer one is a parser failure. */
+const Id = z.string().min(1).max(200);
+/** ISO 3166 alpha-2, upper-cased (db-main checks ^[A-Z]{2}$). */
+const Country = z
+  .string()
+  .regex(/^[A-Za-z]{2}$/)
+  .transform((c) => c.toUpperCase());
 
 /**
  * The Fulfillment API's getOrders (M10: money, dates, refunds and the ship-to block). Version 2:
@@ -70,7 +77,7 @@ export const EbayOrdersV1 = defineParser(
     limit: z.number().int().min(1),
     orders: z.array(
       z.object({
-        orderId: z.string().min(1),
+        orderId: Id,
         creationDate: When,
         lastModifiedDate: When,
         orderFulfillmentStatus: z.string().min(1),
@@ -88,7 +95,7 @@ export const EbayOrdersV1 = defineParser(
             refunds: z
               .array(
                 z.object({
-                  refundId: z.string().min(1),
+                  refundId: Id,
                   refundDate: When,
                   refundStatus: z.string().optional(),
                   amount: GbpAmount,
@@ -114,7 +121,7 @@ export const EbayOrdersV1 = defineParser(
                           city: Text,
                           stateOrProvince: Text,
                           postalCode: Text,
-                          countryCode: z.string().length(2).optional(),
+                          countryCode: Country.optional(),
                         })
                         .optional(),
                     })
@@ -126,8 +133,8 @@ export const EbayOrdersV1 = defineParser(
           .optional(),
         lineItems: z.array(
           z.object({
-            lineItemId: z.string().min(1),
-            sku: z.string().optional(),
+            lineItemId: Id,
+            sku: Id.optional(),
             title: z.string().max(500).optional(),
             quantity: z.number().int().min(1),
             lineItemCost: GbpAmount,
@@ -141,10 +148,15 @@ export const EbayOrdersV1 = defineParser(
 
 type EbayOrder = ReturnType<typeof EbayOrdersV1.parse>['orders'][number];
 
+/** eBay payment statuses that mean the buyer's payment was captured. */
+const PAID_STATUSES: readonly string[] = ['PAID', 'PARTIALLY_REFUNDED', 'FULLY_REFUNDED'];
+
 /** FA-10: eBay's fulfilment, payment and cancel states onto the channel lifecycle. */
 function ebayState(o: EbayOrder): ChannelOrderState {
   if (o.cancelStatus?.cancelState === 'CANCELED') return 'cancelled';
   if (o.orderFulfillmentStatus === 'FULFILLED') return 'dispatched';
+  // Refunded in full before anything shipped: nothing will ship. The refund rows carry the VAT.
+  if (o.orderPaymentStatus === 'FULLY_REFUNDED') return 'cancelled';
   if (o.orderPaymentStatus === 'PENDING' || o.orderPaymentStatus === 'FAILED') {
     return 'pending_payment';
   }
@@ -170,6 +182,11 @@ function ebayBuyer(o: EbayOrder): BuyerDetails | null {
   return entries.length === 0 ? null : Object.fromEntries(entries);
 }
 
+/** One getOrders page's orders as whole channel orders (M10); the buyer block is PII. */
+export function parseEbayOrders(body: unknown): ChannelOrder[] {
+  return EbayOrdersV1.parse(body).orders.map(ebayOrder);
+}
+
 function ebayOrder(o: EbayOrder): ChannelOrder {
   const state = ebayState(o);
   const paid = o.paymentSummary?.payments?.find((p) => p.paymentDate !== undefined)?.paymentDate;
@@ -185,12 +202,13 @@ function ebayOrder(o: EbayOrder): ChannelOrder {
       .join('/'),
     state,
     placedAt: new Date(o.creationDate),
+    // VAT-6: only a captured payment counts; with no payment date, eBay's payment status decides.
     paidAt:
       paid !== undefined
         ? new Date(paid)
-        : state === 'pending_payment'
-          ? null
-          : new Date(o.creationDate),
+        : PAID_STATUSES.includes(o.orderPaymentStatus)
+          ? new Date(o.creationDate)
+          : null,
     shipBy: shipBy === undefined ? null : new Date(shipBy),
     // getOrders has no dispatch time: the update that first shows FULFILLED stands in for it.
     // M12 records its own dispatch time for labels it makes.

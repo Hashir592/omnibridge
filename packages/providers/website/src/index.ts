@@ -25,6 +25,13 @@ const KEY_TTL_MS = 86_400_000;
 
 const Text = z.string().max(4000).nullable().optional();
 const When = z.iso.datetime({ offset: true });
+/** IDs and SKUs: db-main keeps at most 200 characters, so a longer one is a parser failure. */
+const Id = z.string().min(1).max(200);
+/** ISO 3166 alpha-2, upper-cased (db-main checks ^[A-Z]{2}$). */
+const Country = z
+  .string()
+  .regex(/^[A-Za-z]{2}$/)
+  .transform((c) => c.toUpperCase());
 
 /** Version 2 (M10): money, dates, refunds and the buyer block. Provisional until M11. */
 const OrdersV1 = defineParser(
@@ -34,7 +41,7 @@ const OrdersV1 = defineParser(
   z.object({
     orders: z.array(
       z.object({
-        id: z.string().min(1),
+        id: Id,
         created_at: When,
         updated_at: When,
         paid_at: When.nullable().optional(),
@@ -58,15 +65,15 @@ const OrdersV1 = defineParser(
             city: Text,
             county: Text,
             postcode: Text,
-            country: z.string().length(2).nullable().optional(),
+            country: Country.nullable().optional(),
             instructions: Text,
           })
           .nullable()
           .optional(),
         lines: z.array(
           z.object({
-            id: z.string().min(1),
-            sku: z.string().nullable(),
+            id: Id,
+            sku: Id.nullable(),
             quantity: z.number().int().min(1),
             name: z.string().max(500).nullable().optional(),
             total: PenceAmount,
@@ -75,13 +82,13 @@ const OrdersV1 = defineParser(
         refunds: z
           .array(
             z.object({
-              id: z.string().min(1),
+              id: Id,
               created_at: When,
               amount: PenceAmount,
               lines: z
                 .array(
                   z.object({
-                    line_id: z.string().min(1),
+                    line_id: Id,
                     quantity: z.number().int().min(0),
                     amount: PenceAmount,
                   }),
@@ -129,6 +136,11 @@ function websiteBuyer(o: WebsiteOrder): BuyerDetails | null {
 }
 
 const at = (v: string | null | undefined) => (v === null || v === undefined ? null : new Date(v));
+
+/** One orders page as whole channel orders (M10); the buyer block is PII. */
+export function parseWebsiteOrders(body: unknown): ChannelOrder[] {
+  return OrdersV1.parse(body).orders.map(websiteOrder);
+}
 
 function websiteOrder(o: WebsiteOrder): ChannelOrder {
   const state = websiteState(o);

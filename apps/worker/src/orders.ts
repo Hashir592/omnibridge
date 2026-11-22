@@ -26,8 +26,11 @@ import { VaultError, type VaultClient } from '@omnibridge/vault-client';
 const DAY_MS = 86_400_000;
 /** PRD 7.3: PII of an order never dispatched or cancelled goes at most 90 days after placement. */
 export const PII_HARD_LIMIT_MS = 90 * DAY_MS;
-/** FA-10: a vault record younger than this may belong to an ingest still writing db-main. */
-const ORPHAN_GRACE_MS = 60 * 60_000;
+/**
+ * FA-10: a vault record younger than this may belong to an ingest still writing db-main, or to a
+ * sync job still retrying (its retries end well inside a day). Older ones with no order go.
+ */
+const ORPHAN_GRACE_MS = DAY_MS;
 
 /**
  * DEL-1, PRD 7.3: when an order's buyer record must be gone. Delivery (or dispatch when delivery is
@@ -80,8 +83,8 @@ export function orderIngestStream(
       return out;
 
       async function vaultFirst(order: ChannelOrder): Promise<NonNullable<ChannelOrder['pii']>> {
-        // Already stored: its record (or its deletion) is settled; a deleted record is never
-        // brought back by a later poll.
+        // Settled already (a record, a deletion, a refusal or a cancellation): a deleted record is
+        // never brought back by a later poll.
         if (known.has(order.externalId)) return { kind: 'unchanged' };
         if (order.buyer === null || order.state === 'cancelled') return { kind: 'none' };
         const deleteAfter = piiDeleteAfter(order, retentionDays);
@@ -229,7 +232,7 @@ export function ordersPiiExpiryHandler(deps: {
 }
 
 /**
- * orders.orphan_sweep (FA-10): vault order records older than an hour that no order points at
+ * orders.orphan_sweep (FA-10): vault order records older than a day that no order points at
  * are expired now, so the next hourly run deletes them through the one deletion service.
  * IDs only; one short read per page, no transaction across a vault call.
  */
@@ -239,7 +242,7 @@ export function ordersOrphanSweepHandler(deps: {
   vault: Pick<VaultClient, 'subjects' | 'setExpiry'>;
   logger: Logger;
   now?: () => Date;
-  /** How old a vault record must be before it can be an orphan (default an hour). */
+  /** How old a vault record must be before it can be an orphan (default a day). */
   graceMs?: number;
 }): PhasedHandler<Record<string, never>, { orphans: number }> {
   const now = deps.now ?? (() => new Date());

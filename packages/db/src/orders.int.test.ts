@@ -531,6 +531,67 @@ describe('order ingest (T-1001)', () => {
     expect((await movements(w, row?.id)).map((m) => m.kind)).toEqual(['reserve']);
   });
 
+  it('[ORD-3][INV-3] a channel that reports delivery without a dispatch time still dispatches the stock', async () => {
+    const w = await world();
+    const o = order({ placedAt: new Date('2026-11-10T08:00:00Z') });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        state: 'delivered',
+        deliveredAt: new Date('2026-11-12T09:00:00Z'),
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+      },
+    ]);
+    const row = await orderRow(w, o.externalId);
+    expect(row).toMatchObject({ status: 'delivered' });
+    expect(row?.dispatched_at).toEqual(new Date('2026-11-12T09:00:00Z'));
+    expect((await movements(w, row?.id)).map((m) => m.kind).sort()).toEqual([
+      'dispatch',
+      'dispatch',
+      'reserve',
+      'reserve',
+    ]);
+  });
+
+  it('[VAT-5][FA-11] a refund recorded while a line was provisional is re-based when the listing is mapped', async () => {
+    const w = await world();
+    const o = order({
+      lines: [{ lineId: 'L1', sku: 'NEW-ITEM', quantity: 1, title: null, linePrice: p(1200) }],
+      shipping: p(0),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        state: 'dispatched',
+        dispatchedAt: new Date('2026-11-11T09:00:00Z'),
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+        refunds: [
+          {
+            refundId: 'R1',
+            refundedAt: new Date('2026-11-12T09:00:00Z'),
+            amount: p(600),
+            lines: null,
+          },
+        ],
+      },
+    ]);
+    const row = await orderRow(w, o.externalId);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    await ingest.fillSnapshots(w.ctx, w.listings.unmapped);
+    const totals = await q<{ group_key: string; gross: string; vat: string }>(
+      w,
+      sql`SELECT group_key, sum(gross_pence) AS gross, sum(vat_pence) AS vat FROM app.vat_ledger
+           WHERE order_id = ${String(row?.id)}::uuid GROUP BY group_key ORDER BY group_key`,
+    );
+    // The provisional 20% group nets to nothing; the zero group holds the sale less the refund.
+    expect(totals).toEqual([
+      { group_key: 'rate:2000', gross: '0', vat: '0' },
+      { group_key: 'zero:zero', gross: '600', vat: '0' },
+    ]);
+  });
+
   it('[ORD-4] an order placed before its account was connected moves no stock (FA-16 cutover)', async () => {
     const w = await world();
     const old = order({

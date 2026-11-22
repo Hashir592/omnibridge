@@ -194,6 +194,18 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect(scanTextForMarkers(logs)).toEqual([]);
   });
 
+  it('[ORD-4] a pending order first seen without an address gets its buyer record once the channel sends one', async () => {
+    const o = channelOrder({ state: 'pending_payment', paidAt: null, buyer: null });
+    await poll([o]);
+    expect(await orderRow(o.externalId)).toMatchObject({ pii_ref: null });
+    await poll([
+      { ...channelOrder(), externalId: o.externalId, updatedAt: new Date(Date.now() + 1000) },
+    ]);
+    const [record] = await vaultRows(`${account}:${o.externalId}`);
+    expect(record).toBeDefined();
+    expect((await orderRow(o.externalId))?.pii_ref).toBe(record?.pii_ref);
+  });
+
   it('[ORD-4] an order older than the PII window, or cancelled, is stored with no vault record (FA-16)', async () => {
     const old = channelOrder({
       placedAt: new Date(Date.now() - 100 * DAY),

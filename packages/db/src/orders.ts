@@ -202,9 +202,10 @@ export class OrderIngest implements UnmappedDemand {
   }
 
   /**
-   * For the vault-first step, before any transaction holds a lock: which of these orders are
-   * already stored with a PII outcome (a pii_ref, or deleted, or refused), so the vault is asked
-   * only about new ones, and the workspace's PII window.
+   * For the vault-first step, before any transaction holds a lock: which of these orders already
+   * have a settled PII outcome (a pii_ref, deleted or refused, or cancelled), so the vault is asked
+   * only about the others. An order stored without details (a pending order with no address yet)
+   * is not settled: its buyer is stored once the channel sends one.
    */
   async piiState(
     ctx: TenantContext,
@@ -216,7 +217,10 @@ export class OrderIngest implements UnmappedDemand {
         SELECT external_order_id FROM app.orders
          WHERE workspace_id = ${ctx.workspaceId}::uuid
            AND channel_account_id = ${channelAccountId}::uuid
-           AND external_order_id = ANY (${sql.val(externalIds)}::text[])`.execute(trx);
+           AND external_order_id = ANY (${sql.val(externalIds)}::text[])
+           AND (pii_ref IS NOT NULL OR pii_deleted_at IS NOT NULL OR status = 'cancelled')`.execute(
+        trx,
+      );
       const { rows: ws } = await sql<{ days: string }>`
         SELECT pii_retention_days AS days FROM app.workspaces
          WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
@@ -333,6 +337,9 @@ export class OrderIngest implements UnmappedDemand {
     // FA-16: an order placed before the account was connected is history the first stock take
     // already counts; it never moves stock.
     const stockMoves = o.placedAt >= account.created_at;
+    // A channel that reports delivery without a dispatch time: delivery stands in for it.
+    const dispatchedAt =
+      o.dispatchedAt ?? (SHIPPED.includes(status) ? (o.deliveredAt ?? o.updatedAt) : null);
     const piiRef = o.pii.kind === 'stored' ? o.pii.piiRef : null;
     const piiDeletedAt = o.pii.kind === 'refused' ? now : null;
     const unmapped = resolved.some((r) => r.listing?.master_sku_id == null);
@@ -348,7 +355,7 @@ export class OrderIngest implements UnmappedDemand {
       VALUES (${ctx.workspaceId}::uuid, ${id}::uuid, ${account.company_id}::uuid, ${account.provider},
               ${account.provider}, ${account.id}::uuid, ${o.externalId},
               ${piiSubject(account.id, o.externalId)}, ${piiRef}::uuid, ${piiDeletedAt}, ${status},
-              ${o.rawStatus}, ${o.placedAt}, ${o.paidAt}, ${o.shipBy}, ${o.dispatchedAt},
+              ${o.rawStatus}, ${o.placedAt}, ${o.paidAt}, ${o.shipBy}, ${dispatchedAt},
               ${o.deliveredAt}, ${status === 'cancelled' ? (o.cancelledAt ?? now) : null},
               ${o.updatedAt}, ${day}::date, ${goods}, ${discount}, ${shipping}, ${vat.gross},
               ${vat.vat}, ${o.shipToCountry}, ${unmapped}, ${fba}, ${stockMoves}, ${now}, ${now})`.execute(
@@ -426,7 +433,11 @@ export class OrderIngest implements UnmappedDemand {
       incomingStatus(o.state, refunded, big(existing.gross_pence)),
     );
     const stale = o.updatedAt < existing.source_updated_at;
-    const dispatchedAt = existing.dispatched_at ?? o.dispatchedAt;
+    // A channel that reports delivery without a dispatch time: delivery stands in for it.
+    const dispatchedAt =
+      existing.dispatched_at ??
+      o.dispatchedAt ??
+      (SHIPPED.includes(next) ? (o.deliveredAt ?? o.updatedAt) : null);
     const deliveredAt = existing.delivered_at ?? o.deliveredAt;
     const cancelledAt =
       next === 'cancelled'
@@ -447,6 +458,8 @@ export class OrderIngest implements UnmappedDemand {
              delivered_at = ${deliveredAt},
              cancelled_at = ${cancelledAt},
              pii_ref = ${piiRef}::uuid,
+             pii_deleted_at = coalesce(pii_deleted_at,
+                                       ${piiRef === null && o.pii.kind === 'refused' ? now : null}::timestamptz),
              updated_at = ${now}
        WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${existing.id}::uuid`.execute(trx);
     if (statusChanged || rawChanged) {
@@ -637,7 +650,7 @@ export class OrderIngest implements UnmappedDemand {
              -sum(gross_pence) AS gross, -sum(vat_pence) AS vat
         FROM app.vat_ledger
        WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${orderId}::uuid
-         AND kind = 'refund'
+         AND refund_id IS NOT NULL
        GROUP BY group_key`.execute(trx);
     if (rows.length === 0) return [];
     const groups = rows.map((r) => ({
@@ -787,9 +800,85 @@ export class OrderIngest implements UnmappedDemand {
             taxPoint: order.tax_point_date,
           });
         }
+        await this.#rebaseRefunds(trx, ctx, order, after, lines.map((l) => l.line_id).join(','));
       }
       return { filled };
     });
+  }
+
+  /**
+   * FA-11 with FA-12 rule 3: refunds recorded while a line was provisional are worked out again
+   * at the filled rates, in their own order, and the difference goes in as adjustment rows on each
+   * refund's own date. So the per-group cap holds on the new groups and no provisional refund VAT
+   * is left behind.
+   */
+  async #rebaseRefunds(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    order: OrderRow,
+    vat: OrderVat,
+    tag: string,
+  ): Promise<void> {
+    const { rows: refunds } = await sql<{ id: string; amount_pence: string; day: string }>`
+      SELECT id, amount_pence, to_char(tax_point_date, 'YYYY-MM-DD') AS day FROM app.refunds
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${order.id}::uuid
+       ORDER BY refunded_at, id`.execute(trx);
+    if (refunds.length === 0) return;
+    const lines = await this.#lines(trx, ctx, order.id);
+    const index = new Map(lines.map((l, i) => [l.id, i]));
+    const prior: RefundVat[] = [];
+    for (const refund of refunds) {
+      const { rows: refundLines } = await sql<{ order_line_id: string; amount_pence: string }>`
+        SELECT order_line_id, amount_pence FROM app.refund_lines
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND refund_id = ${refund.id}::uuid`.execute(
+        trx,
+      );
+      const byLine = refundLines.flatMap((rl) => {
+        const i = index.get(rl.order_line_id);
+        return i === undefined ? [] : [{ line: i, amount: pence(big(rl.amount_pence)) }];
+      });
+      const rv = computeRefundVat({
+        order: vat,
+        refunded: prior,
+        refund: {
+          amount: pence(big(refund.amount_pence)),
+          ...(byLine.length === 0 ? {} : { lines: byLine }),
+        },
+      });
+      prior.push(rv);
+      const { rows: recorded } = await sql<{
+        group_key: string;
+        gross: string;
+        vat: string;
+        rate_bp: string;
+        vat_type: SaleVatType | null;
+      }>`
+        SELECT group_key, sum(gross_pence) AS gross, sum(vat_pence) AS vat,
+               min(rate_bp) AS rate_bp, min(vat_type) AS vat_type FROM app.vat_ledger
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND refund_id = ${refund.id}::uuid
+         GROUP BY group_key`.execute(trx);
+      const keys = new Set([...recorded.map((r) => r.group_key), ...rv.groups.map((g) => g.key)]);
+      for (const key of keys) {
+        const want = rv.groups.find((g) => g.key === key);
+        const had = recorded.find((r) => r.group_key === key);
+        const gross = 0n - (want?.gross ?? 0n) - big(had?.gross);
+        const vatDiff = 0n - (want?.vat ?? 0n) - big(had?.vat);
+        if (gross === 0n && vatDiff === 0n) continue;
+        const group = vat.groups.find((g) => g.key === key);
+        await this.#ledger(trx, ctx, order, {
+          entryKey: `adjust:${refund.id}:${tag}:${key}`.slice(0, 300),
+          kind: 'adjustment',
+          refundId: refund.id,
+          groupKey: key,
+          vatType: group?.vatType ?? had?.vat_type ?? null,
+          rateBp: group?.rateBp ?? Number(had?.rate_bp ?? 0),
+          provisional: group?.provisional ?? false,
+          gross,
+          vat: vatDiff,
+          taxPoint: refund.day,
+        });
+      }
+    }
   }
 
   /** Line VAT and the order's VAT after a snapshot filled (FA-12 rule 2: from the group). */
