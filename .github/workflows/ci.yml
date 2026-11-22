@@ -216,7 +216,8 @@ jobs:
   verify:
     # The one required check: green only when every job this change needs has passed.
     name: verify (full gate)
-    needs: [changes, docs, static, tests, ui, stack]
+    # Every gate job is listed (ADR-079); tests/config/ci.test.ts fails if one is left out.
+    needs: [changes, docs, static, tests, ui, stack, semgrep]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -230,9 +231,17 @@ jobs:
           TESTS: ${{ needs.tests.result }}
           UI: ${{ needs.ui.result }}
           STACK: ${{ needs.stack.result }}
+          SEMGREP: ${{ needs.semgrep.result }}
+          EVENT: ${{ github.event_name }}
         run: |
-          echo "changes=$CHANGES lane=$LANE docs=$DOCS static=$STATIC tests=$TESTS ui=$UI stack=$STACK"
+          echo "changes=$CHANGES lane=$LANE docs=$DOCS static=$STATIC tests=$TESTS ui=$UI stack=$STACK semgrep=$SEMGREP"
           [[ "$CHANGES" == success ]] || exit 1
+          # Semgrep runs on pull requests only: a pull request needs it green, a push may skip it.
+          if [[ "$EVENT" == pull_request ]]; then
+            [[ "$SEMGREP" == success ]] || exit 1
+          else
+            [[ "$SEMGREP" == success || "$SEMGREP" == skipped ]] || exit 1
+          fi
           case "$LANE" in
             full) [[ "$STATIC" == success && "$TESTS" == success && "$UI" == success && "$STACK" == success ]] ;;
             ui) [[ "$UI" == success ]] ;;

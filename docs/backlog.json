@@ -2160,7 +2160,7 @@
         "CI full gate green at merge (Semgrep included)"
       ],
       "risk": "light",
-      "status": "todo"
+      "status": "review"
     },
     {
       "id": "T-1001",
