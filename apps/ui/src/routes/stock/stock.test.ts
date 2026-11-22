@@ -24,6 +24,7 @@ function listing(over: Partial<StockListing> = {}): StockListing {
   return {
     id: '5a1e9d3c-7f20-4e8a-b1c4-000000000001',
     channel_account_id: '5a1e9d3c-7f20-4e8a-b1c4-0000000000a1',
+    channel_account_name: null,
     provider: 'ebay',
     external_sku: 'BB-BAM-M100',
     external_id: '284519003117',
@@ -163,8 +164,8 @@ describe('list and change log', () => {
   it('[INV-5] names the source and the pushes; an order of another company stays hidden', () => {
     expect(sourceText({ type: 'order', ref: null }, 'u1')).toBe('Order of another company');
     expect(sourceText({ type: 'order', ref: '204-1' }, 'u1')).toBe('Order 204-1');
-    expect(sourceText({ type: 'user', user_id: 'u1' }, 'u1')).toBe('You');
-    expect(sourceText({ type: 'user', user_id: 'u2' }, 'u1')).toBe('A team member');
+    expect(sourceText({ type: 'user', user_id: 'u1', name: null }, 'u1')).toBe('You');
+    expect(sourceText({ type: 'user', user_id: 'u2', name: null }, 'u1')).toBe('A team member');
     expect(pushesText({ pending: 0, sent: 0, held: 0, failed: 0 }).tone).toBe('none');
     expect(pushesText({ pending: 0, sent: 2, held: 0, failed: 1 }).text).toBe('1 of 3 failed');
     expect(pushesText({ pending: 0, sent: 3, held: 0, failed: 0 }).text).toBe('3 sent');

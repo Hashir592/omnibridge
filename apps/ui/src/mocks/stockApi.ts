@@ -121,7 +121,7 @@ export function resetStockMock(): void {
         supplier: kind === 'stock_in' ? 'Marlow Supply' : null,
         source:
           kind === 'stock_in' || kind === 'adjust'
-            ? { type: 'user', user_id: ME }
+            ? { type: 'user', user_id: ME, name: null }
             : { type: 'order', ref: `${order.companyId}|${order.ref}` },
         pushes: { pending: 0, sent: change === 0 ? 0 : r.int(1, 3), held: 0, failed: 0 },
       });
@@ -236,6 +236,7 @@ function toListing(s: CatalogueSku, l: ReturnType<typeof listingsOf>[number]): S
   return {
     id: l.id,
     channel_account_id: l.channel_account_id,
+    channel_account_name: l.channel_account_name,
     provider: l.provider,
     external_sku: l.external_sku,
     external_id: l.external_id,
@@ -371,7 +372,7 @@ function book(
     reserved_change: 0,
     on_hand_after: st.onHand,
     ...extra,
-    source: { type: 'user', user_id: ME },
+    source: { type: 'user', user_id: ME, name: null },
     pushes: {
       pending: pushes.filter((x) => x.result === 'queued').length,
       sent: 0,
@@ -651,7 +652,7 @@ export const stockHandlers = [
       reason: null,
       note: `Allocation saved for ${String(touched.size)} listing${touched.size === 1 ? '' : 's'}`,
       supplier: null,
-      source: { type: 'user', user_id: ME },
+      source: { type: 'user', user_id: ME, name: null },
       pushes: {
         pending: pushes.filter((x) => x.result === 'queued').length,
         sent: 0,

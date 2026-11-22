@@ -64,6 +64,8 @@ export interface SkuSummary {
 export interface SkuListingRef {
   id: string;
   channelAccountId: string;
+  /** Null when the user cannot see the account's company (ARCHITECTURE 6.1). */
+  channelAccountName: string | null;
   provider: ListingProvider;
   externalSku: string;
   externalId: string;
@@ -142,6 +144,8 @@ export interface VatRateRow {
 export interface Listing {
   id: string;
   channelAccountId: string;
+  /** Null when the user cannot see the account's company (ARCHITECTURE 6.1). */
+  channelAccountName: string | null;
   provider: ListingProvider;
   externalSku: string;
   externalId: string;
@@ -978,14 +982,23 @@ export class CatalogueRepository {
       .where('master_sku_id', '=', vatSku)
       .orderBy('effective_from', 'desc')
       .execute();
-    const listings = await trx
-      .selectFrom('app.listings')
-      .select(['id', 'channel_account_id', 'provider', 'external_sku', 'external_id', 'title'])
-      .where('workspace_id', '=', ctx.workspaceId)
-      .where('master_sku_id', '=', id)
-      .where('ended_at', 'is', null)
-      .orderBy('discovered_at')
-      .execute();
+    const { rows: listings } = await sql<{
+      id: string;
+      channel_account_id: string;
+      account_name: string | null;
+      provider: ListingProvider;
+      external_sku: string;
+      external_id: string;
+      title: string | null;
+    }>`
+      SELECT l.id, l.channel_account_id, a.display_name AS account_name, l.provider,
+             l.external_sku, l.external_id, l.title
+        FROM app.listings l
+        LEFT JOIN app.channel_accounts a
+          ON a.workspace_id = l.workspace_id AND a.id = l.channel_account_id
+       WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.master_sku_id = ${id}::uuid
+         AND l.ended_at IS NULL
+       ORDER BY l.discovered_at`.execute(trx);
     const dimensions =
       row.length_mm === null || row.width_mm === null || row.height_mm === null
         ? null
@@ -1013,6 +1026,7 @@ export class CatalogueRepository {
       listings: listings.map((l) => ({
         id: l.id,
         channelAccountId: l.channel_account_id,
+        channelAccountName: l.account_name,
         provider: l.provider,
         externalSku: l.external_sku,
         externalId: l.external_id,
@@ -1079,6 +1093,7 @@ function summarySelect(today: Day, extra = sql``) {
 interface ListingRow {
   id: string;
   channel_account_id: string;
+  account_name: string | null;
   provider: ListingProvider;
   external_sku: string;
   external_id: string;
@@ -1095,17 +1110,21 @@ interface ListingRow {
 
 function listingSelect() {
   return sql`
-    SELECT l.id, l.channel_account_id, l.provider, l.external_sku, l.external_id, l.title,
-           l.fulfilment, l.inventory_api, l.master_sku_id, s.sku, l.mapping_source, l.mapped_at,
-           l.discovered_at, l.ended_at
+    SELECT l.id, l.channel_account_id, a.display_name AS account_name, l.provider,
+           l.external_sku, l.external_id, l.title, l.fulfilment, l.inventory_api, l.master_sku_id,
+           s.sku, l.mapping_source, l.mapped_at, l.discovered_at, l.ended_at
       FROM app.listings l
-      LEFT JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id`;
+      LEFT JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
+      -- LEFT JOIN: channel accounts are company-scoped, listings are not (ARCHITECTURE 6.1).
+      LEFT JOIN app.channel_accounts a
+        ON a.workspace_id = l.workspace_id AND a.id = l.channel_account_id`;
 }
 
 function toListing(row: ListingRow): Listing {
   return {
     id: row.id,
     channelAccountId: row.channel_account_id,
+    channelAccountName: row.account_name,
     provider: row.provider,
     externalSku: row.external_sku,
     externalId: row.external_id,

@@ -288,6 +288,8 @@ describe('catalogue routes (T-0801)', () => {
     });
     expect(mapped.status).toBe(200);
     expect(mapped.body.master_sku).toEqual({ id: one, sku: 'MAP-1' });
+    // ARCHITECTURE 6.1: the account's name, for a user who can see its company.
+    expect(mapped.body.channel_account_name).toBe('eBay main');
     const twice = await call(server, 'PUT', `/catalogue/listings/${listingId}/mapping`, {
       master_sku_id: other,
     });

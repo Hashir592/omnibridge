@@ -148,7 +148,13 @@ describe('stock routes (T-0901)', () => {
       client_ref: ref,
     });
     expect(first.status).toBe(201);
-    expect(first.body).toMatchObject({ kind: 'stock_in', on_hand_change: 12, on_hand_after: 12 });
+    expect(first.body).toMatchObject({
+      kind: 'stock_in',
+      on_hand_change: 12,
+      on_hand_after: 12,
+      // INV-5: the change log names who moved it.
+      source: { type: 'user', user_id: W.admin, name: 'Admin' },
+    });
     const again = await call(server, 'POST', `/stock/${W.sku}/stock-in`, {
       quantity: 12,
       supplier: 'Alder',
@@ -215,7 +221,7 @@ describe('stock routes (T-0901)', () => {
     const detail = await call(server, 'GET', `/stock/${W.sku}`);
     const listing = (detail.body.listings as { target: number; buffer: number }[])[0];
     expect(detail.body.on_hand).toBe(40);
-    expect(listing).toMatchObject({ buffer: 3, target: 37 });
+    expect(listing).toMatchObject({ buffer: 3, target: 37, channel_account_name: 'eBay main' });
     const log = await call(server, 'GET', `/stock/movements?sku_id=${W.sku}&kind=stock_take`);
     expect(log.body.items).toHaveLength(1);
     const csv = await server.inject({
@@ -226,6 +232,8 @@ describe('stock routes (T-0901)', () => {
     expect(csv.statusCode).toBe(200);
     expect(csv.body.split('\r\n')[0]).toContain('at_utc,at_london,sku,kind');
     expect(csv.body).toContain(',RT-1,stock_take,');
+    // INV-5: a hand movement's source is the person's name.
+    expect(csv.body).toMatch(/,RT-1,stock_take,.*,Admin,/);
     await server.close();
   });
 });
