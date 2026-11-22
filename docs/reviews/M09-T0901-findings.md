@@ -2,7 +2,7 @@
 
 Reviewed: T-0901, PR #143 (merge 72b5526, branch `task/T-0901-stock-engine`), read on main b17c874 (which also holds #146, the F-M08-end-01 fix).
 Gate: CI on the PR (run 44944011111) green on every check. CI on main for the merge (run 44944433081) failed in `ui tests` only: one e2e, `apps/ui/e2e/platform.spec.ts:36` "[PLAT-1] [NFR-8] every console section has no serious accessibility issues". #143 changes no file under `apps/ui`, and the next three main runs (#144, #146, #145) are green, so this is a flaky console UI test, not T-0901. Worth a look by whoever owns the console e2e.
-Local: the stock, outbound, discovery and isolation integration files could not run here: Docker Desktop stopped during the session ("Could not find a working container runtime strategy"; 41 skipped, 0 failed). The PR's CI ran them green. The code review below does not depend on them.
+Local: re-run once Docker was back: db `stock.int.test`, worker `stock.int.test`, `outbound.int.test`, `discovery.int.test`, web `isolation.int.test`: 41/41 PASS. The tests pass because none covers the F-01 cases.
 Acceptance: T-0901's tests exist with the cited IDs, and CI ran them green. INV-3 is not proven for a line whose mapping changes: F-M09-T0901-01.
 
 Verdict: **FIX REQUIRED**. Blockers 0, Majors 1, Minors 2. Under ADR-077, S3 fixes the Major in the first commit of M10 (before M10 calls `reserve`, `release` and `dispatch`); the M09 + M10 milestone review confirms it.
