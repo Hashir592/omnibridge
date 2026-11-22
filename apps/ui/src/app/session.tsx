@@ -14,7 +14,7 @@ import type { Company, Session } from '../mocks/types.ts';
  * the one source for them. Tabs, companies and channel accounts still come from the mock data
  * until their real routes exist.
  */
-export type AppSession = Session & { modules: SessionInfo['modules'] };
+export type AppSession = Session & { modules: SessionInfo['modules']; userId: string };
 
 interface AppState {
   session: AppSession | undefined;
@@ -103,6 +103,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       },
       workspace: info.workspace.name,
       modules: info.modules,
+      userId: info.user.id,
     };
   }, [data, info]);
 

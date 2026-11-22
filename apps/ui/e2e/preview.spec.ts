@@ -50,7 +50,6 @@ async function walkWithKeyboard(page: Page, steps = 12): Promise<void> {
 const screens = [
   { name: 'stock list', path: '/stock', ready: 'of 200 SKUs' },
   { name: 'unmapped listings', path: '/stock/listings', ready: 'Not mapped' },
-  { name: 'SKU detail', path: '/stock/sku_3', ready: 'Stock by channel' },
   { name: 'sales and profit', path: '/sales-profit', ready: 'How contribution profit is made' },
   { name: 'VAT quarters', path: '/finance', ready: 'VAT payable' },
   { name: 'expenses', path: '/finance?section=expenses', ready: 'Invoice date' },
@@ -209,7 +208,11 @@ const changed = [
   { name: 'shipping desk with a group', path: '/shipping', ready: 'Pick orders to ship' },
   { name: 'order detail with the Same buyer panel', path: '/orders/ord_0495', ready: 'Same buyer' },
   { name: 'Amazon messages', path: '/customer-service?section=amazon', ready: 'Send reply' },
-  { name: 'SKU detail on manual allocation', path: '/stock/sku_0', ready: 'Stock by channel' },
+  {
+    name: 'SKU detail on manual allocation',
+    path: '/stock/0c0a1e9d-0000-4000-8000-000000000001',
+    ready: 'Stock by channel',
+  },
 ] as const;
 
 for (const s of changed) {
@@ -259,20 +262,7 @@ test('[ORD-9] a same-buyer group is reachable and usable by keyboard', async ({ 
     await expect(row.getByRole('checkbox')).toHaveCount(1);
 });
 
-test('[INV-10] manual allocation: over-allocation warns and a bad number blocks Save', async ({
-  page,
-}) => {
-  await open(page, '/stock/sku_0', 'Stock by channel');
-  await expect(page.getByText('Allocated 260 · Available 186')).toBeVisible();
-  await expect(page.getByText('More allocated than you have.')).toBeVisible();
-  await expect(page.getByText('Capped by stock', { exact: true })).toBeVisible();
-  await expect(page.getByText('Allocation used up', { exact: true })).toBeVisible();
-  const first = page.getByRole('textbox', { name: /^Allocation for / }).first();
-  await first.fill('x');
-  await expect(page.getByRole('button', { name: 'Save allocation' })).toBeDisabled();
-  await first.fill('100');
-  await expect(page.getByText('Allocated 160 · Available 186')).toBeVisible();
-});
+// The manual allocation flows moved to stock.spec.ts with the real M09 routes (T-0317).
 
 test('[PRF-6] order profit: profit inc VAT is profit ex VAT plus net VAT', async ({ page }) => {
   await open(page, '/orders/ord_0039', 'Ship to');

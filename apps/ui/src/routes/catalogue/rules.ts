@@ -95,6 +95,8 @@ const CSV_CODE_TEXT: Record<string, string> = {
   date_invalid: 'Enter the date as DD/MM/YYYY.',
   duplicate: 'This row repeats an earlier one.',
   listing_unknown: 'No listing has this ID. Use the ID from the export.',
+  bundle_stock: 'A bundle has no stock of its own. Count its component instead.',
+  quantity_invalid: 'Enter the counted number as a whole number, 0 or more.',
 };
 
 export function csvErrorText(code: string): string {

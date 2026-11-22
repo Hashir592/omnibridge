@@ -4,6 +4,7 @@
  * Bundle sales are already counted as component units, so bundles are not listed.
  */
 import { rng } from './random.ts';
+import { uid } from './ids.ts';
 import { skus } from './stock.ts';
 
 export interface ForecastRow {
@@ -51,7 +52,7 @@ const ROWS: ForecastRow[] = skus
             ? 'soon'
             : 'ok';
     return {
-      id: s.id,
+      id: uid(s.id),
       sku: s.sku,
       title: s.title,
       available,

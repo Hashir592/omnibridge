@@ -18,6 +18,7 @@ import type {
 } from '../auth/api.ts';
 import { todayLondon } from '../lib/dates.ts';
 import { companies } from './data.ts';
+import { uid } from './ids.ts';
 import { DAY, ago } from './random.ts';
 import { channelOn, currentSession } from './session.ts';
 import { skuDetail, skuPage, skus, type UnmappedPage, type VatType as MockVat } from './stock.ts';
@@ -29,22 +30,9 @@ const VAT_OF: Record<MockVat, VatType> = {
   none: 'no_vat',
 };
 
-let counter = 0;
-const ids = new Map<string, string>();
-/** A stable uuid-shaped id for a mock key, so links survive a reset. */
-function uid(key: string): string {
-  let id = ids.get(key);
-  if (!id) {
-    counter += 1;
-    id = `0c0a1e9d-0000-4000-8000-${counter.toString(16).padStart(12, '0')}`;
-    ids.set(key, id);
-  }
-  return id;
-}
-
 const dayAgo = (days: number) => todayLondon(new Date(Date.now() - days * DAY));
 
-interface Sku {
+export interface CatalogueSku {
   id: string;
   sku: string;
   title: string;
@@ -65,7 +53,7 @@ interface Sku {
 }
 
 let rates: VatRate[] = [];
-let catalogue: Sku[] = [];
+let catalogue: CatalogueSku[] = [];
 let listings: CatalogueListing[] = [];
 
 export function resetCatalogueMock(): void {
@@ -152,6 +140,11 @@ export function resetCatalogueMock(): void {
 }
 resetCatalogueMock();
 
+/** The live catalogue state, for the stock mock (the arrays are replaced on reset). */
+export function catalogueState() {
+  return { skus: catalogue, listings };
+}
+
 const problem = (status: number, code: string, detail?: string) =>
   HttpResponse.json(
     { type: 'about:blank', title: 'Error', status, code, ...(detail ? { detail } : {}) },
@@ -184,12 +177,12 @@ function current<T extends { effective_from: string }>(rows: T[]): T | undefined
     .sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0];
 }
 
-function vatTypeOf(s: Sku): VatType {
+function vatTypeOf(s: CatalogueSku): VatType {
   const base = s.bundle ? byId(s.bundle.componentId) : s;
   return (base && current(base.vat)?.vat_type) ?? 'standard';
 }
 
-function cogsOf(s: Sku): number | null {
+function cogsOf(s: CatalogueSku): number | null {
   if (s.bundle) {
     const c = byId(s.bundle.componentId);
     const p = c ? current(c.cogs)?.cogs_pence : undefined;
@@ -198,7 +191,7 @@ function cogsOf(s: Sku): number | null {
   return current(s.cogs)?.cogs_pence ?? null;
 }
 
-function summary(s: Sku): MasterSkuSummary {
+function summary(s: CatalogueSku): MasterSkuSummary {
   const c = s.bundle ? byId(s.bundle.componentId) : undefined;
   return {
     id: s.id,
@@ -216,7 +209,7 @@ function summary(s: Sku): MasterSkuSummary {
   };
 }
 
-function detail(s: Sku): MasterSku {
+function detail(s: CatalogueSku): MasterSku {
   const base = s.bundle ? byId(s.bundle.componentId) : s;
   const newest = <T extends { effective_from: string }>(rows: T[]) =>
     [...rows].sort((a, b) => b.effective_from.localeCompare(a.effective_from));
@@ -366,7 +359,7 @@ export const catalogueHandlers = [
         'A bundle contains units of one plain SKU, not another bundle.',
       );
     const now = new Date().toISOString();
-    const s: Sku = {
+    const s: CatalogueSku = {
       id: crypto.randomUUID(),
       sku: b.sku,
       title: b.title,
@@ -474,7 +467,7 @@ export const catalogueHandlers = [
     const rows = read.rows;
     const errors: CsvImportReport['errors'] = [];
     const seen = new Set<string>();
-    const good: Array<{ s: Sku; pence: number; day: string }> = [];
+    const good: Array<{ s: CatalogueSku; pence: number; day: string }> = [];
     for (const { line, cells } of rows) {
       const s = catalogue.find((x) => x.sku === cells.sku);
       const pence = pounds(cells.cogs ?? '');
@@ -544,7 +537,7 @@ export const catalogueHandlers = [
     const rows = read.rows;
     const errors: CsvImportReport['errors'] = [];
     const seen = new Set<string>();
-    const good: Array<{ l: CatalogueListing; s: Sku | null }> = [];
+    const good: Array<{ l: CatalogueListing; s: CatalogueSku | null }> = [];
     for (const { line, cells } of rows) {
       const l = listings.find((x) => x.id === cells.listing_id);
       const s = cells.sku ? catalogue.find((x) => x.sku === cells.sku) : null;

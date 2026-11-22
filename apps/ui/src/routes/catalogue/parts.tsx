@@ -24,12 +24,14 @@ import { csvErrorText, reportState } from './rules.ts';
 
 const SECTIONS = [
   { to: '/stock', label: 'Stock' },
+  { to: '/stock/movements', label: 'Change log' },
+  { to: '/stock/buffers', label: 'Buffers' },
   { to: '/stock/skus', label: 'Master SKUs' },
   { to: '/stock/listings', label: 'Listings' },
   { to: '/stock/vat-rates', label: 'VAT rates' },
 ] as const;
 
-/** The four parts of the Stock & Catalogue tab, as links (each has its own URL). */
+/** The parts of the Stock & Catalogue tab, as links (each has its own URL). */
 export function SectionNav() {
   return (
     <nav aria-label="Stock and catalogue" className="mt-3 flex gap-5 border-b border-border">
