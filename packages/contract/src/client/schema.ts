@@ -943,6 +943,142 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/order-groups/{groupId}/dismiss': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Dismiss a same-buyer group as not the same buyer */
+    post: operations['dismissOrderGroup'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/order-groups/{groupId}/members/{orderId}/remove': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Remove one order from its same-buyer group */
+    post: operations['removeOrderGroupMember'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List orders across channels and permitted companies */
+    get: operations['listOrders'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/{orderId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Order detail: lines, money, VAT groups, history, refunds and notes */
+    get: operations['getOrder'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/{orderId}/customer': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Show the buyer's full details (logged) */
+    post: operations['viewOrderCustomer'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/{orderId}/notes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Save the internal notes on an order */
+    put: operations['setOrderNotes'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Export orders as CSV (no customer details) */
+    get: operations['exportOrders'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/search': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Search orders by buyer name or postcode */
+    post: operations['searchOrders'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/platform/api-usage': {
     parameters: {
       query?: never;
@@ -1350,6 +1486,23 @@ export interface paths {
     put?: never;
     /** Suspend a workspace */
     post: operations['suspendWorkspace'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/returns': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Refunds and returns from every channel, newest first (read-only) */
+    get: operations['listReturns'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -2135,6 +2288,10 @@ export interface components {
       rows: number;
       valid: number;
     };
+    /** @enum {string} */
+    CustomerState: 'present' | 'deleted' | 'none';
+    /** @enum {string} */
+    CustomerStateInput: 'present' | 'deleted' | 'none';
     DeadLetter: {
       attempt: number | null;
       /** Format: date-time */
@@ -2505,6 +2662,14 @@ export interface components {
     ManufacturerListInput: {
       items: string[];
     };
+    MaskedBuyer: {
+      name: string | null;
+      postcode: string | null;
+    };
+    MaskedBuyerInput: {
+      name: string | null;
+      postcode: string | null;
+    };
     MasterSku: {
       active: boolean;
       barcode: string | null;
@@ -2869,6 +3034,319 @@ export interface components {
     OAuthProvider: 'amazon' | 'amazon_ads' | 'ebay';
     /** @enum {string} */
     OAuthProviderInput: 'amazon' | 'amazon_ads' | 'ebay';
+    OrderCustomer: {
+      address_line1: string | null;
+      address_line2: string | null;
+      buyer_username: string | null;
+      country: string | null;
+      county: string | null;
+      delivery_instructions: string | null;
+      email: string | null;
+      name: string | null;
+      phone: string | null;
+      postcode: string | null;
+      town: string | null;
+    };
+    OrderCustomerInput: {
+      address_line1: string | null;
+      address_line2: string | null;
+      buyer_username: string | null;
+      country: string | null;
+      county: string | null;
+      delivery_instructions: string | null;
+      email: string | null;
+      name: string | null;
+      phone: string | null;
+      postcode: string | null;
+      town: string | null;
+    };
+    OrderDetail: {
+      buyer: components['schemas']['MaskedBuyer'] | null;
+      cancelled_at: string | null;
+      /** Format: uuid */
+      channel_account_id: string;
+      channel_account_name: string | null;
+      /** Format: uuid */
+      company_id: string;
+      customer_deleted_at: string | null;
+      customer_state: components['schemas']['CustomerState'];
+      delivered_at: string | null;
+      dispatched_at: string | null;
+      first_sku: string | null;
+      flags: components['schemas']['OrderFlag'][];
+      group: components['schemas']['OrderGroupRef'] | null;
+      history: components['schemas']['OrderHistoryEntry'][];
+      /** Format: uuid */
+      id: string;
+      item_count: number;
+      lines: components['schemas']['OrderLine'][];
+      money: {
+        discount_pence: number;
+        goods_pence: number;
+        gross_pence: number;
+        net_pence: number;
+        refunded_pence: number;
+        refunded_vat_pence: number;
+        shipping_pence: number;
+        vat_groups: components['schemas']['VatGroup'][];
+        vat_pence: number;
+      };
+      more_skus: string[];
+      notes: string | null;
+      notes_updated_at: string | null;
+      order_ref: string;
+      paid_at: string | null;
+      /** Format: date-time */
+      placed_at: string;
+      provider: components['schemas']['Provider'];
+      raw_status: string;
+      refunds: components['schemas']['Refund'][];
+      same_buyer: components['schemas']['OrderGroup'] | null;
+      ship_by: string | null;
+      ship_to_country: string | null;
+      shipping_status: string | null;
+      status: components['schemas']['OrderStatus'];
+      /** Format: date */
+      tax_point_date: string;
+      total_gross_pence: number;
+      tracking_state: ('pending' | 'confirmed' | 'not_confirmed') | null;
+    };
+    OrderDetailInput: {
+      buyer: components['schemas']['MaskedBuyerInput'] | null;
+      cancelled_at: string | null;
+      /** Format: uuid */
+      channel_account_id: string;
+      channel_account_name: string | null;
+      /** Format: uuid */
+      company_id: string;
+      customer_deleted_at: string | null;
+      customer_state: components['schemas']['CustomerStateInput'];
+      delivered_at: string | null;
+      dispatched_at: string | null;
+      first_sku: string | null;
+      flags: components['schemas']['OrderFlagInput'][];
+      group: components['schemas']['OrderGroupRefInput'] | null;
+      history: components['schemas']['OrderHistoryEntryInput'][];
+      /** Format: uuid */
+      id: string;
+      item_count: number;
+      lines: components['schemas']['OrderLineInput'][];
+      money: {
+        discount_pence: number;
+        goods_pence: number;
+        gross_pence: number;
+        net_pence: number;
+        refunded_pence: number;
+        refunded_vat_pence: number;
+        shipping_pence: number;
+        vat_groups: components['schemas']['VatGroupInput'][];
+        vat_pence: number;
+      };
+      more_skus: string[];
+      notes: string | null;
+      notes_updated_at: string | null;
+      order_ref: string;
+      paid_at: string | null;
+      /** Format: date-time */
+      placed_at: string;
+      provider: components['schemas']['ProviderInput'];
+      raw_status: string;
+      refunds: components['schemas']['RefundInput'][];
+      same_buyer: components['schemas']['OrderGroupInput'] | null;
+      ship_by: string | null;
+      ship_to_country: string | null;
+      shipping_status: string | null;
+      status: components['schemas']['OrderStatusInput'];
+      /** Format: date */
+      tax_point_date: string;
+      total_gross_pence: number;
+      tracking_state: ('pending' | 'confirmed' | 'not_confirmed') | null;
+    };
+    /** @enum {string} */
+    OrderFlag: 'oversold' | 'unmapped' | 'address_shortened' | 'tracking_not_confirmed' | 'fba';
+    /** @enum {string} */
+    OrderFlagInput:
+      'oversold' | 'unmapped' | 'address_shortened' | 'tracking_not_confirmed' | 'fba';
+    OrderGroup: {
+      /** Format: uuid */
+      channel_account_id: string;
+      earliest_ship_by: string | null;
+      /** Format: uuid */
+      id: string;
+      members: components['schemas']['OrderGroupMember'][];
+      /** @enum {string} */
+      state: 'open' | 'dismissed' | 'closed';
+      warnings: ('different_ship_by' | 'different_service' | 'address_shortened' | 'unmapped')[];
+    };
+    OrderGroupInput: {
+      /** Format: uuid */
+      channel_account_id: string;
+      earliest_ship_by: string | null;
+      /** Format: uuid */
+      id: string;
+      members: components['schemas']['OrderGroupMemberInput'][];
+      /** @enum {string} */
+      state: 'open' | 'dismissed' | 'closed';
+      warnings: ('different_ship_by' | 'different_service' | 'address_shortened' | 'unmapped')[];
+    };
+    OrderGroupMember: {
+      /** Format: uuid */
+      id: string;
+      order_ref: string;
+      /** Format: date-time */
+      placed_at: string;
+      ship_by: string | null;
+      status: components['schemas']['OrderStatus'];
+    };
+    OrderGroupMemberInput: {
+      /** Format: uuid */
+      id: string;
+      order_ref: string;
+      /** Format: date-time */
+      placed_at: string;
+      ship_by: string | null;
+      status: components['schemas']['OrderStatusInput'];
+    };
+    OrderGroupRef: {
+      hidden: number;
+      /** Format: uuid */
+      id: string;
+      position: number;
+      size: number;
+    };
+    OrderGroupRefInput: {
+      hidden: number;
+      /** Format: uuid */
+      id: string;
+      position: number;
+      size: number;
+    };
+    OrderHistoryEntry: {
+      /** Format: date-time */
+      at: string;
+      raw_status: string;
+      status: components['schemas']['OrderStatus'] | null;
+    };
+    OrderHistoryEntryInput: {
+      /** Format: date-time */
+      at: string;
+      raw_status: string;
+      status: components['schemas']['OrderStatusInput'] | null;
+    };
+    OrderLine: {
+      cogs_pence: number | null;
+      discount_pence: number;
+      external_line_id: string;
+      external_sku: string | null;
+      /** Format: uuid */
+      id: string;
+      line_gross_pence: number;
+      oversold: boolean;
+      provisional: boolean;
+      quantity: number;
+      shipping_pence: number;
+      sku: string | null;
+      sku_id: string | null;
+      title: string | null;
+      unit_gross_pence: number;
+      vat_pence: number;
+      vat_rate_bp: number;
+      vat_type: components['schemas']['SaleVatType'] | null;
+    };
+    OrderLineInput: {
+      cogs_pence: number | null;
+      discount_pence: number;
+      external_line_id: string;
+      external_sku: string | null;
+      /** Format: uuid */
+      id: string;
+      line_gross_pence: number;
+      oversold: boolean;
+      provisional: boolean;
+      quantity: number;
+      shipping_pence: number;
+      sku: string | null;
+      sku_id: string | null;
+      title: string | null;
+      unit_gross_pence: number;
+      vat_pence: number;
+      vat_rate_bp: number;
+      vat_type: components['schemas']['SaleVatTypeInput'] | null;
+    };
+    OrderRow: {
+      buyer: components['schemas']['MaskedBuyer'] | null;
+      /** Format: uuid */
+      channel_account_id: string;
+      channel_account_name: string | null;
+      /** Format: uuid */
+      company_id: string;
+      customer_state: components['schemas']['CustomerState'];
+      first_sku: string | null;
+      flags: components['schemas']['OrderFlag'][];
+      group: components['schemas']['OrderGroupRef'] | null;
+      /** Format: uuid */
+      id: string;
+      item_count: number;
+      more_skus: string[];
+      order_ref: string;
+      /** Format: date-time */
+      placed_at: string;
+      provider: components['schemas']['Provider'];
+      raw_status: string;
+      ship_by: string | null;
+      shipping_status: string | null;
+      status: components['schemas']['OrderStatus'];
+      total_gross_pence: number;
+      tracking_state: ('pending' | 'confirmed' | 'not_confirmed') | null;
+    };
+    OrderRowInput: {
+      buyer: components['schemas']['MaskedBuyerInput'] | null;
+      /** Format: uuid */
+      channel_account_id: string;
+      channel_account_name: string | null;
+      /** Format: uuid */
+      company_id: string;
+      customer_state: components['schemas']['CustomerStateInput'];
+      first_sku: string | null;
+      flags: components['schemas']['OrderFlagInput'][];
+      group: components['schemas']['OrderGroupRefInput'] | null;
+      /** Format: uuid */
+      id: string;
+      item_count: number;
+      more_skus: string[];
+      order_ref: string;
+      /** Format: date-time */
+      placed_at: string;
+      provider: components['schemas']['ProviderInput'];
+      raw_status: string;
+      ship_by: string | null;
+      shipping_status: string | null;
+      status: components['schemas']['OrderStatusInput'];
+      total_gross_pence: number;
+      tracking_state: ('pending' | 'confirmed' | 'not_confirmed') | null;
+    };
+    /** @enum {string} */
+    OrderStatus:
+      | 'pending_payment'
+      | 'awaiting_dispatch'
+      | 'label_created'
+      | 'dispatched'
+      | 'delivered'
+      | 'cancelled'
+      | 'partly_refunded'
+      | 'refunded'
+      | 'returned';
+    /** @enum {string} */
+    OrderStatusInput:
+      | 'pending_payment'
+      | 'awaiting_dispatch'
+      | 'label_created'
+      | 'dispatched'
+      | 'delivered'
+      | 'cancelled'
+      | 'partly_refunded'
+      | 'refunded'
+      | 'returned';
     PlatformFlags: {
       public_signup: boolean;
       updated_at: string | null;
@@ -2999,6 +3477,40 @@ export interface components {
       queued: number;
       type: string;
     };
+    Refund: {
+      amount_pence: number;
+      external_refund_id: string;
+      /** Format: uuid */
+      id: string;
+      lines: {
+        amount_pence: number;
+        /** Format: uuid */
+        order_line_id: string;
+        quantity: number;
+        sku: string | null;
+      }[];
+      /** Format: date-time */
+      refunded_at: string;
+      return_to_stock: boolean;
+      vat_pence: number;
+    };
+    RefundInput: {
+      amount_pence: number;
+      external_refund_id: string;
+      /** Format: uuid */
+      id: string;
+      lines: {
+        amount_pence: number;
+        /** Format: uuid */
+        order_line_id: string;
+        quantity: number;
+        sku: string | null;
+      }[];
+      /** Format: date-time */
+      refunded_at: string;
+      return_to_stock: boolean;
+      vat_pence: number;
+    };
     ReorderSettings: {
       lead_time_days: number;
       safety_days: number;
@@ -3019,6 +3531,60 @@ export interface components {
       /** Format: date-time */
       expiresAt: string;
     };
+    ReturnRow: {
+      a_to_z: boolean | null;
+      amount_pence: number;
+      /** Format: date-time */
+      at: string;
+      /** Format: uuid */
+      channel_account_id: string;
+      channel_account_name: string | null;
+      claim_deadline_estimate: string | null;
+      /** Format: uuid */
+      company_id: string;
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      kind: 'refund' | 'amazon_return';
+      /** Format: uuid */
+      order_id: string;
+      order_ref: string;
+      provider: components['schemas']['Provider'];
+      reason: string | null;
+      return_status: string | null;
+      return_to_stock: boolean;
+      skus: string[];
+      vat_pence: number;
+    };
+    ReturnRowInput: {
+      a_to_z: boolean | null;
+      amount_pence: number;
+      /** Format: date-time */
+      at: string;
+      /** Format: uuid */
+      channel_account_id: string;
+      channel_account_name: string | null;
+      claim_deadline_estimate: string | null;
+      /** Format: uuid */
+      company_id: string;
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      kind: 'refund' | 'amazon_return';
+      /** Format: uuid */
+      order_id: string;
+      order_ref: string;
+      provider: components['schemas']['ProviderInput'];
+      reason: string | null;
+      return_status: string | null;
+      return_to_stock: boolean;
+      skus: string[];
+      vat_pence: number;
+    };
+    /** @enum {string} */
+    SaleVatType: 'standard' | 'reduced' | 'zero' | 'no_vat';
+    /** @enum {string} */
+    SaleVatTypeInput: 'standard' | 'reduced' | 'zero' | 'no_vat';
     SessionInfo: {
       incident: components['schemas']['Incident'] | null;
       modules: components['schemas']['WorkspaceModules'];
@@ -3358,6 +3924,22 @@ export interface components {
         | 'reminders'
         | 'notes'
       )[];
+    };
+    VatGroup: {
+      gross_pence: number;
+      net_pence: number;
+      provisional: boolean;
+      rate_bp: number;
+      vat_pence: number;
+      vat_type: components['schemas']['SaleVatType'] | null;
+    };
+    VatGroupInput: {
+      gross_pence: number;
+      net_pence: number;
+      provisional: boolean;
+      rate_bp: number;
+      vat_pence: number;
+      vat_type: components['schemas']['SaleVatTypeInput'] | null;
     };
     VatHistoryEntry: {
       /** Format: date */
@@ -6258,6 +6840,395 @@ export interface operations {
       };
     };
   };
+  dismissOrderGroup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        groupId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          reason: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  removeOrderGroupMember: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        groupId: string;
+        orderId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          reason: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderGroup'];
+        };
+      };
+    };
+  };
+  listOrders: {
+    parameters: {
+      query?: {
+        channel_account_id?: string;
+        company_id?: string;
+        flag?: components['schemas']['OrderFlagInput'];
+        from?: string;
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+        q?: string;
+        ship_by?: 'today' | 'overdue';
+        status?: components['schemas']['OrderStatusInput'];
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['OrderRow'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
+        };
+      };
+    };
+  };
+  getOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        orderId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderDetail'];
+        };
+      };
+    };
+  };
+  viewOrderCustomer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        orderId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderCustomer'];
+        };
+      };
+    };
+  };
+  setOrderNotes: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        orderId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          notes: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            notes: string | null;
+            /** Format: date-time */
+            notes_updated_at: string;
+          };
+        };
+      };
+    };
+  };
+  exportOrders: {
+    parameters: {
+      query?: {
+        channel_account_id?: string;
+        company_id?: string;
+        flag?: components['schemas']['OrderFlagInput'];
+        from?: string;
+        q?: string;
+        ship_by?: 'today' | 'overdue';
+        status?: components['schemas']['OrderStatusInput'];
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description File content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+    };
+  };
+  searchOrders: {
+    parameters: {
+      query?: {
+        channel_account_id?: string;
+        company_id?: string;
+        flag?: components['schemas']['OrderFlagInput'];
+        from?: string;
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+        q?: string;
+        ship_by?: 'today' | 'overdue';
+        status?: components['schemas']['OrderStatusInput'];
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          buyer_name?: string;
+          buyer_postcode?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['OrderRow'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
+        };
+      };
+    };
+  };
   listApiUsage: {
     parameters: {
       query?: {
@@ -7494,6 +8465,59 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['WorkspaceStatusChange'];
+        };
+      };
+    };
+  };
+  listReturns: {
+    parameters: {
+      query?: {
+        channel_account_id?: string;
+        company_id?: string;
+        from?: string;
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['ReturnRow'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
         };
       };
     };

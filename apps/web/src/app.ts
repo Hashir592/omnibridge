@@ -37,6 +37,7 @@ import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
 import { catalogueHandlers, type CatalogueOptions } from './catalogue.ts';
 import { stockHandlers, type StockOptions } from './stock.ts';
+import { ordersHandlers } from './orders.ts';
 import { connectionHandlers, type ConnectionOptions } from './connections.ts';
 import { platformHandlers, type PlatformOptions } from './platform.ts';
 import { privacyHandlers, type PrivacyOptions } from './privacy.ts';
@@ -233,6 +234,7 @@ export function buildWebApp({
     ...connectionHandlers(connections),
     ...catalogueHandlers(catalogue),
     ...stockHandlers(stock),
+    ...ordersHandlers(),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';
