@@ -82,7 +82,12 @@ Follow-ups: <list or "none">
 5. **Critical task:** its own PR. After it merges, print a `PASTE INTO SESSION 4` block naming the PR (and a `PASTE INTO SESSION 5` block when MODULES.md marks an S5 check), then carry on with the next task. Do not wait for the review.
 6. **Findings:** a Blocker is fixed at once; a Major in the first commit of your next task; a Minor in a later task. Add `Resolution:` lines (commit and test) under each finding in its findings file. Give each Blocker fix a regression test. No re-check round: the next review verifies.
 7. **Module end:** write `docs/reviews/<module>-end-report.md` (tasks, how each was built in a paragraph, decisions made, risks, test evidence). If the module closes an S4 milestone (MODULES.md), print the `PASTE INTO SESSION 4` block for it. Then print one `PASTE INTO SESSION 1` block for the whole module. Start the next module only when Hashir pastes it.
-8. APPROVED is needed before any production deploy. An S4 milestone review may run while you build the next module.
+8. **Halfway pause (Hashir, 22 Nov 2026).** When a module is about half built, stop and take a break before going on:
+   - Re-read the module brief, your rule file and the code written so far.
+   - Check that what is built matches what was asked. Fix anything missing or wrong.
+   - Do a light refactor to keep the code clean and the context small. No new features, no over-engineering.
+   - Then write one line, "Rested and checked: <what you fixed or tidied>. Ready to continue.", and **wait**. Continue only when Hashir says "continue", from where you left off.
+9. APPROVED is needed before any production deploy. An S4 milestone review may run while you build the next module.
 
 ## Coverage rules (`scripts/req-coverage.mjs`, built in T-0101)
 
