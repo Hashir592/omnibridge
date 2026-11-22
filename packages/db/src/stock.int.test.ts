@@ -168,6 +168,11 @@ describe('stock engine (T-0901)', () => {
     return detail;
   };
   const order = () => randomUUID();
+  /** Each call its own short transaction, as the worker's tenancy runs them. */
+  const run =
+    (w: World) =>
+    <T>(fn: (ctx: TenantContext) => Promise<T>) =>
+      fn(w.ctx);
   const pick = (m: Map<string, number>, ids: readonly string[]) => ids.map((id) => m.get(id));
   const sell = (w: World, listing: string, quantity: number, line = order()) =>
     engine().reserve(w.ctx, {
@@ -720,11 +725,11 @@ describe('stock engine (T-0901)', () => {
       sql`UPDATE app.listings SET last_order_at = ${new Date(scan.getTime() - 5 * 60_000)}
            WHERE id = ${w.listings.ebay2}::uuid`.execute(trx),
     );
-    expect(await engine().reconcile(w.ctx, w.accounts.ebay1, scan)).toEqual({
+    expect(await engine().reconcile(run(w), w.accounts.ebay1, scan)).toEqual({
       checked: 1,
       drifted: 1,
     });
-    expect(await engine().reconcile(w.ctx, w.accounts.ebay2, scan)).toEqual({
+    expect(await engine().reconcile(run(w), w.accounts.ebay2, scan)).toEqual({
       checked: 0,
       drifted: 0,
     });
@@ -735,7 +740,7 @@ describe('stock engine (T-0901)', () => {
     notices.length = 0;
     const next = new Date(scan.getTime() + 86_400_000);
     await seen({ [w.accounts.ebay1]: 6 }, next);
-    await engine().reconcile(w.ctx, w.accounts.ebay1, next);
+    await engine().reconcile(run(w), w.accounts.ebay1, next);
     expect(notices).toContainEqual({
       op: 'raise',
       type: 'inventory.sync_failed',
@@ -852,6 +857,185 @@ describe('stock engine (T-0901)', () => {
     });
     expect((await stock(w)).listings.find((l) => l.id === w.listings.ebay1)?.manual?.sold).toBe(3);
     clock = NOW;
+  });
+
+  it('[INV-3] [CAT-5] reserve, remap, then dispatch: the line works from its own reservation, and both SKUs end right', async () => {
+    const w = await world(10, 'RM-X');
+    const y = await catalogue.createSku(
+      w.ctx,
+      { sku: 'RM-Y', title: 'Y', shortDescription: 'Y', weightG: 1, vatType: 'standard' },
+      null,
+      clock,
+    );
+    await engine().stockIn(w.ctx, y, { quantity: 10, clientRef: randomUUID(), userId: null });
+    // Another order already holds 3 of Y.
+    await catalogue.upsertDiscovered(
+      w.ctx,
+      w.accounts.website,
+      'website',
+      [
+        {
+          externalSku: 'RM-Y',
+          externalId: 'y',
+          title: null,
+          fulfilment: null,
+          inventoryApi: null,
+          quantity: null,
+        },
+      ],
+      clock,
+    );
+    const yListing = (await engine().getStock(w.ctx, y))?.listings[0]?.id ?? '';
+    await engine().onListingMapped(w.ctx, {
+      listingId: yListing,
+      masterSkuId: y,
+      previousMasterSkuId: null,
+    });
+    await sell(w, yListing, 3);
+    // Line L reserves 2 of X on ebay1, then ebay1 is remapped to Y.
+    const line = order();
+    await sell(w, w.listings.ebay1, 2, line);
+    await catalogue.unmapListing(w.ctx, w.listings.ebay1, clock);
+    await catalogue.mapListing(w.ctx, w.listings.ebay1, y, 'manual', null, clock);
+    const change = { listingId: w.listings.ebay1, masterSkuId: y, previousMasterSkuId: w.sku };
+    await engine().onListingMapped(w.ctx, change);
+    await engine().onListingMapped(w.ctx, change);
+    // The reservation moved with the line: X holds none, Y holds 3 + 2.
+    expect(await stock(w)).toMatchObject({ onHand: 10, reserved: 0, available: 10 });
+    expect(await stock(w, y)).toMatchObject({ onHand: 10, reserved: 5, available: 5 });
+    await engine().dispatch(w.ctx, { orderLineId: line, listingId: w.listings.ebay1, quantity: 2 });
+    expect(await stock(w)).toMatchObject({ onHand: 10, reserved: 0 });
+    expect(await stock(w, y)).toMatchObject({ onHand: 8, reserved: 3, available: 5 });
+    const remaps = await engine().listMovements(w.ctx, { skuId: w.sku, offset: 0, limit: 20 }, 50);
+    expect(
+      remaps.items.filter((m) => m.kind === 'release' && m.reservedChange === -2),
+    ).toHaveLength(1);
+  });
+
+  it('[INV-3] a dispatch with no reservation leaves other orders’ reserved alone', async () => {
+    const w = await world(10, 'NR-1');
+    await sell(w, w.listings.website, 4);
+    // A line first seen already shipped: no reserve of its own.
+    await engine().dispatch(w.ctx, {
+      orderLineId: order(),
+      listingId: w.listings.ebay1,
+      quantity: 2,
+    });
+    expect(await stock(w)).toMatchObject({ onHand: 8, reserved: 4, available: 4 });
+    // A release of a line that never reserved changes nothing.
+    expect(
+      await engine().release(w.ctx, {
+        orderLineId: order(),
+        listingId: w.listings.ebay1,
+        quantity: 9,
+      }),
+    ).toEqual({ applied: false });
+    expect(await stock(w)).toMatchObject({ onHand: 8, reserved: 4 });
+  });
+
+  it('[INV-3] release after dispatch changes nothing; dispatch after release moves on hand only', async () => {
+    const w = await world(10, 'RD-1');
+    await sell(w, w.listings.website, 3);
+    const shipped = order();
+    await sell(w, w.listings.ebay1, 2, shipped);
+    await engine().dispatch(w.ctx, {
+      orderLineId: shipped,
+      listingId: w.listings.ebay1,
+      quantity: 2,
+    });
+    expect(
+      await engine().release(w.ctx, {
+        orderLineId: shipped,
+        listingId: w.listings.ebay1,
+        quantity: 2,
+      }),
+    ).toEqual({ applied: false });
+    expect(await stock(w)).toMatchObject({ onHand: 8, reserved: 3 });
+    const cancelled = order();
+    await sell(w, w.listings.ebay1, 1, cancelled);
+    await engine().release(w.ctx, {
+      orderLineId: cancelled,
+      listingId: w.listings.ebay1,
+      quantity: 1,
+    });
+    // Shipped anyway: on hand goes down, other orders keep their 3 reserved.
+    await engine().dispatch(w.ctx, {
+      orderLineId: cancelled,
+      listingId: w.listings.ebay1,
+      quantity: 1,
+    });
+    expect(await stock(w)).toMatchObject({ onHand: 7, reserved: 3, available: 4 });
+  });
+
+  it('[INV-7] reconciliation runs one short transaction per SKU: a sale of another SKU is not held up', async () => {
+    const w = await world(10, 'RC-1');
+    const other = await catalogue.createSku(
+      w.ctx,
+      { sku: 'RC-2', title: 'Two', shortDescription: 'Two', weightG: 1, vatType: 'standard' },
+      null,
+      clock,
+    );
+    await engine().stockIn(w.ctx, other, { quantity: 10, clientRef: randomUUID(), userId: null });
+    const found = await catalogue.upsertDiscovered(
+      w.ctx,
+      w.accounts.ebay1,
+      'ebay',
+      [
+        {
+          externalSku: 'RC-2',
+          externalId: 'rc2',
+          title: null,
+          fulfilment: null,
+          inventoryApi: true,
+          quantity: 3,
+        },
+      ],
+      clock,
+    );
+    const otherListing = found.autoMapped[0]?.listingId ?? '';
+    await engine().onListingMapped(w.ctx, {
+      listingId: otherListing,
+      masterSkuId: other,
+      previousMasterSkuId: null,
+    });
+    await sendAll(w);
+    const scan = new Date(clock.getTime() + 3_600_000);
+    await catalogue.upsertDiscovered(
+      w.ctx,
+      w.accounts.ebay1,
+      'ebay',
+      [
+        {
+          externalSku: 'RC-1',
+          externalId: 'x',
+          title: null,
+          fulfilment: null,
+          inventoryApi: true,
+          quantity: 4,
+        },
+        {
+          externalSku: 'RC-2',
+          externalId: 'rc2',
+          title: null,
+          fulfilment: null,
+          inventoryApi: true,
+          quantity: 3,
+        },
+      ],
+      scan,
+    );
+    // Between the SKUs' transactions, a sale of the first SKU's other listing goes through at once.
+    let calls = 0;
+    const between = async <T>(fn: (ctx: TenantContext) => Promise<T>): Promise<T> => {
+      calls += 1;
+      // With one transaction for the whole account, this sale would wait for the run to end.
+      if (calls === 3) await sell(w, w.listings.website, 1);
+      return fn(w.ctx);
+    };
+    const result = await engine().reconcile(between, w.accounts.ebay1, scan);
+    expect(result.checked).toBe(2);
+    // One read, then one transaction per SKU.
+    expect(calls).toBe(3);
   });
 
   it('[TEN-6] one workspace’s stock is invisible to another', async () => {

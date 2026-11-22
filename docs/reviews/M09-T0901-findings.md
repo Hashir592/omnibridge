@@ -42,7 +42,17 @@ Required fix:
   - dispatch with no reserve leaves other orders' reserved alone;
   - release after dispatch changes nothing.
 
-Resolution: (S3 fills in)
+Resolution: fixed ahead of M10, on branch `task/T-0901-fixes` (S3, 22 Nov 2026).
+- Every movement of an order line names the line (`order_line_id`, migrations 0045 to 0047; the index is built CONCURRENTLY).
+- A line's live reservation is the sum of its reserved changes per SKU (`#lineHistory`, through indexed lookups).
+- `release` and `dispatch` lock that SKU's stock row and move exactly the live reservation.
+  - No live reservation: `release` is a no-op and `dispatch` moves on hand only (what the line first reserved, or the given quantity if it never reserved).
+  - A second event changes nothing on reserved.
+- A remap moves each open line's live reservation to the new SKU, under both stock rows' locks, as a release on the old SKU and a reserve on the new one (source kind `remap`, converted through the pack sizes). The back-fill of an already-shipped line uses the same line-based dispatch.
+- Tests in `packages/db/src/stock.int.test.ts`:
+  - "[INV-3] [CAT-5] reserve, remap, then dispatch: the line works from its own reservation, and both SKUs end right";
+  - "[INV-3] a dispatch with no reservation leaves other orders' reserved alone";
+  - "[INV-3] release after dispatch changes nothing; dispatch after release moves on hand only".
 
 ## F-M09-T0901-02 — Minor — recordPushResult locks the listing before the stock row on the reorder path
 Area: Performance, Correctness  IDs: INV-8, INV-4
@@ -53,7 +63,7 @@ Failure: a late older write settles (the reorder case) while an order on the sam
 
 Required fix: in `recordPushResult`, lock the listing's component stock row (`#listingSku` + `#lock`) before any `app.listings` update.
 
-Resolution: (S3 fills in)
+Resolution: fixed in the same branch. `recordPushResult` locks the listing's component stock row before any `app.listings` update.
 
 ## F-M09-T0901-03 — Minor — Reconciliation of an account runs in one transaction across all its SKUs
 Area: Performance  IDs: INV-7
@@ -64,7 +74,10 @@ Failure: an account with thousands of listings holds most of its SKUs' stock row
 
 Required fix: one short transaction per component (the per-component logic already stands alone), and a test citing `[INV-7]` that a reserve on another SKU of the account is not blocked during reconciliation.
 
-Resolution: (S3 fills in)
+Resolution: fixed in the same branch.
+- `reconcile` takes a runner and does one short read, then one transaction per SKU.
+- The worker runs it after the scan has concluded, never inside the scan's transaction, and logs a failure instead of re-running the scan.
+- Test: "[INV-7] reconciliation runs one short transaction per SKU: a sale of another SKU is not held up".
 
 ## Not raised (noted as known)
 - Amazon pushes come in M18 (seller ID), EBAY-9 revision holds in M15, and order references with M10.

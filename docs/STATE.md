@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 22 Nov 2026 by S3 (M08 milestone fixes in PR #146; M09 merged).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 22 Nov 2026 by S3 (T-0901 review fixes in PR #151).
 
 ## Now
 
@@ -10,6 +10,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M08 built** (`docs/reviews/M08-end-report.md`): contract #139 and T-0801 #141, merged.
 - **M09 built** (`docs/reviews/M09-end-report.md`): contract #142 and T-0901 #143, merged.
 - **S4:** the M07 + M08 milestone was BLOCKED on F-M08-end-01 (`docs/reviews/M08-end-findings.md`), fixed with both Minors in #146. The M09 + M10 milestone confirms the fix. **Review:** T-0901 critical review FIX REQUIRED (`docs/reviews/M09-T0901-findings.md`): Major F-M09-T0901-01 (release and dispatch must work from the line's own reserve, also across a remap), fixed in M10's first commit; 2 Minors.
+- **T-0901 review** (`docs/reviews/M09-T0901-findings.md`): FIX REQUIRED on F-M09-T0901-01. Fixed with both Minors in #151, ahead of M10. #146 (the M08 milestone fix) and #150 (account and user names for S2) are merged.
 - **Next (S3):** M10, when Hashir pastes it.
 - **S2:** T-0316 catalogue screens merged (#145). T-0317 stock screens and manual allocation built (PR, auto-merge). Two small contract asks for S3 in `docs/handoffs/20261122-1442-S2-to-S3.md`. Next for S2: whatever S1 places after M09.
 

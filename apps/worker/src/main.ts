@@ -316,8 +316,12 @@ await registerHandlers(queue, {
     queue,
     // C7.3 and INV-7: ended listings lose their manual settings; the nightly scan reconciles.
     ended: { onEnded: (ctx, ids) => stockEngine.onListingsEnded(ctx, ids) },
-    reconcile: async (ctx, accountId, startedAt) => {
-      await stockEngine.reconcile(ctx, accountId, startedAt);
+    reconcile: async (workspaceId, accountId, startedAt) => {
+      await stockEngine.reconcile(
+        (fn) => syncPorts.tenancy.runWorkspace({ workspaceId }, fn),
+        accountId,
+        startedAt,
+      );
     },
     logger: log,
   }),
