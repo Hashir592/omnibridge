@@ -237,6 +237,7 @@ describe('order ingest (T-1001)', () => {
         resolve: () => Promise.resolve(true),
       },
       demand: {
+        lockOrders: (ctx, listingId) => ingest.lockOrders(ctx, listingId),
         openLines: (ctx, listingId) => ingest.openLines(ctx, listingId),
         markOversold: (ctx, orderLineId) => ingest.markOversold(ctx, orderLineId),
       },
@@ -923,6 +924,43 @@ describe('order ingest (T-1001)', () => {
     await ingest.apply(w.ctx, other, [order()]);
     expect(late).toEqual([]);
     expect(await ingest.reportLateMapped(w.ctx, w.account)).toBe(1);
+  });
+
+  it('[CAT-6][INV-4] mapping locks stock before the listing, so a sale of the SKU cannot deadlock with it', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    await ingest.apply(w.ctx, w.account, [lateOrder()]);
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    let job: Promise<unknown> = Promise.resolve();
+    // A sale in progress: it holds the stock row and then locks the SKU's listings.
+    await withTenantTransaction(db, w.ctx, async (trx) => {
+      await sql`SELECT 1 FROM app.stock_levels WHERE master_sku_id = ${sku}::uuid FOR UPDATE`.execute(
+        trx,
+      );
+      job = mapped(w, { listingId, masterSkuId: sku });
+      await new Promise((r) => setTimeout(r, 300));
+      await sql`SELECT 1 FROM app.listings WHERE id = ${listingId}::uuid FOR UPDATE NOWAIT`.execute(
+        trx,
+      );
+    });
+    expect(await job).toEqual({ filled: 1 });
+  });
+
+  it('[CAT-6][INV-4] mapping never waits for an order that shipped before', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const o = lateOrder();
+    await ingest.apply(w.ctx, w.account, [shippedOn(o)]);
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    await mapped(w, { listingId, masterSkuId: sku });
+    await withTenantTransaction(db, w.ctx, async (trx) => {
+      await sql`SELECT 1 FROM app.orders WHERE external_order_id = ${o.externalId} FOR UPDATE`.execute(
+        trx,
+      );
+      const done = mapped(w, { listingId, masterSkuId: sku }).then(() => 'done');
+      const late = new Promise<string>((r) => setTimeout(r, 3000, 'waited'));
+      expect(await Promise.race([done, late])).toBe('done');
+    });
   });
 
   it('[CAT-6][INV-3] a dispatch stored while the listing is being mapped is not lost', async () => {

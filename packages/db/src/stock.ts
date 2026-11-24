@@ -58,9 +58,11 @@ export interface StockPushQueue {
 
 /**
  * CAT-6: the order lines of a listing that moved no stock while it was unmapped or not discovered
- * yet (M10). `openLines` locks their orders, so it is called before any stock row is locked.
+ * yet (M10). Lock order: `lockOrders`, then the stock rows, then `openLines` (which touches the
+ * listing).
  */
 export interface UnmappedDemand {
+  lockOrders(ctx: TenantContext, listingId: string): Promise<void>;
   openLines(
     ctx: TenantContext,
     listingId: string,
@@ -559,10 +561,7 @@ export class StockEngine {
   ): Promise<void> {
     await this.#tx(ctx, async (trx, ctx) => {
       const now = this.#now();
-      const lines =
-        change.masterSkuId === null
-          ? []
-          : ((await this.#demand?.openLines(ctx, change.listingId)) ?? []);
+      if (change.masterSkuId !== null) await this.#demand?.lockOrders(ctx, change.listingId);
       // Stock rows before the listing row, in a fixed order (no deadlock with a movement).
       await this.#lockComponents(
         trx,
@@ -592,7 +591,7 @@ export class StockEngine {
           now,
         );
       }
-      for (const line of lines) {
+      for (const line of (await this.#demand?.openLines(ctx, change.listingId)) ?? []) {
         const qty = units(line.quantity) * sku.pack;
         const base = {
           sourceKind: 'order_line' as const,

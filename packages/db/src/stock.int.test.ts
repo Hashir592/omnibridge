@@ -52,6 +52,7 @@ describe('stock engine (T-0901)', () => {
       },
       demand: {
         openLines: (_ctx, listingId) => Promise.resolve(demand.lines.get(listingId) ?? []),
+        lockOrders: () => Promise.resolve(),
         markOversold: () => Promise.resolve(),
       },
       now: () => clock,

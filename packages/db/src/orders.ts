@@ -843,18 +843,16 @@ export class OrderIngest implements UnmappedDemand {
   }
 
   /**
-   * CAT-6 (UnmappedDemand): the lines of a listing stored while it was unmapped (or not discovered
-   * yet), on orders that move stock and are not cancelled, earliest order first. The stock engine
-   * back-fills their movements on mapping; its keys make a repeat move nothing.
-   *
-   * The orders are locked first, as ingest locks them, so a dispatch being stored right now is
-   * either seen here or finds the line linked. The caller locks stock only after this.
+   * CAT-6 (UnmappedDemand): locks the orders still to ship that `openLines` will read, as ingest
+   * locks them, so a dispatch being stored right now is either seen by it or finds the line linked.
+   * Orders come before stock rows in ingest, so this does too.
    */
-  async openLines(ctx: TenantContext, listingId: string) {
-    return withTenantTransaction(this.#db, ctx, async (trx) => {
+  async lockOrders(ctx: TenantContext, listingId: string): Promise<void> {
+    await withTenantTransaction(this.#db, ctx, async (trx) => {
       await sql`
         SELECT o.id FROM app.orders o
          WHERE o.workspace_id = ${ctx.workspaceId}::uuid
+           AND o.dispatched_at IS NULL AND o.status <> 'cancelled'
            AND o.id IN (
              SELECT l.order_id FROM app.order_lines l
               WHERE l.workspace_id = ${ctx.workspaceId}::uuid
@@ -870,6 +868,17 @@ export class OrderIngest implements UnmappedDemand {
                                           AND id = ${listingId}::uuid)
          ORDER BY o.id
          FOR UPDATE`.execute(trx);
+    });
+  }
+
+  /**
+   * CAT-6 (UnmappedDemand): the lines of a listing stored while it was unmapped (or not discovered
+   * yet), on orders that move stock and are not cancelled, earliest order first. The stock engine
+   * back-fills their movements on mapping; its keys make a repeat move nothing. Linking a line
+   * touches the listing row, so the caller holds the stock rows by now.
+   */
+  async openLines(ctx: TenantContext, listingId: string) {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
       await this.#link(trx, ctx, listingId);
       const { rows } = await sql<{
         id: string;

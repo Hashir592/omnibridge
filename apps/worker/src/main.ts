@@ -236,6 +236,7 @@ const stockEngine: StockEngine = new StockEngine(handlerDb.db, {
   pushes: outbound,
   notifier,
   demand: {
+    lockOrders: (ctx, listingId) => orderIngest.lockOrders(ctx, listingId),
     openLines: (ctx, listingId) => orderIngest.openLines(ctx, listingId),
     markOversold: (ctx, orderLineId) => orderIngest.markOversold(ctx, orderLineId),
   },
