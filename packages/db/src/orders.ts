@@ -89,6 +89,14 @@ export interface OrderIngestPorts {
     ctx: TenantContext,
     input: { orderId: string; channelAccountId: string },
   ): Promise<void>;
+  /**
+   * CAT-6: a mapped listing has order lines that missed its mapping event (stored while it ran).
+   * The event is sent again; `key` is the same for the same lines.
+   */
+  lateMapped(
+    ctx: TenantContext,
+    input: { listingId: string; masterSkuId: string; key: string },
+  ): Promise<void>;
   /** ORD-9 (C3.2): the account's orders changed, so its same-buyer groups are recomputed. */
   regroup(ctx: TenantContext, input: { channelAccountId: string }): Promise<void>;
 }
@@ -311,6 +319,7 @@ export class OrderIngest implements UnmappedDemand {
           await this.#update(trx, ctx, existing, order);
         }
       }
+      await this.reportLateMapped(ctx, channelAccountId);
       // ORD-9: new orders and status changes can make or break same-buyer groups.
       await this.#ports.regroup(ctx, { channelAccountId });
       // TEN-3: the account's company is fixed once it has orders.
@@ -429,7 +438,6 @@ export class OrderIngest implements UnmappedDemand {
     // INV-3: stock moves from the order's own lines, each keyed by the line (FA-10 point 2).
     if (stockMoves && this.#stock !== undefined && status !== 'cancelled') {
       const shipped = SHIPPED.includes(status);
-      let oversold = false;
       for (const [index, { line, listing }] of resolved.entries()) {
         if (listing === undefined) continue;
         const move = {
@@ -443,17 +451,7 @@ export class OrderIngest implements UnmappedDemand {
           continue;
         }
         const r = await this.#stock.reserve(ctx, move);
-        if (r.oversold) {
-          oversold = true;
-          await sql`UPDATE app.order_lines SET oversold = true
-                     WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${move.orderLineId}::uuid`.execute(
-            trx,
-          );
-        }
-      }
-      if (oversold) {
-        await sql`UPDATE app.orders SET oversold = true
-                   WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${id}::uuid`.execute(trx);
+        if (r.oversold) await this.markOversold(ctx, move.orderLineId);
       }
     }
 
@@ -779,12 +777,100 @@ export class OrderIngest implements UnmappedDemand {
   }
 
   /**
-   * CAT-6 (UnmappedDemand): the lines of a listing stored while it was unmapped, on orders that
-   * move stock and are not cancelled. The stock engine back-fills their movements on mapping;
-   * its keys make a repeat move nothing.
+   * CAT-6: gives a listing the lines stored before discovery had seen it, matched as ingest matches
+   * them: the same channel account and external SKU.
+   */
+  async #link(trx: Transaction<MainDb>, ctx: TenantContext, listingId: string): Promise<void> {
+    const { rows } = await sql<{ order_id: string; fba: boolean }>`
+      UPDATE app.order_lines l
+         SET listing_id = li.id, fba = (li.fulfilment IS NOT DISTINCT FROM 'fba')
+        FROM app.orders o, app.listings li
+       WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.listing_id IS NULL
+         AND l.vat_type IS NULL AND l.external_sku = li.external_sku
+         AND o.workspace_id = l.workspace_id AND o.id = l.order_id
+         AND li.workspace_id = l.workspace_id AND li.id = ${listingId}::uuid
+         AND li.channel_account_id = o.channel_account_id
+      RETURNING l.order_id, l.fba`.execute(trx);
+    const fba = rows.filter((r) => r.fba).map((r) => r.order_id);
+    if (fba.length === 0) return;
+    await sql`UPDATE app.orders SET fba = true
+               WHERE workspace_id = ${ctx.workspaceId}::uuid
+                 AND id = ANY (${sql.val(fba)}::uuid[])`.execute(trx);
+  }
+
+  /**
+   * CAT-6: mapped listings of the account that still have provisional lines get their event again:
+   * a line stored while the event ran (or while the scan added the listing) was not visible to it.
+   * Read only here, so ingest takes no listing lock. Returns how many listings it reported.
+   */
+  async reportLateMapped(ctx: TenantContext, channelAccountId: string): Promise<number> {
+    return withBoundTenant(this.#db, ctx, async (trx, ctx) => {
+      const { rows } = await sql<{ listing_id: string; master_sku_id: string; lines: string[] }>`
+        SELECT li.id AS listing_id, li.master_sku_id, array_agg(l.id::text) AS lines
+          FROM app.order_lines l
+          JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
+          JOIN app.listings li ON li.workspace_id = l.workspace_id
+                              AND li.channel_account_id = o.channel_account_id
+                              AND li.external_sku = l.external_sku
+         WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.vat_type IS NULL
+           AND o.channel_account_id = ${channelAccountId}::uuid AND li.master_sku_id IS NOT NULL
+         GROUP BY li.id, li.master_sku_id
+         ORDER BY li.id`.execute(trx);
+      for (const r of rows) {
+        await this.#ports.lateMapped(ctx, {
+          listingId: r.listing_id,
+          masterSkuId: r.master_sku_id,
+          key: linesDigest(r.lines),
+        });
+      }
+      return rows.length;
+    });
+  }
+
+  /** INV-6: an order line that took available stock below 0, at ingest or on back-fill. */
+  async markOversold(ctx: TenantContext, orderLineId: string): Promise<void> {
+    await withTenantTransaction(this.#db, ctx, async (trx) => {
+      await sql`
+        WITH line AS (
+          UPDATE app.order_lines SET oversold = true
+           WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${orderLineId}::uuid
+          RETURNING order_id)
+        UPDATE app.orders SET oversold = true
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = (SELECT order_id FROM line)`.execute(
+        trx,
+      );
+    });
+  }
+
+  /**
+   * CAT-6 (UnmappedDemand): the lines of a listing stored while it was unmapped (or not discovered
+   * yet), on orders that move stock and are not cancelled, earliest order first. The stock engine
+   * back-fills their movements on mapping; its keys make a repeat move nothing.
+   *
+   * The orders are locked first, as ingest locks them, so a dispatch being stored right now is
+   * either seen here or finds the line linked. The caller locks stock only after this.
    */
   async openLines(ctx: TenantContext, listingId: string) {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
+      await sql`
+        SELECT o.id FROM app.orders o
+         WHERE o.workspace_id = ${ctx.workspaceId}::uuid
+           AND o.id IN (
+             SELECT l.order_id FROM app.order_lines l
+              WHERE l.workspace_id = ${ctx.workspaceId}::uuid
+                AND l.listing_id = ${listingId}::uuid AND l.stored_unmapped
+             UNION ALL
+             SELECT l.order_id FROM app.order_lines l
+               JOIN app.listings li ON li.workspace_id = l.workspace_id
+                                   AND li.external_sku = l.external_sku
+              WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.vat_type IS NULL
+                AND l.listing_id IS NULL AND li.id = ${listingId}::uuid)
+           AND o.channel_account_id = (SELECT channel_account_id FROM app.listings
+                                        WHERE workspace_id = ${ctx.workspaceId}::uuid
+                                          AND id = ${listingId}::uuid)
+         ORDER BY o.id
+         FOR UPDATE`.execute(trx);
+      await this.#link(trx, ctx, listingId);
       const { rows } = await sql<{
         id: string;
         quantity: string;
@@ -796,7 +882,7 @@ export class OrderIngest implements UnmappedDemand {
           JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
          WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.listing_id = ${listingId}::uuid
            AND l.stored_unmapped AND o.stock_moves AND o.status <> 'cancelled'
-         ORDER BY l.created_at, l.id`.execute(trx);
+         ORDER BY o.placed_at, o.id, l.line_no`.execute(trx);
       return rows.map((r) => ({
         orderLineId: r.id,
         quantity: Number(r.quantity),
@@ -813,6 +899,7 @@ export class OrderIngest implements UnmappedDemand {
    */
   async fillSnapshots(ctx: TenantContext, listingId: string): Promise<{ filled: number }> {
     return withBoundTenant(this.#db, ctx, async (trx, ctx) => {
+      await this.#link(trx, ctx, listingId);
       const { rows: pending } = await sql<{
         line_id: string;
         order_id: string;

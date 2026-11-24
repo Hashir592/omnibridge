@@ -10,7 +10,7 @@ import { OrderIngest, type IncomingOrder, type OrderIngestPorts } from './orders
 import { OutboundWriteRepository } from './outbound.ts';
 import type { MainDb } from './schema.ts';
 import { StockEngine } from './stock.ts';
-import { withTenantTransaction } from './tenant.ts';
+import { Tenancy, withTenantTransaction } from './tenant.ts';
 
 const ROLES = ['ob_owner', 'ob_app'] as const;
 const p = (n: number) => pence(BigInt(n));
@@ -40,8 +40,14 @@ describe('order ingest (T-1001)', () => {
       calls.push({ op: 'total', orderId: input.orderId, detail: input.channelAccountId });
       return Promise.resolve();
     },
+    lateMapped: (_ctx, input) => {
+      late.push({ listingId: input.listingId, masterSkuId: input.masterSkuId, key: input.key });
+      return Promise.resolve();
+    },
     regroup: () => Promise.resolve(),
   };
+  const late: { listingId: string; masterSkuId: string; key: string }[] = [];
+  const oversold: string[] = [];
   let ingest: OrderIngest;
   let stock: StockEngine;
 
@@ -224,10 +230,16 @@ describe('order ingest (T-1001)', () => {
     stock = new StockEngine(db, {
       pushes: { enqueue: (ctx, input) => writes.insert(ctx, input, clock) },
       notifier: {
-        raise: () => Promise.resolve({ id: randomUUID(), created: true, reopened: false } as never),
+        raise: (_ctx, input) => {
+          if (input.type === 'inventory.oversold') oversold.push(input.record.id);
+          return Promise.resolve({ id: randomUUID(), created: true, reopened: false } as never);
+        },
         resolve: () => Promise.resolve(true),
       },
-      demand: { openLines: (ctx, listingId) => ingest.openLines(ctx, listingId) },
+      demand: {
+        openLines: (ctx, listingId) => ingest.openLines(ctx, listingId),
+        markOversold: (ctx, orderLineId) => ingest.markOversold(ctx, orderLineId),
+      },
       now: () => clock,
     });
     ingest = new OrderIngest(db, { catalogue, stock, ports, now: () => clock });
@@ -632,6 +644,253 @@ describe('order ingest (T-1001)', () => {
     expect(stored).toEqual([{ quantity: '1', amount_pence: '800' }]);
     const refunds = (await ledger(w, row?.id)).filter((r) => r.kind === 'refund');
     expect(refunds.map((r) => [r.group_key, r.gross_pence])).toEqual([['rate:2000', '-800']]);
+  });
+
+  /** A SKU code the channel sells before any scan has seen its listing. */
+  const lateItem = async (w: World, vatType: 'zero' | 'standard' = 'zero', onHand = 10) => {
+    const sku = await catalogue.createSku(
+      w.ctx,
+      {
+        sku: 'LATE-ITEM',
+        title: 'Late',
+        shortDescription: 'l',
+        weightG: 1,
+        vatType,
+        firstCogs: { cogsPence: p(300), effectiveFrom: '2026-01-01' },
+      },
+      null,
+      clock,
+    );
+    await stock.stockIn(w.ctx, sku, { quantity: onHand, clientRef: randomUUID(), userId: null });
+    return sku;
+  };
+  const discover = (w: World, code = 'LATE-ITEM', account = w.account) =>
+    catalogue.upsertDiscovered(
+      w.ctx,
+      account,
+      'ebay',
+      [
+        {
+          externalSku: code,
+          externalId: `${code}-id`,
+          title: null,
+          fulfilment: null,
+          inventoryApi: null,
+          quantity: null,
+        },
+      ],
+      clock,
+    );
+  const lateOrder = (over: Partial<IncomingOrder> = {}, quantity = 1) =>
+    order({
+      lines: [{ lineId: 'L1', sku: 'LATE-ITEM', quantity, title: null, linePrice: p(1200) }],
+      shipping: p(0),
+      ...over,
+    });
+  /** What the catalogue.listing_mapped job runs (CAT-6). */
+  const mapped = async (w: World, change: { listingId: string; masterSkuId: string }) => {
+    await stock.onListingMapped(w.ctx, { ...change, previousMasterSkuId: null });
+    return ingest.fillSnapshots(w.ctx, change.listingId);
+  };
+  const level = async (w: World, sku: string) =>
+    (
+      await q<{ on_hand: string; reserved: string }>(
+        w,
+        sql`SELECT on_hand, reserved FROM app.stock_levels WHERE master_sku_id = ${sku}::uuid`,
+      )
+    )[0];
+  const totals = (w: World, orderId: unknown) =>
+    q<{ group_key: string; gross: string; vat: string }>(
+      w,
+      sql`SELECT group_key, sum(gross_pence) AS gross, sum(vat_pence) AS vat FROM app.vat_ledger
+           WHERE order_id = ${String(orderId)}::uuid GROUP BY group_key ORDER BY group_key`,
+    );
+  const shippedOn = (o: IncomingOrder): IncomingOrder => ({
+    ...o,
+    state: 'dispatched',
+    rawStatus: 'FULFILLED/PAID',
+    dispatchedAt: new Date('2026-11-11T09:00:00Z'),
+    updatedAt: new Date('2026-11-11T09:00:00Z'),
+  });
+
+  it('[CAT-6][INV-3][VAT-2] an order stored before its listing is discovered is linked when the scan matches it', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const o = lateOrder({}, 2);
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    expect(await totals(w, id)).toEqual([{ group_key: 'rate:2000', gross: '1200', vat: '200' }]);
+    const { autoMapped } = await discover(w);
+    const change = autoMapped[0];
+    if (change?.masterSkuId == null) throw new Error('not matched');
+    expect(await mapped(w, { listingId: change.listingId, masterSkuId: sku })).toEqual({
+      filled: 1,
+    });
+    // The job may run again: nothing moves or fills twice.
+    expect(await mapped(w, { listingId: change.listingId, masterSkuId: sku })).toEqual({
+      filled: 0,
+    });
+    expect(await orderRow(w, o.externalId)).toMatchObject({ unmapped: false, vat_pence: '0' });
+    expect(await totals(w, id)).toEqual([
+      { group_key: 'rate:2000', gross: '0', vat: '0' },
+      { group_key: 'zero:zero', gross: '1200', vat: '0' },
+    ]);
+    expect(await level(w, sku)).toEqual({ on_hand: '10', reserved: '2' });
+    // From here on it is an ordinary line: dispatch ships what it reserved.
+    await ingest.apply(w.ctx, w.account, [shippedOn(o)]);
+    expect(await level(w, sku)).toEqual({ on_hand: '8', reserved: '0' });
+  });
+
+  it('[CAT-6][INV-3][VAT-2] an order stored before its listing is discovered is linked when a person maps it', async () => {
+    const w = await world();
+    const o = lateOrder();
+    await ingest.apply(w.ctx, w.account, [o]);
+    expect((await discover(w)).autoMapped).toEqual([]);
+    const [listing] = await q<{ id: string }>(
+      w,
+      sql`SELECT id FROM app.listings WHERE external_sku = 'LATE-ITEM'`,
+    );
+    const listingId = listing?.id ?? '';
+    await catalogue.mapListing(w.ctx, listingId, w.zero, 'manual', null, clock);
+    expect(await mapped(w, { listingId, masterSkuId: w.zero })).toEqual({ filled: 1 });
+    expect(await orderRow(w, o.externalId)).toMatchObject({ unmapped: false, vat_pence: '0' });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '1' });
+  });
+
+  it('[CAT-6][INV-3] an order dispatched before its listing was discovered takes its stock on mapping', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const o = lateOrder({}, 3);
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [shippedOn(o)]);
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    expect(await mapped(w, { listingId, masterSkuId: sku })).toEqual({ filled: 1 });
+    expect(await level(w, sku)).toEqual({ on_hand: '7', reserved: '0' });
+  });
+
+  it('[CAT-6][INV-3] back-fill leaves cancelled orders and history from before the account alone', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const history = lateOrder({
+      placedAt: new Date('2026-10-20T08:00:00Z'),
+      updatedAt: new Date('2026-10-20T09:00:00Z'),
+    });
+    const cancelled = lateOrder();
+    await ingest.apply(w.ctx, w.account, [history, cancelled]);
+    await ingest.apply(w.ctx, w.account, [
+      { ...cancelled, state: 'cancelled', updatedAt: new Date('2026-11-10T10:00:00Z') },
+    ]);
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    // Their VAT snapshots still fill; their stock does not move.
+    expect(await mapped(w, { listingId, masterSkuId: sku })).toEqual({ filled: 2 });
+    expect(await level(w, sku)).toEqual({ on_hand: '10', reserved: '0' });
+  });
+
+  it('[CAT-6][TEN-5] a late line is linked only to a listing of its own channel account', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const other = randomUUID();
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      trx
+        .insertInto('app.channel_accounts')
+        .values({
+          id: other,
+          workspace_id: w.ctx.workspaceId,
+          company_id: w.company,
+          provider: 'ebay',
+          display_name: 'other',
+        })
+        .execute(),
+    );
+    const o = lateOrder();
+    await ingest.apply(w.ctx, w.account, [o]);
+    const listingId = (await discover(w, 'LATE-ITEM', other)).autoMapped[0]?.listingId ?? '';
+    expect(await mapped(w, { listingId, masterSkuId: sku })).toEqual({ filled: 0 });
+    expect(await orderRow(w, o.externalId)).toMatchObject({ unmapped: true });
+    expect(await level(w, sku)).toEqual({ on_hand: '10', reserved: '0' });
+  });
+
+  it('[INV-6][CAT-6] a back-fill that takes available below 0 flags the line and the order, and raises Oversold', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const first = lateOrder({ placedAt: new Date('2026-11-10T07:00:00Z') }, 8);
+    const second = lateOrder({ placedAt: new Date('2026-11-10T08:00:00Z') }, 5);
+    const shipped = lateOrder({ placedAt: new Date('2026-11-10T06:00:00Z') }, 1);
+    // Stored newest first: the earliest placed order still gets the stock.
+    await ingest.apply(w.ctx, w.account, [second, first, shippedOn(shipped)]);
+    oversold.length = 0;
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    await mapped(w, { listingId, masterSkuId: sku });
+    await mapped(w, { listingId, masterSkuId: sku });
+    expect(await level(w, sku)).toEqual({ on_hand: '9', reserved: '13' });
+    const flags = async (o: IncomingOrder) => {
+      const row = await orderRow(w, o.externalId);
+      const [line] = await q<{ id: string; oversold: boolean }>(
+        w,
+        sql`SELECT id, oversold FROM app.order_lines WHERE order_id = ${String(row?.id)}::uuid`,
+      );
+      return { order: row?.oversold, line: line?.oversold, id: line?.id };
+    };
+    expect(await flags(first)).toMatchObject({ order: false, line: false });
+    expect(await flags(shipped)).toMatchObject({ order: false, line: false });
+    const hit = await flags(second);
+    expect(hit).toMatchObject({ order: true, line: true });
+    expect(oversold).toEqual([hit.id]);
+  });
+
+  it('[CAT-6][INV-3] a dispatch stored while the listing is being mapped is not lost', async () => {
+    const w = await world();
+    const o = order({
+      lines: [{ lineId: 'L1', sku: 'NEW-ITEM', quantity: 2, title: null, linePrice: p(1200) }],
+      shipping: p(0),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    const tenancy = new Tenancy(db);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    let stored: () => void = () => undefined;
+    const isStored = new Promise<void>((r) => (stored = r));
+    // The sync job's transaction, held open after it stored the dispatch. The line is linked to a
+    // listing that this transaction may still see as unmapped, so it ships nothing itself.
+    const unlinked = sql`UPDATE app.order_lines SET listing_id = NULL`;
+    await withTenantTransaction(db, w.ctx, (trx) => unlinked.execute(trx));
+    const sync = tenancy.runWorkspace({ workspaceId: w.ctx.workspaceId }, async (ctx) => {
+      await ingest.apply(ctx, w.account, [shippedOn(o)]);
+      stored();
+      await gate;
+    });
+    await isStored;
+    const job = mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero });
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await sync;
+    expect(await job).toEqual({ filled: 1 });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '8', reserved: '0' });
+  });
+
+  it('[CAT-6] a listing matched while an order was being stored is reported by the next page, once per set of lines', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const o = lateOrder();
+    await ingest.apply(w.ctx, w.account, [o]);
+    // The scan matched it and its event ran before the order was committed: nothing was linked.
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    late.length = 0;
+    await ingest.apply(w.ctx, w.account, [order()]);
+    await ingest.apply(w.ctx, w.account, [order()]);
+    expect(late.map((l) => [l.listingId, l.masterSkuId])).toEqual([
+      [listingId, sku],
+      [listingId, sku],
+    ]);
+    // The same lines give the same key, so the queue runs the event once; new lines give another.
+    expect(new Set(late.map((l) => l.key)).size).toBe(1);
+    await mapped(w, { listingId, masterSkuId: sku });
+    late.length = 0;
+    await ingest.apply(w.ctx, w.account, [order()]);
+    expect(late).toEqual([]);
+    // A nightly check finds them too, with no new order.
+    expect(await ingest.reportLateMapped(w.ctx, w.account)).toBe(0);
   });
 
   it('[VAT-1][FIN-1] a ledger key taken by a different amount is an error, never a silent skip', async () => {
