@@ -497,6 +497,12 @@ export class Vault {
           // means every ingest already past its check is visible to the match below, and every
           // later one sees these rows.
           await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(workspaceId)]);
+          // Closure may have held the lock: its records and entries are gone and stay gone.
+          const closed = await c.query(
+            'SELECT 1 FROM vault.closed_workspaces WHERE workspace_id = $1',
+            [workspaceId],
+          );
+          if ((closed.rowCount ?? 0) > 0) return { rows: [], more: false };
           for (const [field, value] of tombs) {
             // A second notice for a reused username covers its second owner's orders too.
             await c.query(

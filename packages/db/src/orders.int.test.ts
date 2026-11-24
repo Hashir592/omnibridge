@@ -599,6 +599,41 @@ describe('order ingest (T-1001)', () => {
     }
   });
 
+  it('[VAT-5][FIN-1] a refund that lists one line twice keeps the whole amount on that line', async () => {
+    const w = await world();
+    const o = order({ shipping: p(0) });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        state: 'dispatched',
+        dispatchedAt: new Date('2026-11-11T09:00:00Z'),
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+        refunds: [
+          {
+            refundId: 'R1',
+            refundedAt: new Date('2026-11-12T09:00:00Z'),
+            amount: p(800),
+            lines: [
+              { lineId: 'L1', quantity: 1, amount: p(600) },
+              { lineId: 'L1', quantity: 0, amount: p(200) },
+            ],
+          },
+        ],
+      },
+    ]);
+    const row = await orderRow(w, o.externalId);
+    const stored = await q<{ quantity: string; amount_pence: string }>(
+      w,
+      sql`SELECT rl.quantity, rl.amount_pence FROM app.refund_lines rl
+            JOIN app.refunds r ON r.workspace_id = rl.workspace_id AND r.id = rl.refund_id
+           WHERE r.order_id = ${String(row?.id)}::uuid`,
+    );
+    expect(stored).toEqual([{ quantity: '1', amount_pence: '800' }]);
+    const refunds = (await ledger(w, row?.id)).filter((r) => r.kind === 'refund');
+    expect(refunds.map((r) => [r.group_key, r.gross_pence])).toEqual([['rate:2000', '-800']]);
+  });
+
   it('[VAT-1][FIN-1] a ledger key taken by a different amount is an error, never a silent skip', async () => {
     const w = await world();
     const unpaid = order({ state: 'pending_payment', paidAt: null });

@@ -18,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildVaultApp } from './app.ts';
 import { ServiceTokens } from './auth.ts';
 import { DeletionJournal, DeletionService } from './deletion.ts';
-import { Vault } from './vault.ts';
+import { Vault, workspaceLock } from './vault.ts';
 
 // T-0402: the PII store and its capability-scoped API, against a real db-pii with the real roles.
 
@@ -869,6 +869,34 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
         .filter((w) => w.workspace_id === W)
         .flatMap((w) => w.matches.map((m) => m.pii_ref)),
     ).toEqual([pii_ref]);
+  });
+
+  it('[DEL-2][AT-10] a notice that waited for a closing workspace writes nothing into it', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-closing-${randomUUID().slice(0, 8)}`;
+    await ingest(W, `${account}:CLOSING`, contact('645', { channel_buyer_id: userId }));
+    // Closure's last batch, held open: the lock alone, then the keys and rows go with the marker.
+    const c = await ownerPool.connect();
+    let found;
+    try {
+      await c.query('BEGIN');
+      await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [W]);
+      await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(W)]);
+      const notice = clients.web.ebayUserMatch({ user_id: userId });
+      await new Promise((r) => setTimeout(r, 300));
+      await c.query(
+        'INSERT INTO vault.closed_workspaces (workspace_id, closed_at) VALUES ($1, now())',
+        [W],
+      );
+      await c.query('COMMIT');
+      found = await notice;
+    } finally {
+      c.release();
+    }
+    expect(found.workspaces.filter((w) => w.workspace_id === W)).toEqual([]);
+    expect(
+      await raw(ownerPool, W, 'SELECT 1 FROM vault.deleted_buyers WHERE workspace_id = $1', [W]),
+    ).toEqual([]);
   });
 
   it('[DP-4][DEL-1] only the worker may move an expiry', async () => {

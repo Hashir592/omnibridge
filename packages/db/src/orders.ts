@@ -641,9 +641,19 @@ export class OrderIngest implements UnmappedDemand {
       if (seen.length > 0) continue;
       const prior = await this.#refundedSoFar(trx, ctx, order.id);
       const byExternal = new Map(lines.map((l, index) => [l.external_line_id, { l, index }]));
-      const refundLines = (refund.lines ?? []).flatMap((rl) => {
+      // One entry per order line: a channel may list a line twice (goods, then an extra part).
+      const merged = new Map<string, { lineId: string; quantity: number; amount: bigint }>();
+      for (const rl of refund.lines ?? []) {
+        const had = merged.get(rl.lineId);
+        merged.set(rl.lineId, {
+          lineId: rl.lineId,
+          quantity: (had?.quantity ?? 0) + rl.quantity,
+          amount: (had?.amount ?? 0n) + rl.amount,
+        });
+      }
+      const refundLines = [...merged.values()].flatMap((rl) => {
         const hit = byExternal.get(rl.lineId);
-        return hit === undefined ? [] : [{ ...rl, line: hit }];
+        return hit === undefined ? [] : [{ ...rl, amount: pence(rl.amount), line: hit }];
       });
       const rv = computeRefundVat({
         order: vat,

@@ -113,7 +113,8 @@ function websiteState(o: WebsiteOrder): ChannelOrderState {
   if (o.delivered_at !== null && o.delivered_at !== undefined) return 'delivered';
   if (o.status === 'shipped' || o.status === 'completed') return 'dispatched';
   if (o.shipped_at !== null && o.shipped_at !== undefined) return 'dispatched';
-  if (o.status === 'pending') return 'pending_payment';
+  const paid = o.paid_at !== null && o.paid_at !== undefined;
+  if (o.status === 'pending' && !paid) return 'pending_payment';
   return 'awaiting_dispatch';
 }
 

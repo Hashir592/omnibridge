@@ -30,6 +30,13 @@ describe('website orders parser (M10, provisional until M11)', () => {
     expect(o?.deliveredAt).toEqual(new Date('2026-11-22T09:00:00.000Z'));
   });
 
+  it('[ORD-3] a paid order is never pending payment, whatever its status says', () => {
+    const state = (over: Record<string, unknown>) =>
+      parseWebsiteOrders({ orders: [order(over)], next_cursor: null })[0]?.state;
+    expect(state({ status: 'pending' })).toBe('awaiting_dispatch');
+    expect(state({ status: 'pending', paid_at: null })).toBe('pending_payment');
+  });
+
   it('[ORD-4][FIN-1] pence by text, upper-case country, buyer fields only in the buyer block', () => {
     const [o] = parseWebsiteOrders({ orders: [order()], next_cursor: null });
     expect(o).toMatchObject({
