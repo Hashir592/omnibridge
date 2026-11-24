@@ -42,6 +42,16 @@ describe('website orders parser (M10, provisional until M11)', () => {
     expect(JSON.stringify({ ...o, buyer: null })).not.toContain('PIIMARK');
   });
 
+  it('[FIN-1] a negative line or refund fails the parser; a discount may carry its minus', () => {
+    const parse = (over: Record<string, unknown>) =>
+      parseWebsiteOrders({ orders: [order(over)], next_cursor: null });
+    const line = { id: 'L1', sku: 'SKU-1', quantity: 1, total: '-5.00' };
+    expect(() => parse({ lines: [line] })).toThrow();
+    const refund = { id: 'R1', created_at: '2026-11-21T09:00:00Z', amount: '-4.00' };
+    expect(() => parse({ refunds: [refund] })).toThrow();
+    expect(parse({ discount_total: '-2.00' })[0]?.discountPence).toBe(200);
+  });
+
   it('[ORD-4] a bad country or an over-long SKU fails the parser, not the insert', () => {
     const bad = (over: Record<string, unknown>) => () =>
       parseWebsiteOrders({ orders: [order(over)], next_cursor: null });

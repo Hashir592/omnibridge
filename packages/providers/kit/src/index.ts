@@ -4,7 +4,14 @@
  * runner (INT-8). No provider-specific code lives here.
  */
 export { BUYER_FIELDS } from './adapters.ts';
-export { GbpAmount, PenceAmount, penceFromAmount } from './money.ts';
+export {
+  GbpAmount,
+  GbpDiscount,
+  GbpSignedAmount,
+  PenceAmount,
+  PenceDiscount,
+  penceFromAmount,
+} from './money.ts';
 export type {
   AccessToken,
   AdsAdapter,

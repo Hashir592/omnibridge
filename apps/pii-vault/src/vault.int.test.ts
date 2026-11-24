@@ -36,6 +36,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
   const clients = {} as Record<keyof typeof tokens, VaultClient>;
   const A = randomUUID();
   const B = randomUUID();
+  const keyring = parseKeyring('pii', generateKekLine(1));
   const journalDir = mkdtempSync(join(tmpdir(), 'ob-journal-'));
   const journalLines = () =>
     readdirSync(journalDir)
@@ -96,7 +97,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     });
     vault = new Vault({
       pool: appPool,
-      keyring: parseKeyring('pii', generateKekLine(1)),
+      keyring,
       journal: new DeletionJournal(journalDir),
       onCanary: (event) => {
         logger.warn(
@@ -771,6 +772,117 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect((early as VaultError).code).toBe('buyer_deleted');
     const later = await byName('NAME-LATER', new Date(Date.now() + 60_000).toISOString());
     expect(later.pii_ref).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('[DEL-1][AT-10] a deleted user ID is refused in the username field as well', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-ebay-user-${randomUUID().slice(0, 8)}`;
+    await ingest(W, `${account}:SLOT-SEED`, contact('621'));
+    await clients.web.ebayUserMatch({ user_id: userId });
+    // Placed after the notice: only the user ID rule can refuse it.
+    const refused = await clients.worker
+      .ingest({
+        workspace_id: W,
+        kind: 'buyer_contact',
+        channel_account_id: account,
+        subject_type: 'order',
+        subject_id: `${account}:SLOT`,
+        placed_at: new Date(Date.now() + 60_000).toISOString(),
+        fields: contact('622', { channel_username: userId }),
+      })
+      .catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(VaultError);
+    expect((refused as VaultError).code).toBe('buyer_deleted');
+  });
+
+  it('[DEL-1][AT-10] a second notice for a reused username also covers the orders of its second owner', async () => {
+    const W = randomUUID();
+    const username = `PIIMARK-reused-${randomUUID().slice(0, 8)}`;
+    const pause = () => new Promise((r) => setTimeout(r, 25));
+    await ingest(W, `${account}:TWICE-SEED`, contact('631'));
+    await clients.web.ebayUserMatch({ username });
+    await pause();
+    const between = new Date().toISOString();
+    await pause();
+    await clients.web.ebayUserMatch({ username });
+    const store = (subject: string, placedAt: string) =>
+      clients.worker.ingest({
+        workspace_id: W,
+        kind: 'buyer_contact',
+        channel_account_id: account,
+        subject_type: 'order',
+        subject_id: `${account}:${subject}`,
+        placed_at: placedAt,
+        fields: contact('632', { channel_username: username }),
+      });
+    const refused = await store('TWICE', between).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(VaultError);
+    expect((refused as VaultError).code).toBe('buyer_deleted');
+    // A third owner, after both notices, is stored.
+    const third = await store('THIRD', new Date(Date.now() + 60_000).toISOString());
+    expect(third.pii_ref).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('[DEL-1][AT-10] a notice waits for an ingest already past its check, and finds its record', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-race-${randomUUID().slice(0, 8)}`;
+    await ingest(W, `${account}:RACE-SEED`, contact('641'));
+    // A vault whose ingest stops between the deleted-buyer check and its write.
+    let reached: () => void = () => undefined;
+    const atWrite = new Promise<void>((r) => (reached = r));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const gated = {
+      query: appPool.query.bind(appPool),
+      connect: async () => {
+        const c = await appPool.connect();
+        return {
+          release: () => {
+            c.release();
+          },
+          query: async (text: string, params?: unknown[]) => {
+            if (text.trimStart().startsWith('INSERT INTO vault.records')) {
+              reached();
+              await gate;
+            }
+            return c.query(text, params);
+          },
+        };
+      },
+    } as unknown as pg.Pool;
+    const slow = new Vault({ pool: gated, keyring }).ingest({
+      workspace_id: W,
+      kind: 'buyer_contact',
+      channel_account_id: account,
+      subject_type: 'order',
+      subject_id: `${account}:RACE`,
+      fields: contact('642', { channel_buyer_id: userId }),
+    });
+    await atWrite;
+    const notice = clients.web.ebayUserMatch({ user_id: userId });
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    const { pii_ref } = await slow;
+    const match = await notice;
+    expect(
+      match.workspaces
+        .filter((w) => w.workspace_id === W)
+        .flatMap((w) => w.matches.map((m) => m.pii_ref)),
+    ).toEqual([pii_ref]);
+  });
+
+  it('[DP-4][DEL-1] only the worker may move an expiry', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await ingest(W, `${account}:EXPIRY-WEB`, contact('651'));
+    const refused = await clients.web
+      .setExpiry({
+        workspace_id: W,
+        pii_refs: [pii_ref],
+        delete_after: new Date(Date.now() + 80 * 86_400_000).toISOString(),
+        reason: 'dispatch',
+      })
+      .catch((e: unknown) => e);
+    expect((refused as VaultError).status).toBe(403);
   });
 
   it('[AT-10] an eBay notice matches by user ID first: a reused username never reaches another buyer (ADR-068)', async () => {

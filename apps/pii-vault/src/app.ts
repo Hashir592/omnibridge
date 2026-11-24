@@ -121,8 +121,10 @@ export function buildVaultApp({
     return reply.code(201).send(await vault.ingest(body));
   });
 
+  // DEL-1: the worker's expiry jobs only; web never moves a date.
   app.post('/v1/expiry', async (request) => {
-    authorise(request, 'ingest');
+    const caller = authorise(request, 'ingest');
+    if (caller !== 'worker') throw new HttpError(403, 'capability_missing');
     return vault.setExpiry(parse(ExpiryRequest, request.body));
   });
 

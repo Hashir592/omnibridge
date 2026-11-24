@@ -6,15 +6,20 @@ import {
   CatalogueRepository,
   createMainDb,
   createQueues,
+  JobRecordRepository,
   migrateMain,
+  NotificationRepository,
   OrderIngest,
   OrderReads,
   Tenancy,
   type MainDbHandle,
 } from '@omnibridge/db';
+import { Notifier } from '@omnibridge/core';
 import { createLogger } from '@omnibridge/logger';
+import { parseEbayOrders } from '@omnibridge/provider-ebay';
 import type { ChannelOrder } from '@omnibridge/provider-kit';
-import { JOBS, type PreparingJob } from '@omnibridge/queue';
+import { parseWebsiteOrders } from '@omnibridge/provider-website';
+import { JobQueue, JOBS, type PreparingJob } from '@omnibridge/queue';
 import {
   PII_MARKER,
   scanDatabaseForMarkers,
@@ -26,6 +31,7 @@ import { VaultClient } from '@omnibridge/vault-client';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startTestVault, type TestVault } from '../../pii-vault/src/testing.ts';
+import { createWorkerBoss } from './heartbeat.ts';
 import {
   orderIngestPorts,
   orderIngestStream,
@@ -54,6 +60,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
   let web: VaultClient;
   let tenancy: Tenancy;
   let ingest: OrderIngest;
+  let notifier: Notifier;
   const sent: { type: string; key: string; payload: unknown }[] = [];
   const logs: string[] = [];
   const logger = createLogger({
@@ -80,6 +87,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     shippingPence: 300,
     shipToCountry: 'GB',
     fba: false,
+    totalPence: null,
     lines: [{ lineId: 'L1', sku: 'MOCK-SKU-1', quantity: 1, title: 'Mock', linePricePence: 1200 }],
     refunds: [],
     buyer: {
@@ -126,7 +134,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
 
   beforeAll(async () => {
     [main, pii] = await Promise.all([
-      startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_app']),
+      startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_app', 'ob_worker']),
       startRoleCluster('db-pii', 'omnibridge_pii', ['vault_owner', 'vault_app']),
     ]);
     await migrateMain(main.connection('ob_owner'));
@@ -144,6 +152,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     root = new pg.Pool({ connectionString: main.container.getConnectionUri(), max: 2 });
     piiRoot = new pg.Pool({ connectionString: pii.container.getConnectionUri(), max: 2 });
     tenancy = new Tenancy(db.db);
+    notifier = new Notifier({ store: new NotificationRepository(db.db) });
     // The cluster superuser seeds the tenant rows (it is not subject to row-level security).
     await root.query(`INSERT INTO app.workspaces (id, name) VALUES ($1, 'Orders')`, [ws]);
     await root.query(
@@ -159,12 +168,15 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     );
     ingest = new OrderIngest(db.db, {
       catalogue: new CatalogueRepository(db.db),
-      ports: orderIngestPorts({
-        send: (def, input) => {
-          sent.push({ type: def.type, key: input.idempotencyKey, payload: input.payload });
-          return Promise.resolve({ id: randomUUID(), created: true });
+      ports: orderIngestPorts(
+        {
+          send: (def, input) => {
+            sent.push({ type: def.type, key: input.idempotencyKey, payload: input.payload });
+            return Promise.resolve({ id: randomUUID(), created: true });
+          },
         },
-      }),
+        { notifier, logger },
+      ),
     });
   }, 300_000);
 
@@ -208,6 +220,234 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await orderRow(o.externalId))?.pii_ref).toBe(record?.pii_ref);
   });
 
+  /** A website order as its API sends it, with markers on every buyer field. */
+  const websiteOrders = (...over: Record<string, unknown>[]) =>
+    parseWebsiteOrders({
+      orders: over.map((o) => ({
+        id: `WEB-${randomUUID().slice(0, 8)}`,
+        created_at: new Date(Date.now() - 2 * DAY).toISOString(),
+        updated_at: new Date(Date.now() - DAY).toISOString(),
+        paid_at: new Date(Date.now() - 2 * DAY).toISOString(),
+        status: 'processing',
+        currency: 'GBP',
+        shipping_total: '3.00',
+        customer: { id: `${PII_MARKER}cust`, email: `${PII_MARKER}web@example.test` },
+        shipping_address: {
+          name: `${PII_MARKER}Web Buyer`,
+          line1: `${PII_MARKER}2 Road`,
+          city: 'Testville',
+          postcode: 'TE2 2ND',
+          country: 'GB',
+          instructions: `${PII_MARKER}leave by the gate`,
+        },
+        // Fields no parser asked for: they must go nowhere.
+        billing_address: { line1: `${PII_MARKER}billing` },
+        notes: `${PII_MARKER}notes`,
+        lines: [{ id: 'L1', sku: 'MOCK-SKU-1', quantity: 1, total: '12.00' }],
+        ...o,
+      })),
+      next_cursor: null,
+    });
+  /** An eBay order as getOrders sends it, with markers on every buyer field. */
+  const ebayOrders = (...over: Record<string, unknown>[]) => {
+    const gbp = (value: string) => ({ value, currency: 'GBP' });
+    return parseEbayOrders({
+      offset: 0,
+      limit: 50,
+      orders: over.map((o) => ({
+        orderId: `EBP-${randomUUID().slice(0, 8)}`,
+        creationDate: new Date(Date.now() - 2 * DAY).toISOString(),
+        lastModifiedDate: new Date(Date.now() - DAY).toISOString(),
+        orderFulfillmentStatus: 'NOT_STARTED',
+        orderPaymentStatus: 'PAID',
+        buyer: {
+          username: `${PII_MARKER}user-${randomUUID().slice(0, 8)}`,
+          taxAddress: { postalCode: `${PII_MARKER}tax` },
+        },
+        buyerCheckoutNotes: `${PII_MARKER}checkout note`,
+        pricingSummary: { deliveryCost: gbp('3.00'), total: gbp('15.00') },
+        lineItems: [{ lineItemId: 'L1', sku: 'S-1', quantity: 1, lineItemCost: gbp('12.00') }],
+        ...o,
+      })),
+    });
+  };
+  const shipTo = (address: Record<string, unknown> | undefined) => ({
+    fulfillmentStartInstructions: [
+      {
+        shippingStep: {
+          shipTo: { fullName: `${PII_MARKER}Eve Bay`, contactAddress: address },
+        },
+      },
+    ],
+  });
+  const fullAddress = {
+    addressLine1: `${PII_MARKER}3 Auction Way`,
+    city: 'Testville',
+    postalCode: 'TE3 3RD',
+    countryCode: 'GB',
+  };
+  const fieldsOf = async (subject: string) =>
+    (
+      await piiRoot.query<{ field: string }>(
+        `SELECT f.field FROM vault.record_fields f
+           JOIN vault.records r ON r.workspace_id = f.workspace_id AND r.pii_ref = f.pii_ref
+          WHERE r.workspace_id = $1 AND r.subject_id = $2 ORDER BY f.field`,
+        [ws, subject],
+      )
+    ).rows.map((r) => r.field);
+
+  it('[DEL-1][AT-8] a website order first seen shipped with no ship date counts from the update that shows it', async () => {
+    const updated = new Date(Date.now() - 5 * DAY);
+    const [recent, old] = websiteOrders(
+      {
+        status: 'shipped',
+        created_at: new Date(Date.now() - 10 * DAY).toISOString(),
+        updated_at: updated.toISOString(),
+      },
+      {
+        status: 'completed',
+        created_at: new Date(Date.now() - 40 * DAY).toISOString(),
+        updated_at: new Date(Date.now() - 38 * DAY).toISOString(),
+      },
+    );
+    if (recent === undefined || old === undefined) throw new Error('no orders');
+    await poll([recent, old]);
+    const [record] = await vaultRows(`${account}:${recent.externalId}`);
+    expect(record?.delete_after.getTime()).toBe(updated.getTime() + 25 * DAY);
+    // Past its window already: stored with no record at all (FA-16).
+    expect(await vaultRows(`${account}:${old.externalId}`)).toEqual([]);
+    expect(await orderRow(old.externalId)).toMatchObject({ pii_ref: null });
+  });
+
+  it('[DEL-1] a record written before the order shipped is corrected when the order is first stored shipped', async () => {
+    const [waiting] = websiteOrders({});
+    if (waiting === undefined) throw new Error('no order');
+    // The vault write happened, the db-main write did not; the next poll finds the order shipped.
+    await stream().prepare?.(job, [waiting]);
+    await poll([{ ...waiting, state: 'dispatched', updatedAt: new Date(Date.now() - DAY) }]);
+    const id = (await orderRow(waiting.externalId))?.id;
+    expect(sent.filter((s) => s.type === 'orders.pii_expiry').map((s) => s.payload)).toContainEqual(
+      { order_id: id, reason: 'dispatch' },
+    );
+  });
+
+  it('[DEL-1] a dispatch or delivery date in the future never keeps a record longer than one of today', async () => {
+    const future = new Date(Date.now() + 50 * DAY);
+    const o = channelOrder({ state: 'delivered', dispatchedAt: future, deliveredAt: future });
+    await poll([o]);
+    const limit = Date.now() + 25 * DAY;
+    const [stored] = await vaultRows(`${account}:${o.externalId}`);
+    expect(stored?.delete_after.getTime()).toBeLessThanOrEqual(limit);
+    const id = (await orderRow(o.externalId))?.id ?? '';
+    await ordersPiiExpiryHandler({ tenancy, ingest, vault: worker }).prepare(
+      preparing('orders.pii_expiry', { order_id: id, reason: 'delivery' as const }),
+    );
+    const [moved] = await vaultRows(`${account}:${o.externalId}`);
+    expect(moved?.delete_after.getTime()).toBeLessThanOrEqual(Date.now() + 25 * DAY);
+  });
+
+  it('[ORD-4][DP-5] an unpaid order sends nothing to the vault; once paid, the whole address is stored', async () => {
+    const [pending] = ebayOrders({ orderPaymentStatus: 'PENDING', ...shipTo(undefined) });
+    const [pendingWeb] = websiteOrders({ status: 'pending', paid_at: null });
+    if (pending === undefined || pendingWeb === undefined) throw new Error('no orders');
+    await poll([pending, pendingWeb]);
+    const subject = `${account}:${pending.externalId}`;
+    expect(await vaultRows(subject)).toEqual([]);
+    expect(await vaultRows(`${account}:${pendingWeb.externalId}`)).toEqual([]);
+    const [paid] = ebayOrders({
+      orderId: pending.externalId,
+      lastModifiedDate: new Date().toISOString(),
+      ...shipTo(fullAddress),
+    });
+    if (paid === undefined) throw new Error('no order');
+    await poll([paid]);
+    expect(await fieldsOf(subject)).toEqual(
+      expect.arrayContaining(['address_line1', 'channel_username', 'name', 'postcode']),
+    );
+    expect((await orderRow(pending.externalId))?.pii_ref).toBe(
+      (await vaultRows(subject))[0]?.pii_ref,
+    );
+  });
+
+  it('[ORD-4] a paid order with no delivery address yet is not settled: it is stored once the address comes', async () => {
+    const [bare] = ebayOrders({ ...shipTo({ countryCode: 'GB', postalCode: 'TE3 3RD' }) });
+    if (bare === undefined) throw new Error('no order');
+    await poll([bare]);
+    const subject = `${account}:${bare.externalId}`;
+    expect(await vaultRows(subject)).toEqual([]);
+    const [whole] = ebayOrders({
+      orderId: bare.externalId,
+      lastModifiedDate: new Date().toISOString(),
+      ...shipTo(fullAddress),
+    });
+    if (whole === undefined) throw new Error('no order');
+    await poll([whole]);
+    expect(await fieldsOf(subject)).toContain('address_line1');
+  });
+
+  it('[ORD-4] a delivery address abroad with no postcode is still an address', async () => {
+    const [abroad] = ebayOrders({
+      ...shipTo({ addressLine1: `${PII_MARKER}9 Harbour`, city: 'Hong Kong', countryCode: 'HK' }),
+    });
+    if (abroad === undefined) throw new Error('no order');
+    await poll([abroad]);
+    expect(await fieldsOf(`${account}:${abroad.externalId}`)).toContain('address_line1');
+  });
+
+  it('[ORD-4][AT-9] whole channel payloads through a real queue leave no buyer value outside the vault', async () => {
+    const boss = createWorkerBoss(main.connection('ob_worker'), { monitorIntervalSeconds: 1 });
+    boss.on('error', () => undefined);
+    await boss.start();
+    const records = new JobRecordRepository(db.db);
+    const queue = new JobQueue({ boss, records, tenancy, logger });
+    const real = new OrderIngest(db.db, {
+      catalogue: new CatalogueRepository(db.db),
+      ports: orderIngestPorts(queue, { notifier, logger }),
+    });
+    const s = orderIngestStream({ tenancy, ingest: real, vault: worker, logger });
+    const pollReal = async (items: ChannelOrder[]) => {
+      const ready = (await s.prepare?.(job, items)) ?? items;
+      await tenancy.runWorkspace({ workspaceId: ws }, (c) => s.sink(c, account, ready));
+    };
+    try {
+      const [web] = websiteOrders({});
+      const [ebay] = ebayOrders({ ...shipTo(fullAddress) });
+      if (web === undefined || ebay === undefined) throw new Error('no orders');
+      await pollReal([web, ebay]);
+      const later = new Date();
+      await pollReal([
+        { ...web, state: 'dispatched', dispatchedAt: later, updatedAt: later },
+        { ...ebay, state: 'cancelled', cancelledAt: later, updatedAt: later },
+      ]);
+      // The scan below is worth something only if the jobs really are in the queue's tables.
+      const jobs = await root.query<{ name: string; n: string }>(
+        `SELECT name, count(*) AS n FROM pgboss.job GROUP BY name`,
+      );
+      expect(jobs.rows.map((r) => r.name)).toEqual(
+        expect.arrayContaining(['orders.group_recompute', 'orders.pii_expiry', 'pii.delete']),
+      );
+      expect(await scanDatabaseForMarkers(main)).toEqual([]);
+      expect(await scanDatabaseForMarkers(pii, ['vault'])).toEqual([]);
+      expect(scanTextForMarkers(logs)).toEqual([]);
+    } finally {
+      await boss.stop({ graceful: false, close: true });
+    }
+  });
+
+  it('[FIN-1][INT-5] an order whose pence do not add up to eBay total raises one platform notice', async () => {
+    const gbp = (value: string) => ({ value, currency: 'GBP' });
+    const wrong = { pricingSummary: { deliveryCost: gbp('3.00'), total: gbp('12.00') } };
+    await poll(
+      ebayOrders({ ...shipTo(fullAddress), ...wrong }, { ...shipTo(fullAddress), ...wrong }),
+    );
+    await poll(ebayOrders({ ...shipTo(fullAddress) }));
+    const notices = await root.query<{ record_id: string }>(
+      `SELECT record_id FROM app.platform_notifications WHERE record_kind = 'order_total'`,
+    );
+    expect(notices.rows).toEqual([{ record_id: account }]);
+    expect(logs.filter((l) => l.includes('orders.total_mismatch'))).toHaveLength(2);
+  });
+
   it('[ORD-4] an order older than the PII window, or cancelled, is stored with no vault record (FA-16)', async () => {
     const old = channelOrder({
       placedAt: new Date(Date.now() - 100 * DAY),
@@ -222,8 +462,9 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     }
     expect(
       piiDeleteAfter(
-        { placedAt: new Date(0), dispatchedAt: new Date(0), deliveredAt: null },
+        channelOrder({ state: 'dispatched', dispatchedAt: new Date(0), deliveredAt: null }),
         25,
+        new Date(),
       ).getTime(),
     ).toBe(25 * DAY);
   });
@@ -240,6 +481,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
   });
 
   it('[DEL-1] cancellation queues the deletion and dispatch moves the expiry, journalled, IDs only', async () => {
+    sent.length = 0;
     const o = channelOrder();
     await poll([o]);
     const row = await orderRow(o.externalId);

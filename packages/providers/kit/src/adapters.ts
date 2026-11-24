@@ -103,6 +103,8 @@ export interface ChannelOrder extends OrderSummary {
   readonly discountPence: number;
   /** Shipping charged to the buyer, VAT-inclusive (VAT-3 step 3). */
   readonly shippingPence: number;
+  /** What the buyer paid as the channel states it; null when it states no total (FIN-1). */
+  readonly totalPence: number | null;
   readonly shipToCountry: string | null;
   readonly fba: boolean;
   readonly lines: readonly ChannelOrderLine[];

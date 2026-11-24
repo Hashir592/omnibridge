@@ -12,6 +12,8 @@ import {
   RateLimited,
   readJson,
   GbpAmount,
+  GbpDiscount,
+  GbpSignedAmount,
   type AccessToken,
   type BuyerDetails,
   type ChannelAdapter,
@@ -86,7 +88,9 @@ export const EbayOrdersV1 = defineParser(
         buyer: z.object({ username: Text }).optional(),
         pricingSummary: z.object({
           deliveryCost: GbpAmount.optional(),
-          priceDiscount: GbpAmount.optional(),
+          priceDiscount: GbpDiscount.optional(),
+          deliveryDiscount: GbpDiscount.optional(),
+          adjustment: GbpSignedAmount.optional(),
           total: GbpAmount,
         }),
         paymentSummary: z
@@ -187,6 +191,22 @@ export function parseEbayOrders(body: unknown): ChannelOrder[] {
   return EbayOrdersV1.parse(body).orders.map(ebayOrder);
 }
 
+/**
+ * eBay's order-level amounts onto ours: a delivery discount comes off the delivery charge (any
+ * excess off the goods); a negative adjustment is a discount, a positive one is more to pay and is
+ * split like shipping (VAT-3). Provisional until T-1501 checks eBay's rule; until then `total`
+ * says whether the pence add up.
+ */
+function ebayAmounts(p: EbayOrder['pricingSummary']) {
+  const adjustment = p.adjustment ?? 0;
+  const delivery = (p.deliveryCost ?? 0) - (p.deliveryDiscount ?? 0);
+  return {
+    discountPence: (p.priceDiscount ?? 0) + Math.max(0, -delivery) + Math.max(0, -adjustment),
+    shippingPence: Math.max(0, delivery) + Math.max(0, adjustment),
+    totalPence: p.total,
+  };
+}
+
 function ebayOrder(o: EbayOrder): ChannelOrder {
   const state = ebayState(o);
   const paid = o.paymentSummary?.payments?.find((p) => p.paymentDate !== undefined)?.paymentDate;
@@ -215,8 +235,7 @@ function ebayOrder(o: EbayOrder): ChannelOrder {
     dispatchedAt: state === 'dispatched' ? new Date(o.lastModifiedDate) : null,
     deliveredAt: null,
     cancelledAt: state === 'cancelled' ? new Date(o.lastModifiedDate) : null,
-    discountPence: o.pricingSummary.priceDiscount ?? 0,
-    shippingPence: o.pricingSummary.deliveryCost ?? 0,
+    ...ebayAmounts(o.pricingSummary),
     shipToCountry:
       o.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo?.contactAddress?.countryCode ??
       null,

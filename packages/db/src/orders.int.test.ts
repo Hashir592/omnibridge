@@ -26,7 +26,7 @@ describe('order ingest (T-1001)', () => {
   let catalogue: CatalogueRepository;
   let writes: OutboundWriteRepository;
   let clock = new Date('2026-11-10T12:00:00.000Z');
-  const calls: { op: 'cancel' | 'shorten'; orderId: string; detail: string }[] = [];
+  const calls: { op: 'cancel' | 'shorten' | 'total'; orderId: string; detail: string }[] = [];
   const ports: OrderIngestPorts = {
     cancelPii: (_ctx, input) => {
       calls.push({ op: 'cancel', orderId: input.orderId, detail: input.piiSubject });
@@ -34,6 +34,10 @@ describe('order ingest (T-1001)', () => {
     },
     shortenPii: (_ctx, input) => {
       calls.push({ op: 'shorten', orderId: input.orderId, detail: input.reason });
+      return Promise.resolve();
+    },
+    totalMismatch: (_ctx, input) => {
+      calls.push({ op: 'total', orderId: input.orderId, detail: input.channelAccountId });
       return Promise.resolve();
     },
     regroup: () => Promise.resolve(),
@@ -162,6 +166,7 @@ describe('order ingest (T-1001)', () => {
     cancelledAt: null,
     discount: p(0),
     shipping: p(300),
+    channelTotal: null,
     shipToCountry: 'GB',
     fba: false,
     lines: [
@@ -530,6 +535,155 @@ describe('order ingest (T-1001)', () => {
       ['zero:zero', '1200', '0'],
     ]);
     expect((await movements(w, row?.id)).map((m) => m.kind)).toEqual(['reserve']);
+  });
+
+  it('[VAT-2][VAT-3][FIN-1] mapping many lines of one listing at once loses no VAT ledger row', async () => {
+    for (const target of ['zero', 'reduced'] as const) {
+      const w = await world();
+      const lines = Array.from({ length: 8 }, (_, i) => ({
+        lineId: `L${String(i + 1)}`,
+        sku: 'NEW-ITEM',
+        quantity: 1,
+        title: null,
+        linePrice: p(1200),
+      }));
+      const o = order({ lines, shipping: p(0) });
+      await ingest.apply(w.ctx, w.account, [o]);
+      // A refund made while the lines are provisional is re-based with them.
+      await ingest.apply(w.ctx, w.account, [
+        {
+          ...o,
+          state: 'dispatched',
+          dispatchedAt: new Date('2026-11-11T09:00:00Z'),
+          updatedAt: new Date('2026-11-12T09:00:00Z'),
+          refunds: [
+            {
+              refundId: 'R1',
+              refundedAt: new Date('2026-11-12T09:00:00Z'),
+              amount: p(1200),
+              lines: null,
+            },
+          ],
+        },
+      ]);
+      let sku = w.zero;
+      if (target === 'reduced') {
+        sku = await catalogue.createSku(
+          w.ctx,
+          {
+            sku: 'RED-1',
+            title: 'Reduced',
+            shortDescription: 'r',
+            weightG: 1,
+            vatType: 'reduced',
+            firstCogs: { cogsPence: p(200), effectiveFrom: '2026-01-01' },
+          },
+          null,
+          clock,
+        );
+      }
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, sku, 'manual', null, clock);
+      expect(await ingest.fillSnapshots(w.ctx, w.listings.unmapped)).toEqual({ filled: 8 });
+      const row = await orderRow(w, o.externalId);
+      const totals = await q<{ group_key: string; gross: string; vat: string }>(
+        w,
+        sql`SELECT group_key, sum(gross_pence) AS gross, sum(vat_pence) AS vat FROM app.vat_ledger
+             WHERE order_id = ${String(row?.id)}::uuid GROUP BY group_key ORDER BY group_key`,
+      );
+      // 8 x £12 less the £12 refund, all in the mapped group; the provisional group nets to 0.
+      expect(totals.filter((t) => t.gross !== '0' || t.vat !== '0')).toEqual([
+        target === 'zero'
+          ? { group_key: 'zero:zero', gross: '8400', vat: '0' }
+          : { group_key: 'rate:500', gross: '8400', vat: '400' },
+      ]);
+    }
+  });
+
+  it('[VAT-1][FIN-1] a ledger key taken by a different amount is an error, never a silent skip', async () => {
+    const w = await world();
+    const unpaid = order({ state: 'pending_payment', paidAt: null });
+    await ingest.apply(w.ctx, w.account, [unpaid]);
+    const id = String((await orderRow(w, unpaid.externalId))?.id);
+    await q(
+      w,
+      sql<object>`INSERT INTO app.vat_ledger
+          (workspace_id, id, company_id, order_id, entry_key, kind, group_key, vat_type, rate_bp,
+           provisional, gross_pence, vat_pence, net_pence, tax_point_date, period_date, created_at)
+        VALUES (${w.ctx.workspaceId}::uuid, ${randomUUID()}::uuid, ${w.company}::uuid,
+                ${id}::uuid, ${`sale:${id}:rate:2000`}, 'sale', 'rate:2000', 'standard', 2000,
+                false, 1, 0, 1, '2026-11-10', '2026-11-10', now())`,
+    );
+    const paid = {
+      ...unpaid,
+      state: 'awaiting_dispatch' as const,
+      paidAt: new Date('2026-11-10T10:00:00Z'),
+      updatedAt: new Date('2026-11-10T10:00:00Z'),
+    };
+    await expect(ingest.apply(w.ctx, w.account, [paid])).rejects.toThrow(/ledger/);
+  });
+
+  it('[FIN-1][VAT-3] an order whose pence differ from the channel total is reported once; a matching one is not', async () => {
+    const w = await world();
+    const same = order({ channelTotal: p(2100) });
+    const differs = order({ channelTotal: p(2000) });
+    const unknown = order();
+    await ingest.apply(w.ctx, w.account, [same, differs, unknown]);
+    await ingest.apply(w.ctx, w.account, [differs]);
+    const ids: string[] = [];
+    for (const o of [same, differs, unknown]) {
+      ids.push(String((await orderRow(w, o.externalId))?.id));
+    }
+    expect(calls.filter((c) => c.op === 'total' && ids.includes(c.orderId))).toEqual([
+      { op: 'total', orderId: ids[1], detail: w.account },
+    ]);
+  });
+
+  it('[DEL-1] an order first stored already shipped moves its record expiry at once', async () => {
+    const w = await world();
+    const bare = order({ state: 'dispatched' });
+    const delivered = order({ state: 'delivered', deliveredAt: new Date('2026-11-10T09:00:00Z') });
+    const noRecord = order({ state: 'dispatched', pii: { kind: 'none' } });
+    const waiting = order();
+    await ingest.apply(w.ctx, w.account, [bare, delivered, noRecord, waiting]);
+    const details = async (o: IncomingOrder) => {
+      const id = String((await orderRow(w, o.externalId))?.id);
+      return calls.filter((c) => c.op === 'shorten' && c.orderId === id).map((c) => c.detail);
+    };
+    expect(await details(bare)).toEqual(['dispatch']);
+    expect(await details(delivered)).toEqual(['delivery']);
+    expect(await details(noRecord)).toEqual([]);
+    expect(await details(waiting)).toEqual([]);
+    // No ship date from the channel: the update that first shows it shipped stands in for it.
+    expect((await orderRow(w, bare.externalId))?.dispatched_at).toEqual(bare.updatedAt);
+  });
+
+  it('[DEL-1] a record that arrives after the order shipped has its expiry moved too', async () => {
+    const w = await world();
+    const o = order({ state: 'dispatched', pii: { kind: 'none' } });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = String((await orderRow(w, o.externalId))?.id);
+    const later = { ...o, updatedAt: new Date('2026-11-12T09:00:00Z') };
+    await ingest.apply(w.ctx, w.account, [
+      { ...later, pii: { kind: 'stored', piiRef: randomUUID() } },
+    ]);
+    await ingest.apply(w.ctx, w.account, [{ ...later, pii: { kind: 'unchanged' } }]);
+    expect(calls.filter((c) => c.orderId === id).map((c) => c.detail)).toEqual(['dispatch']);
+  });
+
+  it('[FIN-1] the amounts an order was stored with never change', async () => {
+    const w = await world();
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    for (const column of ['goods_pence', 'discount_pence', 'shipping_pence', 'gross_pence']) {
+      await expect(
+        q(
+          w,
+          sql<object>`UPDATE app.orders SET ${sql.ref(column)} = 1
+                       WHERE external_order_id = ${o.externalId}`,
+        ),
+        column,
+      ).rejects.toThrow(/never change/);
+    }
   });
 
   it('[ORD-3][INV-3] a channel that reports delivery without a dispatch time still dispatches the stock', async () => {

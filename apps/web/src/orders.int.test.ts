@@ -114,6 +114,7 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
         cancelledAt: null,
         discount: pence(0n),
         shipping: pence(300n),
+        channelTotal: null,
         shipToCountry: 'GB',
         fba: false,
         lines: [
@@ -207,6 +208,7 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
       ports: {
         cancelPii: () => Promise.resolve(),
         shortenPii: () => Promise.resolve(),
+        totalMismatch: () => Promise.resolve(),
         regroup: () => Promise.resolve(),
       },
     });
@@ -484,6 +486,7 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
         cancelledAt: null,
         discount: pence(0n),
         shipping: pence(300n),
+        channelTotal: null,
         shipToCountry: 'GB',
         fba: false,
         lines: [
