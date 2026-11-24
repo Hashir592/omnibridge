@@ -23,6 +23,28 @@ export interface RoleCluster {
   };
 }
 
+const CLOSE_WAIT_MS = 5000;
+
+/** Waits until no client session is open, at most CLOSE_WAIT_MS. */
+async function sessionsClosed(container: StartedPostgreSqlContainer): Promise<void> {
+  const until = Date.now() + CLOSE_WAIT_MS;
+  while (Date.now() < until) {
+    const res = await container.exec([
+      'psql',
+      '-U',
+      container.getUsername(),
+      '-d',
+      'postgres',
+      '-Atc',
+      `SELECT count(*) FROM pg_stat_activity
+        WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()`,
+    ]);
+    // Anything but a count (the server is already down): there is nothing to wait for.
+    if (res.exitCode !== 0 || res.output.trim() === '0') return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 /** Every role whose password the cluster's roles script reads (`/run/secrets/<role>_password`). */
 function scriptRoles(cluster: 'db-main' | 'db-pii'): string[] {
   const script = readFileSync(`${repoRoot}infra/compose/${cluster}/10-roles.sh`, 'utf8');
@@ -58,6 +80,16 @@ export async function startRoleCluster(
       })),
     )
     .start();
+
+  // Stop only once closing sessions are gone. `pool.end()` resolves before its sockets close
+  // (pg-pool), so a stop straight after it could end a session mid-close: an uncaught 57P01 that
+  // fails a run whose tests all passed. A session still open after the wait is a real leak: the
+  // stop ends it, and its error is reported as before.
+  const stop = container.stop.bind(container);
+  container.stop = async (options) => {
+    await sessionsClosed(container);
+    return stop(options);
+  };
 
   return {
     container,

@@ -6,7 +6,7 @@ M10, orders and sales VAT, ran under the ADR-077 fast lane:
 - T-1001 (critical; Hashir's go came with the 22 Nov paste);
 - T-1002 (high).
 
-The ADR-080 halfway pause was taken after T-1001. T-1001's critical S4 review and S5 check were handed off right after its PR, and their findings are not in yet. M10 closes the S4 milestone M09 + M10.
+The ADR-080 halfway pause was taken after the T-1001 PR was opened (not after it merged), and its self-check was lighter than the rule asks (see "Process: where S3 fell short"). T-1001's critical S4 review and S5 check were handed off right after its PR, and their findings are not in yet. M10 closes the S4 milestone M09 + M10.
 
 ## Tasks
 
@@ -90,6 +90,17 @@ S2 builds T-0318 on it.
 - **Waiting on S4/S5:** T-1001's critical review and security check findings.
 - **Next for S3:** the T-1101 Connect route should create accounts with `holdStockPush: true` (FA-16).
 
+## Process: where S3 fell short (for S4 and S1)
+
+- **Tests first (CLAUDE.md, and the acceptance of T-1001 and T-1002) was only partly followed.**
+  - Written before the code: the VAT engine with penny allocation, and the order state table.
+  - Written after the code: order ingest and the 0048 snapshot trigger (money, VAT), the vault changes (deletion), the orphan sweep and PII expiry (deletion), the order reads, routes and company scoping (tenancy, permissions), and the grouping rules.
+  - Many of these passed on their first run, so nobody has seen them fail against the fault they describe. Git cannot show the order: each test and its code share a commit.
+  - #159's description first said "tests first"; it is corrected.
+- **Halfway check.** "Rested and checked" was reported without re-reading the brief, the rule file and the code as ADR-080 asks; the check was made from memory, and before #158 had merged. S4 should not count it as a second look at T-1001.
+- **Reviews.** Both `/code-review` high runs were S3 reading its own code in the same session, largely from memory of writing it, with no independent verify pass.
+- **CI.** #158 went red twice and #159 twice. One commit was pushed to #158 with lint and type errors, because the check and the push were one command that did not stop on failure.
+
 ## Test evidence
 
 - Local `verify.sh --quick` passes on every branch.
@@ -103,4 +114,4 @@ S2 builds T-0318 on it.
   - vault idempotency, tombstone, journal and orphan tests
   - a restore test that replays a journalled expiry
 - Marker scans run over db-main (app and pgboss), logs, the journal, queued payloads and the CSV export.
-- CI is the full gate: #156, #157 and #158 are green; #159 is running.
+- CI is the full gate: #156, #157 and #158 are green. #159 failed twice: the split-group test (a real ordering fault, fixed) and a teardown race in the testkit with every test green (`pool.end()` resolves before its sockets close; fixed in `packages/testkit/src/postgres.ts`, which now waits for closing sessions and still reports a leaked one).
