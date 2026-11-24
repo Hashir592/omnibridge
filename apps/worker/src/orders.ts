@@ -97,7 +97,7 @@ export function orderIngestStream(
     prepare: async (job, items) => {
       if (items.length === 0) return items;
       const actor = { workspaceId: job.workspaceId };
-      const { known, retentionDays } = await deps.tenancy.runWorkspace(actor, (ctx) =>
+      const { known, dates, retentionDays } = await deps.tenancy.runWorkspace(actor, (ctx) =>
         deps.ingest.piiState(
           ctx,
           job.channelAccountId,
@@ -120,7 +120,16 @@ export function orderIngestStream(
         if (order.state === 'pending_payment' || !hasDeliveryAddress(order.buyer)) {
           return { kind: 'none' };
         }
-        const deleteAfter = piiDeleteAfter(order, retentionDays, now());
+        const first = dates.get(order.externalId);
+        const deleteAfter = piiDeleteAfter(
+          {
+            ...order,
+            dispatchedAt: first?.dispatchedAt ?? order.dispatchedAt,
+            deliveredAt: first?.deliveredAt ?? order.deliveredAt,
+          },
+          retentionDays,
+          now(),
+        );
         // FA-16: an order already past its PII window (a backfill at cutover) is stored with no
         // vault record at all.
         if (deleteAfter.getTime() <= now().getTime()) return { kind: 'none' };

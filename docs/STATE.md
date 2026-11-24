@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 23 Nov 2026 by S3 (M10 built).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 24 Nov 2026 by S3 (T-1001 fixes).
 
 ## Now
 
@@ -8,14 +8,14 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Closed:** M01 to M05 (S4 M05 end APPROVED). The M06 site pieces are merged; it waits on the client's legal details.
 - **M07, M08, M09 built** (end reports in `docs/reviews/`). The M08 milestone fix (#146) and the T-0901 review fixes (#151) are merged, for the M09 + M10 milestone to verify.
 - **M10 built** (`docs/reviews/M10-end-report.md`):
-  - #156 T-1000, #157 contract, #158 T-1001 (critical): merged;
-  - #159 T-1002: auto-merge on, CI running.
+  - #156 T-1000, #157 contract, #158 T-1001 (critical), #159 T-1002: merged;
+  - T-1001 fixes (S5's critical check, branch `task/T-1001-fixes`): auto-merge on, CI running.
 - **Waiting on reviews:**
   - S4 critical review of #158 → `docs/reviews/M10-T1001-findings.md`;
-  - S5 check of #158 → `docs/reviews/security/`;
+  - S5 check of #158 is in (no Blocker). Its report stays out of git until every Major is fixed (ADR-074); S1 rules on the open points first (PS-035 and the S3-to-S1 note of 24 Nov);
   - S4 M09 + M10 milestone (also verifies #141, #146, #151).
   - Fix rule: Blockers at once; Majors in the first commit of S3's next task.
-- **Next (S3):** M11, when Hashir pastes it.
+- **Next (S3):** S4's T-1001 findings, then M11, when Hashir pastes it.
 - **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
 
 ## M10 in short (what later modules use)
@@ -25,7 +25,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - M11's website push should reuse `orderIngestStream`'s vault-first step and `OrderIngest.apply`.
 - **PII:**
   - one vault record per order, subject `<channel_account_id>:<external_order_id>` (`orders.pii_subject`);
-  - backstop: placement + 90 days; dispatch or delivery + 25 days via `orders.pii_expiry` (journalled);
+  - a record is written only once the order is paid and has a delivery address;
+  - backstop: placement + 90 days; dispatch or delivery + 25 days via `orders.pii_expiry` (journalled); `effectiveDispatch()` is the one dispatch date;
   - cancellation calls `requestDeletion`;
   - the nightly `orders.orphan-sweep` expires orphan records older than a day;
   - eBay tombstones are in `vault.deleted_buyers`.
@@ -69,7 +70,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - a settings route for `group_midnight_grace_hours` (TEN-6);
   - a return-to-stock flag on refunds;
   - Amazon orders and the returns report (M18);
-  - re-index vault match keys before M22 (dev records from before T-1002).
+  - re-index vault match keys before M22 (dev records from before T-1002);
+  - a visible order flag for a channel total that does not add up (today a platform notice).
 - **M12:** the vault's `LabelFiles` hook deletes label files with their records.
 - **M15:** the eBay endpoint's token and keyset move into app secrets. **M18:** LWA rotation reminders. **M21:** platform-audit read route.
 - **PS-026 / picomatch:** the audit exception **expires 1 Dec 2026**. Bump the package when a fix ships and delete the entry.

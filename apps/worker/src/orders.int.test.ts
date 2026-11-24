@@ -319,6 +319,26 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect(await orderRow(old.externalId)).toMatchObject({ pii_ref: null });
   });
 
+  it('[DEL-1][AT-8] a later update of an order past its window never stores its buyer again', async () => {
+    const created = new Date(Date.now() - 40 * DAY).toISOString();
+    const seen = new Date(Date.now() - 38 * DAY).toISOString();
+    const [web] = websiteOrders({ status: 'completed', created_at: created, updated_at: seen });
+    const fulfilled = { orderFulfillmentStatus: 'FULFILLED', ...shipTo(fullAddress) };
+    const [ebay] = ebayOrders({ creationDate: created, lastModifiedDate: seen, ...fulfilled });
+    if (web === undefined || ebay === undefined) throw new Error('no orders');
+    await poll([web, ebay]);
+    // A late refund or feedback: the channel sends the order again with today's update time.
+    const now = new Date();
+    await poll([
+      { ...web, updatedAt: now },
+      { ...ebay, updatedAt: now, dispatchedAt: now },
+    ]);
+    for (const o of [web, ebay]) {
+      expect(await vaultRows(`${account}:${o.externalId}`)).toEqual([]);
+      expect(await orderRow(o.externalId)).toMatchObject({ pii_ref: null });
+    }
+  });
+
   it('[DEL-1] a record written before the order shipped is corrected when the order is first stored shipped', async () => {
     const [waiting] = websiteOrders({});
     if (waiting === undefined) throw new Error('no order');

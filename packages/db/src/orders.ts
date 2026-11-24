@@ -233,27 +233,42 @@ export class OrderIngest implements UnmappedDemand {
    * For the vault-first step, before any transaction holds a lock: which of these orders already
    * have a settled PII outcome (a pii_ref, deleted or refused, or cancelled), so the vault is asked
    * only about the others. An order stored without details (a pending order with no address yet)
-   * is not settled: its buyer is stored once the channel sends one.
+   * is not settled: its buyer is stored once the channel sends one. `dates` holds the dispatch and
+   * delivery the stored orders already have, so a later update never restarts their window.
    */
   async piiState(
     ctx: TenantContext,
     channelAccountId: string,
     externalIds: readonly string[],
-  ): Promise<{ known: ReadonlySet<string>; retentionDays: number }> {
+  ): Promise<{
+    known: ReadonlySet<string>;
+    dates: ReadonlyMap<string, { dispatchedAt: Date | null; deliveredAt: Date | null }>;
+    retentionDays: number;
+  }> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
-      const { rows } = await sql<{ external_order_id: string }>`
-        SELECT external_order_id FROM app.orders
+      const { rows } = await sql<{
+        external_order_id: string;
+        settled: boolean;
+        dispatched_at: Date | null;
+        delivered_at: Date | null;
+      }>`
+        SELECT external_order_id, dispatched_at, delivered_at,
+               (pii_ref IS NOT NULL OR pii_deleted_at IS NOT NULL OR status = 'cancelled') AS settled
+          FROM app.orders
          WHERE workspace_id = ${ctx.workspaceId}::uuid
            AND channel_account_id = ${channelAccountId}::uuid
-           AND external_order_id = ANY (${sql.val(externalIds)}::text[])
-           AND (pii_ref IS NOT NULL OR pii_deleted_at IS NOT NULL OR status = 'cancelled')`.execute(
-        trx,
-      );
+           AND external_order_id = ANY (${sql.val(externalIds)}::text[])`.execute(trx);
       const { rows: ws } = await sql<{ days: string }>`
         SELECT pii_retention_days AS days FROM app.workspaces
          WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
       return {
-        known: new Set(rows.map((r) => r.external_order_id)),
+        known: new Set(rows.filter((r) => r.settled).map((r) => r.external_order_id)),
+        dates: new Map(
+          rows.map((r) => [
+            r.external_order_id,
+            { dispatchedAt: r.dispatched_at, deliveredAt: r.delivered_at },
+          ]),
+        ),
         retentionDays: Number(ws[0]?.days ?? 25),
       };
     });

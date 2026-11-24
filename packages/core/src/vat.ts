@@ -159,9 +159,9 @@ export interface RefundVat {
  * do not cover (the refund is larger, or a group has less left than its lines say) splits like a
  * refund without line detail: across the groups pro-rata to the gross each still has unrefunded
  * (the original gross when nothing was refunded yet). Lines never add up to more than the refund.
- * Each part's VAT is at the group's original rate, capped
- * so the VAT given back on a group never exceeds the VAT charged on it; the refund that clears a
- * group's gross takes exactly the VAT left (rule 3). `refunded` holds the earlier refunds.
+ * Each part's VAT is at the group's original rate, capped so the VAT given back on a group never
+ * exceeds the VAT charged on it; the refund that clears a group's gross takes exactly the VAT left
+ * (rule 3). `refunded` holds the earlier refunds.
  */
 export function computeRefundVat(input: {
   order: OrderVat;
