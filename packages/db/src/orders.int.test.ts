@@ -838,6 +838,93 @@ describe('order ingest (T-1001)', () => {
     expect(oversold).toEqual([hit.id]);
   });
 
+  it('[CAT-6][VAT-2] mapping links only the lines of its own SKU', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const line = (lineId: string, code: string) => ({
+      lineId,
+      sku: code,
+      quantity: 1,
+      title: null,
+      linePrice: p(1200),
+    });
+    const o = order({
+      lines: [line('L1', 'LATE-ITEM'), line('L2', 'OTHER-LATE')],
+      shipping: p(0),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    expect(await mapped(w, { listingId, masterSkuId: sku })).toEqual({ filled: 1 });
+    const lines = await q<{ listing_id: string | null; vat_type: string | null }>(
+      w,
+      sql`SELECT l.listing_id, l.vat_type FROM app.order_lines l
+            JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
+           WHERE o.external_order_id = ${o.externalId} ORDER BY l.line_no`,
+    );
+    expect(lines).toEqual([
+      { listing_id: listingId, vat_type: 'zero' },
+      { listing_id: null, vat_type: null },
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({ unmapped: true });
+    expect(await level(w, sku)).toEqual({ on_hand: '10', reserved: '1' });
+  });
+
+  it('[CAT-6][VAT-2] the snapshot step links late lines by itself, and marks an FBA listing as such', async () => {
+    const w = await world();
+    const sku = await lateItem(w);
+    const o = lateOrder();
+    await ingest.apply(w.ctx, w.account, [o]);
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    await q(
+      w,
+      sql<object>`UPDATE app.listings SET fulfilment = 'fba' WHERE id = ${listingId}::uuid`,
+    );
+    expect(await ingest.fillSnapshots(w.ctx, listingId)).toEqual({ filled: 1 });
+    const [line] = await q<{ fba: boolean; master_sku_id: string }>(
+      w,
+      sql`SELECT l.fba, l.master_sku_id FROM app.order_lines l WHERE l.listing_id = ${listingId}::uuid`,
+    );
+    expect(line).toEqual({ fba: true, master_sku_id: sku });
+    expect(await orderRow(w, o.externalId)).toMatchObject({ fba: true });
+  });
+
+  it('[INV-6][CAT-6] an order that has already shipped is never flagged Oversold by the back-fill', async () => {
+    const w = await world();
+    const sku = await lateItem(w, 'zero', 1);
+    const o = lateOrder({}, 5);
+    await ingest.apply(w.ctx, w.account, [shippedOn(o)]);
+    oversold.length = 0;
+    const listingId = (await discover(w)).autoMapped[0]?.listingId ?? '';
+    await mapped(w, { listingId, masterSkuId: sku });
+    expect(await level(w, sku)).toEqual({ on_hand: '-4', reserved: '0' });
+    expect(await orderRow(w, o.externalId)).toMatchObject({ oversold: false });
+    expect(oversold).toEqual([]);
+  });
+
+  it('[CAT-6][TEN-5] a page of one account reports only that account’s late lines', async () => {
+    const w = await world();
+    await lateItem(w);
+    const other = randomUUID();
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      trx
+        .insertInto('app.channel_accounts')
+        .values({
+          id: other,
+          workspace_id: w.ctx.workspaceId,
+          company_id: w.company,
+          provider: 'ebay',
+          display_name: 'other',
+        })
+        .execute(),
+    );
+    await ingest.apply(w.ctx, w.account, [lateOrder()]);
+    await discover(w);
+    late.length = 0;
+    await ingest.apply(w.ctx, other, [order()]);
+    expect(late).toEqual([]);
+    expect(await ingest.reportLateMapped(w.ctx, w.account)).toBe(1);
+  });
+
   it('[CAT-6][INV-3] a dispatch stored while the listing is being mapped is not lost', async () => {
     const w = await world();
     const o = order({
