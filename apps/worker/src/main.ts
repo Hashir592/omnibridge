@@ -246,7 +246,7 @@ const catalogueRepo = new CatalogueRepository(handlerDb.db);
 const orderIngest: OrderIngest = new OrderIngest(handlerDb.db, {
   catalogue: catalogueRepo,
   stock: stockEngine,
-  ports: orderIngestPorts(queue),
+  ports: orderIngestPorts(queue, { notifier, logger: log }),
 });
 const orderStream = orderIngestStream({
   tenancy: syncPorts.tenancy,

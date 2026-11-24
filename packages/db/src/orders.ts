@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   computeOrderVat,
   computeRefundVat,
@@ -54,6 +54,8 @@ export interface IncomingOrder {
   cancelledAt: Date | null;
   discount: Pence;
   shipping: Pence;
+  /** What the buyer paid as the channel states it; null when it states no total. */
+  channelTotal: Pence | null;
   shipToCountry: string | null;
   fba: boolean;
   lines: readonly {
@@ -82,6 +84,11 @@ export interface OrderIngestPorts {
     ctx: TenantContext,
     input: { orderId: string; reason: 'dispatch' | 'delivery' },
   ): Promise<void>;
+  /** FIN-1: the order's pence do not add up to the total the channel states. */
+  totalMismatch(
+    ctx: TenantContext,
+    input: { orderId: string; channelAccountId: string },
+  ): Promise<void>;
   /** ORD-9 (C3.2): the account's orders changed, so its same-buyer groups are recomputed. */
   regroup(ctx: TenantContext, input: { channelAccountId: string }): Promise<void>;
 }
@@ -98,6 +105,25 @@ export function piiSubject(channelAccountId: string, externalOrderId: string): s
 export function vatPeriodDate(taxPoint: string): string {
   return taxPoint;
 }
+
+/**
+ * DEL-1: when a shipped order left, as far as the channel says: its dispatch time, else delivery,
+ * else the update that first shows it shipped. Null until it has shipped. The vault-first step and
+ * db-main both use this, so a record's expiry and the stored date always agree.
+ */
+export function effectiveDispatch(
+  o: Pick<IncomingOrder, 'state' | 'dispatchedAt' | 'deliveredAt' | 'updatedAt'>,
+): Date | null {
+  if (o.dispatchedAt !== null) return o.dispatchedAt;
+  const shipped = o.state === 'dispatched' || o.state === 'delivered';
+  return shipped ? (o.deliveredAt ?? o.updatedAt) : null;
+}
+
+/** A fixed-length name for a set of order lines, for a ledger key (the column holds 300). */
+const linesDigest = (ids: readonly string[]): string =>
+  createHash('sha256')
+    .update([...ids].sort().join(','))
+    .digest('hex');
 
 /** The ORD-3 status an update asks for: refunds turn a dispatched order (partly) refunded. */
 export function incomingStatus(state: IncomingState, refunded: bigint, gross: bigint): OrderStatus {
@@ -207,27 +233,42 @@ export class OrderIngest implements UnmappedDemand {
    * For the vault-first step, before any transaction holds a lock: which of these orders already
    * have a settled PII outcome (a pii_ref, deleted or refused, or cancelled), so the vault is asked
    * only about the others. An order stored without details (a pending order with no address yet)
-   * is not settled: its buyer is stored once the channel sends one.
+   * is not settled: its buyer is stored once the channel sends one. `dates` holds the dispatch and
+   * delivery the stored orders already have, so a later update never restarts their window.
    */
   async piiState(
     ctx: TenantContext,
     channelAccountId: string,
     externalIds: readonly string[],
-  ): Promise<{ known: ReadonlySet<string>; retentionDays: number }> {
+  ): Promise<{
+    known: ReadonlySet<string>;
+    dates: ReadonlyMap<string, { dispatchedAt: Date | null; deliveredAt: Date | null }>;
+    retentionDays: number;
+  }> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
-      const { rows } = await sql<{ external_order_id: string }>`
-        SELECT external_order_id FROM app.orders
+      const { rows } = await sql<{
+        external_order_id: string;
+        settled: boolean;
+        dispatched_at: Date | null;
+        delivered_at: Date | null;
+      }>`
+        SELECT external_order_id, dispatched_at, delivered_at,
+               (pii_ref IS NOT NULL OR pii_deleted_at IS NOT NULL OR status = 'cancelled') AS settled
+          FROM app.orders
          WHERE workspace_id = ${ctx.workspaceId}::uuid
            AND channel_account_id = ${channelAccountId}::uuid
-           AND external_order_id = ANY (${sql.val(externalIds)}::text[])
-           AND (pii_ref IS NOT NULL OR pii_deleted_at IS NOT NULL OR status = 'cancelled')`.execute(
-        trx,
-      );
+           AND external_order_id = ANY (${sql.val(externalIds)}::text[])`.execute(trx);
       const { rows: ws } = await sql<{ days: string }>`
         SELECT pii_retention_days AS days FROM app.workspaces
          WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
       return {
-        known: new Set(rows.map((r) => r.external_order_id)),
+        known: new Set(rows.filter((r) => r.settled).map((r) => r.external_order_id)),
+        dates: new Map(
+          rows.map((r) => [
+            r.external_order_id,
+            { dispatchedAt: r.dispatched_at, deliveredAt: r.delivered_at },
+          ]),
+        ),
         retentionDays: Number(ws[0]?.days ?? 25),
       };
     });
@@ -339,9 +380,7 @@ export class OrderIngest implements UnmappedDemand {
     // FA-16: an order placed before the account was connected is history the first stock take
     // already counts; it never moves stock.
     const stockMoves = o.placedAt >= account.created_at;
-    // A channel that reports delivery without a dispatch time: delivery stands in for it.
-    const dispatchedAt =
-      o.dispatchedAt ?? (SHIPPED.includes(status) ? (o.deliveredAt ?? o.updatedAt) : null);
+    const dispatchedAt = effectiveDispatch(o);
     const piiRef = o.pii.kind === 'stored' ? o.pii.piiRef : null;
     const piiDeletedAt = o.pii.kind === 'refused' ? now : null;
     const unmapped = resolved.some((r) => r.listing?.master_sku_id == null);
@@ -418,6 +457,21 @@ export class OrderIngest implements UnmappedDemand {
       }
     }
 
+    // DEL-1: an order first seen already shipped. Its record may be an older one with the 90-day
+    // backstop (a retry after a failed write), so the expiry is moved here too.
+    if (piiRef !== null && status !== 'cancelled' && dispatchedAt !== null) {
+      await this.#ports.shortenPii(ctx, {
+        orderId: id,
+        reason: o.deliveredAt === null ? 'dispatch' : 'delivery',
+      });
+    }
+    if (o.channelTotal !== null && o.channelTotal !== vat.gross) {
+      await this.#ports.totalMismatch(ctx, {
+        orderId: id,
+        channelAccountId: account.id,
+      });
+    }
+
     const order = await this.#lock(trx, ctx, id);
     await this.#settle(trx, ctx, order, o);
   }
@@ -435,11 +489,10 @@ export class OrderIngest implements UnmappedDemand {
       incomingStatus(o.state, refunded, big(existing.gross_pence)),
     );
     const stale = o.updatedAt < existing.source_updated_at;
-    // A channel that reports delivery without a dispatch time: delivery stands in for it.
     const dispatchedAt =
       existing.dispatched_at ??
       o.dispatchedAt ??
-      (SHIPPED.includes(next) ? (o.deliveredAt ?? o.updatedAt) : null);
+      (SHIPPED.includes(next) ? effectiveDispatch(o) : null);
     const deliveredAt = existing.delivered_at ?? o.deliveredAt;
     const cancelledAt =
       next === 'cancelled'
@@ -496,9 +549,11 @@ export class OrderIngest implements UnmappedDemand {
           piiSubject: existing.pii_subject,
         });
       } else if (next !== 'cancelled') {
-        if (existing.delivered_at === null && deliveredAt !== null) {
+        // A record that only now joins a shipped order needs its expiry moved as well.
+        const joined = existing.pii_ref === null;
+        if (deliveredAt !== null && (joined || existing.delivered_at === null)) {
           await this.#ports.shortenPii(ctx, { orderId: existing.id, reason: 'delivery' });
-        } else if (existing.dispatched_at === null && dispatchedAt !== null) {
+        } else if (dispatchedAt !== null && (joined || existing.dispatched_at === null)) {
           await this.#ports.shortenPii(ctx, { orderId: existing.id, reason: 'dispatch' });
         }
       }
@@ -586,9 +641,19 @@ export class OrderIngest implements UnmappedDemand {
       if (seen.length > 0) continue;
       const prior = await this.#refundedSoFar(trx, ctx, order.id);
       const byExternal = new Map(lines.map((l, index) => [l.external_line_id, { l, index }]));
-      const refundLines = (refund.lines ?? []).flatMap((rl) => {
+      // One entry per order line: a channel may list a line twice (goods, then an extra part).
+      const merged = new Map<string, { lineId: string; quantity: number; amount: bigint }>();
+      for (const rl of refund.lines ?? []) {
+        const had = merged.get(rl.lineId);
+        merged.set(rl.lineId, {
+          lineId: rl.lineId,
+          quantity: (had?.quantity ?? 0) + rl.quantity,
+          amount: (had?.amount ?? 0n) + rl.amount,
+        });
+      }
+      const refundLines = [...merged.values()].flatMap((rl) => {
         const hit = byExternal.get(rl.lineId);
-        return hit === undefined ? [] : [{ ...rl, line: hit }];
+        return hit === undefined ? [] : [{ ...rl, amount: pence(rl.amount), line: hit }];
       });
       const rv = computeRefundVat({
         order: vat,
@@ -688,7 +753,7 @@ export class OrderIngest implements UnmappedDemand {
       taxPoint: string;
     },
   ): Promise<void> {
-    await sql`
+    const { numAffectedRows } = await sql`
       INSERT INTO app.vat_ledger
         (workspace_id, id, company_id, order_id, refund_id, entry_key, kind, group_key, vat_type,
          rate_bp, provisional, gross_pence, vat_pence, net_pence, tax_point_date, period_date,
@@ -699,6 +764,18 @@ export class OrderIngest implements UnmappedDemand {
               ${row.gross - row.vat}, ${row.taxPoint}::date, ${vatPeriodDate(row.taxPoint)}::date,
               ${this.#now()})
       ON CONFLICT (workspace_id, entry_key) DO NOTHING`.execute(trx);
+    if (numAffectedRows !== 0n) return;
+    // A repeat writes nothing, but only a true repeat: the ledger is append-only, so a key taken
+    // by another row would lose this one for good.
+    const { rows } = await sql<{ same: boolean }>`
+      SELECT (order_id = ${order.id}::uuid AND group_key = ${row.groupKey}
+              AND refund_id IS NOT DISTINCT FROM ${row.refundId}::uuid
+              AND gross_pence = ${row.gross} AND vat_pence = ${row.vat}) AS same
+        FROM app.vat_ledger
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND entry_key = ${row.entryKey}`.execute(trx);
+    if (rows[0]?.same !== true) {
+      throw new Error('a VAT ledger key is taken by a different entry');
+    }
   }
 
   /**
@@ -756,6 +833,7 @@ export class OrderIngest implements UnmappedDemand {
       for (const [orderId, lines] of byOrder) {
         const order = await this.#lock(trx, ctx, orderId);
         const before = vatOf(await this.#lines(trx, ctx, orderId), order);
+        const done: string[] = [];
         for (const p of lines) {
           const snap = await this.#snapshot(ctx, p.master_sku_id, p.day);
           if (snap === undefined) continue;
@@ -765,8 +843,11 @@ export class OrderIngest implements UnmappedDemand {
                    vat_rate_bp = ${snap.rateBp}, cogs_pence = ${snap.cogs}, snapshot_at = ${this.#now()}
              WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${p.line_id}::uuid
                AND vat_type IS NULL`.execute(trx);
-          filled += Number(numAffectedRows ?? 0n);
+          if ((numAffectedRows ?? 0n) > 0n) done.push(p.line_id);
         }
+        if (done.length === 0) continue;
+        filled += done.length;
+        const tag = linesDigest(done);
         const after = vatOf(await this.#lines(trx, ctx, orderId), order);
         await this.#reallocate(trx, ctx, orderId, after);
         if (order.vat_recorded_at === null) continue;
@@ -787,10 +868,7 @@ export class OrderIngest implements UnmappedDemand {
           const g = a ?? b;
           if (g === undefined) continue;
           await this.#ledger(trx, ctx, order, {
-            entryKey: `adjust:${orderId}:${lines.map((l) => l.line_id).join(',')}:${key}`.slice(
-              0,
-              300,
-            ),
+            entryKey: `adjust:${orderId}:${tag}:${key}`,
             kind: 'adjustment',
             refundId: null,
             groupKey: key,
@@ -802,7 +880,7 @@ export class OrderIngest implements UnmappedDemand {
             taxPoint: order.tax_point_date,
           });
         }
-        await this.#rebaseRefunds(trx, ctx, order, after, lines.map((l) => l.line_id).join(','));
+        await this.#rebaseRefunds(trx, ctx, order, after, tag);
       }
       return { filled };
     });
@@ -868,7 +946,7 @@ export class OrderIngest implements UnmappedDemand {
         if (gross === 0n && vatDiff === 0n) continue;
         const group = vat.groups.find((g) => g.key === key);
         await this.#ledger(trx, ctx, order, {
-          entryKey: `adjust:${refund.id}:${tag}:${key}`.slice(0, 300),
+          entryKey: `adjust:${refund.id}:${tag}:${key}`,
           kind: 'adjustment',
           refundId: refund.id,
           groupKey: key,

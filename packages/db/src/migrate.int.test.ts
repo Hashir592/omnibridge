@@ -109,6 +109,7 @@ describe('db-main roles and migrations', () => {
       '0049_order_groups',
       '0050_validate_order_groups',
       '0051_order_group_index',
+      '0052_orders_fixed_amounts',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

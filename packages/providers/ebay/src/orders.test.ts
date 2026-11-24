@@ -57,6 +57,56 @@ describe('eBay getOrders parser (M10)', () => {
     expect(JSON.stringify({ ...o, buyer: null })).not.toContain('PIIMARK');
   });
 
+  it('[FIN-1][VAT-3] delivery discounts and adjustments count, so the pence add up to the total eBay states', () => {
+    const [o] = parseEbayOrders(
+      page(
+        order({
+          pricingSummary: {
+            deliveryCost: gbp('3.00'),
+            priceDiscount: gbp('-1.00'),
+            deliveryDiscount: gbp('-2.00'),
+            adjustment: gbp('-0.50'),
+            total: gbp('11.50'),
+          },
+        }),
+      ),
+    );
+    expect(o).toMatchObject({ discountPence: 150, shippingPence: 100, totalPence: 1150 });
+    // A delivery discount beyond the delivery charge comes off the goods.
+    const [free] = parseEbayOrders(
+      page(
+        order({
+          pricingSummary: {
+            deliveryCost: gbp('3.00'),
+            deliveryDiscount: gbp('-4.00'),
+            total: gbp('11.00'),
+          },
+        }),
+      ),
+    );
+    expect(free).toMatchObject({ discountPence: 100, shippingPence: 0, totalPence: 1100 });
+    // A positive adjustment is more to pay: it is split like shipping (VAT-3 step 3).
+    const [more] = parseEbayOrders(
+      page(
+        order({
+          pricingSummary: {
+            deliveryCost: gbp('3.00'),
+            adjustment: gbp('0.50'),
+            total: gbp('15.50'),
+          },
+        }),
+      ),
+    );
+    expect(more).toMatchObject({ discountPence: 0, shippingPence: 350, totalPence: 1550 });
+  });
+
+  it('[FIN-1] a negative line or refund fails the parser: its sign is never dropped', () => {
+    const line = { lineItemId: 'L1', quantity: 1, lineItemCost: gbp('-5.00') };
+    expect(() => parseEbayOrders(page(order({ lineItems: [line] })))).toThrow();
+    const refunds = [{ refundId: 'R1', refundDate: '2026-11-20T10:00:00Z', amount: gbp('-4.00') }];
+    expect(() => parseEbayOrders(page(order({ paymentSummary: { refunds } })))).toThrow();
+  });
+
   it('[ORD-4] an ID or SKU longer than db-main keeps fails the parser, not the insert', () => {
     expect(() => parseEbayOrders(page(order({ orderId: 'x'.repeat(201) })))).toThrow();
     expect(() =>

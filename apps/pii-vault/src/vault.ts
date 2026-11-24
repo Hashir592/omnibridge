@@ -282,7 +282,8 @@ export class Vault {
 
   /**
    * ADR-068 tombstone check: a buyer whose eBay account was deleted is never stored again. An ID
-   * is never reused, so a matching user ID always refuses. A username can be reused by someone
+   * is never reused, so a matching user ID always refuses, in either field (eBay may send the ID
+   * as the username, and orders carry the username only). A username can be reused by someone
    * else, so it decides only for a record with no ID, and only for an order placed before the
    * notice (a re-poll or backfill of the deleted buyer's own orders).
    */
@@ -295,11 +296,11 @@ export class Vault {
           WHERE workspace_id = $1 AND field = $2 AND mac = $3`,
         [req.workspace_id, field, keys.index.mac(field, value)],
       );
-    if (id !== '') {
-      if (((await lookup('ebay_user_id', id)).rowCount ?? 0) > 0) throw new BuyerDeleted();
-      return;
+    for (const value of new Set([id, username])) {
+      if (value === '') continue;
+      if (((await lookup('ebay_user_id', value)).rowCount ?? 0) > 0) throw new BuyerDeleted();
     }
-    if (username === '') return;
+    if (id !== '' || username === '') return;
     const hit = (await lookup('ebay_username', username)).rows[0];
     if (hit === undefined) return;
     const placed = req.placed_at === undefined ? undefined : new Date(req.placed_at);
@@ -492,10 +493,23 @@ export class Vault {
         if (userId !== '') tombs.push(['ebay_user_id', userId]);
         if (username !== '') tombs.push(['ebay_username', username]);
         if (after === null) {
+          // Ingest holds this lock (shared) from before its check to its commit. Taking it alone
+          // means every ingest already past its check is visible to the match below, and every
+          // later one sees these rows.
+          await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(workspaceId)]);
+          // Closure may have held the lock: its records and entries are gone and stay gone.
+          const closed = await c.query(
+            'SELECT 1 FROM vault.closed_workspaces WHERE workspace_id = $1',
+            [workspaceId],
+          );
+          if ((closed.rowCount ?? 0) > 0) return { rows: [], more: false };
           for (const [field, value] of tombs) {
+            // A second notice for a reused username covers its second owner's orders too.
             await c.query(
-              `INSERT INTO vault.deleted_buyers (workspace_id, field, mac, key_version, created_at)
-               VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+              `INSERT INTO vault.deleted_buyers AS d (workspace_id, field, mac, key_version, created_at)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (workspace_id, field, mac) DO UPDATE SET created_at = excluded.created_at
+                 WHERE d.created_at < excluded.created_at`,
               [workspaceId, field, keys.index.mac(field, value), keys.index.version, this.#now()],
             );
           }

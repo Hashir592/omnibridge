@@ -7,6 +7,7 @@ import { Secret } from '@omnibridge/crypto';
 import {
   defineParser,
   PenceAmount,
+  PenceDiscount,
   readJson,
   type BuyerDetails,
   type ChannelAdapter,
@@ -52,7 +53,7 @@ const OrdersV1 = defineParser(
         status: z.string().min(1),
         currency: z.literal('GBP'),
         shipping_total: PenceAmount,
-        discount_total: PenceAmount.optional(),
+        discount_total: PenceDiscount.optional(),
         customer: z
           .object({ id: Text, email: Text, phone: Text, name: Text })
           .nullable()
@@ -112,7 +113,8 @@ function websiteState(o: WebsiteOrder): ChannelOrderState {
   if (o.delivered_at !== null && o.delivered_at !== undefined) return 'delivered';
   if (o.status === 'shipped' || o.status === 'completed') return 'dispatched';
   if (o.shipped_at !== null && o.shipped_at !== undefined) return 'dispatched';
-  if (o.status === 'pending') return 'pending_payment';
+  const paid = o.paid_at !== null && o.paid_at !== undefined;
+  if (o.status === 'pending' && !paid) return 'pending_payment';
   return 'awaiting_dispatch';
 }
 
@@ -157,6 +159,8 @@ function websiteOrder(o: WebsiteOrder): ChannelOrder {
     cancelledAt: state === 'cancelled' ? (at(o.cancelled_at) ?? new Date(o.updated_at)) : null,
     discountPence: o.discount_total ?? 0,
     shippingPence: o.shipping_total,
+    // The protocol states no order total yet (M11).
+    totalPence: null,
     shipToCountry: o.shipping_address?.country ?? null,
     fba: false,
     lines: o.lines.map((l) => ({

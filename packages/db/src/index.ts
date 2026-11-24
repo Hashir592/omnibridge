@@ -202,6 +202,7 @@ export {
 } from './stock.ts';
 export {
   incomingStatus,
+  effectiveDispatch,
   OrderIngest,
   piiSubject,
   vatPeriodDate,

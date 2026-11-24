@@ -155,11 +155,13 @@ export interface RefundVat {
 }
 
 /**
- * VAT-5 with the FA-12 cap. A refund tied to lines takes those lines' groups; one without line
- * detail splits across the groups pro-rata to the gross each still has unrefunded (the original
- * gross when nothing was refunded yet). Each part's VAT is at the group's original rate, capped
- * so the VAT given back on a group never exceeds the VAT charged on it; the refund that clears a
- * group's gross takes exactly the VAT left (rule 3). `refunded` holds the earlier refunds.
+ * VAT-5 with the FA-12 cap. A refund tied to lines takes those lines' groups; whatever the lines
+ * do not cover (the refund is larger, or a group has less left than its lines say) splits like a
+ * refund without line detail: across the groups pro-rata to the gross each still has unrefunded
+ * (the original gross when nothing was refunded yet). Lines never add up to more than the refund.
+ * Each part's VAT is at the group's original rate, capped so the VAT given back on a group never
+ * exceeds the VAT charged on it; the refund that clears a group's gross takes exactly the VAT left
+ * (rule 3). `refunded` holds the earlier refunds.
  */
 export function computeRefundVat(input: {
   order: OrderVat;
@@ -175,22 +177,25 @@ export function computeRefundVat(input: {
     return left > 0n ? left : 0n;
   });
 
-  let parts: bigint[];
-  if (refund.lines !== undefined && refund.lines.length > 0) {
-    parts = order.groups.map((g) =>
-      total(
-        refund.lines?.filter((l) => order.lines[l.line]?.groupKey === g.key).map((l) => l.amount) ??
-          [],
-      ),
-    );
-  } else {
-    parts = allocateLargestRemainder(refund.amount, remainingGross);
+  const least = (a: bigint, b: bigint): bigint => (a < b ? a : b);
+  const lines = refund.lines ?? [];
+  let byLine: bigint[] = order.groups.map((g) =>
+    total(lines.filter((l) => order.lines[l.line]?.groupKey === g.key).map((l) => l.amount)),
+  );
+  if (total(byLine) > refund.amount) byLine = allocateLargestRemainder(refund.amount, byLine);
+  const parts = byLine.map((part, i) => least(part, remainingGross[i] ?? 0n));
+  const free = parts.map((part, i) => (remainingGross[i] ?? 0n) - part);
+  const rest = least(refund.amount - total(parts), total(free));
+  if (rest > 0n) {
+    allocateLargestRemainder(rest, free).forEach((extra, i) => {
+      parts[i] = (parts[i] ?? 0n) + extra;
+    });
   }
 
   const groups: RefundVatGroup[] = [];
   order.groups.forEach((g, i) => {
     const left = remainingGross[i] ?? 0n;
-    const gross = (parts[i] ?? 0n) > left ? left : (parts[i] ?? 0n);
+    const gross = parts[i] ?? 0n;
     if (gross <= 0n) return;
     const vatLeft = g.vat - before(g.key, 'vat');
     const atRate = vatInGross(gross, g.rateBp);

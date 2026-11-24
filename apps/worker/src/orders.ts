@@ -1,14 +1,21 @@
-import { londonDate, pence, type TenantContext, type TenantRunner } from '@omnibridge/core';
+import {
+  londonDate,
+  pence,
+  type Notifier,
+  type TenantContext,
+  type TenantRunner,
+} from '@omnibridge/core';
 import { randomUUID } from 'node:crypto';
-import type {
-  Connection,
-  IncomingOrder,
-  OrderIngest,
-  OrderIngestPorts,
-  OrderReads,
+import {
+  effectiveDispatch,
+  type Connection,
+  type IncomingOrder,
+  type OrderIngest,
+  type OrderIngestPorts,
+  type OrderReads,
 } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
-import type { ChannelOrder, SyncStream } from '@omnibridge/provider-kit';
+import type { BuyerDetails, ChannelOrder, SyncStream } from '@omnibridge/provider-kit';
 import {
   ordersGroupRecomputeJob,
   ordersOrphanSweepJob,
@@ -43,15 +50,28 @@ const ORPHAN_GRACE_MS = DAY_MS;
 /**
  * DEL-1, PRD 7.3: when an order's buyer record must be gone. Delivery (or dispatch when delivery is
  * unknown) plus the workspace's PII window; an order not yet dispatched keeps the 90-day backstop.
+ * A shipped order the channel gave no date for counts from the update that shows it shipped, and a
+ * date in the future counts as now.
  */
 export function piiDeleteAfter(
-  order: Pick<ChannelOrder, 'placedAt' | 'dispatchedAt' | 'deliveredAt'>,
+  order: Pick<ChannelOrder, 'placedAt' | 'state' | 'dispatchedAt' | 'deliveredAt' | 'updatedAt'>,
   retentionDays: number,
+  now: Date,
 ): Date {
-  const shipped = order.deliveredAt ?? order.dispatchedAt;
+  const shipped = order.deliveredAt ?? effectiveDispatch(order);
   return shipped === null
     ? new Date(order.placedAt.getTime() + PII_HARD_LIMIT_MS)
-    : new Date(shipped.getTime() + retentionDays * DAY_MS);
+    : new Date(Math.min(shipped.getTime(), now.getTime()) + retentionDays * DAY_MS);
+}
+
+/**
+ * ORD-4: a buyer record is written once per order, so it waits for a delivery address: the first
+ * line and the postcode (or, outside the UK, where some addresses have none, the town).
+ */
+function hasDeliveryAddress(buyer: BuyerDetails): boolean {
+  const given = (v: string | undefined) => v !== undefined && v.trim() !== '';
+  const abroad = given(buyer.country) && buyer.country?.toUpperCase() !== 'GB';
+  return given(buyer.address_line1) && (given(buyer.postcode) || (abroad && given(buyer.city)));
 }
 
 export interface OrderStreamDeps {
@@ -77,7 +97,7 @@ export function orderIngestStream(
     prepare: async (job, items) => {
       if (items.length === 0) return items;
       const actor = { workspaceId: job.workspaceId };
-      const { known, retentionDays } = await deps.tenancy.runWorkspace(actor, (ctx) =>
+      const { known, dates, retentionDays } = await deps.tenancy.runWorkspace(actor, (ctx) =>
         deps.ingest.piiState(
           ctx,
           job.channelAccountId,
@@ -95,7 +115,21 @@ export function orderIngestStream(
         // never brought back by a later poll.
         if (known.has(order.externalId)) return { kind: 'unchanged' };
         if (order.buyer === null || order.state === 'cancelled') return { kind: 'none' };
-        const deleteAfter = piiDeleteAfter(order, retentionDays);
+        // DP-5: nothing is kept of a buyer who has not paid, and nothing is settled until there
+        // is somewhere to send the parcel. A later poll asks again.
+        if (order.state === 'pending_payment' || !hasDeliveryAddress(order.buyer)) {
+          return { kind: 'none' };
+        }
+        const first = dates.get(order.externalId);
+        const deleteAfter = piiDeleteAfter(
+          {
+            ...order,
+            dispatchedAt: first?.dispatchedAt ?? order.dispatchedAt,
+            deliveredAt: first?.deliveredAt ?? order.deliveredAt,
+          },
+          retentionDays,
+          now(),
+        );
         // FA-16: an order already past its PII window (a backfill at cutover) is stored with no
         // vault record at all.
         if (deleteAfter.getTime() <= now().getTime()) return { kind: 'none' };
@@ -153,6 +187,7 @@ export function toIncoming(o: ChannelOrder): IncomingOrder {
     cancelledAt: o.cancelledAt,
     discount: pence(BigInt(o.discountPence)),
     shipping: pence(BigInt(o.shippingPence)),
+    channelTotal: o.totalPence === null ? null : pence(BigInt(o.totalPence)),
     shipToCountry: o.shipToCountry,
     fba: o.fba,
     lines: o.lines.map((l) => ({
@@ -180,9 +215,28 @@ export function toIncoming(o: ChannelOrder): IncomingOrder {
   };
 }
 
-/** The jobs the ingest queues inside its transaction (IDs only, invariant 7a). */
-export function orderIngestPorts(queue: Pick<JobQueue, 'send'>): OrderIngestPorts {
+/** The jobs and notices of the ingest, inside its transaction (IDs only, invariant 7a). */
+export function orderIngestPorts(
+  queue: Pick<JobQueue, 'send'>,
+  notices: { notifier: Pick<Notifier, 'raisePlatform'>; logger: Logger },
+): OrderIngestPorts {
   return {
+    totalMismatch: async (ctx, input) => {
+      notices.logger.warn(
+        {
+          event: 'orders.total_mismatch',
+          workspaceId: ctx.workspaceId,
+          channelAccountId: input.channelAccountId,
+          orderId: input.orderId,
+        },
+        'order pence do not add up to the total the channel states',
+      );
+      // One open notice per account: the rule for reading its amounts needs a look (T-1501).
+      await notices.notifier.raisePlatform(ctx, {
+        type: 'platform.report_failure',
+        record: { kind: 'order_total', id: input.channelAccountId },
+      });
+    },
     cancelPii: async (ctx, input) => {
       await requestDeletion(queue, ctx, {
         trigger: 'cancellation',
@@ -266,8 +320,9 @@ export function ordersPiiExpiryHandler(deps: {
       });
       if (target === undefined) return { updated: 0 };
       // The job is queued only once dispatch or delivery is known, so `shipped` is set.
+      // A date in the future counts as now.
       const shipped = target.deliveredAt ?? target.dispatchedAt ?? now();
-      const due = new Date(shipped.getTime() + days * DAY_MS);
+      const due = new Date(Math.min(shipped.getTime(), now().getTime()) + days * DAY_MS);
       const at = Math.min(
         Math.max(due.getTime(), now().getTime()),
         now().getTime() + PII_HARD_LIMIT_MS,

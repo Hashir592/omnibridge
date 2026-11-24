@@ -298,6 +298,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         ports: {
           cancelPii: () => Promise.resolve(),
           shortenPii: () => Promise.resolve(),
+          totalMismatch: () => Promise.resolve(),
           regroup: () => Promise.resolve(),
         },
       });
@@ -314,6 +315,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         cancelledAt: null,
         discount: pence(0n),
         shipping: pence(0n),
+        channelTotal: null,
         shipToCountry: 'GB',
         fba: false,
         lines: [

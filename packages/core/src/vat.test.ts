@@ -212,6 +212,61 @@ describe('refund VAT (VAT-5, FA-12 cap)', () => {
     expect(refund.groups.map((g) => g.vatType)).toEqual(['zero']);
   });
 
+  it('[VAT-5] the part of a refund its lines do not cover splits across the rate groups', () => {
+    // One rate: £12 of goods plus £3 shipping, all given back.
+    const one = computeOrderVat({ lines: [std(1200)], discount: p(0), shipping: p(300) });
+    const whole = computeRefundVat({
+      order: one,
+      refunded: [],
+      refund: { amount: p(1500), lines: [{ line: 0, amount: p(1200) }] },
+    });
+    expect([whole.gross, whole.vat]).toEqual([1500n, 250n]);
+    // Two rates (gross 1400 and 700): £12 is line 1's, the other £1.50 splits by what is left.
+    const two = computeOrderVat({
+      lines: [std(1200), zero(600)],
+      discount: p(0),
+      shipping: p(300),
+    });
+    const part = computeRefundVat({
+      order: two,
+      refunded: [],
+      refund: { amount: p(1350), lines: [{ line: 0, amount: p(1200) }] },
+    });
+    expect(part.groups.map((g) => [g.vatType, g.gross])).toEqual([
+      ['standard', 1233n],
+      ['zero', 117n],
+    ]);
+  });
+
+  it('[VAT-5] refund lines that add up to more than the refund never give back more than the refund', () => {
+    const order = computeOrderVat({ lines: [std(1200)], discount: p(0), shipping: p(0) });
+    const refund = computeRefundVat({
+      order,
+      refunded: [],
+      refund: { amount: p(1000), lines: [{ line: 0, amount: p(1200) }] },
+    });
+    expect([refund.gross, refund.vat]).toEqual([1000n, 167n]);
+  });
+
+  it('[VAT-5][FIN-1] property: a refund with line detail is counted in full, up to what is left of the order', () => {
+    const next = rng(11);
+    for (let run = 0; run < 1500; run++) {
+      const lines = randomLines(next);
+      const order = computeOrderVat({ lines, discount: p(0), shipping: p(next(1_000)) });
+      const refunded: ReturnType<typeof computeRefundVat>[] = [];
+      for (let k = 0; k < 4; k++) {
+        const left = order.gross - sum(refunded.map((r) => r.gross));
+        const amount = p(next(Number(order.gross) + 500));
+        const detail = lines.flatMap((l, line) =>
+          next(2) === 0 ? [] : [{ line, amount: p(next(Number(l.lineGross) + 1)) }],
+        );
+        const r = computeRefundVat({ order, refunded, refund: { amount, lines: detail } });
+        expect(r.gross).toBe(amount < left ? amount : left);
+        refunded.push(r);
+      }
+    }
+  });
+
   it('[VAT-5][FIN-1] property: refunds never give back more VAT than was charged on a group', () => {
     const next = rng(5);
     for (let run = 0; run < 1500; run++) {
