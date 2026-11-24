@@ -53,6 +53,7 @@ describe('db-pii roles and migrations', () => {
       '0007_security_log_retention',
       '0008_order_ingest',
       '0009_order_subject_index',
+      '0010_deleted_buyer_date',
     ]);
     expect((await migratePii(owner)).applied).toEqual([]);
   });
