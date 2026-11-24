@@ -14,6 +14,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - S4 critical review of #158 → `docs/reviews/M10-T1001-findings.md`;
   - S5 check of #158 → `docs/reviews/security/`;
   - S4 M09 + M10 milestone (also verifies #141, #146, #151).
+  - **Review (S4, 24 Nov 2026): M09 + M10 BLOCKED**, 3 Blockers, 8 Majors, 10 Minors (`docs/reviews/M10-end.md`; holds the #158 review; #141, #146, #151 verified).
   - Fix rule: Blockers at once; Majors in the first commit of S3's next task.
 - **Next (S3):** M11, when Hashir pastes it.
 - **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
