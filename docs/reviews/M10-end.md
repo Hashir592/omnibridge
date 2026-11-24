@@ -6,9 +6,30 @@ Local: `verify.sh --quick` PASS (333 s; a first run had one 5 s unit timeout, `w
 Probes: about 20 ad-hoc tests on bd1741d; the later commit 0f3c393 changes only the testkit and the end report. Tests-can-fail check: 123 planted faults on 0f3c393. None of it is committed.
 Acceptance re-run: 22/24 PASS (table at the end).
 
-Verdict: **BLOCKED**. Blockers 3, Majors 8, Minors 10. Blocking: F-M10-end-01 to -11. Every earlier Major is resolved and verified. M09 has no open finding of its own; the one M09 gap (Oversold on back-fill) is inside F-M10-end-01.
+Verdict: **BLOCKED**. Found: Blockers 3, Majors 8, Minors 10. **Open on main ecb1834: Blockers 1 (F-01), Majors 7 (F-05 to F-11), Minors 9.** Fixed by #160: F-02, F-03, F-04, F-16. Every earlier Major is resolved and verified. M09 has no open finding of its own; the one M09 gap (Oversold on back-fill) is inside F-M10-end-01.
 
 As S3 asked on 24 Nov, its halfway check and its two `/code-review` runs are not counted as independent looks at T-1001.
+
+## Update: #160 (main ecb1834, CI green, run 45446699363)
+
+#160 merged 16 seconds after this file. Everything below describes 35746f5; I re-ran the probes on ecb1834:
+
+| Finding | On ecb1834 |
+|---|---|
+| F-01 | **Open.** Same result: `filled: 0`, no movement, £2.00 VAT kept; `oversold` false at 50 reserved of 10. |
+| F-02 | Fixed. £15.00 refund with £12.00 of lines: ledger nets to 0 / 0. |
+| F-03 | Fixed. 7 lines: `rate:2000` 0, `zero:zero` £84.00. Keys are a digest; a different entry under a taken key is an error. |
+| F-04 | Fixed. Nothing is stored before payment and an address; the full record is stored at the second poll. An address that changes after the record is written is still not updated (eBay does not change it after payment, T-1501 to confirm). |
+| F-05 | **Open, and harder.** Still £18.00 / £3.00 for £13.80 / £2.30. Db-main 0052 (#160) now refuses any change of goods, discount, shipping or gross, so the fix needs a rule from S1 first. The new total check raises a notice for new orders. |
+| F-06 | **Open.** With a real address: still placement + 113 days (the adapter still gives `lastModifiedDate` as the dispatch time of a first-seen FULFILLED order, and no bound by placement). |
+| F-07 | **Open.** Both actions still regroup. |
+| F-08 | **Open.** 301 calls and 301 log rows for 301 orders. |
+| F-09 | **Open.** `order-reads.ts` is unchanged. |
+| F-10 | **Open.** 10 deadlocks in 10 runs; `sync.ts` is unchanged. Timings not re-measured. |
+| F-11 | **Open.** 36 of the 37 required faults still survive; O10 (the 25-day window at ingest) is now caught. |
+| F-12 to F-21 | F-16 fixed (deliveryDiscount read, totals compared). F-12, F-13, F-14, F-15 and F-17 reproduced again. F-18 to F-21 not re-run. |
+
+I checked #160 only against these findings. It is not an independent review of the rest of #160 (its own review was by the session that wrote it); S5 checks it.
 
 ## Earlier fixes
 
@@ -73,7 +94,7 @@ The website parser returns `amount` and `lines` separately, so this path is live
 
 Required fix: book the whole refund amount, always. Line amounts take their lines' groups; the rest splits pro-rata over the groups' remaining gross; an excess over one group goes to the others. Parts sum to the refund, up to what is left on the order. A refund beyond that is stored and flagged, never silently cut. Apply the same rule in `#rebaseRefunds`. Extend the property test to refunds with lines, and check that the parts sum to the refund.
 
-Resolution: (S3)
+Resolution: fixed by #160; re-run by S4 on ecb1834 (see Update).
 
 ## F-M10-end-03 — Blocker — A truncated adjustment key drops a ledger row
 Area: Correctness, Invariants  IDs: VAT-2, VAT-4, FA-11
@@ -83,7 +104,7 @@ Probe (7 lines of one unmapped listing, £84.00, mapped to a zero-rated SKU): th
 
 Required fix: use a fixed-length key (for example a hash of the line ids plus the group key), never a truncated one, and treat a conflict on an adjustment row as an error unless the stored row is identical. Test with 7 and 50 lines.
 
-Resolution: (S3)
+Resolution: fixed by #160; re-run by S4 on ecb1834 (see Update).
 
 ## F-M10-end-04 — Major — A username-only buyer record counts as settled, so the delivery address is never stored
 Area: Correctness  IDs: ORD-4, ORD-5
@@ -94,7 +115,7 @@ Failure: an order in that state has no delivery address and cannot be shipped. W
 
 Required fix: while the order is pending payment or its record lacks name, line 1 or postcode, it is not settled: an update with more details updates the same vault record (fields and blind indexes, including the match key). Keep the rule that a deleted record is never brought back. Test the case above, and an address that changes before payment.
 
-Resolution: (S3)
+Resolution: fixed by #160; re-run by S4 on ecb1834 (see Update).
 
 ## F-M10-end-05 — Major — Discount and shipping are fixed at first sight, even before payment
 Area: Correctness  IDs: VAT-3, VAT-6
@@ -248,4 +269,4 @@ Resolution: (S3)
 
 The two FAILs are the same fact. I grade it Major, not Blocker: the order cannot be redone, and F-11 asks for the red runs that tests-first would have given. S1 may rule otherwise.
 
-Resolution rule (ADR-077): Blockers F-01 to F-03 at once, in their own PR; Majors F-04 to F-11 in the first commits of S3's next task. The next S4 review confirms them, and M10 stays BLOCKED until then.
+Resolution rule (ADR-077): Blocker F-01 at once, in its own PR; Majors F-05 to F-11 in the first commits of S3's next task. The next S4 review confirms them, and M10 stays BLOCKED until then.
