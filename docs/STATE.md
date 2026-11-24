@@ -14,7 +14,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - S4 critical review of #158 → `docs/reviews/M10-T1001-findings.md`;
   - S5 check of #158 is in (no Blocker). Its report stays out of git until every Major is fixed (ADR-074); S1 rules on the open points first (PS-035 and the S3-to-S1 note of 24 Nov);
   - S4 M09 + M10 milestone (also verifies #141, #146, #151).
-  - **Review (S4, 24 Nov 2026): M09 + M10 BLOCKED**, 3 Blockers, 8 Majors, 10 Minors (`docs/reviews/M10-end.md`; holds the #158 review; #141, #146, #151 verified).
+  - **Review (S4, 24 Nov 2026): M09 + M10 BLOCKED**, open on main ecb1834: 1 Blocker (F-01), 7 Majors, 9 Minors; #160 fixed F-02, F-03, F-04 (`docs/reviews/M10-end.md`; holds the #158 review; #141, #146, #151 verified).
   - Fix rule: Blockers at once; Majors in the first commit of S3's next task.
 - **Next (S3):** S4's T-1001 findings, then M11, when Hashir pastes it.
 - **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
