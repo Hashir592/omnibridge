@@ -82,6 +82,8 @@ export interface OrderIngestPorts {
     ctx: TenantContext,
     input: { orderId: string; reason: 'dispatch' | 'delivery' },
   ): Promise<void>;
+  /** ORD-9 (C3.2): the account's orders changed, so its same-buyer groups are recomputed. */
+  regroup(ctx: TenantContext, input: { channelAccountId: string }): Promise<void>;
 }
 
 /** The vault subject of an order: one buyer record per order, keyed by account and order ID. */
@@ -268,6 +270,8 @@ export class OrderIngest implements UnmappedDemand {
           await this.#update(trx, ctx, existing, order);
         }
       }
+      // ORD-9: new orders and status changes can make or break same-buyer groups.
+      await this.#ports.regroup(ctx, { channelAccountId });
       // TEN-3: the account's company is fixed once it has orders.
       await sql`UPDATE app.channel_accounts SET orders_seen_at = ${this.#now()}
                  WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${channelAccountId}::uuid
@@ -318,11 +322,9 @@ export class OrderIngest implements UnmappedDemand {
     }
     // VAT-3 needs discount <= goods; a channel discount beyond the goods comes off the shipping.
     const goods = resolved.reduce((a, r) => a + r.line.linePrice, 0n);
-    const discount = o.discount > goods ? goods : o.discount;
-    const shipping =
-      o.discount > goods
-        ? pence(o.shipping - (o.discount - goods) > 0n ? o.shipping - (o.discount - goods) : 0n)
-        : o.shipping;
+    const excess = o.discount > goods ? o.discount - goods : 0n;
+    const discount = o.discount - excess;
+    const shipping = pence(o.shipping > excess ? o.shipping - excess : 0n);
     const vat = computeOrderVat({
       lines: resolved.map((r) => ({
         lineGross: r.line.linePrice,

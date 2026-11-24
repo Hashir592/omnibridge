@@ -8,6 +8,7 @@ import {
   createQueues,
   migrateMain,
   OrderIngest,
+  OrderReads,
   Tenancy,
   type MainDbHandle,
 } from '@omnibridge/db';
@@ -29,6 +30,7 @@ import {
   orderIngestPorts,
   orderIngestStream,
   ordersOrphanSweepHandler,
+  ordersGroupRecomputeHandler,
   ordersPiiExpiryHandler,
   piiDeleteAfter,
 } from './orders.ts';
@@ -310,5 +312,50 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     ).rows[0]?.n;
     expect(Number(kept)).toBeGreaterThan(0);
     expect((await sweep.prepare(preparing('orders.orphan_sweep', {}))).orphans).toBe(0);
+  });
+
+  it('[ORD-9][AT-26] the regroup job asks the vault which orders share a buyer and links them (C3.2)', async () => {
+    const same = {
+      name: `${PII_MARKER}Gus Group`,
+      address_line1: `${PII_MARKER}9 Group Road`,
+      city: 'Testville',
+      postcode: 'GR1 1UP',
+      country: 'GB',
+      channel_username: `${PII_MARKER}gus`,
+    };
+    const a = channelOrder({ buyer: same, placedAt: new Date('2026-11-20T23:59:00Z') });
+    const b = channelOrder({ buyer: same, placedAt: new Date('2026-11-21T00:01:00Z') });
+    const other = channelOrder({ placedAt: new Date('2026-11-21T00:02:00Z') });
+    await poll([a, b, other]);
+    expect(sent.some((s) => s.type === 'orders.group_recompute')).toBe(true);
+    const reads = new OrderReads(db.db);
+    const handler = ordersGroupRecomputeHandler({ tenancy, reads, vault: worker });
+    const recompute = {
+      ...preparing('orders.group_recompute', {}),
+      envelope: {
+        workspace_id: ws,
+        channel_account_id: account,
+        idempotency_key: randomUUID(),
+        attempt: 1,
+        type: 'orders.group_recompute',
+        payload: {},
+      },
+    };
+    const classes = await handler.prepare(recompute);
+    // Order subjects only: the vault never hands back a key or a value.
+    expect(JSON.stringify(classes)).not.toContain(PII_MARKER);
+    await tenancy.runWorkspace({ workspaceId: ws }, (ctx) =>
+      handler.commit({ ...recompute, ctx }, classes),
+    );
+    const groups = await root.query<{ external_order_id: string; order_group_id: string | null }>(
+      `SELECT external_order_id, order_group_id FROM app.orders
+        WHERE external_order_id = ANY ($1::text[]) ORDER BY placed_at`,
+      [[a.externalId, b.externalId, other.externalId]],
+    );
+    const [ga, gb, go] = groups.rows;
+    expect(ga?.order_group_id).not.toBeNull();
+    expect(gb?.order_group_id).toBe(ga?.order_group_id);
+    expect(go?.order_group_id).toBeNull();
+    expect(await scanDatabaseForMarkers(main)).toEqual([]);
   });
 });

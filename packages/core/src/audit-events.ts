@@ -91,6 +91,15 @@ export const AUDIT_EVENTS = {
   'listing.mapped': spec('listing', ['master_sku_id', 'source']),
   'listing.unmapped': spec('listing', ['master_sku_id']),
   'catalogue.imported': spec('catalogue_import', ['kind', 'row_count']),
+  // Orders (T-1002). A full view of the buyer's details (ORD-5: user, order, time; never a value),
+  // a notes edit (never the text) and the same-buyer group actions, which need a reason (C3.3,
+  // ADR-057).
+  'order.customer_viewed': spec('order', []),
+  'order.notes_changed': spec('order', []),
+  'order_group.dismissed': spec('order_group', ['member_count'], { reasonRequired: true }),
+  'order_group.member_removed': spec('order_group', ['order_id', 'member_count'], {
+    reasonRequired: true,
+  }),
   // Finance (M16, M17): every create, edit and delete; moving a cost to another company needs a
   // reason (EXP-4).
   'finance.created': spec('finance_record', FINANCE_FIELDS, { finance: true }),

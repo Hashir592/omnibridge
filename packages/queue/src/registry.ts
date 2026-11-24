@@ -242,6 +242,19 @@ export const ordersPiiExpiryJob = defineJob({
 });
 
 /**
+ * ORD-9 (C3.2): recompute one channel account's same-buyer groups after its orders changed. The
+ * vault's `match` capability names the orders that share a buyer, then db-main links them under an
+ * advisory lock per account. IDs only; one account at a time.
+ */
+export const ordersGroupRecomputeJob = defineJob({
+  type: 'orders.group_recompute',
+  payload: z.object({}).strict(),
+  serialPerAccount: true,
+  retry: { limit: 5, delaySeconds: 30, backoff: true, maxDelaySeconds: 600 },
+  expireInSeconds: 300,
+});
+
+/**
  * FA-10: the nightly orphan sweep of one workspace. Vault order records that no db-main order
  * points at (a db-main write failed after the vault write) are expired now, so the hourly expiry
  * run deletes them. Compared by ID only.
@@ -282,6 +295,7 @@ export const JOBS: readonly JobDefinition[] = [
   ordersSyncAccountsJob,
   ordersPiiExpiryJob,
   ordersOrphanSweepJob,
+  ordersGroupRecomputeJob,
 ];
 
 /**

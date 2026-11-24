@@ -31,6 +31,7 @@ import {
   WorkspaceRepository,
   CatalogueRepository,
   OrderIngest,
+  OrderReads,
   StockEngine,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
@@ -83,6 +84,7 @@ import {
   orderIngestPorts,
   orderIngestStream,
   ordersOrphanSweepHandler,
+  ordersGroupRecomputeHandler,
   ordersPiiExpiryHandler,
   ordersSyncAccountsHandler,
 } from './orders.ts';
@@ -365,6 +367,11 @@ await registerHandlers(queue, {
   'orders.pii_expiry': ordersPiiExpiryHandler({
     tenancy: syncPorts.tenancy,
     ingest: orderIngest,
+    vault: workerVault,
+  }),
+  'orders.group_recompute': ordersGroupRecomputeHandler({
+    tenancy: syncPorts.tenancy,
+    reads: new OrderReads(handlerDb.db),
     vault: workerVault,
   }),
   'orders.orphan_sweep': ordersOrphanSweepHandler({

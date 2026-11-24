@@ -37,10 +37,37 @@ describe('normalising and masking', () => {
       postcode: 'G21AA',
       buyer: 'buyer-1',
       buyer_exact: 'Buyer-1',
-      match: 'jane smith|1 high st|G21AA',
+      match: 'jane smith|1 high st|||G21AA||',
     });
     expect(indexValues({ name: 'Jane Smith' }).match).toBeUndefined();
     expect(queryValues({ postcode: ' ', email: 'A@B.TEST' })).toEqual({ email: 'a@b.test' });
+  });
+
+  it('[AT-26][ORD-9] the same-buyer key is exact after normalising, with town, country and eBay username (C3.1)', () => {
+    const key = (f: Record<string, string>) => indexValues(f).match;
+    const base = {
+      name: 'Zoë Smith',
+      address_line1: '1 High St.',
+      address_line2: 'Flat 2',
+      city: 'Glasgow',
+      postcode: 'G2 1AA',
+      country: 'gb',
+      channel_username: 'zoe_s',
+    };
+    // Case, spacing, accents and punctuation do not matter.
+    expect(
+      key({
+        ...base,
+        name: ' ZOE   SMITH',
+        address_line1: '1 high st',
+        postcode: 'g21aa',
+        country: 'GB',
+      }),
+    ).toBe(key(base));
+    // A different name at the same address, another town, or another eBay username does.
+    expect(key({ ...base, name: 'Ian Smith' })).not.toBe(key(base));
+    expect(key({ ...base, city: 'Edinburgh' })).not.toBe(key(base));
+    expect(key({ ...base, channel_username: 'Zoe_S' })).not.toBe(key(base));
   });
 
   it("[AT-10] the exact buyer index trims only: 'AbC' and 'abc' stay different (ADR-066)", () => {

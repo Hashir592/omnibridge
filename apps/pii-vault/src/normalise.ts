@@ -85,11 +85,24 @@ export function indexValues(fields: Readonly<Record<string, string>>): Record<st
   const buyer = buyerSource(fields);
   add('buyer', buyer, normaliseBuyer);
   add('buyer_exact', buyer, normaliseBuyerExact);
-  // ORD-9: same buyer and same delivery address, exact after normalising.
-  const name = fields.name === undefined ? '' : normaliseName(fields.name);
-  const line1 = fields.address_line1 === undefined ? '' : normaliseName(fields.address_line1);
+  // ORD-9 (C3.1): same buyer and same delivery address, exact after normalising: name, address
+  // lines 1 and 2 and town (case, accents, spaces and punctuation ignored), postcode (no spaces),
+  // country code, and on eBay the buyer's username too (exact). No fuzzy matching.
+  const text = (v: string | undefined) => (v === undefined ? '' : normaliseName(v));
+  const name = text(fields.name);
+  const line1 = text(fields.address_line1);
   const postcode = fields.postcode === undefined ? '' : normalisePostcode(fields.postcode);
-  if (name !== '' && line1 !== '' && postcode !== '') out.match = [name, line1, postcode].join('|');
+  if (name !== '' && line1 !== '' && postcode !== '') {
+    out.match = [
+      name,
+      line1,
+      text(fields.address_line2),
+      text(fields.city),
+      postcode,
+      (fields.country ?? '').trim().toUpperCase(),
+      normaliseBuyerExact(fields.channel_username ?? ''),
+    ].join('|');
+  }
   return out;
 }
 

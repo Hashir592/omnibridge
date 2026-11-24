@@ -37,7 +37,7 @@ import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
 import { catalogueHandlers, type CatalogueOptions } from './catalogue.ts';
 import { stockHandlers, type StockOptions } from './stock.ts';
-import { ordersHandlers } from './orders.ts';
+import { ordersHandlers, type OrdersOptions } from './orders.ts';
 import { connectionHandlers, type ConnectionOptions } from './connections.ts';
 import { platformHandlers, type PlatformOptions } from './platform.ts';
 import { privacyHandlers, type PrivacyOptions } from './privacy.ts';
@@ -139,6 +139,8 @@ export interface WebAppOptions {
   catalogue?: CatalogueOptions;
   /** The stock engine (T-0901); without it those routes answer 404. */
   stock?: StockOptions;
+  /** Orders (T-1002); without it those routes answer 404. */
+  orders?: OrdersOptions;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
@@ -178,6 +180,7 @@ export function buildWebApp({
   connections,
   catalogue,
   stock,
+  orders,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
@@ -234,7 +237,7 @@ export function buildWebApp({
     ...connectionHandlers(connections),
     ...catalogueHandlers(catalogue),
     ...stockHandlers(stock),
-    ...ordersHandlers(),
+    ...ordersHandlers(orders),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';

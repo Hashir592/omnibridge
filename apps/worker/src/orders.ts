@@ -1,8 +1,16 @@
 import { londonDate, pence, type TenantContext, type TenantRunner } from '@omnibridge/core';
-import type { Connection, IncomingOrder, OrderIngest, OrderIngestPorts } from '@omnibridge/db';
+import { randomUUID } from 'node:crypto';
+import type {
+  Connection,
+  IncomingOrder,
+  OrderIngest,
+  OrderIngestPorts,
+  OrderReads,
+} from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import type { ChannelOrder, SyncStream } from '@omnibridge/provider-kit';
 import {
+  ordersGroupRecomputeJob,
   ordersOrphanSweepJob,
   ordersPiiExpiryJob,
   ordersSyncAccountsJob,
@@ -189,6 +197,51 @@ export function orderIngestPorts(queue: Pick<JobQueue, 'send'>): OrderIngestPort
         payload: { order_id: input.orderId, reason: input.reason },
       });
     },
+    regroup: async (ctx, input) => {
+      // One per sync page that stored orders; the job runs one account at a time.
+      await queue.send(ordersGroupRecomputeJob, {
+        ctx,
+        channelAccountId: input.channelAccountId,
+        idempotencyKey: `orders.group_recompute:${input.channelAccountId}:${randomUUID()}`,
+        payload: {},
+      });
+    },
+  };
+}
+
+/**
+ * orders.group_recompute (ORD-9, C3.2). With no transaction open, the vault's `match` capability
+ * says which of the account's awaiting orders share a buyer and delivery address (order subjects
+ * only, never PII); then, in the job's transaction, db-main links them under an advisory lock.
+ */
+export function ordersGroupRecomputeHandler(deps: {
+  tenancy: Pick<TenantRunner, 'runWorkspace'>;
+  reads: Pick<OrderReads, 'groupCandidates' | 'applyGroups'>;
+  vault: Pick<VaultClient, 'match'>;
+}): PhasedHandler<Record<string, never>, [string, string][]> {
+  return {
+    prepare: async (job) => {
+      const workspaceId = job.envelope.workspace_id;
+      const accountId = job.envelope.channel_account_id;
+      if (accountId === undefined) return [];
+      const candidates = await deps.tenancy.runWorkspace({ workspaceId }, (ctx) =>
+        deps.reads.groupCandidates(ctx, accountId),
+      );
+      // Match keys are exact, so "shares a key with" is a class: one vault call per buyer.
+      const classes = new Map<string, string>();
+      for (const c of candidates) {
+        if (classes.has(c.piiSubject)) continue;
+        classes.set(c.piiSubject, c.piiSubject);
+        const { subject_ids } = await deps.vault.match(workspaceId, c.piiRef);
+        for (const s of subject_ids) if (!classes.has(s)) classes.set(s, c.piiSubject);
+      }
+      return [...classes.entries()];
+    },
+    commit: async (job, classes) => {
+      const accountId = job.envelope.channel_account_id;
+      if (accountId === undefined) return { groups: 0 };
+      return deps.reads.applyGroups(job.ctx, accountId, new Map(classes));
+    },
   };
 }
 
@@ -212,10 +265,9 @@ export function ordersPiiExpiryHandler(deps: {
         return [rows[0], await deps.ingest.retentionDays(ctx)] as const;
       });
       if (target === undefined) return { updated: 0 };
-      const due = piiDeleteAfter(
-        { placedAt: now(), dispatchedAt: target.dispatchedAt, deliveredAt: target.deliveredAt },
-        days,
-      );
+      // The job is queued only once dispatch or delivery is known, so `shipped` is set.
+      const shipped = target.deliveredAt ?? target.dispatchedAt ?? now();
+      const due = new Date(shipped.getTime() + days * DAY_MS);
       const at = Math.min(
         Math.max(due.getTime(), now().getTime()),
         now().getTime() + PII_HARD_LIMIT_MS,
