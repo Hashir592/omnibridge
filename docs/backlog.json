@@ -2338,7 +2338,9 @@
         "NFR-3",
         "TEN-5",
         "PERM-3",
-        "DEL-1"
+        "DEL-1",
+        "EBAY-2",
+        "ORD-4"
       ],
       "scope": [
         "F-05: the ADR-081 (1) rule; migrations expand only (line uniqueness becomes partial, skipping removed lines)",
@@ -2348,7 +2350,9 @@
         "F-09: index-first paging, hidden members counted for the page only, capped count, prefix search (ADR-081 6); plan-shape test at 100,000 rows",
         "F-10: short transactions (25 to 50 orders), cursor moved only after the last, stock rows locked in component id order, stop before the job expiry and resume; F-20 lock order with it. Each chunk locks in this order: its existing orders in id order, then the stock rows in component id order, then it stores; listings are locked FOR NO KEY UPDATE, on the mapping side too (S4's text of 25 Nov in docs/reviews/M10-end.md)",
         "F-11: the 37 required tests, each shown red against its fault; G02, G09 and G10 with F-07; the other survivors ride along",
-        "Minors F-12 (open cancellation requests kept and excluded from groups), F-13 (404) and F-15 (name punctuation removed, match keys re-indexed)"
+        "Minors F-12 (open cancellation requests kept and excluded from groups), F-13 (404) and F-15 (name punctuation removed, match keys re-indexed)",
+        "PS-036 (a) (ADR-083): `dispatch_estimated` on the order, expand only; the first real dispatch date replaces a stand-in once, clears the flag and recomputes the deletion date by the one sum; no second stock or VAT move. Contract field added; the order page says estimated",
+        "Contract migration: drop the unused vault.deleted_buyers (#167 no longer reads or writes it)"
       ],
       "out_of_scope": [
         "F-14 and F-17 (T-1101)"
@@ -2359,6 +2363,7 @@
       "acceptance": [
         "Tests first, as their own commits: the S4 probes for F-05, F-07 (two connections), F-08 (call count), F-09 and F-10 (opposite order; a stock movement waits for one chunk only)",
         "F-10: S4's three deadlock rows (4 open orders in falling id order; a new sale then 4 orders in rising order; 5 new sales) run through the real apply against a mapping event with no 40P01; the sale inserts its line first, as a real sale does",
+        "[DEL-1] an estimated order that gets its real date: an earlier one moves the deletion date earlier, a later one follows PRD 7.3 under the 90-day cap, a deleted record stays deleted, stock and VAT move once, and a second real date changes nothing",
         "F-09 p95 under 1 s at 100,000 orders in the plan test's setting",
         "S4 reviews this PR right after merge",
         "CI full gate green at merge (Semgrep included)"
