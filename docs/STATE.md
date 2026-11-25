@@ -13,9 +13,9 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - #164 F-M10-end-01, S4's Blocker: merged and confirmed by S4;
   - T-1003 buyer data and F-M10-end-22 (critical, branch `task/T-1003-m10-fixes-1`): auto-merge on, CI running.
 - **Waiting on reviews:**
-  - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`) until S4 confirms T-1003 and T-1004 (ADR-081 10);
+  - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`) until S4 confirms T-1004 (T-1003 is confirmed);
   - S5 check of #158: no Blocker, every Major fixed in #160 and T-1003; its report is committed with T-1003. S5 confirms T-1003;
-  - **Review (S4, 25 Nov 2026): M09 + M10 BLOCKED**, open on main 32c8f7a: 0 Blockers (F-01 confirmed fixed, #164), 8 Majors (F-05 to F-11, new F-22), 10 Minors (`docs/reviews/M10-end.md`, Update: #164);
+  - **Review (S4, 25 Nov 2026): T-1003 (#167) CONTINUE; M09 + M10 still BLOCKED**, open on main cb348b9: 0 Blockers, 6 Majors (F-05, F-07 to F-11, all in T-1004), 9 Minors (`docs/reviews/M10-end.md`, Update: #167). F-11 gains 3 required tests; new Minor F-24;
   - Fix rule: Blockers at once; Majors in the first commit of S3's next task.
 - **Next (S3):** the halfway pause (ADR-080) after T-1003's PR, then T-1004 (critical) on Hashir's "continue"; M11 after it. T-1004 drops the unused `vault.deleted_buyers` and keeps F-22's race test.
 - **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).

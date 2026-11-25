@@ -6,7 +6,7 @@ Local: `verify.sh --quick` PASS (333 s; a first run had one 5 s unit timeout, `w
 Probes: about 20 ad-hoc tests on bd1741d; the later commit 0f3c393 changes only the testkit and the end report. Tests-can-fail check: 123 planted faults on 0f3c393. None of it is committed.
 Acceptance re-run: 22/24 PASS (table at the end).
 
-Verdict: **BLOCKED**. Found: Blockers 3, Majors 9, Minors 11. **Open on main 32c8f7a: Blockers 0, Majors 8 (F-05 to F-11, F-22), Minors 10.** Fixed by #160: F-02, F-03, F-04, F-16. Fixed by #164: F-01. Every earlier Major is resolved and verified. M09 has no open finding of its own; the one M09 gap (Oversold on back-fill) is inside F-M10-end-01.
+Verdict: **BLOCKED**. Found: Blockers 3, Majors 9, Minors 11. **Open on main cb348b9: Blockers 0, Majors 6 (F-05, F-07 to F-11), Minors 9.** Fixed by #160: F-02, F-03, F-04, F-16. Fixed by #164: F-01. Fixed by #167: F-06, F-18, F-19, F-22. Every earlier Major is resolved and verified. M09 has no open finding of its own; the one M09 gap (Oversold on back-fill) is inside F-M10-end-01.
 
 As S3 asked on 24 Nov, its halfway check and its two `/code-review` runs are not counted as independent looks at T-1001.
 
@@ -53,6 +53,42 @@ Own probes on real PostgreSQL, each store and each event in its own transaction 
 | Time at 100,000 lines, 20,000 provisional | PASS. Each new query under 100 ms. |
 | 0053 | Expand only, concurrent, no waiver. |
 | 13 planted faults of my own | 12 caught. Removing the lock on linked lines (the first branch of `lockOrders`) passes unnoticed: F-22. |
+
+## Update: #167, T-1003 (head a6b43fa, main cb348b9; CI green, runs 45626895360 and 45628150182)
+
+**Verdict for #167: CONTINUE.** No new Blocker or Major. F-06 and F-22 are resolved, and so are the Minors F-18 and F-19. M10 stays BLOCKED on T-1004.
+
+Local: `verify.sh --quick` PASS (232 s). Integration on a6b43fa: 8 files, 162/162 PASS (vault, restore, pii-db, db orders and stock, worker orders). Own probes on real PostgreSQL clusters. I wrote the probes and faults before I read S5's confirmation (#169).
+
+| Acceptance (T-1003) | Result |
+|---|---|
+| Every probe and finding has a test, committed failing first | PASS. I ran the four test commits before their fixes: 27 + 1 + 1 + 2 = 31 failures, the number S3 reports. The one slip S3 names (three checks in 936325f) is as described; my faults on those checks are caught. |
+| Marker scan, RLS coverage and restore tests | PASS (restore, the worker's marker scans and db-pii's policies run locally; the rest in CI) |
+| S4 reviews, S5 confirms | Done (S5: #169) |
+| CI full gate, Semgrep included | PASS |
+| F-22 probe and random runs give 0 wrong lines | PASS: 0 of 240 lines wrong (it was 7). Removing the first branch of `lockOrders` now fails the race test. |
+
+| Check | Result |
+|---|---|
+| F-22: dispatch between mapping and event, event run twice | PASS. On hand 8, reserved 0, both times. The F-01 probes still hold (VAT, Oversold, three events at once). |
+| F-06 through the parsers: first seen shipped, edited late | PASS. eBay at 89 days, website at 80 and 88 days: no record. eBay at 10 days: placement + 25. |
+| F-06, stored waiting, first shown FULFILLED on day 5, 60, 64, 66, 80, 89 | PASS. Placement + 30, 85, 89, 90, 90, 90, after the expiry job. |
+| F-06, 200,000 random orders through `piiDeleteAfter` | PASS. None past placement + 90; none first seen shipped later than its stand-in allows. |
+| Notice race: 40 rounds at random times, each with 5 first ingests (3 in new workspaces), 2 corrections, a deletion and an expiry change | PASS. 0 buyers stored and not found, 0 stored after a finished notice, no deadlock. |
+| Notice lock | 503 after 2.0 s. While it waits, other buyer writes wait too, at most those 2 s, website ones included. Accepted: ingests are short. |
+| `/v1/replace` | PASS: refusals, lock order and canary by S3's tests and my faults on them; no dead tuple after a correction by my probe. |
+| Restore, 180-day cut, newest date, two key versions | PASS (S3's tests pass, and fail under my faults on them, V13 apart). |
+| 0011 | Expand only, no waiver, safe with the previous vault running. |
+| The three changed older tests | Right. The website and db ones follow S1's stand-in rule. The closing-workspace one guarded a write that no longer exists. |
+
+**83 planted faults of my own: 70 caught, 13 survived.** The code is right in all 13 places today.
+- **Required, added to F-11's list** (Major, open, T-1004): V04, W11 and W12, described there.
+- Ride along as Minors: V18 (a username with no placed date is refused), V24 (`replace` without its row lock), V32 and V33 (bullet and town in the mask check; with S5-20261124-12), V34 (no VACUUM; S5's hardening 1), A02 (`VaultBusy` answered 503 by the vault itself).
+- Prove nothing: V13 (one key version until M22), V21 (same update, same values), V44 (no other kind is asked for), O06 (the vault refuses too).
+
+**S5-20261124-11:** my probe found the same before I read S5's report. After a failed first store the corrected address is dropped, and the sync never brings that update again. I agree with Minor and with "before T-1201", because no label exists yet. By reading, it lasts longer than it looks: polls run every 5 minutes and the deletion run every hour, so a stale record the sweep has expired is nearly always stored again (T-1003's new rule) instead of being deleted and rebuilt. T-1004's first commit is the right place.
+
+**New Minor: F-M10-end-24** (below, with the Minors).
 
 ## Earlier fixes
 
@@ -156,7 +192,7 @@ Evidence: the eBay adapter uses `lastModifiedDate` as the dispatch time of a FUL
 
 Required fix: bound the expiry by placement + 90 days always. For an order first seen already shipped with no real dispatch time, do not treat a later edit as the dispatch: use the earliest defensible date (ship-by or placement), and store no vault record when that is past the window.
 
-Resolution: fixed in T-1003 (with S5-20261124-10): one expiry sum for ingest and the expiry job, capped at placement + 90 days; a first-seen shipped order uses the earlier of ship-by and the update, or placement; eBay gives no dispatch time for FULFILLED. Red first, through the parsers.
+Resolution: fixed in T-1003 (with S5-20261124-10): one expiry sum for ingest and the expiry job, capped at placement + 90 days; a first-seen shipped order uses the earlier of ship-by and the update, or placement; eBay gives no dispatch time for FULFILLED. Red first, through the parsers. **Confirmed by S4 on #167.**
 
 ## F-M10-end-07 — Major — A dismissed or removed pair is regrouped when a recompute is in flight
 Area: Correctness  IDs: ORD-9
@@ -253,8 +289,13 @@ Required fix: a failing test for each of the following, shown red against the fa
 - **Write-once and append-only:** VAT type, SKU, quantity and prices, provisional rate (T01, T04, T05, T09). Order tax point and placed time (T06). UPDATE and DELETE refused on `vat_ledger` and `refunds` (T07, T08).
 - **Stock:** back-fill skips history and cancelled orders (I18, I19). A first-seen cancelled order reserves nothing (I27). Oversold stored on the line and the order (I23, I24).
 - **Company scoping:** behaviour of `refunds`, `refund_lines`, `order_groups` and `order_group_exclusions` (C03, C04, C07, C08; the coverage test checks that a policy mentions the setting, not that it limits rows). A company filter the user cannot see (C10).
-- **Deletion and retention:** delivery wins over dispatch, at ingest and in the expiry job (O04, O05). The 25-day window is used at ingest (O10). The sweep's one-day grace and second page (O01, O03). The expiry job ignores cancelled orders (O15) and never sends a past date (O06). A record already stored and then erased is not re-created by a later poll (O13). Closure removes the deleted-buyer marks (V10). The newest journal line wins on restore (V12).
+- **Deletion and retention:** delivery wins over dispatch, at ingest and in the expiry job (O04, O05). The 25-day window is used at ingest (O10). The sweep's one-day grace and second page (O01, O03). The expiry job ignores cancelled orders (O15) and never sends a past date (O06). A record already stored and then erased is not re-created by a later poll (O13). ~~Closure removes the deleted-buyer marks (V10)~~ (withdrawn: ADR-083 keeps them). The newest journal line wins on restore (V12).
 - **Grouping:** an order that is cancelled or dispatched leaves its group and a group of one closes (G13, G14).
+
+- **Added 25 Nov (#167), 3 more required:**
+  - V04: an ingest must take the notice lock before it checks the deleted buyers. Proved: an ingest sent while a notice holds the lock (its journal write paused) is `buyer_deleted` today; with the two lines swapped it is **stored, and the notice does not find it**. The existing tests pause only at the record's INSERT. Test that order, and the same for `replace`.
+  - W12: a correction the vault refuses as `buyer_deleted` must leave the order `unchanged`. With the catch removed the refusal fails the whole poll, and no test notices.
+  - W11: the channel must be sent with a correction. Without it, a website customer's corrected address is dropped when their ID equals a deleted eBay one.
 
 The other 19 (R03, R04, R06 to R11, R15, R17, G02, G09, G10, G17 to G19, G21, G22, G24) ride along as Minors; G02, G09 and G10 belong with F-07.
 
@@ -277,7 +318,7 @@ Tests citing `[INV-3][CAT-6]`, red first:
 - a linked line dispatched between the mapping and its event, with the event run twice;
 - the existing "dispatch stored while the listing is being mapped" test for a linked line, with the sync transaction storing the dispatch before the mapping commits. It must fail when the first branch of `lockOrders` is removed.
 
-Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispatch alone. Tests: the linked line dispatched between its mapping and the event (red first, event run twice), and the dispatch of a linked line stored while its listing is mapped (a guard, which fails when the first branch of `lockOrders` is removed). Four planted faults, all caught.
+Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispatch alone. Tests: the linked line dispatched between its mapping and the event (red first, event run twice), and the dispatch of a linked line stored while its listing is mapped (a guard, which fails when the first branch of `lockOrders` is removed). Four planted faults, all caught. **Confirmed by S4 on #167.**
 
 ## Minors (follow-ups)
 
@@ -292,6 +333,7 @@ Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispa
 - **F-M10-end-20** (INV-4): lock order differs between mapping (stock row, then order) and an order update (order, then stock row). By reading only; a deadlock there is retried.
 - **F-M10-end-21** (ADR-080, CLAUDE.md): tests-first was not followed for most of T-1001 and T-1002, as S3 reported itself. For S1.
 - **F-M10-end-23** (INV-9): a line on an FBA listing moves the seller's own stock, at ingest and on back-fill (S3's note in #164; by reading only). Not reachable before M18. S1 to place there.
+- **F-M10-end-24** (DEL-1, ORD-4; found on #167): an expiry deletion already past its read deletes a record that has just been stored again. `DeletionService.delete` reads the expired refs, journals them, then locks and deletes by ref without looking at `delete_after` again. Probe: the run paused after its journal write, the order ingested (same ref, new date, committed), the run released: 1 record deleted. The order then holds a dead ref and counts as settled, so its customer details never come back. The window is short and opens once an hour, hence Minor. Fix: for the expiry scope, read the targets `FOR UPDATE` in the transaction that deletes, and journal inside it before the delete, so the journal never names a record that is kept. A red test as the probe. Best with S5-20261124-11, before T-1201.
 
 ## Acceptance
 
@@ -325,4 +367,4 @@ Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispa
 
 The two FAILs are the same fact. I grade it Major, not Blocker: the order cannot be redone, and F-11 asks for the red runs that tests-first would have given. S1 may rule otherwise.
 
-Resolution rule (ADR-077): Blocker F-01 at once, in its own PR (done, #164); Majors F-05 to F-11 as ADR-081 places them; F-22 in the first commits of S3's next task. The next S4 review confirms them, and M10 stays BLOCKED until then.
+Resolution rule (ADR-077): Blocker F-01 at once, in its own PR (done, #164); Majors F-05 and F-07 to F-11 in T-1004 (F-06 and F-22 done, #167). The next S4 review confirms them, and M10 stays BLOCKED until then.
