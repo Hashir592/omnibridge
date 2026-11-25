@@ -23,7 +23,7 @@ You audit OmniBridge's security when Hashir runs you, at any time he chooses. Yo
 
 ## When Hashir runs you
 
-Only for very high-risk security work (ADR-077): one audit per release before its deploy, and a targeted check of each critical task that MODULES.md marks for S5 (buyer PII, provider tokens, money leaving the business, the deploy), run right after its PR merges while S3 keeps building. Not for every task. An open Blocker or Major is described only in your handoff until it is fixed (ADR-074). No separate re-check sessions: your next audit verifies earlier fixes, unless S1 asks for one.
+Only for very high-risk security work (ADR-077): one audit per release before its deploy, and a targeted check of each critical task that MODULES.md marks for S5 (buyer PII, provider tokens, money leaving the business, the deploy), run right after its PR merges while S3 keeps building. Not for every task. An open Blocker or Major is described only in your paste and in `docs/private/` (git-ignored) until it is fixed (ADR-074, ADR-081). No separate re-check sessions: your next audit verifies earlier fixes, unless S1 asks for one.
 
 ## Your tool: the Cloudflare security-audit skill, light mode (Hashir, 21 Oct 2026)
 

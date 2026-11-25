@@ -2269,6 +2269,98 @@
       "status": "done"
     },
     {
+      "id": "T-1003",
+      "module": "M10",
+      "session": "S3",
+      "title": "M10 fixes, part 1: buyer data and retention (ADR-081)",
+      "goal": "Every open buyer-data point from the M10 reviews is closed, with a test that failed first.",
+      "prd_ids": [],
+      "supports": [
+        "DEL-1",
+        "DEL-2",
+        "ORD-4",
+        "DP-5",
+        "DP-6",
+        "AT-8",
+        "AT-9",
+        "AT-10",
+        "EBAY-2"
+      ],
+      "scope": [
+        "The open points of S5's T-1001 check and F-M10-end-06, -18 and -19, exactly as S1's private handoff of 25 Nov 2026 rules them (docs/private/, ADR-074)",
+        "PS-035 as accepted in ADR-081 (8)",
+        "Commit S5's report docs/reviews/security/20261124-M10-T1001.md with its Resolution lines once every Major in it is fixed, and write ADR-081's private points into docs/DECISIONS.md as a Proposed row for S1"
+      ],
+      "out_of_scope": [
+        "Index-key rotation (M22)",
+        "Real eBay payload checks (T-1501)"
+      ],
+      "depends_on": [
+        "T-1002"
+      ],
+      "acceptance": [
+        "Every probe and finding has a test, committed failing first, citing its PRD IDs",
+        "Marker scan, RLS coverage and restore tests pass",
+        "S4 reviews this PR and S5 confirms it, right after merge",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "critical",
+      "status": "todo"
+    },
+    {
+      "id": "T-1004",
+      "module": "M10",
+      "session": "S3",
+      "title": "M10 fixes, part 2: amounts, grouping, speed and test gaps (ADR-081)",
+      "goal": "Order money follows the channel until payment and never after, groups respect users' choices, lists and syncs are fast, and the tests fail when the code is broken.",
+      "prd_ids": [],
+      "supports": [
+        "VAT-1",
+        "VAT-2",
+        "VAT-3",
+        "VAT-5",
+        "VAT-6",
+        "VAT-7",
+        "FIN-1",
+        "ORD-1",
+        "ORD-2",
+        "ORD-6",
+        "ORD-9",
+        "INV-3",
+        "INV-4",
+        "CAP-5",
+        "CAP-7",
+        "NFR-3",
+        "TEN-5",
+        "PERM-3",
+        "DEL-1"
+      ],
+      "scope": [
+        "F-05: the ADR-081 (1) rule; migrations expand only (line uniqueness becomes partial, skipping removed lines)",
+        "ADR-081 (2) and (3): refund above what is left, and the amounts-differ mark with its line on the order detail page",
+        "F-07: dismiss and remove take the account's advisory lock first; applyGroups links only to a group it re-checked as open",
+        "F-08: one vault match call and one access-log row per recompute; queue one only when an order is new or enters or leaves Awaiting dispatch, with a collapsing key",
+        "F-09: index-first paging, hidden members counted for the page only, capped count, prefix search (ADR-081 6); plan-shape test at 100,000 rows",
+        "F-10: short transactions (25 to 50 orders), cursor moved only after the last, stock rows locked in component id order, stop before the job expiry and resume; F-20 lock order with it",
+        "F-11: the 37 required tests, each shown red against its fault; G02, G09 and G10 with F-07; the other survivors ride along",
+        "Minors F-12 (open cancellation requests kept and excluded from groups), F-13 (404) and F-15 (name punctuation removed, match keys re-indexed)"
+      ],
+      "out_of_scope": [
+        "F-14 and F-17 (T-1101)"
+      ],
+      "depends_on": [
+        "T-1003"
+      ],
+      "acceptance": [
+        "Tests first, as their own commits: the S4 probes for F-05, F-07 (two connections), F-08 (call count), F-09 and F-10 (opposite order; a stock movement waits for one chunk only)",
+        "F-09 p95 under 1 s at 100,000 orders in the plan test's setting",
+        "S4 reviews this PR right after merge",
+        "CI full gate green at merge (Semgrep included)"
+      ],
+      "risk": "critical",
+      "status": "todo"
+    },
+    {
       "id": "T-0318",
       "module": "M03",
       "session": "S2",
@@ -2324,6 +2416,7 @@
       ],
       "scope": [
         "Contract PR first: website setup, inbound and outbound shapes, Disconnect; then the PASTE INTO SESSION 2 block for T-0319",
+        "First commit: one order that cannot be stored never stops an account's sync (F-M10-end-14, F-M10-end-17 and S5's related T-1001 point): cap order IDs in the parsers, cut free text to its limit, strip NUL, set one bad order (non-GBP, no lines, unparsable) aside with one notice, store the rest and move the cursor",
         "Setup (WEB-1): connection ID, inbound key shown once, signing secret, base URL and outbound key; module toggle website_connector off means every website route answers 404 (ADR-059)",
         "Signing both ways (WEB-2) with timestamp window and idempotency keys; inbound processed in the request, vault first, nothing with PII in any inbox (ADR-054, FA-04)",
         "Outbound (WEB-4, WEB-5) through the M07 outbound path: retries back off from 1 minute to 24 hours, then the dead-letter queue and an alert; no eBay data ever sent to the website (WEB-6)",
@@ -2335,7 +2428,7 @@
         "Screens (T-0319)"
       ],
       "depends_on": [
-        "T-1002"
+        "T-1004"
       ],
       "acceptance": [
         "Tests first, citing IDs: [AT-14] a replayed request with the same key creates no duplicate; a bad signature or a timestamp over 5 minutes old is rejected; toggle off answers 404 on every website route; outbound retries end in the dead-letter queue with one alert",
@@ -2408,7 +2501,8 @@
         "Label creation idempotent per parcel; carrier errors shown in plain words with the raw code; only the label's PII sent (SHIP-4); a full carrier cap is a governor wait (ADR-079 2)",
         "Label files made by the worker and stored by the vault, merged on download; vault 256 MB with a 200-label test (FA-15); deleted through the M04 LabelFiles hook",
         "Label cost table per service, ex VAT with a VAT rate (SHP-7)",
-        "Ship together (SHP-9, C3.4): members locked and re-checked; one label; same tracking pushed to every member; cost split with remainder pence to the earliest; void returns every member"
+        "Ship together (SHP-9, C3.4): members locked and re-checked; one label; same tracking pushed to every member; cost split with remainder pence to the earliest; void returns every member",
+        "A buyer record that changes after a label exists marks the order for a check before dispatch (ADR-081)"
       ],
       "out_of_scope": [
         "Desk, rules and tracking loop (T-1202)",
@@ -2445,13 +2539,15 @@
       "supports": [
         "INV-3",
         "ORD-3",
-        "NTF-1"
+        "NTF-1",
+        "DEL-1"
       ],
       "scope": [
         "Desk queue (SHP-1) and batches up to 200 (SHP-2); ordered shipping rules with manual override (SHP-3)",
         "On label creation: Label created, then Dispatched when auto_dispatch_on_label is on; StockEngine.dispatch with the order line id; tracking job queued (SHP-4, TRK-1)",
         "Packing slip rendered on demand, never stored (SHP-6); partial dispatch where the channel allows it (SHP-8)",
-        "Tracking loop (TRK-2, TRK-3): retries at 1, 5, 15, 60, 180 and 360 minutes; the 4-hour critical alert; dead-letter queue with admin re-send; Pending, Sent, Confirmed, Failed with the last error"
+        "Tracking loop (TRK-2, TRK-3): retries at 1, 5, 15, 60, 180 and 360 minutes; the 4-hour critical alert; dead-letter queue with admin re-send; Pending, Sent, Confirmed, Failed with the last error",
+        "PRD 7.3: a daily check raises one warning notice per order neither dispatched nor cancelled 30 days after placement; it resolves on dispatch or cancellation (ADR-081 9)"
       ],
       "out_of_scope": [
         "Screens (T-0320)"
@@ -2533,13 +2629,15 @@
         "Governor (EBAY-8, RL-2): getRateLimits and getUserRateLimits read hourly into the console; F-M07-T0702-02",
         "Freshness (EBAY-10) shown as data age; restrictions (EBAY-11) enforced",
         "The ebay.account_deletion.too_large platform notice",
-        "Mock endpoints checked against eBay's official OpenAPI files (Hashir's yes in the module paste)"
+        "Mock endpoints checked against eBay's official OpenAPI files (Hashir's yes in the module paste)",
+        "S5's T-1001 needs-validation 1 and 2 checked against eBay's official spec, with the notice's eventDate; real fulfilment ship dates replace the stand-in"
       ],
       "out_of_scope": [
         "Messages, feedback, health and finances (T-1502)"
       ],
       "depends_on": [
-        "T-1202"
+        "T-1202",
+        "T-1003"
       ],
       "acceptance": [
         "Tests first, citing IDs: [AT-7] the 241st revision of one listing in a day is held and released after the reset; the governor never sends above 95% of any daily cap (simulated); revocation marks the account within the hour",
@@ -2569,7 +2667,8 @@
       ],
       "scope": [
         "Messages inbox per account (CS-1) with content in the vault, deleted 30 days after the conversation's last activity (CS-2)",
-        "Seller feedback (CS-3); health card per account (HLT-2), never side by side with Amazon (HLT-3), band and status alerts (HLT-4), data age on every card (HLT-5); finances reads"
+        "Seller feedback (CS-3); health card per account (HLT-2), never side by side with Amazon (HLT-3), band and status alerts (HLT-4), data age on every card (HLT-5); finances reads",
+        "S5's T-1001 hardening 4 for the inbox record kinds"
       ],
       "out_of_scope": [
         "Amazon health (M18)"

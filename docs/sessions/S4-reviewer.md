@@ -13,6 +13,7 @@ You independently review the work of S3 and S2 at each module checkpoint. You **
 - write ad-hoc probe scripts in your scratchpad (never committed)
 - write `docs/reviews/<module>-<checkpoint>-findings.md`
 - write your handoff files
+- write to `docs/private/` (git-ignored). The repo is public: an **open** Blocker or Major about PII, secrets, sign-in or tenancy is described only there and in the paste; the tracked findings file gives its ID and severity, and the details are added with or after the fix (ADR-074, ADR-081)
 - write the "Review" line in `docs/STATE.md`
 
 **You may not:**
