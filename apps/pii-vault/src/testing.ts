@@ -53,6 +53,12 @@ export async function startTestVault(options: {
         'canary record read',
       );
     },
+    onVacuumFailed: (errorName) => {
+      options.logger.warn(
+        { event: 'vault.vacuum_failed', errorName },
+        'VACUUM after a correction failed',
+      );
+    },
   });
   await vault.ensureVaultKey();
   const deletion = new DeletionService({

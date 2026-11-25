@@ -37,6 +37,9 @@ const vault = new Vault({
       'canary record read',
     );
   },
+  onVacuumFailed: (errorName) => {
+    logger.warn({ event: 'vault.vacuum_failed', errorName }, 'VACUUM after a correction failed');
+  },
 });
 // PS-035: the vault-wide key exists before anything is served, so every backup holds it. A vault
 // that cannot make or open it does not start.
