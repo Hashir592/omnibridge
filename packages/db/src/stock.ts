@@ -242,6 +242,34 @@ export class StockEngine {
     this.#now = deps.now ?? (() => new Date());
   }
 
+  /**
+   * The first stock step of a transaction that will move several orders' lines (F-M10-end-10): the
+   * stock rows of these listings, and those where these lines have moved before (a remap may have
+   * changed the listing's since), in component id order. So two of them never deadlock, and neither
+   * do one of them and a mapping.
+   */
+  async lockFor(
+    ctx: TenantContext,
+    input: { listingIds: readonly string[]; orderLineIds: readonly string[] },
+  ): Promise<void> {
+    if (input.listingIds.length === 0 && input.orderLineIds.length === 0) return;
+    await this.#tx(ctx, async (trx, ctx) => {
+      const { rows } = await sql<{ component: string }>`
+        SELECT coalesce(s.bundle_component_id, s.id) AS component
+          FROM app.listings l
+          JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
+         WHERE l.workspace_id = ${ctx.workspaceId}::uuid
+           AND l.id = ANY (${sql.val(input.listingIds)}::uuid[])
+        UNION
+        SELECT m.master_sku_id FROM app.stock_movements m
+         WHERE m.workspace_id = ${ctx.workspaceId}::uuid
+           AND m.order_line_id = ANY (${sql.val(input.orderLineIds)}::text[])
+         ORDER BY component`.execute(trx);
+      const now = this.#now();
+      for (const r of rows) await this.#lock(trx, ctx, r.component, now);
+    });
+  }
+
   // ---- Order line movements (INV-3; M10 and M12 call these) -------------------------------------
 
   /**
@@ -629,11 +657,8 @@ export class StockEngine {
   async onListingsEnded(ctx: TenantContext, listingIds: readonly string[]): Promise<void> {
     await this.#tx(ctx, async (trx, ctx) => {
       const now = this.#now();
-      for (const id of listingIds) {
-        const sku = await this.#listingSku(trx, ctx, id);
-        if (sku !== undefined) await this.#lock(trx, ctx, sku.component, now);
-        await this.#clearListing(trx, ctx, id, now);
-      }
+      await this.lockFor(ctx, { listingIds, orderLineIds: [] });
+      for (const id of [...listingIds].sort()) await this.#clearListing(trx, ctx, id, now);
     });
   }
 
@@ -1385,7 +1410,10 @@ export class StockEngine {
     return { id: row.id, component: row.id, pack: 1 };
   }
 
-  /** The listings of a SKU and of its bundles, locked. */
+  /**
+   * The listings of a SKU and of its bundles, locked. NO KEY: an order line being stored holds a key
+   * share on its listing, which its identity needs and its numbers do not.
+   */
   async #ownListings(trx: Transaction<MainDb>, ctx: TenantContext, skuId: string) {
     const { rows } = await sql<{
       id: string;
@@ -1399,7 +1427,8 @@ export class StockEngine {
         JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
        WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.ended_at IS NULL
          AND (s.id = ${skuId}::uuid OR s.bundle_component_id = ${skuId}::uuid)
-       FOR UPDATE OF l`.execute(trx);
+       ORDER BY l.id
+       FOR NO KEY UPDATE OF l`.execute(trx);
     return new Map(rows.map((r) => [r.id, r] as const));
   }
 
@@ -1460,7 +1489,7 @@ export class StockEngine {
     const { rows } = await sql<{ was_manual: boolean; pending_write_id: string | null }>`
       SELECT stock_mode = 'manual' AS was_manual, pending_write_id FROM app.listings
        WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${listingId}::uuid
-       FOR UPDATE`.execute(trx);
+       FOR NO KEY UPDATE`.execute(trx);
     const row = rows[0];
     if (row === undefined) return false;
     await sql`
@@ -1518,7 +1547,7 @@ export class StockEngine {
          AND l.ended_at IS NULL AND l.fulfilment IS DISTINCT FROM 'fba'
          AND l.provider = ANY (${sql.val(PUSHED)}::text[])
        ORDER BY l.id
-       FOR UPDATE OF l`.execute(trx);
+       FOR NO KEY UPDATE OF l`.execute(trx);
     const available = n(level.on_hand) - n(level.reserved);
     return new Map(
       rows.map((r) => {

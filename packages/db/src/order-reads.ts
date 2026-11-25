@@ -870,7 +870,7 @@ export class OrderReads {
   ): Promise<{ groups: number }> {
     const now = this.#now();
     return withTenantTransaction(this.#db, ctx, async (trx) => {
-      await this.#lockAccount(trx, channelAccountId);
+      await this.#lockAccount(trx, ctx, channelAccountId);
       const { rows: cands } = await sql<{
         id: string;
         placed_at: Date;
@@ -948,12 +948,24 @@ export class OrderReads {
 
   /**
    * Every change to an account's groups takes this lock first, so a recompute that has read the
-   * groups and the pairs kept apart never writes over what a person has just decided (C3.3).
+   * groups and the pairs kept apart never writes over what a person has just decided (C3.3). Then
+   * the orders it may link or unlink, in id order, as a page of orders locks them (F-M10-end-10).
    */
-  async #lockAccount(trx: Transaction<MainDb>, channelAccountId: string): Promise<void> {
+  async #lockAccount(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    channelAccountId: string,
+  ): Promise<void> {
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`order-groups:${channelAccountId}`}, 0))`.execute(
       trx,
     );
+    await sql`
+      SELECT id FROM app.orders
+       WHERE workspace_id = ${ctx.workspaceId}::uuid
+         AND channel_account_id = ${channelAccountId}::uuid
+         AND (status = 'awaiting_dispatch' OR order_group_id IS NOT NULL)
+       ORDER BY id
+       FOR NO KEY UPDATE`.execute(trx);
   }
 
   async #closeSmall(
@@ -999,7 +1011,7 @@ export class OrderReads {
       SELECT channel_account_id FROM app.order_groups
        WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${groupId}::uuid`.execute(trx);
     if (where[0] === undefined) throw new OrderGroupRefused('not_found');
-    await this.#lockAccount(trx, where[0].channel_account_id);
+    await this.#lockAccount(trx, ctx, where[0].channel_account_id);
     const { rows } = await sql<{
       id: string;
       state: string;

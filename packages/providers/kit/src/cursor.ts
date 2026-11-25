@@ -81,6 +81,28 @@ export function applyPoll<T extends SyncItem>(
 }
 
 /**
+ * A run that stopped before all it had read was stored: the cursor and its page stay where they
+ * were, so the same pages are read again, and what was stored is remembered, so none of it is
+ * stored twice. Those pairs come last: the bound drops others first.
+ */
+export function applyPart<T extends SyncItem>(
+  state: CursorState,
+  items: readonly T[],
+  handled: readonly T[],
+): CursorState {
+  const done = new Set(state.overlap.map((o) => key(o.id, o.at)));
+  for (const i of handled) done.add(key(i.externalId, i.updatedAt.toISOString()));
+  const ofRun = withPairs([], latestOf(items).values()).filter((o) => done.has(key(o.id, o.at)));
+  const here = new Set(ofRun.map((o) => key(o.id, o.at)));
+  const others = state.overlap.filter((o) => !here.has(key(o.id, o.at)));
+  return {
+    cursorAt: state.cursorAt,
+    overlap: [...others, ...ofRun].slice(-MAX_OVERLAP),
+    resume: state.resume ?? null,
+  };
+}
+
+/**
  * One run's pages. When the run stopped at the page cap (`nextPage` set), the cursor stays where
  * it was and the run resumes from that page next time with the same `since`, so no unread page
  * is ever skipped; every change handled so far is remembered so none is handled twice. When the

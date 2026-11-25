@@ -293,7 +293,7 @@ function vatOf(
 export class OrderIngest implements UnmappedDemand {
   readonly #db: Kysely<MainDb>;
   readonly #catalogue: Pick<CatalogueRepository, 'cogsOn' | 'vatTypeOn' | 'vatRateOn'>;
-  readonly #stock: Pick<StockEngine, 'reserve' | 'release' | 'dispatch'> | undefined;
+  readonly #stock: Pick<StockEngine, 'reserve' | 'release' | 'dispatch' | 'lockFor'> | undefined;
   readonly #ports: OrderIngestPorts;
   readonly #now: () => Date;
 
@@ -302,7 +302,7 @@ export class OrderIngest implements UnmappedDemand {
     deps: {
       catalogue: Pick<CatalogueRepository, 'cogsOn' | 'vatTypeOn' | 'vatRateOn'>;
       /** Left out (web's read side), ingest is not available. */
-      stock?: Pick<StockEngine, 'reserve' | 'release' | 'dispatch'>;
+      stock?: Pick<StockEngine, 'reserve' | 'release' | 'dispatch' | 'lockFor'>;
       ports: OrderIngestPorts;
       now?: () => Date;
     },
@@ -382,7 +382,11 @@ export class OrderIngest implements UnmappedDemand {
     });
   }
 
-  /** Stores the orders of one sync page, in the caller's transaction. */
+  /**
+   * Stores some orders of one sync page, in the caller's (short) transaction. Lock order, the same
+   * for every page and for a mapping event (F-M10-end-10): the orders already stored, in id order;
+   * then the stock rows that will move, in component id order; then everything else.
+   */
   async apply(
     ctx: TenantContext,
     channelAccountId: string,
@@ -405,24 +409,29 @@ export class OrderIngest implements UnmappedDemand {
         SELECT default_vat_rate_bp AS rate FROM app.workspaces
          WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
       const defaultRate = Number(ws[0]?.rate ?? 2000);
+      const { rows: known } = await sql<OrderRow & { external_order_id: string }>`
+        SELECT external_order_id, ${ORDER_COLUMNS} FROM app.orders
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid
+           AND external_order_id = ANY (${sql.val(orders.map((o) => o.externalId))}::text[])
+         ORDER BY id
+         FOR UPDATE`.execute(trx);
+      const stored = new Map<string, OrderRow>(known.map((r) => [r.external_order_id, r]));
+      const here = { id: channelAccountId, ...account };
+      await this.#lockStock(trx, ctx, here, orders, stored);
       let regroup = false;
       for (const order of orders) {
-        const { rows } = await sql<OrderRow>`
-          SELECT ${ORDER_COLUMNS} FROM app.orders
-           WHERE workspace_id = ${ctx.workspaceId}::uuid
-             AND channel_account_id = ${channelAccountId}::uuid
-             AND external_order_id = ${order.externalId}
-           FOR UPDATE`.execute(trx);
-        const existing = rows[0];
+        const existing = stored.get(order.externalId);
         let id = existing?.id;
         if (existing === undefined) {
-          const account_ = { id: channelAccountId, ...account };
-          id = await this.#create(trx, ctx, account_, defaultRate, order);
+          id = await this.#create(trx, ctx, here, defaultRate, order);
         } else {
           await this.#update(trx, ctx, channelAccountId, defaultRate, existing, order);
         }
+        const row = await this.#lock(trx, ctx, id ?? '');
+        stored.set(order.externalId, row);
         const before = existing !== undefined && canGroup(existing);
-        const after = canGroup(await this.#lock(trx, ctx, id ?? ''));
+        const after = canGroup(row);
         regroup ||= before !== after || (after && order.pii.kind === 'replaced');
       }
       await this.reportLateMapped(ctx, channelAccountId);
@@ -445,6 +454,55 @@ export class OrderIngest implements UnmappedDemand {
     if (rateBp === undefined) return undefined;
     const cogs = await this.#catalogue.cogsOn(ctx, masterSkuId, day);
     return { masterSkuId, vatType, rateBp, cogs: cogs ?? null };
+  }
+
+  /**
+   * Locks the stock rows these orders may move, before any of them is stored: of new orders that
+   * reserve or dispatch, and of stored ones that ship, are cancelled or still take new lines. An
+   * order that moves nothing (history, a repeat) makes nobody wait.
+   */
+  async #lockStock(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    account: Account,
+    orders: readonly IncomingOrder[],
+    stored: ReadonlyMap<string, OrderRow>,
+  ): Promise<void> {
+    if (this.#stock === undefined) return;
+    const skus = new Set<string>();
+    const moving: string[] = [];
+    for (const o of orders) {
+      const existing = stored.get(o.externalId);
+      const ships = o.dispatchedAt !== null || o.state === 'dispatched' || o.state === 'delivered';
+      if (existing === undefined) {
+        if (o.placedAt < account.created_at || o.state === 'cancelled') continue;
+      } else {
+        const open =
+          existing.vat_recorded_at === null &&
+          existing.status !== 'cancelled' &&
+          o.updatedAt > existing.source_updated_at;
+        const leaves =
+          existing.status !== 'cancelled' &&
+          ((ships && existing.dispatched_at === null) || o.state === 'cancelled');
+        if (!existing.stock_moves || !(open || leaves)) continue;
+        moving.push(existing.id);
+      }
+      for (const l of o.lines) if (l.sku !== null) skus.add(l.sku);
+    }
+    const { rows } = await sql<{ listing_id: string | null; line_id: string | null }>`
+      SELECT l.listing_id, l.id::text AS line_id FROM app.order_lines l
+       WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.removed_at IS NULL
+         AND l.order_id = ANY (${sql.val(moving)}::uuid[])
+      UNION ALL
+      SELECT li.id, NULL FROM app.listings li
+       WHERE li.workspace_id = ${ctx.workspaceId}::uuid
+         AND li.channel_account_id = ${account.id}::uuid
+         AND li.external_sku = ANY (${sql.val([...skus])}::text[])`.execute(trx);
+    const given = (v: string | null): v is string => v !== null;
+    await this.#stock.lockFor(ctx, {
+      listingIds: rows.map((r) => r.listing_id).filter(given),
+      orderLineIds: rows.map((r) => r.line_id).filter(given),
+    });
   }
 
   /** Each line with its listing, and the snapshot of its SKU on the order's day. */
@@ -1131,21 +1189,23 @@ export class OrderIngest implements UnmappedDemand {
   }
 
   /**
-   * CAT-6 (UnmappedDemand): locks the orders still to ship that `openLines` will read, as ingest
-   * locks them, so a dispatch being stored right now is either seen by it or finds the line linked.
-   * Orders come before stock rows in ingest, so this does too.
+   * CAT-6 (UnmappedDemand): locks the orders still to ship that `openLines` will read, and those
+   * whose lines `fillSnapshots` will fill, as ingest locks them: in id order, all at once, before the
+   * stock rows. So a dispatch being stored right now is either seen by it or finds the line linked,
+   * and the event never asks for an order while it holds a stock row (F-M10-end-10).
    */
   async lockOrders(ctx: TenantContext, listingId: string): Promise<void> {
     await withTenantTransaction(this.#db, ctx, async (trx) => {
       await sql`
         SELECT o.id FROM app.orders o
          WHERE o.workspace_id = ${ctx.workspaceId}::uuid
-           AND o.dispatched_at IS NULL AND o.status <> 'cancelled'
            AND o.id IN (
              SELECT l.order_id FROM app.order_lines l
+               JOIN app.orders x ON x.workspace_id = l.workspace_id AND x.id = l.order_id
               WHERE l.workspace_id = ${ctx.workspaceId}::uuid
-                AND l.listing_id = ${listingId}::uuid AND l.stored_unmapped
-                AND l.removed_at IS NULL
+                AND l.listing_id = ${listingId}::uuid AND l.removed_at IS NULL
+                AND (l.vat_type IS NULL
+                     OR (l.stored_unmapped AND x.dispatched_at IS NULL AND x.status <> 'cancelled'))
              UNION ALL
              SELECT l.order_id FROM app.order_lines l
                JOIN app.listings li ON li.workspace_id = l.workspace_id

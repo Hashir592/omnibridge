@@ -37,14 +37,16 @@ export class SyncCursorRepository {
       : { cursorAt: row.cursor_at, overlap: row.overlap, resume: row.resume };
   }
 
-  /** Stores the cursor after a successful poll. */
+  /** Stores the cursor after a poll; `failed` for one that failed after storing a part. */
   async save(
     ctx: TenantContext,
     channelAccountId: string,
     stream: string,
     cursor: StoredCursor,
     at: Date,
+    options?: { failed: true },
   ): Promise<void> {
+    const success = options?.failed === true ? {} : { last_success_at: at };
     const overlap = JSON.stringify(cursor.overlap);
     const resume = cursor.resume == null ? null : JSON.stringify(cursor.resume);
     await withTenantTransaction(this.#db, ctx, (trx) =>
@@ -58,7 +60,7 @@ export class SyncCursorRepository {
           overlap,
           resume,
           last_run_at: at,
-          last_success_at: at,
+          ...success,
           updated_at: at,
         })
         .onConflict((oc) =>
@@ -67,7 +69,7 @@ export class SyncCursorRepository {
             overlap,
             resume,
             last_run_at: at,
-            last_success_at: at,
+            ...success,
             updated_at: at,
           }),
         )
