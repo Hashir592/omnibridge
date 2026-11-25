@@ -454,6 +454,50 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     }
   });
 
+  it('[CAT-6] a line that missed its mapping event has it sent again, IDs only, with one key per set of lines', async () => {
+    const code = `LATE-${randomUUID().slice(0, 8)}`;
+    const catalogue = new CatalogueRepository(db.db);
+    const line = { lineId: 'L1', sku: code, quantity: 1, title: null, linePricePence: 1200 };
+    await poll([channelOrder({ lines: [line] })]);
+    const sku = await tenancy.runWorkspace({ workspaceId: ws }, (c) =>
+      catalogue.createSku(
+        c,
+        { sku: code, title: 'Late', shortDescription: 'l', weightG: 1, vatType: 'zero' },
+        null,
+        new Date(),
+      ),
+    );
+    const { autoMapped } = await tenancy.runWorkspace({ workspaceId: ws }, (c) =>
+      catalogue.upsertDiscovered(
+        c,
+        account,
+        'ebay',
+        [
+          {
+            externalSku: code,
+            externalId: code,
+            title: null,
+            fulfilment: null,
+            inventoryApi: null,
+            quantity: null,
+          },
+        ],
+        new Date(),
+      ),
+    );
+    const listing = autoMapped[0]?.listingId ?? '';
+    sent.length = 0;
+    await poll([channelOrder()]);
+    await poll([channelOrder()]);
+    const events = sent.filter((s) => s.type === 'catalogue.listing_mapped');
+    expect(events.map((e) => e.payload)).toEqual([
+      { listing_id: listing, master_sku_id: sku, previous_master_sku_id: null },
+      { listing_id: listing, master_sku_id: sku, previous_master_sku_id: null },
+    ]);
+    expect(new Set(events.map((e) => e.key)).size).toBe(1);
+    expect(events[0]?.key.length).toBeLessThanOrEqual(200);
+  });
+
   it('[FIN-1][INT-5] an order whose pence do not add up to eBay total raises one platform notice', async () => {
     const gbp = (value: string) => ({ value, currency: 'GBP' });
     const wrong = { pricingSummary: { deliveryCost: gbp('3.00'), total: gbp('12.00') } };

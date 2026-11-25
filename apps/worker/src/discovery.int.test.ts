@@ -99,8 +99,13 @@ describe('listings.discover against the eBay and website mocks (CAT-5, CAT-6)', 
       },
       catalogue,
       queue,
+      lateMapped: (_ctx, accountId) => {
+        lateChecks.push(accountId);
+        return Promise.resolve();
+      },
       logger,
     });
+  const lateChecks: string[] = [];
 
   beforeAll(async () => {
     cluster = await startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_worker']);
@@ -255,6 +260,14 @@ describe('listings.discover against the eBay and website mocks (CAT-5, CAT-6)', 
       catalogue.listListings(c, { channelAccountId: accounts.ebay, offset: 0, limit: 50 }, 100),
     );
     expect(listed.items.find((l) => l.externalSku === 'STILL-LIVE-1')?.endedAt).toBeNull();
+  });
+
+  it('[CAT-6] only a complete scan looks for order lines that missed their mapping event', async () => {
+    lateChecks.length = 0;
+    await handler(0).prepare(job(accounts.ebay));
+    expect(lateChecks).toEqual([]);
+    await handler().prepare(job(accounts.ebay));
+    expect(lateChecks).toEqual([accounts.ebay]);
   });
 
   it('[CAT-5] the website scan stores its products the same way', async () => {

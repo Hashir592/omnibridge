@@ -209,6 +209,7 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
         cancelPii: () => Promise.resolve(),
         shortenPii: () => Promise.resolve(),
         totalMismatch: () => Promise.resolve(),
+        lateMapped: () => Promise.resolve(),
         regroup: () => Promise.resolve(),
       },
     });

@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 24 Nov 2026 by S3 (T-1001 fixes).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 25 Nov 2026 by S3 (F-M10-end-01).
 
 ## Now
 
@@ -9,14 +9,14 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M07, M08, M09 built** (end reports in `docs/reviews/`). The M08 milestone fix (#146) and the T-0901 review fixes (#151) are merged, for the M09 + M10 milestone to verify.
 - **M10 built** (`docs/reviews/M10-end-report.md`):
   - #156 T-1000, #157 contract, #158 T-1001 (critical), #159 T-1002: merged;
-  - T-1001 fixes (S5's critical check, branch `task/T-1001-fixes`): auto-merge on, CI running.
+  - #160 T-1001 fixes (S5's critical check): merged;
+  - F-M10-end-01, S4's Blocker (branch `task/T-1001-late-lines`): auto-merge on, CI running.
 - **Waiting on reviews:**
-  - S4 critical review of #158 → `docs/reviews/M10-T1001-findings.md`;
-  - S5 check of #158 is in (no Blocker). Its report stays out of git until every Major is fixed (ADR-074); S1 rules on the open points first (PS-035 and the S3-to-S1 note of 24 Nov);
-  - S4 M09 + M10 milestone (also verifies #141, #146, #151).
+  - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`). F-01 is in its own PR; the rest is ruled in ADR-081 and goes into T-1003 and T-1004;
+  - S5 check of #158 is in (no Blocker). Its report stays out of git until every Major is fixed (ADR-074, ADR-081); T-1003 closes the open points;
   - **Review (S4, 24 Nov 2026): M09 + M10 BLOCKED**, open on main ecb1834: 1 Blocker (F-01), 7 Majors, 9 Minors; #160 fixed F-02, F-03, F-04 (`docs/reviews/M10-end.md`; holds the #158 review; #141, #146, #151 verified).
   - Fix rule: Blockers at once; Majors in the first commit of S3's next task.
-- **Next (S3):** S4's T-1001 findings, then M11, when Hashir pastes it.
+- **Next (S3):** T-1003 (critical), then T-1004 (critical), when Hashir pastes them; both before M11.
 - **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
 
 ## M10 in short (what later modules use)

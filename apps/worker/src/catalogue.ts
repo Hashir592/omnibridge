@@ -102,6 +102,8 @@ export function listingsDiscoverHandler(deps: {
   catalogue: Pick<CatalogueRepository, 'upsertDiscovered' | 'beginScan' | 'concludeScan'>;
   queue: Pick<JobQueue, 'send'>;
   ended?: ListingsEndedListener;
+  /** CAT-6: after a complete scan, order lines that missed a mapping event get it again. */
+  lateMapped?: (ctx: TenantContext, channelAccountId: string) => Promise<unknown>;
   /** How long one scan may read before it stops unconcluded; default 25 minutes. */
   maxRunMs?: number;
   /** INV-7 (M09): after a complete scan, compare each listing's channel quantity with its target. */
@@ -154,6 +156,7 @@ export function listingsDiscoverHandler(deps: {
               const ended = await deps.catalogue.concludeScan(ctx, accountId, startedAt, now());
               if (ended === undefined) return false;
               if (ended.length > 0) await deps.ended?.onEnded(ctx, ended);
+              await deps.lateMapped?.(ctx, accountId);
               concludedAt = startedAt;
               return true;
             },

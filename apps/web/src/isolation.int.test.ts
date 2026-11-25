@@ -299,6 +299,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           cancelPii: () => Promise.resolve(),
           shortenPii: () => Promise.resolve(),
           totalMismatch: () => Promise.resolve(),
+          lateMapped: () => Promise.resolve(),
           regroup: () => Promise.resolve(),
         },
       });

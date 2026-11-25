@@ -56,8 +56,13 @@ export interface StockPushQueue {
   ): Promise<{ id: string; created: boolean }>;
 }
 
-/** CAT-6: the order lines of a listing that moved no stock while it was unmapped (M10). */
+/**
+ * CAT-6: the order lines of a listing that moved no stock while it was unmapped or not discovered
+ * yet (M10). Lock order: `lockOrders`, then the stock rows, then `openLines` (which touches the
+ * listing).
+ */
 export interface UnmappedDemand {
+  lockOrders(ctx: TenantContext, listingId: string): Promise<void>;
   openLines(
     ctx: TenantContext,
     listingId: string,
@@ -69,6 +74,8 @@ export interface UnmappedDemand {
       companyId: string | null;
     }[]
   >;
+  /** INV-6: the back-fill of this line took available below 0. */
+  markOversold(ctx: TenantContext, orderLineId: string): Promise<void>;
 }
 
 /** An order line event on a listing (M10 reserve and release, M12 dispatch). */
@@ -283,13 +290,7 @@ export class StockEngine {
         trx,
       );
       const oversold = moved.onHandAfter - moved.reservedAfter < 0;
-      if (oversold) {
-        await this.#notifier.raise(ctx, {
-          type: 'inventory.oversold',
-          record: { kind: 'order_line', id: move.orderLineId },
-          ...(move.companyId ? { companyId: move.companyId } : {}),
-        });
-      }
+      if (oversold) await this.#oversold(ctx, move.orderLineId, move.companyId);
       await this.#recompute(trx, ctx, sku.component, moved.id, now);
       await this.#allocationUsedUp(trx, ctx, move.listingId);
       return { applied: true, oversold, unmapped: false };
@@ -560,6 +561,7 @@ export class StockEngine {
   ): Promise<void> {
     await this.#tx(ctx, async (trx, ctx) => {
       const now = this.#now();
+      if (change.masterSkuId !== null) await this.#demand?.lockOrders(ctx, change.listingId);
       // Stock rows before the listing row, in a fixed order (no deadlock with a movement).
       await this.#lockComponents(
         trx,
@@ -599,12 +601,21 @@ export class StockEngine {
           companyId: line.companyId,
           now,
         };
-        await this.#move(trx, ctx, sku.component, {
+        const moved = await this.#move(trx, ctx, sku.component, {
           ...base,
           kind: 'reserve',
           onHand: 0,
           reserved: qty,
         });
+        // INV-6, as for a sale: a line still to ship that takes available below 0 is oversold.
+        if (
+          !line.dispatched &&
+          moved !== undefined &&
+          moved.onHandAfter - moved.reservedAfter < 0
+        ) {
+          await this.#oversold(ctx, line.orderLineId, line.companyId);
+          await this.#demand?.markOversold(ctx, line.orderLineId);
+        }
         // A line already shipped goes through the same line-based dispatch (F-M09-T0901-01).
         if (line.dispatched) {
           await this.dispatch(ctx, {
@@ -1142,6 +1153,19 @@ export class StockEngine {
       const row = rows[0];
       if (row === undefined || row.master_sku_id !== sku.id) throw new StockRefused('not_found');
       return toMovement(row);
+    });
+  }
+
+  /** INV-6: the Oversold notice of one order line. */
+  async #oversold(
+    ctx: TenantContext,
+    orderLineId: string,
+    companyId: string | null | undefined,
+  ): Promise<void> {
+    await this.#notifier.raise(ctx, {
+      type: 'inventory.oversold',
+      record: { kind: 'order_line', id: orderLineId },
+      ...(companyId ? { companyId } : {}),
     });
   }
 

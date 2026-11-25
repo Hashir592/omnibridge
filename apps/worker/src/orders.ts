@@ -29,6 +29,7 @@ import {
   type SyncStreamName,
 } from '@omnibridge/queue';
 import { VaultError, type VaultClient } from '@omnibridge/vault-client';
+import { sendMappingChanged } from './catalogue.ts';
 
 /*
  * M10 order ingest in the worker (T-1001: ORD-4, DEL-1, FA-10, FA-16). Vault first: buyer details
@@ -236,6 +237,14 @@ export function orderIngestPorts(
         type: 'platform.report_failure',
         record: { kind: 'order_total', id: input.channelAccountId },
       });
+    },
+    lateMapped: async (ctx, input) => {
+      const change = {
+        listingId: input.listingId,
+        masterSkuId: input.masterSkuId,
+        previousMasterSkuId: null,
+      };
+      await sendMappingChanged(queue, ctx, change, `late:${input.key}`);
     },
     cancelPii: async (ctx, input) => {
       await requestDeletion(queue, ctx, {

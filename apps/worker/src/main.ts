@@ -235,7 +235,11 @@ const outbound = new OutboundQueue({ queue, writes: outboundWrites });
 const stockEngine: StockEngine = new StockEngine(handlerDb.db, {
   pushes: outbound,
   notifier,
-  demand: { openLines: (ctx, listingId) => orderIngest.openLines(ctx, listingId) },
+  demand: {
+    lockOrders: (ctx, listingId) => orderIngest.lockOrders(ctx, listingId),
+    openLines: (ctx, listingId) => orderIngest.openLines(ctx, listingId),
+    markOversold: (ctx, orderLineId) => orderIngest.markOversold(ctx, orderLineId),
+  },
 });
 // M10 order ingest: vault first (the worker's token), then db-main in the sync transaction.
 const workerVault = new VaultClient({
@@ -351,6 +355,7 @@ await registerHandlers(queue, {
     queue,
     // C7.3 and INV-7: ended listings lose their manual settings; the nightly scan reconciles.
     ended: { onEnded: (ctx, ids) => stockEngine.onListingsEnded(ctx, ids) },
+    lateMapped: (ctx, accountId) => orderIngest.reportLateMapped(ctx, accountId),
     reconcile: async (workspaceId, accountId, startedAt) => {
       await stockEngine.reconcile(
         (fn) => syncPorts.tenancy.runWorkspace({ workspaceId }, fn),
