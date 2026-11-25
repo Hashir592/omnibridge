@@ -84,6 +84,34 @@ describe('the vault-first step for a stored order (ORD-4)', () => {
     expect(await asked(order(), stored({ paidAt: null }))).toEqual(whole);
   });
 
+  it('[DEL-1] a record not stored yet counts from the earlier of a stand-in and the real date', async () => {
+    const ago = (days: number) => new Date(Date.now() - days * 86_400_000);
+    const kind = async (stand: number, real: number | null, dispatchEstimated = true) =>
+      (
+        await asked(
+          order({
+            state: 'dispatched',
+            placedAt: ago(50),
+            updatedAt: ago(0),
+            dispatchedAt: real === null ? null : ago(real),
+          }),
+          stored({
+            settled: false,
+            piiRef: null,
+            live: false,
+            status: 'dispatched',
+            dispatchedAt: ago(stand),
+            dispatchEstimated,
+          }),
+        )
+      ).kind;
+    expect(await kind(10, null)).toBe('stored');
+    expect(await kind(10, 40)).toBe('none');
+    // A window that has passed is never started again, and a real stored date stands.
+    expect(await kind(40, 1)).toBe('none');
+    expect(await kind(10, 40, false)).toBe('stored');
+  });
+
   it('[ORD-4][DEL-1] no other stored order asks the vault for anything', async () => {
     const nothing = { calls: [], kind: 'unchanged', buyer: null };
     const cases: [string, ChannelOrder, StoredOrderPii][] = [
