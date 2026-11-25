@@ -174,6 +174,8 @@ export class Vault {
     onCanary?: (event: CanaryEvent) => void;
     /** Expiry changes are journalled here (ADR-068): the deletion journal's directory. */
     journal?: Journal;
+    /** A VACUUM after a correction failed: the error's name, never its text. The app logs it. */
+    onVacuumFailed?: (errorName: string) => void;
   }) {
     this.#pool = options.pool;
     this.#keyring = options.keyring;
