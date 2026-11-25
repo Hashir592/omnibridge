@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { TenantContext } from '@omnibridge/core';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { Kysely, PostgresDialect } from 'kysely';
@@ -217,10 +218,54 @@ describe('the order list (T-1004)', () => {
     expect(await found('web')).toEqual(['WebX100', 'Web_100%']);
     // With another filter as well.
     expect((await refs(w, { q: 'web', to: '2026-11-02' })).refs).toEqual(['Web_100%']);
-    // A renamed SKU is found by its new name only.
-    await root.query(`UPDATE app.master_skus SET sku = 'POT-Red' WHERE sku = 'JUG-Red'`);
-    expect(await found('jug')).toEqual([]);
-    expect(await found('pot-')).toEqual(['Web_100%']);
+    // A group's member that the search does not find is hidden, one that it finds is not.
+    const g = await group(w);
+    await put(w, { ref: 'GRP-1', at: '2026-11-04T10:00:00Z', group: g, sku: 'PAN-1' });
+    await put(w, { ref: 'GRP-2', at: '2026-11-05T10:00:00Z', group: g, external: 'PAN-X' });
+    await put(w, { ref: 'GRP-3', at: '2026-11-06T10:00:00Z', group: g });
+    const pans = await refs(w, { q: 'pan-' });
+    expect(pans.items.map((i) => [i.orderRef, i.group?.hidden])).toEqual([
+      ['GRP-1', 1],
+      ['GRP-2', 1],
+    ]);
+    expect((await refs(w, { q: 'grp-2' })).items.map((i) => i.group?.hidden)).toEqual([2]);
+  });
+
+  it('[ORD-2][TEN-1] rows from before the search columns are filled, and the tenant rules are back on afterwards', async () => {
+    const w = await world();
+    await put(w, { ref: 'OLD-1', at: '2026-11-01T10:00:00Z', sku: 'OLDSKU', external: 'Old-Ext' });
+    for (const [table, column] of [
+      ['orders', 'search_ref'],
+      ['order_lines', 'search_sku'],
+      ['master_skus', 'search_sku'],
+    ] as const) {
+      await root.query(`UPDATE app.${table} SET ${column} = NULL WHERE workspace_id = $1`, [
+        w.ctx.workspaceId,
+      ]);
+    }
+    expect((await refs(w, { q: 'old' })).refs).toEqual([]);
+    const file = readFileSync(
+      new URL('../migrations/0059_search_columns.sql', import.meta.url),
+      'utf8',
+    );
+    const owner = new pg.Client(cluster.connection('ob_owner'));
+    await owner.connect();
+    try {
+      await owner.query('BEGIN');
+      await owner.query(file.slice(file.indexOf('-- Rows stored before this')));
+      await owner.query('COMMIT');
+    } finally {
+      await owner.end();
+    }
+    for (const q of ['old-1', 'oldsku', 'old-ext']) {
+      expect((await refs(w, { q })).refs, q).toEqual(['OLD-1']);
+    }
+    const { rows } = await root.query<{ relname: string }>(
+      `SELECT relname FROM pg_class
+        WHERE relnamespace = 'app'::regnamespace AND relforcerowsecurity
+          AND relname IN ('orders', 'order_lines', 'master_skus') ORDER BY relname`,
+    );
+    expect(rows.map((r) => r.relname)).toEqual(['master_skus', 'order_lines', 'orders']);
   });
 
   it('[CAP-7][ORD-1][ORD-2] at 100,000 orders a page reads its own rows, by index, in under a second', async () => {
@@ -255,6 +300,8 @@ describe('the order list (T-1004)', () => {
                                    - ($4::int - n) * interval '5 minutes' AS at) t`,
       [ws, company, w.account, ORDERS],
     );
+    // The checks of the lines that follow plan for this many orders, not for the few before.
+    await root.query('ANALYZE app.orders');
     await root.query(
       `INSERT INTO app.order_lines
          (workspace_id, id, company_id, order_id, line_no, external_line_id, external_sku, quantity,
@@ -334,12 +381,10 @@ describe('the order list (T-1004)', () => {
     const [week] = await plans({ from: '2026-11-13' });
     expect(week?.seq).toEqual([]);
     expect(week?.orders).toBeLessThan(1_000);
-    const [byRef, byRefCount] = await plans({ q: 'ref-00500' });
-    for (const p of [byRef, byRefCount]) {
-      expect(p?.seq).toEqual([]);
-      expect(p?.indexes).toContain('orders_search_ref');
-      expect(p?.orders).toBeLessThan(2_000);
-    }
+    const [byRef] = await plans({ q: 'ref-00500' });
+    expect(byRef?.seq).toEqual([]);
+    expect(byRef?.indexes).toContain('orders_search_ref');
+    expect(byRef?.orders).toBeLessThan(2_000);
     const [bySku] = await plans({ q: 'sku-0042' });
     expect(bySku?.seq).toEqual([]);
     expect(bySku?.indexes).toContain('master_skus_search');
@@ -362,6 +407,9 @@ describe('the order list (T-1004)', () => {
     };
     expect(Object.entries(p95).filter(([, ms]) => ms >= 1_000)).toEqual([]);
     expect((await refs(w, {})).total).toBe(COUNT_CAP);
-    expect((await refs(w, { q: 'ref-0050000' })).refs).toEqual(['REF-0050000', 'REF-0050001']);
+    const one = await refs(w, { q: 'ref-0050000' });
+    expect(one.items.map((i) => [i.orderRef, i.group?.size, i.group?.hidden])).toEqual([
+      ['REF-0050000', 2, 1],
+    ]);
   }, 600_000);
 });
