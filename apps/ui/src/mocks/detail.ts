@@ -233,7 +233,15 @@ export function orderDetail(o: OrderRow): OrderDetail {
       labelPence,
       cogsPence,
       refundPence,
+      // Synthetic: the website's refunded orders show every reason the page can give.
+      amountsDiffer:
+        o.channel === 'website' && o.status === 'refunded'
+          ? ['channel_total', 'late_change', 'refund_above']
+          : [],
     },
+    dispatchedAt: history.find((h) => h.label === 'Dispatched')?.at ?? null,
+    // Only the website leaves the dispatch time out.
+    dispatchEstimated: o.channel === 'website',
     history: history.sort((a, b) => a.at.localeCompare(b.at)),
     label:
       o.shipping && trackingNumber

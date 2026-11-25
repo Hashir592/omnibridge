@@ -36,6 +36,7 @@ const stored = (over: Partial<StoredOrderPii> = {}): StoredOrderPii => ({
   status: 'awaiting_dispatch',
   paidAt: at,
   dispatchedAt: null,
+  dispatchEstimated: false,
   deliveredAt: null,
   ...over,
 });

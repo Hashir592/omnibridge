@@ -22,6 +22,9 @@ import { withTenantTransaction } from './tenant.ts';
 export type OrderFlag =
   'oversold' | 'unmapped' | 'address_shortened' | 'tracking_not_confirmed' | 'fba';
 
+/** Why an order's pence differ from the channel's (ADR-081 3). */
+export type AmountsDiffer = 'channel_total' | 'late_change' | 'refund_above';
+
 export interface OrderFilter {
   companyId?: string | undefined;
   channelAccountId?: string | undefined;
@@ -96,6 +99,8 @@ export interface OrderLineView {
 export interface OrderDetailView extends OrderListRow {
   paidAt: Date | null;
   dispatchedAt: Date | null;
+  /** `dispatchedAt` is a stand-in: the channel gave no dispatch time. */
+  dispatchEstimated: boolean;
   deliveredAt: Date | null;
   cancelledAt: Date | null;
   taxPointDate: string;
@@ -111,6 +116,7 @@ export interface OrderDetailView extends OrderListRow {
     refundedPence: bigint;
     refundedVatPence: bigint;
     vatGroups: OrderVat['groups'];
+    amountsDiffer: AmountsDiffer[];
   };
   history: { at: Date; status: OrderStatus | null; rawStatus: string }[];
   refunds: {
@@ -387,8 +393,10 @@ export class OrderReads {
       const { rows: extra } = await sql<{
         paid_at: Date | null;
         dispatched_at: Date | null;
+        dispatch_estimated: boolean;
         delivered_at: Date | null;
         cancelled_at: Date | null;
+        amounts_differ: AmountsDiffer[];
         tax_point_date: string;
         ship_to_country: string | null;
         goods_pence: string;
@@ -397,7 +405,7 @@ export class OrderReads {
         notes: string | null;
         notes_updated_at: Date | null;
       }>`
-        SELECT paid_at, dispatched_at, delivered_at, cancelled_at,
+        SELECT paid_at, dispatched_at, dispatch_estimated, delivered_at, cancelled_at, amounts_differ,
                to_char(tax_point_date, 'YYYY-MM-DD') AS tax_point_date, ship_to_country,
                goods_pence, discount_pence, shipping_pence, notes, notes_updated_at
           FROM app.orders WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${orderId}::uuid`.execute(
@@ -480,6 +488,7 @@ export class OrderReads {
         ...row,
         paidAt: o.paid_at,
         dispatchedAt: o.dispatched_at,
+        dispatchEstimated: o.dispatch_estimated,
         deliveredAt: o.delivered_at,
         cancelledAt: o.cancelled_at,
         taxPointDate: o.tax_point_date,
@@ -495,6 +504,7 @@ export class OrderReads {
           refundedPence: refunds.reduce((a, r) => a + r.amountPence, 0n),
           refundedVatPence: big(refundedVat[0]?.vat),
           vatGroups: vat.groups,
+          amountsDiffer: o.amounts_differ,
         },
         history: history.map((h) => ({
           at: h.created_at,

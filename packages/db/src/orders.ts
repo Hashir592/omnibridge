@@ -81,10 +81,13 @@ export interface IncomingOrder {
 export interface OrderIngestPorts {
   /** DEL-1: the cancelled order's buyer record is deleted (trigger `cancellation`). */
   cancelPii(ctx: TenantContext, input: { orderId: string; piiSubject: string }): Promise<void>;
-  /** DEL-1: dispatch or delivery is known, so the live copy's expiry moves (journalled). */
+  /**
+   * DEL-1: dispatch or delivery is known, so the live copy's expiry moves (journalled). `real` is
+   * set when the first real dispatch date replaces a stand-in: a second move, not a repeat.
+   */
   shortenPii(
     ctx: TenantContext,
-    input: { orderId: string; reason: 'dispatch' | 'delivery' },
+    input: { orderId: string; reason: 'dispatch' | 'delivery'; real?: boolean },
   ): Promise<void>;
   /** FIN-1: the order's pence do not add up to the total the channel states. */
   totalMismatch(
@@ -149,6 +152,8 @@ export interface StoredOrderPii {
   status: OrderStatus;
   paidAt: Date | null;
   dispatchedAt: Date | null;
+  /** `dispatchedAt` is a stand-in (PS-036 a). */
+  dispatchEstimated: boolean;
   deliveredAt: Date | null;
 }
 
@@ -286,9 +291,11 @@ export class OrderIngest implements UnmappedDemand {
         status: OrderStatus;
         paid_at: Date | null;
         dispatched_at: Date | null;
+        dispatch_estimated: boolean;
         delivered_at: Date | null;
       }>`
-        SELECT o.external_order_id, o.status, o.paid_at, o.dispatched_at, o.delivered_at, o.pii_ref,
+        SELECT o.external_order_id, o.status, o.paid_at, o.dispatched_at, o.dispatch_estimated,
+               o.delivered_at, o.pii_ref,
                (o.pii_ref IS NOT NULL OR o.pii_deleted_at IS NOT NULL OR o.status = 'cancelled')
                  AS settled,
                (o.pii_ref IS NOT NULL AND o.pii_deleted_at IS NULL AND t.pii_ref IS NULL) AS live
@@ -317,6 +324,7 @@ export class OrderIngest implements UnmappedDemand {
               status: r.status,
               paidAt: r.paid_at,
               dispatchedAt: r.dispatched_at,
+              dispatchEstimated: r.dispatch_estimated,
               deliveredAt: r.delivered_at,
             },
           ]),

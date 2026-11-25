@@ -131,6 +131,7 @@ function detailBody(d: OrderDetailView, masked: ReadonlyMap<string, Record<strin
     ...rowBody(d, masked),
     paid_at: iso(d.paidAt),
     dispatched_at: iso(d.dispatchedAt),
+    dispatch_estimated: d.dispatchEstimated,
     delivered_at: iso(d.deliveredAt),
     cancelled_at: iso(d.cancelledAt),
     tax_point_date: d.taxPointDate,
@@ -171,6 +172,7 @@ function detailBody(d: OrderDetailView, masked: ReadonlyMap<string, Record<strin
         net_pence: n(g.net),
         provisional: g.provisional,
       })),
+      amounts_differ: d.money.amountsDiffer,
     },
     history: d.history.map((h) => ({
       at: h.at.toISOString(),

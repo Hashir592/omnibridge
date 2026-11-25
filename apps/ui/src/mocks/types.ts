@@ -161,7 +161,12 @@ export interface OrderDetail {
     labelPence: number;
     cogsPence: number;
     refundPence: number;
+    /** Why the pence differ from the channel's (contract `money.amounts_differ`). */
+    amountsDiffer: Array<'channel_total' | 'late_change' | 'refund_above'>;
   };
+  dispatchedAt: string | null;
+  /** `dispatchedAt` is a stand-in: the channel gave no dispatch time. */
+  dispatchEstimated: boolean;
   history: OrderEvent[];
   label: { carrier: string; service: string; trackingNumber: string; createdAt: string } | null;
   notes: Array<{ at: string; by: string; text: string }>;
