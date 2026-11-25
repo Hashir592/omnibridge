@@ -246,7 +246,8 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
         clients.web.readFull({ workspaceId: B, piiRef: pii_ref, purpose: 'order_detail' }),
       ),
     ).toBe(404);
-    expect(await status(clients.web.match(B, pii_ref))).toBe(404);
+    const asked = { channel_account_id: account, pii_refs: [pii_ref] };
+    expect(await clients.web.match({ workspace_id: B, ...asked })).toEqual({ groups: [] });
     expect((await clients.web.mask(B, [pii_ref])).records).toEqual([]);
     expect(
       (
@@ -329,11 +330,71 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
 
   it('[DP-7] match returns only same-buyer subject IDs on the same channel account (ORD-9)', async () => {
     const same = { name: 'Sam Same', address_line1: '1 Same Road', postcode: 'AB1 2CD' };
-    const first = await ingest(A, 'order-m1', same);
-    await ingest(A, 'order-m2', { ...same, name: '  sam   SAME ', postcode: 'ab12cd' });
-    await ingest(A, 'order-m3', same, otherAccount);
-    await ingest(A, 'order-m4', { ...same, address_line1: '2 Other Road' });
-    expect((await clients.worker.match(A, first.pii_ref)).subject_ids).toEqual(['order-m2']);
+    const refs = [
+      await ingest(A, 'order-m1', same),
+      await ingest(A, 'order-m2', { ...same, name: '  sam   SAME ', postcode: 'ab12cd' }),
+      await ingest(A, 'order-m3', same, otherAccount),
+      await ingest(A, 'order-m4', { ...same, address_line1: '2 Other Road' }),
+    ].map((r) => r.pii_ref);
+    expect(
+      await clients.worker.match({ workspace_id: A, channel_account_id: account, pii_refs: refs }),
+    ).toEqual({ groups: [['order-m1', 'order-m2']] });
+  });
+
+  it('[DP-7][ORD-9] one match call answers for every record asked about, with one log row and the count', async () => {
+    const W = randomUUID();
+    const twin = (n: string) => ({
+      name: `${PII_MARKER}Twin ${n}`,
+      address_line1: `${PII_MARKER}${n} Pair Road`,
+      postcode: 'PA1 1RS',
+    });
+    const put = async (subject: string, fields: Record<string, string>, channel = account) =>
+      (await ingest(W, subject, fields, channel)).pii_ref;
+    const refs = [
+      await put('t1-a', twin('1')),
+      await put('t2-a', twin('2')),
+      await put('t1-b', twin('1')),
+      await put('lone', twin('3')),
+      await put('t2-b', twin('2')),
+      await put('t1-c', twin('1')),
+    ];
+    // Not asked about, another channel account, another kind, a record that is not there.
+    await put('t1-unasked', twin('1'));
+    const elsewhere = await put('t1-other', twin('1'), otherAccount);
+    const feedback = await clients.worker.ingest({
+      workspace_id: W,
+      kind: 'buyer_contact',
+      channel_account_id: account,
+      subject_type: 'conversation',
+      subject_id: 't1-conversation',
+      fields: twin('1'),
+    });
+    const [canary] = await raw(ownerPool, W, 'SELECT pii_ref FROM vault.records WHERE canary');
+    const asked = [...refs, elsewhere, feedback.pii_ref, String(canary?.pii_ref), randomUUID()];
+    const { groups } = await clients.worker.match({
+      workspace_id: W,
+      channel_account_id: account,
+      pii_refs: asked,
+    });
+    expect(groups.map((g) => [...g].sort()).sort((a, b) => b.length - a.length)).toEqual([
+      ['t1-a', 't1-b', 't1-c'],
+      ['t2-a', 't2-b'],
+    ]);
+    const log = await raw(
+      ownerPool,
+      W,
+      `SELECT caller, capability, purpose, pii_ref, result_count FROM vault.access_log
+        WHERE capability = 'match'`,
+    );
+    expect(log).toEqual([
+      {
+        caller: 'worker',
+        capability: 'match',
+        purpose: 'same_buyer',
+        pii_ref: null,
+        result_count: '5',
+      },
+    ]);
   });
 
   it('[DP-7] a purpose opens only the kinds it covers: a label never reads an eBay message', async () => {
@@ -426,8 +487,13 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       .readFull({ workspaceId: unknown, piiRef: ref, purpose: 'order_detail' })
       .catch((e: unknown) => e);
     expect((missing as VaultError).status).toBe(404);
-    const matched = await clients.web.match(unknown, ref).catch((e: unknown) => e);
-    expect((matched as VaultError).status).toBe(404);
+    expect(
+      await clients.web.match({
+        workspace_id: unknown,
+        channel_account_id: account,
+        pii_refs: [ref],
+      }),
+    ).toEqual({ groups: [] });
     expect(await raw(ownerPool, unknown, 'SELECT 1 FROM vault.workspace_keys')).toEqual([]);
     expect(await raw(ownerPool, unknown, 'SELECT 1 FROM vault.access_log')).toEqual([]);
   });
@@ -1323,7 +1389,14 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     const before = await raw(ownerPool, W, 'SELECT * FROM vault.records WHERE pii_ref = $1', [
       first.pii_ref,
     ]);
-    const match = async () => (await clients.worker.match(W, first.pii_ref)).subject_ids;
+    const match = async () =>
+      (
+        await clients.worker.match({
+          workspace_id: W,
+          channel_account_id: account,
+          pii_refs: [first.pii_ref, twin.pii_ref],
+        })
+      ).groups;
     expect(await match()).toEqual([]);
     expect(
       await clients.worker.replace({
@@ -1347,7 +1420,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(await found('NE1 1ST')).toEqual([]);
     expect((await found('NE9 9ZZ')).sort()).toEqual([first.pii_ref, twin.pii_ref].sort());
     // The same buyer and address now: the match key moved with it.
-    expect(await match()).toEqual([`${account}:R2`]);
+    expect(await match()).toEqual([[`${account}:R1`, `${account}:R2`]]);
     const after = await raw(ownerPool, W, 'SELECT * FROM vault.records WHERE pii_ref = $1', [
       first.pii_ref,
     ]);

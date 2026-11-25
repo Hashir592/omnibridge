@@ -1107,6 +1107,34 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await sweep.prepare(preparing('orders.orphan_sweep', {}))).orphans).toBe(0);
   });
 
+  it('[ORD-9] repeats of a group recompute collapse into one job that starts after they end', async () => {
+    const queued: { key: string; startAfter: Date | undefined }[] = [];
+    let at = new Date('2026-11-20T10:00:12Z');
+    const ports = orderIngestPorts(
+      {
+        send: (_def, input) => {
+          queued.push({ key: input.idempotencyKey, startAfter: input.startAfter });
+          return Promise.resolve({ id: randomUUID(), created: true });
+        },
+      },
+      { notifier, logger },
+      () => at,
+    );
+    const ctx = { workspaceId: ws, companyIds: [company] };
+    await ports.regroup(ctx, { channelAccountId: account });
+    at = new Date('2026-11-20T10:00:59.999Z');
+    await ports.regroup(ctx, { channelAccountId: account });
+    at = new Date('2026-11-20T10:01:00Z');
+    await ports.regroup(ctx, { channelAccountId: account });
+    await ports.regroup(ctx, { channelAccountId: randomUUID() });
+    const [a, b, c, d] = queued;
+    expect(b).toEqual(a);
+    expect(new Set([a?.key, c?.key, d?.key]).size).toBe(3);
+    // After every change that could share its key has committed.
+    expect(a?.startAfter?.getTime()).toBeGreaterThanOrEqual(Date.parse('2026-11-20T10:01:20Z'));
+    expect(a?.startAfter?.getTime()).toBeLessThanOrEqual(Date.parse('2026-11-20T10:03:00Z'));
+  });
+
   it('[ORD-9][AT-26] the regroup job asks the vault which orders share a buyer and links them (C3.2)', async () => {
     const same = {
       name: `${PII_MARKER}Gus Group`,
@@ -1122,7 +1150,25 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     await poll([a, b, other]);
     expect(sent.some((s) => s.type === 'orders.group_recompute')).toBe(true);
     const reads = new OrderReads(db.db);
-    const handler = ordersGroupRecomputeHandler({ tenancy, reads, vault: worker });
+    let calls = 0;
+    const counted = {
+      match: (req: Parameters<VaultClient['match']>[0]) => {
+        calls += 1;
+        return worker.match(req);
+      },
+    };
+    const logRows = async () =>
+      Number(
+        (
+          await piiRoot.query<{ n: string }>(
+            `SELECT count(*) AS n FROM vault.access_log
+              WHERE workspace_id = $1 AND capability = 'match'`,
+            [ws],
+          )
+        ).rows[0]?.n,
+      );
+    const logged = await logRows();
+    const handler = ordersGroupRecomputeHandler({ tenancy, reads, vault: counted });
     const recompute = {
       ...preparing('orders.group_recompute', {}),
       envelope: {
@@ -1135,6 +1181,13 @@ describe('order ingest across the PII boundary (T-1001)', () => {
       },
     };
     const classes = await handler.prepare(recompute);
+    // However many orders wait (dozens by now), one call and one access-log row.
+    expect(
+      (await tenancy.runWorkspace({ workspaceId: ws }, (c) => reads.groupCandidates(c, account)))
+        .length,
+    ).toBeGreaterThan(5);
+    expect(calls).toBe(1);
+    expect(await logRows()).toBe(logged + 1);
     // Order subjects only: the vault never hands back a key or a value.
     expect(JSON.stringify(classes)).not.toContain(PII_MARKER);
     await tenancy.runWorkspace({ workspaceId: ws }, (ctx) =>

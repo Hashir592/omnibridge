@@ -132,13 +132,12 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
   /** What the worker's orders.group_recompute job does: vault match, then db-main links. */
   const regroup = async (account: string) => {
     const candidates = await reads.groupCandidates(all(), account);
-    const classes = new Map<string, string>();
-    for (const c of candidates) {
-      if (classes.has(c.piiSubject)) continue;
-      classes.set(c.piiSubject, c.piiSubject);
-      const { subject_ids } = await clients.worker.match(A, c.piiRef);
-      for (const s of subject_ids) if (!classes.has(s)) classes.set(s, c.piiSubject);
-    }
+    const { groups } = await clients.worker.match({
+      workspace_id: A,
+      channel_account_id: account,
+      pii_refs: candidates.map((c) => c.piiRef),
+    });
+    const classes = new Map(groups.flatMap((g) => g.map((s) => [s, g[0] ?? s] as const)));
     await reads.applyGroups(all(), account, classes);
   };
 

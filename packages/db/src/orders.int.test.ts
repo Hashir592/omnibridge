@@ -46,8 +46,12 @@ describe('order ingest (T-1001)', () => {
       late.push({ listingId: input.listingId, masterSkuId: input.masterSkuId, key: input.key });
       return Promise.resolve();
     },
-    regroup: () => Promise.resolve(),
+    regroup: (_ctx, input) => {
+      regroups.push(input.channelAccountId);
+      return Promise.resolve();
+    },
   };
+  const regroups: string[] = [];
   const late: { listingId: string; masterSkuId: string; key: string }[] = [];
   const oversold: string[] = [];
   let ingest: OrderIngest;
@@ -1734,6 +1738,36 @@ describe('order ingest (T-1001)', () => {
         sql<object>`UPDATE app.order_lines SET line_gross_pence = 1 WHERE order_id = ${cancelled}::uuid`,
       ),
     ).rejects.toThrow(/write-once/);
+  });
+
+  it('[ORD-9] a group recompute is asked for only when an order enters or leaves the ones that can group', async () => {
+    const w = await world();
+    const asked = async (...orders: IncomingOrder[]) => {
+      regroups.length = 0;
+      await ingest.apply(w.ctx, w.account, orders);
+      return regroups.length;
+    };
+    const ref = { kind: 'stored' as const, piiRef: randomUUID() };
+    const o = order();
+    // One per call, however many new orders it stores.
+    expect(await asked(o, order())).toBe(1);
+    expect(await asked(next(o, 1, { pii: { kind: 'unchanged' } }))).toBe(0);
+    expect(await asked(next(o, 2, { pii: { kind: 'unchanged' }, rawStatus: 'OTHER' }))).toBe(0);
+    // The buyer's record was corrected.
+    expect(await asked(next(o, 3, { pii: { kind: 'replaced' } }))).toBe(1);
+    const gone = { state: 'dispatched' as const, dispatchedAt: clock };
+    expect(await asked(next(o, 4, { ...gone, pii: { kind: 'unchanged' } }))).toBe(1);
+    expect(await asked(next(o, 5, { ...gone, pii: { kind: 'replaced' } }))).toBe(0);
+    // First seen shipped, unpaid or without a buyer record: in no group, now or before.
+    expect(await asked(order(gone), pending(), order({ pii: { kind: 'none' } }))).toBe(0);
+    // Paid, then its record comes, then cancelled.
+    const late = pending();
+    await ingest.apply(w.ctx, w.account, [late]);
+    expect(await asked(next(late, 1, paid))).toBe(0);
+    expect(await asked(next(late, 2, { ...paid, pii: ref }))).toBe(1);
+    expect(await asked(next(late, 3, { ...paid, state: 'cancelled' }))).toBe(1);
+    // An FBA order is never grouped.
+    expect(await asked(order({ fba: true }))).toBe(0);
   });
 
   it('[ORD-3][INV-3] a channel that reports delivery without a dispatch time still dispatches the stock', async () => {
