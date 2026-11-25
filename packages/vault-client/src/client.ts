@@ -16,6 +16,7 @@ import {
   type EbayUserMatchRequest,
   type ExpiryRequest,
   type IngestRequest,
+  type MatchRequest,
   type ReadPurpose,
   type ReplaceRequest,
   type SearchPurpose,
@@ -136,8 +137,8 @@ export class VaultClient {
     return this.#post('/v1/signals', request, SignalsResponse);
   }
 
-  match(workspaceId: string, piiRef: string): Promise<MatchResponse> {
-    return this.#post('/v1/match', { workspace_id: workspaceId, pii_ref: piiRef }, MatchResponse);
+  match(request: MatchRequest): Promise<MatchResponse> {
+    return this.#post('/v1/match', request, MatchResponse);
   }
 
   async #post<S extends z.ZodType>(path: string, body: unknown, schema: S): Promise<z.infer<S>> {

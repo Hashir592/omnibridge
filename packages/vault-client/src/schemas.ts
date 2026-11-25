@@ -262,10 +262,22 @@ export const EbayUserMatchResponse = z
   .strict();
 export type EbayUserMatchResponse = z.infer<typeof EbayUserMatchResponse>;
 
-export const MatchRequest = z.object({ workspace_id: uuid, pii_ref: uuid }).strict();
+/** The most records one match call compares (the vault takes 256 KB a request). */
+export const MATCH_MAX = 5_000;
+/** ORD-9 (C3.2): one call per recompute, with all the records it asks about. */
+export const MatchRequest = z
+  .object({
+    workspace_id: uuid,
+    channel_account_id: uuid,
+    pii_refs: z.array(uuid).min(1).max(MATCH_MAX),
+  })
+  .strict();
 export type MatchRequest = z.infer<typeof MatchRequest>;
-/** ORD-9, ADR-055: the subject IDs of the same buyer on the same channel account. Nothing else. */
-export const MatchResponse = z.object({ subject_ids: z.array(z.string()) }).strict();
+/**
+ * ORD-9, ADR-055: the subject IDs, of the records asked about, that share a buyer and delivery
+ * address on that channel account; one list per buyer, two or more in each. Nothing else.
+ */
+export const MatchResponse = z.object({ groups: z.array(z.array(z.string()).min(2)) }).strict();
 export type MatchResponse = z.infer<typeof MatchResponse>;
 
 /**

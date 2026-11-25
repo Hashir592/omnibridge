@@ -16,6 +16,7 @@ import {
   type ExpiryRequest,
   type IngestRequest,
   type MaskResponse,
+  type MatchRequest,
   type MatchResponse,
   type ReadFullResponse,
   type RecordKind,
@@ -748,29 +749,29 @@ export class Vault {
   }
 
   /**
-   * ORD-9, ADR-055: the subject IDs of other records with the same buyer and delivery address on
-   * the same channel account. Never a value, never another channel account's record.
+   * ORD-9, ADR-055: which of these records share a buyer and delivery address, on one channel
+   * account. Subject IDs only, never a value, and never another channel account's record.
    */
-  async match(workspaceId: string, piiRef: string, actor: Actor): Promise<MatchResponse> {
-    return this.#tx(workspaceId, async (c) => {
-      await this.#record(c, workspaceId, piiRef);
-      const res = await c.query<{ subject_id: string }>(
-        `SELECT DISTINCT o.subject_id
+  async match(req: MatchRequest, actor: Actor): Promise<MatchResponse> {
+    return this.#tx(req.workspace_id, async (c, tx) => {
+      // A workspace with no keys holds no records: answer empty and write nothing (F-M04h-04).
+      if ((await this.#loadKeys(tx, req.workspace_id, false)) === undefined) return { groups: [] };
+      const res = await c.query<{ subjects: string[] }>(
+        `SELECT array_agg(DISTINCT r.subject_id ORDER BY r.subject_id) AS subjects
            FROM vault.records r
-           JOIN vault.blind_index rb ON rb.workspace_id = r.workspace_id AND rb.pii_ref = r.pii_ref
-                                    AND rb.field = 'match'
-           JOIN vault.blind_index ob ON ob.workspace_id = r.workspace_id AND ob.field = 'match'
-                                    AND ob.mac = rb.mac AND ob.pii_ref <> r.pii_ref
-           JOIN vault.records o ON o.workspace_id = ob.workspace_id AND o.pii_ref = ob.pii_ref
-          WHERE r.workspace_id = $1 AND r.pii_ref = $2
-            AND o.kind = r.kind AND o.subject_type = r.subject_type
-            AND o.channel_account_id IS NOT DISTINCT FROM r.channel_account_id
-            AND r.channel_account_id IS NOT NULL
-          ORDER BY o.subject_id`,
-        [workspaceId, piiRef],
+           JOIN vault.blind_index b ON b.workspace_id = r.workspace_id AND b.pii_ref = r.pii_ref
+                                   AND b.field = 'match'
+          WHERE r.workspace_id = $1 AND r.channel_account_id = $2
+            AND r.pii_ref = ANY($3::uuid[]) AND NOT r.canary
+          GROUP BY b.mac, r.kind, r.subject_type
+         HAVING count(DISTINCT r.subject_id) > 1
+          ORDER BY 1`,
+        [req.workspace_id, req.channel_account_id, req.pii_refs],
       );
-      await this.#log(c, workspaceId, actor, 'match', 'same_buyer', piiRef, res.rowCount ?? 0);
-      return { subject_ids: res.rows.map((r) => r.subject_id) };
+      const groups = res.rows.map((r) => r.subjects);
+      const count = groups.reduce((n, g) => n + g.length, 0);
+      await this.#log(c, req.workspace_id, actor, 'match', 'same_buyer', null, count);
+      return { groups };
     });
   }
 

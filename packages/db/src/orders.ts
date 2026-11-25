@@ -106,7 +106,10 @@ export interface OrderIngestPorts {
     ctx: TenantContext,
     input: { listingId: string; masterSkuId: string; key: string },
   ): Promise<void>;
-  /** ORD-9 (C3.2): the account's orders changed, so its same-buyer groups are recomputed. */
+  /**
+   * ORD-9 (C3.2): an order entered or left the ones that can group (awaiting dispatch, its buyer's
+   * record held, not FBA), or its buyer was corrected: the account's groups are recomputed.
+   */
   regroup(ctx: TenantContext, input: { channelAccountId: string }): Promise<void>;
 }
 
@@ -205,7 +208,12 @@ interface OrderRow {
   vat_recorded_at: Date | null;
   stock_moves: boolean;
   amounts_differ: AmountsDiffer[];
+  fba: boolean;
 }
+
+/** ORD-9 (C3.1): the orders a recompute considers (OrderReads.groupCandidates). */
+const canGroup = (o: Pick<OrderRow, 'status' | 'fba' | 'pii_ref' | 'pii_deleted_at'>): boolean =>
+  o.status === 'awaiting_dispatch' && !o.fba && o.pii_ref !== null && o.pii_deleted_at === null;
 
 interface LineRow {
   id: string;
@@ -232,7 +240,7 @@ const big = (v: string | number | bigint | null | undefined): bigint => BigInt(v
 const ORDER_COLUMNS = sql`id, company_id, status, raw_status, pii_subject, pii_ref, pii_deleted_at,
   paid_at, ship_by, dispatched_at, dispatch_estimated, delivered_at, cancelled_at, source_updated_at,
   to_char(tax_point_date, 'YYYY-MM-DD') AS tax_point_date, discount_pence, shipping_pence,
-  gross_pence, vat_recorded_at, stock_moves, amounts_differ`;
+  gross_pence, vat_recorded_at, stock_moves, amounts_differ, fba`;
 
 /** VAT-3 needs discount <= goods; a channel discount beyond the goods comes off the shipping. */
 function amountsOf(o: Pick<IncomingOrder, 'lines' | 'discount' | 'shipping'>) {
@@ -397,6 +405,7 @@ export class OrderIngest implements UnmappedDemand {
         SELECT default_vat_rate_bp AS rate FROM app.workspaces
          WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
       const defaultRate = Number(ws[0]?.rate ?? 2000);
+      let regroup = false;
       for (const order of orders) {
         const { rows } = await sql<OrderRow>`
           SELECT ${ORDER_COLUMNS} FROM app.orders
@@ -405,15 +414,19 @@ export class OrderIngest implements UnmappedDemand {
              AND external_order_id = ${order.externalId}
            FOR UPDATE`.execute(trx);
         const existing = rows[0];
+        let id = existing?.id;
         if (existing === undefined) {
-          await this.#create(trx, ctx, { id: channelAccountId, ...account }, defaultRate, order);
+          const account_ = { id: channelAccountId, ...account };
+          id = await this.#create(trx, ctx, account_, defaultRate, order);
         } else {
           await this.#update(trx, ctx, channelAccountId, defaultRate, existing, order);
         }
+        const before = existing !== undefined && canGroup(existing);
+        const after = canGroup(await this.#lock(trx, ctx, id ?? ''));
+        regroup ||= before !== after || (after && order.pii.kind === 'replaced');
       }
       await this.reportLateMapped(ctx, channelAccountId);
-      // ORD-9: new orders and status changes can make or break same-buyer groups.
-      await this.#ports.regroup(ctx, { channelAccountId });
+      if (regroup) await this.#ports.regroup(ctx, { channelAccountId });
       // TEN-3: the account's company is fixed once it has orders.
       await sql`UPDATE app.channel_accounts SET orders_seen_at = ${this.#now()}
                  WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${channelAccountId}::uuid
@@ -497,7 +510,7 @@ export class OrderIngest implements UnmappedDemand {
     account: Account,
     defaultRate: number,
     o: IncomingOrder,
-  ): Promise<void> {
+  ): Promise<string> {
     const now = this.#now();
     const id = randomUUID();
     const day = londonDate(o.placedAt);
@@ -582,6 +595,7 @@ export class OrderIngest implements UnmappedDemand {
 
     const order = await this.#lock(trx, ctx, id);
     await this.#settle(trx, ctx, order, o);
+    return id;
   }
 
   /**

@@ -68,12 +68,12 @@ export function sameBuyerGroups(
   };
   // Closest pairs first, so a "never again" pair keeps each order with its nearest neighbour.
   const pairs: [GroupCandidate, GroupCandidate][] = [];
-  for (let i = 0; i < candidates.length; i++) {
-    for (let j = i + 1; j < candidates.length; j++) {
-      const a = candidates[i];
-      const b = candidates[j];
-      if (a !== undefined && b !== undefined && ordersLink(a, b, options.graceHours, excluded)) {
-        pairs.push([a, b]);
+  const classes = new Map<string, GroupCandidate[]>();
+  for (const c of candidates) classes.set(c.matchClass, [...(classes.get(c.matchClass) ?? []), c]);
+  for (const same of classes.values()) {
+    for (const [i, a] of same.entries()) {
+      for (const b of same.slice(i + 1)) {
+        if (ordersLink(a, b, options.graceHours, excluded)) pairs.push([a, b]);
       }
     }
   }

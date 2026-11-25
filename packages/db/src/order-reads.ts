@@ -793,9 +793,7 @@ export class OrderReads {
   ): Promise<{ groups: number }> {
     const now = this.#now();
     return withTenantTransaction(this.#db, ctx, async (trx) => {
-      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`order-groups:${channelAccountId}`}, 0))`.execute(
-        trx,
-      );
+      await this.#lockAccount(trx, channelAccountId);
       const { rows: cands } = await sql<{
         id: string;
         placed_at: Date;
@@ -843,9 +841,8 @@ export class OrderReads {
         if (groupId !== null && usedIds.has(groupId)) groupId = null;
         if (groupId !== null) {
           const { rows: open } = await sql`SELECT 1 FROM app.order_groups
-             WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${groupId}::uuid AND state = 'open'`.execute(
-            trx,
-          );
+             WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${groupId}::uuid AND state = 'open'
+             FOR UPDATE`.execute(trx);
           if (open.length === 0) groupId = null;
         }
         if (groupId === null) {
@@ -870,6 +867,16 @@ export class OrderReads {
       await this.#closeSmall(trx, ctx, channelAccountId, now);
       return { groups: groups.length };
     });
+  }
+
+  /**
+   * Every change to an account's groups takes this lock first, so a recompute that has read the
+   * groups and the pairs kept apart never writes over what a person has just decided (C3.3).
+   */
+  async #lockAccount(trx: Transaction<MainDb>, channelAccountId: string): Promise<void> {
+    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`order-groups:${channelAccountId}`}, 0))`.execute(
+      trx,
+    );
   }
 
   async #closeSmall(
@@ -911,6 +918,11 @@ export class OrderReads {
   }
 
   async #lockGroup(trx: Transaction<MainDb>, ctx: TenantContext, groupId: string) {
+    const { rows: where } = await sql<{ channel_account_id: string }>`
+      SELECT channel_account_id FROM app.order_groups
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${groupId}::uuid`.execute(trx);
+    if (where[0] === undefined) throw new OrderGroupRefused('not_found');
+    await this.#lockAccount(trx, where[0].channel_account_id);
     const { rows } = await sql<{
       id: string;
       state: string;

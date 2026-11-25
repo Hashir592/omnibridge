@@ -5,7 +5,6 @@ import {
   type TenantContext,
   type TenantRunner,
 } from '@omnibridge/core';
-import { randomUUID } from 'node:crypto';
 import {
   effectiveDispatch,
   type Connection,
@@ -30,7 +29,7 @@ import {
   type SyncStreamName,
 } from '@omnibridge/queue';
 import { VaultError, type VaultClient } from '@omnibridge/vault-client';
-import { hasDeliveryAddress } from '@omnibridge/vault-client/schemas';
+import { hasDeliveryAddress, MATCH_MAX } from '@omnibridge/vault-client/schemas';
 import { sendMappingChanged } from './catalogue.ts';
 
 /*
@@ -49,6 +48,10 @@ export const PII_HARD_LIMIT_MS = 90 * DAY_MS;
  * sync job still retrying (its retries end well inside a day). Older ones with no order go.
  */
 const ORPHAN_GRACE_MS = DAY_MS;
+/** ORD-9: group recomputes asked for in one minute are one job. */
+const REGROUP_SLOT_MS = 60_000;
+/** Longer than a transaction that stores orders takes (one chunk of a poll). */
+const REGROUP_SETTLE_MS = 30_000;
 
 /**
  * DEL-1, PRD 7.3: when an order's buyer record must be gone, used at ingest and by the expiry job.
@@ -288,6 +291,7 @@ export function toIncoming(o: ChannelOrder): IncomingOrder {
 export function orderIngestPorts(
   queue: Pick<JobQueue, 'send'>,
   notices: { notifier: Pick<Notifier, 'raisePlatform'>; logger: Logger },
+  now: () => Date = () => new Date(),
 ): OrderIngestPorts {
   return {
     totalMismatch: async (ctx, input) => {
@@ -330,11 +334,14 @@ export function orderIngestPorts(
       });
     },
     regroup: async (ctx, input) => {
-      // One per sync page that stored orders; the job runs one account at a time.
+      // One per account and minute, run after that minute has ended and every transaction that
+      // shares its key has committed, so no change under the key is missed.
+      const slot = Math.floor(now().getTime() / REGROUP_SLOT_MS);
       await queue.send(ordersGroupRecomputeJob, {
         ctx,
         channelAccountId: input.channelAccountId,
-        idempotencyKey: `orders.group_recompute:${input.channelAccountId}:${randomUUID()}`,
+        idempotencyKey: `orders.group_recompute:${input.channelAccountId}:${String(slot)}`,
+        startAfter: new Date((slot + 1) * REGROUP_SLOT_MS + REGROUP_SETTLE_MS),
         payload: {},
       });
     },
@@ -359,15 +366,17 @@ export function ordersGroupRecomputeHandler(deps: {
       const candidates = await deps.tenancy.runWorkspace({ workspaceId }, (ctx) =>
         deps.reads.groupCandidates(ctx, accountId),
       );
-      // Match keys are exact, so "shares a key with" is a class: one vault call per buyer.
-      const classes = new Map<string, string>();
-      for (const c of candidates) {
-        if (classes.has(c.piiSubject)) continue;
-        classes.set(c.piiSubject, c.piiSubject);
-        const { subject_ids } = await deps.vault.match(workspaceId, c.piiRef);
-        for (const s of subject_ids) if (!classes.has(s)) classes.set(s, c.piiSubject);
-      }
-      return [...classes.entries()];
+      // Match keys are exact, so "shares a key with" is a class. One vault call for them all.
+      const newest = candidates.slice(-MATCH_MAX);
+      if (newest.length === 0) return [];
+      const { groups } = await deps.vault.match({
+        workspace_id: workspaceId,
+        channel_account_id: accountId,
+        pii_refs: newest.map((c) => c.piiRef),
+      });
+      return groups.flatMap((subjects) =>
+        subjects.map((s): [string, string] => [s, subjects[0] ?? s]),
+      );
     },
     commit: async (job, classes) => {
       const accountId = job.envelope.channel_account_id;
