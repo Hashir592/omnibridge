@@ -11,13 +11,16 @@ import {
   NotificationRepository,
   OrderIngest,
   OrderReads,
+  OutboundWriteRepository,
+  StockEngine,
   Tenancy,
   type MainDbHandle,
 } from '@omnibridge/db';
-import { Notifier } from '@omnibridge/core';
+import { Notifier, type TenantContext } from '@omnibridge/core';
+import { Secret } from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { parseEbayOrders } from '@omnibridge/provider-ebay';
-import type { ChannelOrder } from '@omnibridge/provider-kit';
+import { AccessTokenCache, runIncrementalSync, type ChannelOrder } from '@omnibridge/provider-kit';
 import { parseWebsiteOrders } from '@omnibridge/provider-website';
 import { JobQueue, JOBS, type PreparingJob } from '@omnibridge/queue';
 import {
@@ -1105,6 +1108,105 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     ).rows[0]?.n;
     expect(Number(kept)).toBeGreaterThan(0);
     expect((await sweep.prepare(preparing('orders.orphan_sweep', {}))).orphans).toBe(0);
+  });
+
+  it('[INV-4][CAP-5][NFR-3] a stock movement waits for one small transaction of a long poll, not for the poll', async () => {
+    const sku = `POLL-${randomUUID().slice(0, 8)}`;
+    const catalogue = new CatalogueRepository(db.db);
+    const inWs = <T>(fn: (c: TenantContext) => Promise<T>) =>
+      tenancy.runWorkspace({ workspaceId: ws }, fn);
+    const at = new Date();
+    const skuId = await inWs((c) =>
+      catalogue.createSku(
+        c,
+        { sku, title: 'Poll', shortDescription: 'p', weightG: 1, vatType: 'standard' },
+        null,
+        at,
+      ),
+    );
+    const listing = {
+      externalSku: sku,
+      externalId: `${sku}-id`,
+      title: null,
+      fulfilment: null,
+      inventoryApi: null,
+      quantity: null,
+    };
+    await inWs((c) => catalogue.upsertDiscovered(c, account, 'ebay', [listing], at));
+    const engine = new StockEngine(db.db, {
+      pushes: { enqueue: (c, input) => new OutboundWriteRepository(db.db).insert(c, input, at) },
+      notifier,
+    });
+    const withStock = new OrderIngest(db.db, {
+      catalogue,
+      stock: engine,
+      ports: orderIngestPorts(
+        { send: () => Promise.resolve({ id: randomUUID(), created: true }) },
+        { notifier, logger },
+      ),
+    });
+    const line = { lineId: 'L1', sku, quantity: 1, title: 'Poll', linePricePence: 100 };
+    const items = Array.from({ length: 75 }, () =>
+      channelOrder({ placedAt: new Date(), lines: [line], buyer: null }),
+    );
+    const base = orderIngestStream({ tenancy, ingest: withStock, vault: worker, logger });
+    const storedThen: number[] = [];
+    let moved: Promise<unknown> | undefined;
+    const unused = () => Promise.reject(new Error('not reached'));
+    const done = await runIncrementalSync<ChannelOrder>(
+      {
+        tenancy,
+        accounts: {
+          get: () => Promise.resolve({ provider: 'ebay', companyId: company, status: 'active' }),
+        },
+        credentials: { read: () => Promise.resolve(new Secret('synthetic')) },
+        cursors: {
+          get: () => Promise.resolve({ cursorAt: null, overlap: [] }),
+          save: () => Promise.resolve(),
+        },
+        health: {
+          recordSuccess: () => Promise.resolve({ reauthCleared: false }),
+          recordAuthFailure: unused,
+          recordError: unused,
+          recordCalls: () => Promise.resolve(),
+        },
+        notifier: { raise: unused, resolve: unused, raisePlatform: unused },
+        tokens: new AccessTokenCache(),
+      },
+      {
+        ...base,
+        stream: 'ebay.orders',
+        provider: 'ebay',
+        api: 'sell.fulfillment',
+        lookbackMs: DAY,
+        authenticate: () =>
+          Promise.resolve({ token: new Secret('t'), expiresAt: new Date(Date.now() + 60_000) }),
+        fetchPage: () => Promise.resolve({ items, next: undefined }),
+        // While the first part is open, someone books stock in on the same SKU.
+        sink: async (ctx, accountId, part) => {
+          await base.sink(ctx, accountId, part);
+          moved ??= inWs(async (c) => {
+            await engine.stockIn(c, skuId, { quantity: 5, clientRef: randomUUID(), userId: null });
+            const { rows } = await root.query<{ n: string }>(
+              'SELECT count(*) AS n FROM app.orders WHERE external_order_id = ANY ($1)',
+              [items.map((o) => o.externalId)],
+            );
+            storedThen.push(Number(rows[0]?.n));
+          });
+        },
+      },
+      job,
+    );
+    expect(done).toMatchObject({ fetched: 75, fresh: 75 });
+    await moved;
+    // It went in between two of them, well before the poll had stored everything.
+    expect(storedThen[0]).toBeGreaterThanOrEqual(25);
+    expect(storedThen[0]).toBeLessThan(75);
+    const { rows } = await root.query<{ on_hand: string; reserved: string }>(
+      'SELECT on_hand, reserved FROM app.stock_levels WHERE master_sku_id = $1',
+      [skuId],
+    );
+    expect(rows).toEqual([{ on_hand: '5', reserved: '75' }]);
   });
 
   it('[ORD-9] repeats of a group recompute collapse into one job that starts after they end', async () => {

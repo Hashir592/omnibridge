@@ -226,6 +226,31 @@ describe('sync.poll: job, governor, parser and cursor against the eBay mock (INT
     expect(lines.join('\n')).toContain('"fieldPath":"orderTotal"');
   });
 
+  it('[INT-8] a run that failed after storing a part is no success of its stream', async () => {
+    const cursors = new SyncCursorRepository(db.db);
+    const at = (minute: number) => new Date(Date.UTC(2026, 10, 21, 12, minute));
+    const state = { cursorAt: null, overlap: [{ id: 'A', at: at(0).toISOString() }] };
+    const row = async () =>
+      (
+        await root.query<{ last_run_at: Date; last_success_at: Date | null; overlap: unknown[] }>(
+          `SELECT last_run_at, last_success_at, overlap FROM app.sync_cursors
+            WHERE channel_account_id = $1 AND stream = 'website.orders'`,
+          [account],
+        )
+      ).rows[0];
+    const save = (minute: number, options?: { failed: true }) =>
+      inA((c) => cursors.save(c, account, 'website.orders', state, at(minute), options));
+    await save(1, { failed: true });
+    expect(await row()).toEqual({
+      last_run_at: at(1),
+      last_success_at: null,
+      overlap: state.overlap,
+    });
+    await save(2);
+    await save(3, { failed: true });
+    expect(await row()).toMatchObject({ last_run_at: at(3), last_success_at: at(2) });
+  });
+
   it('[INT-4] a revoked eBay token marks the account and raises one critical notice; a success after re-auth resolves it', async () => {
     scenarios.set('ebay', refresh, 'revoked');
     ports.tokens.invalidate(account);

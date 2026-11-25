@@ -1044,6 +1044,203 @@ describe('order ingest (T-1001)', () => {
     expect(await level(w, w.zero)).toEqual({ on_hand: '8', reserved: '0' });
   });
 
+  // ---- F-M10-end-10 and -20: one lock order ------------------------------------------------------
+
+  /** The mapping event as the worker runs it: both listeners in one transaction. */
+  const eventTx = (w: World, change: { listingId: string; masterSkuId: string }) =>
+    new Tenancy(db).runWorkspace({ workspaceId: w.ctx.workspaceId }, async (ctx) => {
+      await stock.onListingMapped(ctx, { ...change, previousMasterSkuId: null });
+      return ingest.fillSnapshots(ctx, change.listingId);
+    });
+  /** One page, in a transaction of its own, as the worker stores it. */
+  const pageTx = (w: World, account: string, orders: IncomingOrder[]) =>
+    new Tenancy(db).runWorkspace({ workspaceId: w.ctx.workspaceId }, (ctx) =>
+      ingest.apply(ctx, account, orders),
+    );
+  const failures = async (runs: Promise<unknown>[]) =>
+    (await Promise.allSettled(runs)).flatMap((r) =>
+      r.status === 'rejected' ? [(r.reason as { code?: string }).code ?? String(r.reason)] : [],
+    );
+  const newItem = (over: Partial<IncomingOrder> = {}) =>
+    order({
+      lines: [{ lineId: 'L1', sku: 'NEW-ITEM', quantity: 1, title: null, linePrice: p(1200) }],
+      shipping: p(0),
+      ...over,
+    });
+  /** `orders`, stored, sorted by the id db-main gave them. */
+  const byId = async (w: World, orders: IncomingOrder[]) => {
+    await ingest.apply(w.ctx, w.account, orders);
+    const ids = new Map<string, string>();
+    for (const o of orders) ids.set(o.externalId, String((await orderRow(w, o.externalId))?.id));
+    return [...orders].sort((a, b) =>
+      (ids.get(a.externalId) ?? '') < (ids.get(b.externalId) ?? '') ? -1 : 1,
+    );
+  };
+
+  it('[INV-4][CAT-6] a mapping event and a page never deadlock: four open orders in falling id order', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 8; run += 1) {
+      const w = await world();
+      const open = await byId(
+        w,
+        Array.from({ length: 4 }, () => newItem()),
+      );
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+      const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+      seen.push(
+        ...(await failures([
+          pageTx(w, w.account, [...open].reverse().map(shippedOn)),
+          eventTx(w, change),
+        ])),
+      );
+      expect(await level(w, w.zero)).toEqual({ on_hand: '6', reserved: '0' });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAT-6] a mapping event and a page never deadlock: a new sale, then four open orders in rising id order', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 8; run += 1) {
+      const w = await world();
+      const open = await byId(
+        w,
+        Array.from({ length: 4 }, () => newItem()),
+      );
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+      const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+      seen.push(
+        ...(await failures([
+          pageTx(w, w.account, [newItem(), ...open.map(shippedOn)]),
+          eventTx(w, change),
+        ])),
+      );
+      expect(await level(w, w.zero)).toEqual({ on_hand: '6', reserved: '1' });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAT-6] a mapping event and a page never deadlock: five new sales', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 12; run += 1) {
+      const w = await world();
+      await ingest.apply(w.ctx, w.account, [newItem()]);
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+      const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+      seen.push(
+        ...(await failures([
+          pageTx(
+            w,
+            w.account,
+            Array.from({ length: 5 }, () => newItem()),
+          ),
+          eventTx(w, change),
+        ])),
+      );
+      // A line stored while the event ran is reported by the next page, and then moves too.
+      await eventTx(w, change);
+      expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '6' });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAT-6] a mapping event and a page never deadlock: shipped orders that were never priced', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 8; run += 1) {
+      const w = await world();
+      const all = await byId(
+        w,
+        Array.from({ length: 6 }, () => newItem()),
+      );
+      // Every other one shipped before the mapping; a page touches them all again, falling.
+      await ingest.apply(w.ctx, w.account, all.filter((_, i) => i % 2 === 0).map(shippedOn));
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+      const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+      const later = (o: IncomingOrder): IncomingOrder => ({
+        ...o,
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+      });
+      seen.push(
+        ...(await failures([
+          pageTx(
+            w,
+            w.account,
+            [...all].reverse().map((o) => later(shippedOn(o))),
+          ),
+          eventTx(w, change),
+        ])),
+      );
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAP-5] two accounts that sell the same SKUs in opposite order never deadlock', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 8; run += 1) {
+      const w = await world();
+      const other = randomUUID();
+      await withTenantTransaction(db, w.ctx, async (trx) => {
+        await trx
+          .insertInto('app.channel_accounts')
+          .values({
+            id: other,
+            workspace_id: w.ctx.workspaceId,
+            company_id: w.company,
+            provider: 'website',
+            display_name: 'site',
+          })
+          .execute();
+        await sql`UPDATE app.channel_accounts SET created_at = '2026-11-01T00:00:00Z'
+                   WHERE id = ${other}::uuid`.execute(trx);
+      });
+      await catalogue.upsertDiscovered(
+        w.ctx,
+        other,
+        'website',
+        ['STD-1', 'ZERO-1'].map((code) => ({
+          externalSku: code,
+          externalId: `${code}-w`,
+          title: null,
+          fulfilment: null,
+          inventoryApi: null,
+          quantity: null,
+        })),
+        clock,
+      );
+      const sale = (sku: string) =>
+        order({
+          lines: [{ lineId: 'L1', sku, quantity: 1, title: null, linePrice: p(1200) }],
+        });
+      seen.push(
+        ...(await failures([
+          pageTx(w, w.account, [sale('STD-1'), sale('STD-1'), sale('ZERO-1')]),
+          pageTx(w, other, [sale('ZERO-1'), sale('ZERO-1'), sale('STD-1')]),
+        ])),
+      );
+      expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '3' });
+      expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '3' });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAP-5] a page that moves no stock never makes a stock movement wait', async () => {
+    const w = await world();
+    const old = {
+      placedAt: new Date('2026-10-20T08:00:00Z'),
+      updatedAt: new Date('2026-10-20T09:00:00Z'),
+    };
+    // History from before the account, and a repeat of an order that is stored already.
+    const known = order();
+    await ingest.apply(w.ctx, w.account, [known]);
+    await new Tenancy(db).runWorkspace({ workspaceId: w.ctx.workspaceId }, async (ctx) => {
+      await ingest.apply(ctx, w.account, [order(old), order(old), known]);
+      const moved = stock
+        .stockIn(w.ctx, w.std, { quantity: 1, clientRef: randomUUID(), userId: null })
+        .then(() => 'moved');
+      const late = new Promise<string>((r) => setTimeout(r, 3000, 'waited'));
+      expect(await Promise.race([moved, late])).toBe('moved');
+    });
+  });
+
   it('[CAT-6] a listing matched while an order was being stored is reported by the next page, once per set of lines', async () => {
     const w = await world();
     const sku = await lateItem(w);

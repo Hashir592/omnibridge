@@ -198,6 +198,172 @@ describe('incremental sync: job, governor, parser and cursor (INT-1, INT-5, INT-
     expect(fetched).toBe(false);
   });
 
+  // ---- F-M10-end-10: short transactions, the cursor after the last one ---------------------------
+
+  const many = (n: number, at = '2026-11-21T11:00:00.000Z'): Item[] =>
+    Array.from({ length: n }, (_, i) => ({
+      externalId: `N${String(i).padStart(5, '0')}`,
+      updatedAt: new Date(Date.parse(at) + i),
+    }));
+  /** Ports that note what each transaction did, in order. */
+  const noted = (h: ReturnType<typeof harness>) => {
+    const log: string[] = [];
+    let open = 0;
+    const { runWorkspace } = h.ports.tenancy;
+    h.ports.tenancy = {
+      runWorkspace: async (actor, fn) => {
+        open += 1;
+        try {
+          return await runWorkspace(actor, fn);
+        } finally {
+          open -= 1;
+        }
+      },
+    };
+    const cursors = h.ports.cursors;
+    const save: typeof cursors.save = (...args) => kept.save(...args);
+    const kept = { ...cursors };
+    h.ports.cursors = {
+      ...cursors,
+      save: (ctx, a, s, next, at) => {
+        log.push(next.cursorAt === null ? 'save:same' : `save:${next.cursorAt.toISOString()}`);
+        return save(ctx, a, s, next, at);
+      },
+    };
+    return { log, open: () => open };
+  };
+
+  it('[INT-8][CAP-5] a run is stored in short transactions, each prepared just before it; the cursor moves after the last', async () => {
+    const h = harness(new Date('2026-11-21T12:00:00.000Z'));
+    const { log, open } = noted(h);
+    const s: SyncStream<Item> = {
+      ...stream(() => many(120), []),
+      prepare: (_job, items) => {
+        expect(open()).toBe(0);
+        log.push(`prepare:${String(items.length)}`);
+        return Promise.resolve(items);
+      },
+      sink: (_ctx, _account, items) => {
+        expect(open()).toBe(1);
+        log.push(`sink:${String(items.length)}:${items[0]?.externalId ?? ''}`);
+        return Promise.resolve();
+      },
+    };
+    expect(await runIncrementalSync(h.ports, s, job)).toMatchObject({ fetched: 120, fresh: 120 });
+    const chunks = log.filter((l) => l.startsWith('sink'));
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+    for (const c of chunks) expect(Number(c.split(':')[1])).toBeLessThanOrEqual(50);
+    for (const c of chunks.slice(0, -1)) expect(Number(c.split(':')[1])).toBeGreaterThanOrEqual(25);
+    expect(chunks.map((c) => Number(c.split(':')[1])).reduce((a, b) => a + b, 0)).toBe(120);
+    // prepare, sink, prepare, sink, … and one cursor, with the last.
+    expect(log.map((l) => l.split(':')[0])).toEqual([
+      ...chunks.flatMap(() => ['prepare', 'sink']),
+      'save',
+    ]);
+    expect(log.at(-1)).toBe('save:2026-11-21T11:00:00.119Z');
+    expect(h.health.successes).toBe(1);
+    // A run with nothing new still saves its cursor and its health, in one transaction.
+    log.length = 0;
+    await runIncrementalSync(h.ports, s, job);
+    expect(log).toEqual(['save:2026-11-21T11:00:00.119Z']);
+    expect(h.health.successes).toBe(2);
+  });
+
+  it('[INT-8][CAP-6] a run that comes near its job expiry stops, and the next goes on from what is stored', async () => {
+    let at = Date.parse('2026-11-21T12:00:00.000Z');
+    const h = harness(new Date(at));
+    h.ports.now = () => new Date(at);
+    const stored: string[] = [];
+    let perChunk = 200_000;
+    const s: SyncStream<Item> = {
+      ...stream(() => many(400), []),
+      sink: (_ctx, _account, items) => {
+        stored.push(...items.map((i) => i.externalId));
+        at += perChunk;
+        return Promise.resolve();
+      },
+    };
+    const first = await runIncrementalSync(h.ports, s, job);
+    expect(first).toMatchObject({ more: true });
+    // Never near the 600 s at which the job expires, and something was stored.
+    expect(at - Date.parse('2026-11-21T12:00:00.000Z')).toBeLessThanOrEqual(800_000);
+    expect(stored.length).toBeGreaterThan(0);
+    expect(stored.length).toBeLessThan(400);
+    // The cursor has not moved: nothing unread is skipped.
+    expect(h.cursor().cursorAt).toBeNull();
+    const done = stored.length;
+    for (let i = 0; i < 20 && h.cursor().cursorAt === null; i += 1) {
+      await runIncrementalSync(h.ports, s, job);
+    }
+    expect(stored.slice(0, done + 1)).toEqual(
+      many(400)
+        .slice(0, done + 1)
+        .map((i) => i.externalId),
+    );
+    expect(stored).toHaveLength(400);
+    expect(new Set(stored).size).toBe(400);
+    expect(h.cursor().cursorAt).toEqual(new Date('2026-11-21T11:00:00.399Z'));
+    perChunk = 0;
+  });
+
+  it('[INT-8] a run that fails part way keeps what it stored, and does not store it again', async () => {
+    const h = harness(new Date('2026-11-21T12:00:00.000Z'));
+    const stored: string[] = [];
+    let broken = true;
+    const s: SyncStream<Item> = {
+      ...stream(() => many(120), []),
+      sink: (_ctx, _account, items) => {
+        if (broken && items.some((i) => i.externalId === 'N00100')) {
+          return Promise.reject(new Error('a bad order'));
+        }
+        stored.push(...items.map((i) => i.externalId));
+        return Promise.resolve();
+      },
+    };
+    await expect(runIncrementalSync(h.ports, s, job)).rejects.toThrow('a bad order');
+    const kept = stored.length;
+    expect(kept).toBeGreaterThanOrEqual(75);
+    expect(h.cursor().cursorAt).toBeNull();
+    expect(h.health.successes).toBe(0);
+    broken = false;
+    await runIncrementalSync(h.ports, s, job);
+    expect(stored).toHaveLength(120);
+    expect(new Set(stored).size).toBe(120);
+    expect(h.cursor().cursorAt).toEqual(new Date('2026-11-21T11:00:00.119Z'));
+  });
+
+  it('[INT-8][CAP-6] slow pages stop the reading in time to store them, and the next run reads on', async () => {
+    let at = Date.parse('2026-11-21T12:00:00.000Z');
+    const h = harness(new Date(at));
+    h.ports.now = () => new Date(at);
+    const stored: string[] = [];
+    const all = many(300);
+    const asked: (string | undefined)[] = [];
+    const s: SyncStream<Item> = {
+      ...stream(() => [], []),
+      fetchPage: (_token, _since, page) => {
+        at += 70_000;
+        asked.push(page);
+        const n = page === undefined ? 0 : Number(page);
+        const items = all.slice(n * 30, (n + 1) * 30);
+        return Promise.resolve({ items, next: n < 9 ? String(n + 1) : undefined });
+      },
+      sink: (_ctx, _account, items) => {
+        stored.push(...items.map((i) => i.externalId));
+        return Promise.resolve();
+      },
+    };
+    expect(await runIncrementalSync(h.ports, s, job)).toMatchObject({ more: true });
+    expect(asked.length).toBeLessThan(7);
+    expect(stored).toHaveLength(asked.length * 30);
+    expect(h.cursor().resume?.page).toBe(String(asked.length));
+    for (let i = 0; i < 10 && h.cursor().cursorAt === null; i += 1) {
+      await runIncrementalSync(h.ports, s, job);
+    }
+    expect(stored).toEqual(all.map((i) => i.externalId));
+    expect(asked).toEqual([undefined, '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  });
+
   it('[INT-2] every provider call passes the governor first', async () => {
     const h = harness(new Date('2026-11-21T12:00:00.000Z'));
     const order: string[] = [];

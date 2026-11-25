@@ -240,6 +240,28 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
     expect(await groups(w, 'closed')).toEqual([]);
   });
 
+  it('[ORD-9][INV-4] a page of orders and a recompute, dismissal or removal of their groups never deadlock', async () => {
+    const seen: unknown[] = [];
+    for (let run = 0; run < 6; run += 1) {
+      const w = await world();
+      const { classes, orders, ids } = await sameBuyer(w, 12);
+      await reads.applyGroups(w.ctx, w.account, classes);
+      const [groupId = ''] = await groupIds(w);
+      const gone = [...orders]
+        .reverse()
+        .map((o): IncomingOrder => ({ ...o, rawStatus: 'SEEN', updatedAt: now }));
+      const act = [
+        () => reads.dismissGroup(w.ctx, groupId ?? ''),
+        () => reads.removeMember(w.ctx, groupId ?? '', ids[0] ?? ''),
+        () => reads.applyGroups(w.ctx, w.account, new Map()),
+      ][run % 3];
+      const done = await Promise.allSettled([ingest.apply(w.ctx, w.account, gone), act?.()]);
+      for (const d of done)
+        if (d.status === 'rejected') seen.push((d.reason as { code?: string }).code);
+    }
+    expect(seen).toEqual([]);
+  });
+
   it('[ORD-9] a recompute never waits for, or stops, the actions of another account', async () => {
     const w = await world();
     const { classes } = await sameBuyer(w, 2);
