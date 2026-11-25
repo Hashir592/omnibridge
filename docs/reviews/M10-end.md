@@ -6,7 +6,7 @@ Local: `verify.sh --quick` PASS (333 s; a first run had one 5 s unit timeout, `w
 Probes: about 20 ad-hoc tests on bd1741d; the later commit 0f3c393 changes only the testkit and the end report. Tests-can-fail check: 123 planted faults on 0f3c393. None of it is committed.
 Acceptance re-run: 22/24 PASS (table at the end).
 
-Verdict: **BLOCKED**. Found: Blockers 3, Majors 8, Minors 10. **Open on main ecb1834: Blockers 1 (F-01), Majors 7 (F-05 to F-11), Minors 9.** Fixed by #160: F-02, F-03, F-04, F-16. Every earlier Major is resolved and verified. M09 has no open finding of its own; the one M09 gap (Oversold on back-fill) is inside F-M10-end-01.
+Verdict: **BLOCKED**. Found: Blockers 3, Majors 9, Minors 11. **Open on main 32c8f7a: Blockers 0, Majors 8 (F-05 to F-11, F-22), Minors 10.** Fixed by #160: F-02, F-03, F-04, F-16. Fixed by #164: F-01. Every earlier Major is resolved and verified. M09 has no open finding of its own; the one M09 gap (Oversold on back-fill) is inside F-M10-end-01.
 
 As S3 asked on 24 Nov, its halfway check and its two `/code-review` runs are not counted as independent looks at T-1001.
 
@@ -30,6 +30,29 @@ As S3 asked on 24 Nov, its halfway check and its two `/code-review` runs are not
 | F-12 to F-21 | F-16 fixed (deliveryDiscount read, totals compared). F-12, F-13, F-14, F-15 and F-17 reproduced again. F-18 to F-21 not re-run. |
 
 I checked #160 only against these findings. It is not an independent review of the rest of #160 (its own review was by the session that wrote it); S5 checks it.
+
+## Update: #164, F-01 only (main 32c8f7a, CI green, run 45609666835)
+
+Own probes on real PostgreSQL, each store and each event in its own transaction as the worker runs them (both listeners in one). `verify.sh --quick` PASS (302 s). 7 integration files, 109/109 PASS (db orders, stock, catalogue, migrate; worker orders, discovery, stock).
+
+**F-01 is resolved.**
+
+| Check | Result |
+|---|---|
+| My probe: order, discovery, manual mapping, event, dispatch | PASS. `filled: 1`, reserved 2, then on hand 8 and reserved 0. Ledger `rate:2000` £0.00, `zero:zero` £12.00. |
+| Automatic mapping | PASS |
+| Dispatched before discovery or mapping | PASS for a line with no listing yet. A line whose listing is already known: **F-22**. |
+| Oversold on back-fill (50 on a stock of 10) | PASS. Line and order flagged, one notice after two events. |
+| Two lines of one code on a mixed order, refunded before mapping | PASS. `rate:2000` £13.20 / £2.20, `zero:zero` £13.80. |
+| Three events of one listing at once, 8 runs | PASS. No deadlock, nothing moved twice. |
+| Race: order stored while its listing is matched | PASS |
+| Race: dispatch stored while its listing is mapped | PASS for a line with no listing; fails for a linked line dispatched after the mapping commits and before its event (F-22). S3's test sets `listing_id` to NULL first. |
+| 40 random runs (store, dispatch, cancel against map and event), 240 lines | No listing before: 120 of 120 right. Listing known: 7 of 120 wrong, all F-22. |
+| Lock order, stock before the listing on the mapping side | PASS |
+| Lock order, a page of several orders | FAIL, see F-10. Retried, nothing lost. |
+| Time at 100,000 lines, 20,000 provisional | PASS. Each new query under 100 ms. |
+| 0053 | Expand only, concurrent, no waiver. |
+| 13 planted faults of my own | 12 caught. Removing the lock on linked lines (the first branch of `lockOrders`) passes unnoticed: F-22. |
 
 ## Earlier fixes
 
@@ -79,7 +102,7 @@ Required fix:
 - A line reserved by the back-fill that takes available below 0 sets the line and order Oversold flags and raises the notice (INV-6). Probe: 50 units back-filled on a stock of 10 left reserved 50, `oversold` false. `onListingMapped` calls `#move` directly and checks nothing.
 - Tests citing `[CAT-6]`: order first, discovery after, manual and auto mapping, dispatched before mapping, and oversold on back-fill.
 
-Resolution: fixed in the F-01 PR (branch `task/T-1001-late-lines`). Mapping links the provisional lines of its channel account and external SKU (index 0053) and back-fills and fills them; the orders are locked before stock, so a dispatch being stored at that moment is not lost. A line that missed its event (stored while the event ran) has it sent again by the account's next page and by the nightly scan. A back-fill below 0 flags the line and the order and raises Oversold; an order already shipped is not flagged. Tests in `orders.int.test.ts` (db and worker) and `discovery.int.test.ts`, seen red first except the guards; 24 planted faults, all caught on the final code.
+Resolution: fixed in the F-01 PR (branch `task/T-1001-late-lines`). Mapping links the provisional lines of its channel account and external SKU (index 0053) and back-fills and fills them; the orders are locked before stock, so a dispatch being stored at that moment is not lost. A line that missed its event (stored while the event ran) has it sent again by the account's next page and by the nightly scan. A back-fill below 0 flags the line and the order and raises Oversold; an order already shipped is not flagged. Tests in `orders.int.test.ts` (db and worker) and `discovery.int.test.ts`, seen red first except the guards; 24 planted faults, all caught on the final code. **Confirmed by S4 on main 32c8f7a (see Update: #164).**
 
 ## F-M10-end-02 — Blocker — A refund with line detail gives VAT back only on the line amounts
 Area: Correctness  IDs: VAT-5, FIN-1
@@ -195,6 +218,19 @@ Evidence:
 
 Required fix: store a run in short transactions (for example 25 to 50 orders), with the cursor moved only after the last. Within one, lock the stock rows in component id order first. Use `FOR NO KEY UPDATE` on listings if the reading above is right. Stop before the job expiry and resume. Tests: the opposite-order case, and that a stock movement on a SKU waits only for one chunk.
 
+Added 25 Nov 2026 (#164, main 32c8f7a). `lockOrders` takes all of a listing's open orders before the stock rows, while a page takes order, stock, order, stock. Deadlocks (40P01) in 12 runs each, every one retried after 20 to 80 ms:
+
+| Mapping event against one page | ecb1834 | 32c8f7a |
+|---|---|---|
+| 4 open orders updated in falling id order | 2 | 24 |
+| A new sale of the SKU, then 4 open orders in rising id order | 2 | 12 |
+| 5 new sales of the SKU | 5 | 4 |
+
+- The second row shows that sorting the orders is not enough: the page must not hold a stock row when it asks for an order.
+- The third row fits the key-share reading above, now checked: while a page that stored a line is open, its listing is `55P03` for `FOR UPDATE NOWAIT` and free for `FOR NO KEY UPDATE NOWAIT`. S3's test for it plays the sale by taking the stock row first; a real sale inserts its line (key share) first.
+
+Required as well: in each chunk, lock the existing orders in id order, then the stock rows in component id order, then store. Listings `FOR NO KEY UPDATE`. Tests: the three rows above through the real `apply`, with no 40P01. F-20 closes with this.
+
 Resolution: (S3)
 
 ## F-M10-end-11 — Major — Tests for money, snapshots, deletion and scoping that do not fail when the code is broken
@@ -224,6 +260,25 @@ The other 19 (R03, R04, R06 to R11, R15, R17, G02, G09, G10, G17 to G19, G21, G2
 
 Resolution: (S3)
 
+## F-M10-end-22 — Major — A dispatch between a mapping and its event leaves stock reserved for ever
+Area: Correctness, Invariants  IDs: INV-3, INV-1, CAT-6
+
+Found while checking #164. It was there before (same result on ecb1834); my earlier reviews missed it.
+
+Evidence:
+- `onListingMapped` (`packages/db/src/stock.ts`) reserves every open line, then calls `dispatch` for a line already shipped. If that line's dispatch movement already exists, the reserve still applies and the dispatch is a repeat that does nothing.
+- Probe: order of 2 on a known, unmapped listing; map it; store the dispatch before the event runs; run the event. Result: on hand 8, **reserved 2**; right is 8 and 0. A second event changes nothing, and no hand movement can lower `reserved`.
+- 40 random runs with at most 60 ms between mapping and event: 7 of 120 lines on a known listing.
+
+Failure: available stays too low for ever, so every listing of the SKU is pushed too few units. Never an oversell, so Major. The window is the time from the mapping's commit to its event: short for one mapping, longer when a first scan maps many listings at once or the queue is behind. By reading, it is also open for a line that missed its event, until the event is sent again.
+
+Required fix: the back-fill reserves only lines still to ship; a shipped line takes `dispatch` alone, which already moves on hand only when nothing is reserved. (Tried in my copy: the probes and the random runs give 0 wrong, and db orders and stock pass 66/66.)
+Tests citing `[INV-3][CAT-6]`, red first:
+- a linked line dispatched between the mapping and its event, with the event run twice;
+- the existing "dispatch stored while the listing is being mapped" test for a linked line, with the sync transaction storing the dispatch before the mapping commits. It must fail when the first branch of `lockOrders` is removed.
+
+Resolution: (S3)
+
 ## Minors (follow-ups)
 
 - **F-M10-end-12** (ORD-9, C3.1 point 3): an order with an open cancellation request (`CANCEL_REQUESTED`, `IN_PROGRESS`, `CANCEL_PENDING`) maps to Awaiting dispatch and groups. Keep the flag and exclude it; fix before M12's Ship together.
@@ -236,6 +291,7 @@ Resolution: (S3)
 - **F-M10-end-19** (FA-10): a repeat ingest of an orphan returns the old record with its old (perhaps already expired) `delete_after`. By reading only.
 - **F-M10-end-20** (INV-4): lock order differs between mapping (stock row, then order) and an order update (order, then stock row). By reading only; a deadlock there is retried.
 - **F-M10-end-21** (ADR-080, CLAUDE.md): tests-first was not followed for most of T-1001 and T-1002, as S3 reported itself. For S1.
+- **F-M10-end-23** (INV-9): a line on an FBA listing moves the seller's own stock, at ingest and on back-fill (S3's note in #164; by reading only). Not reachable before M18. S1 to place there.
 
 ## Acceptance
 
@@ -269,4 +325,4 @@ Resolution: (S3)
 
 The two FAILs are the same fact. I grade it Major, not Blocker: the order cannot be redone, and F-11 asks for the red runs that tests-first would have given. S1 may rule otherwise.
 
-Resolution rule (ADR-077): Blocker F-01 at once, in its own PR; Majors F-05 to F-11 in the first commits of S3's next task. The next S4 review confirms them, and M10 stays BLOCKED until then.
+Resolution rule (ADR-077): Blocker F-01 at once, in its own PR (done, #164); Majors F-05 to F-11 as ADR-081 places them; F-22 in the first commits of S3's next task. The next S4 review confirms them, and M10 stays BLOCKED until then.
