@@ -430,6 +430,34 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await expiryJob(early.externalId))?.getTime()).toBe(shown.getTime() + 25 * DAY);
   });
 
+  it('[DEL-1][ORD-4] an order seen unpaid first, then shipped, counts from the update that shows it shipped', async () => {
+    const base = { creationDate: daysAgo(40).toISOString() };
+    const [unpaid] = ebayOrders({ ...base, orderPaymentStatus: 'PENDING', ...shipTo(fullAddress) });
+    if (unpaid === undefined) throw new Error('no order');
+    await poll([unpaid]);
+    const shown = daysAgo(1);
+    const [shipped] = ebayOrders({
+      ...base,
+      orderId: unpaid.externalId,
+      orderFulfillmentStatus: 'FULFILLED',
+      lastModifiedDate: shown.toISOString(),
+      ...shipTo(fullAddress),
+    });
+    if (shipped === undefined) throw new Error('no order');
+    await poll([shipped]);
+    const [record] = await vaultRows(`${account}:${unpaid.externalId}`);
+    expect(record?.delete_after.getTime()).toBe(shown.getTime() + 25 * DAY);
+  });
+
+  it('[ORD-4] an address with no country counts as a UK one: without a postcode it is not whole', async () => {
+    const [o] = ebayOrders({
+      ...shipTo({ addressLine1: `${PII_MARKER}1 Nowhere`, city: 'Testville' }),
+    });
+    if (o === undefined) throw new Error('no order');
+    await poll([o]);
+    expect(await vaultRows(`${account}:${o.externalId}`)).toEqual([]);
+  });
+
   it('[DEL-1][AT-8] a real but late dispatch or delivery is still capped at placement + 90 days', async () => {
     const placed = daysAgo(80);
     const [o] = websiteOrders({
