@@ -41,6 +41,16 @@
 
 4. **Restore db-pii** the same way, with `db-pii`, the `pii` repository (tag `db-pii`, file `/db-pii.dump`) and the database `omnibridge_pii`.
 
+   Then bring both restored databases to the running release's schema, before step 5 (a copy from before the last migration makes the replay fail loudly). Keep the apps stopped:
+
+   ```bash
+   "${COMPOSE[@]}" run --rm migrate-main
+   ```
+
+   ```bash
+   "${COMPOSE[@]}" run --rm migrate-pii
+   ```
+
 5. **Re-apply every deletion to db-pii.** Load all three sources into the replay, exactly as `restore-drill.sh` does, then run `infra/backup/apply-tombstones.sql` as the superuser:
    - db-main's `app.pii_tombstones` (from step 3, plus the export from step 2)
    - the off-site journal (`journal_restore <dir>` from `lib.sh`: the latest 15-minute run)
@@ -66,7 +76,7 @@
 - Record what you did in the incident log: snapshot ids, times, and the counts printed by step 5.
 - **The deletion window (S5-20261118-01).** The journal leaves the host every 15 minutes (`journal.sh`), so after a host loss the deletions of the last 15 minutes before it may be missing from every source. Re-run them: in the deletion runs list (DEL-3), find every run started in the 15 minutes before the loss and request it again with the same trigger and scope.
 - **VACUUM residue (accepted, invariant 10).** VACUUM frees deleted rows but does not overwrite the disk pages or old WAL files that held them, so ciphertext can stay on disk until it is overwritten. It cannot be read without the workspace's key, and a closed workspace has none. Read DEL-2's "even with the highest database privilege" with this in mind.
-- If the db-main snapshot is older than the db-pii one, refs created after it have no db-main rows. M10 (orders) decides how orders are re-synced from the channels.
+- **Order re-read (ADR-083, built in M22; required before real data).** Keep the maintenance switch on after step 7. Rewind every order stream's cursor to the older snapshot's time less 1 hour, and let waiting orders whose ref has no vault record and no tombstone give up that ref. The next polls bring back corrected addresses and the buyers stored after the backup. Take maintenance off only when every order account has synced past the restore point. Orders lost with an older db-main snapshot come back the same way; a vault record left with no order is expired by the orphan sweep.
 
 ## The drill
 
