@@ -33,7 +33,8 @@ describe('order ingest (T-1001)', () => {
       return Promise.resolve();
     },
     shortenPii: (_ctx, input) => {
-      calls.push({ op: 'shorten', orderId: input.orderId, detail: input.reason });
+      const detail = input.real === true ? `${input.reason} real` : input.reason;
+      calls.push({ op: 'shorten', orderId: input.orderId, detail });
       return Promise.resolve();
     },
     totalMismatch: (_ctx, input) => {
@@ -1128,6 +1129,93 @@ describe('order ingest (T-1001)', () => {
     const shown = new Date('2026-11-12T09:00:00Z');
     await ingest.apply(w.ctx, w.account, [{ ...waiting, state: 'dispatched', updatedAt: shown }]);
     expect((await orderRow(w, waiting.externalId))?.dispatched_at).toEqual(shown);
+  });
+
+  it('[DEL-1][ORD-6][INV-3] the first real dispatch date replaces a stand-in once, and moves nothing else', async () => {
+    const w = await world();
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    const at = (day: number) => new Date(Date.UTC(2026, 10, day, 9));
+    const send = (over: Partial<IncomingOrder>) =>
+      ingest.apply(w.ctx, w.account, [{ ...o, pii: { kind: 'unchanged' }, ...over }]);
+    const state = async () => {
+      const row = await orderRow(w, o.externalId);
+      return {
+        at: row?.dispatched_at,
+        estimated: row?.dispatch_estimated,
+        shortened: calls
+          .filter((c) => c.op === 'shorten' && c.orderId === row?.id)
+          .map((c) => c.detail),
+      };
+    };
+    expect(await state()).toEqual({ at: null, estimated: false, shortened: [] });
+    await send({ state: 'dispatched', updatedAt: at(14) });
+    expect(await state()).toEqual({ at: at(14), estimated: true, shortened: ['dispatch'] });
+    const row = await orderRow(w, o.externalId);
+    const before = { moves: await movements(w, row?.id), vat: await ledger(w, row?.id) };
+    const levels = [await level(w, w.std), await level(w, w.zero)];
+    // Another update with no real date changes nothing.
+    await send({ state: 'dispatched', updatedAt: at(15) });
+    expect(await state()).toEqual({ at: at(14), estimated: true, shortened: ['dispatch'] });
+    await send({ state: 'dispatched', updatedAt: at(16), dispatchedAt: at(12) });
+    const real = { at: at(12), estimated: false, shortened: ['dispatch', 'dispatch real'] };
+    expect(await state()).toEqual(real);
+    // A second real date, earlier or later, changes nothing, and neither does a repeat.
+    for (const day of [12, 11, 13]) {
+      await send({ state: 'dispatched', updatedAt: at(17 + day), dispatchedAt: at(day) });
+    }
+    expect(await state()).toEqual(real);
+    expect(await movements(w, row?.id)).toEqual(before.moves);
+    expect(await ledger(w, row?.id)).toEqual(before.vat);
+    expect([await level(w, w.std), await level(w, w.zero)]).toEqual(levels);
+  });
+
+  it('[DEL-1][ORD-6] a stand-in is marked as one, however it was found; a real date never is', async () => {
+    const w = await world();
+    const day = new Date('2026-11-12T09:00:00Z');
+    const marked = async (o: IncomingOrder) => {
+      await ingest.apply(w.ctx, w.account, [o]);
+      return (await orderRow(w, o.externalId))?.dispatch_estimated;
+    };
+    expect(await marked(order())).toBe(false);
+    expect(await marked(order({ state: 'dispatched' }))).toBe(true);
+    expect(await marked(order({ state: 'dispatched', dispatchedAt: day }))).toBe(false);
+    // A delivery time says when it arrived, not when it left.
+    expect(await marked(order({ state: 'delivered', deliveredAt: day }))).toBe(true);
+    expect(await marked(order({ state: 'delivered', deliveredAt: day, dispatchedAt: day }))).toBe(
+      false,
+    );
+    // Seen waiting, then shipped with a real date at once.
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    expect(await marked({ ...o, state: 'dispatched', dispatchedAt: day, updatedAt: day })).toBe(
+      false,
+    );
+  });
+
+  it('[DEL-1] a real dispatch date moves no expiry of a record that is gone, or once delivery is known', async () => {
+    const w = await world();
+    const day = new Date('2026-11-12T09:00:00Z');
+    const later = new Date('2026-11-13T09:00:00Z');
+    const shown = { state: 'dispatched' as const, updatedAt: day };
+    const gone = order({ state: 'dispatched', pii: { kind: 'refused' } });
+    const none = order({ state: 'dispatched', pii: { kind: 'none' } });
+    const delivered = order({ state: 'delivered', deliveredAt: day });
+    await ingest.apply(w.ctx, w.account, [gone, none, delivered]);
+    calls.length = 0;
+    await ingest.apply(
+      w.ctx,
+      w.account,
+      [gone, none, delivered].map((o) => ({
+        ...o,
+        ...shown,
+        pii: { kind: 'unchanged' as const },
+        updatedAt: later,
+        dispatchedAt: day,
+      })),
+    );
+    expect(calls.filter((c) => c.op === 'shorten')).toEqual([]);
+    expect((await orderRow(w, gone.externalId))?.dispatched_at).toEqual(day);
   });
 
   it('[DEL-1] a record that arrives after the order shipped has its expiry moved too', async () => {

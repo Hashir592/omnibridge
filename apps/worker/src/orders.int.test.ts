@@ -474,6 +474,99 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await expiryJob(o.externalId))?.getTime()).toBe(cap);
   });
 
+  /** A website order first stored waiting, then shown shipped with no ship date. */
+  const shownShipped = async (placed: Date, shown: Date) => {
+    const base = { created_at: placed.toISOString(), paid_at: placed.toISOString() };
+    const [waiting] = websiteOrders({ ...base, updated_at: placed.toISOString() });
+    if (waiting === undefined) throw new Error('no order');
+    await poll([waiting]);
+    const update = async (over: Record<string, unknown>) => {
+      const [next] = websiteOrders({ ...base, id: waiting.externalId, status: 'shipped', ...over });
+      if (next === undefined) throw new Error('no order');
+      sent.length = 0;
+      await poll([next]);
+      const id = (await orderRow(waiting.externalId))?.id;
+      return sent
+        .filter((s) => s.type === 'orders.pii_expiry')
+        .filter((s) => (s.payload as { order_id: string }).order_id === id)
+        .map((s) => s.key);
+    };
+    const keys = await update({ updated_at: shown.toISOString() });
+    return { id: waiting.externalId, update, keys };
+  };
+
+  it('[DEL-1][AT-8] a real dispatch date after a stand-in works the deletion date out again', async () => {
+    const placed = daysAgo(20);
+    const { id, update, keys } = await shownShipped(placed, daysAgo(1));
+    expect((await expiryJob(id))?.getTime()).toBeGreaterThan(Date.now() + 23 * DAY);
+    const shipped = daysAgo(18);
+    const again = await update({
+      updated_at: daysAgo(0).toISOString(),
+      shipped_at: shipped.toISOString(),
+    });
+    // Its own job: the first one's key is taken.
+    expect(again).toHaveLength(1);
+    expect(keys).toHaveLength(1);
+    expect(again).not.toEqual(keys);
+    expect((await expiryJob(id))?.getTime()).toBe(shipped.getTime() + 25 * DAY);
+    // A second real date queues nothing and changes nothing.
+    const second = await update({
+      updated_at: new Date(Date.now() + 1000).toISOString(),
+      shipped_at: daysAgo(2).toISOString(),
+    });
+    expect(second).toEqual([]);
+    expect((await expiryJob(id))?.getTime()).toBe(shipped.getTime() + 25 * DAY);
+  });
+
+  it('[DEL-1][AT-8] a later real dispatch date follows the window, never past placement + 90 days', async () => {
+    const placed = daysAgo(80);
+    const near = await shownShipped(daysAgo(30), daysAgo(20));
+    expect((await expiryJob(near.id))?.getTime()).toBeLessThan(Date.now() + 6 * DAY);
+    const late = daysAgo(10);
+    await near.update({ updated_at: daysAgo(0).toISOString(), shipped_at: late.toISOString() });
+    expect((await expiryJob(near.id))?.getTime()).toBe(late.getTime() + 25 * DAY);
+    const far = await shownShipped(placed, daysAgo(60));
+    await far.update({
+      updated_at: daysAgo(0).toISOString(),
+      shipped_at: daysAgo(1).toISOString(),
+    });
+    expect((await expiryJob(far.id))?.getTime()).toBe(placed.getTime() + 90 * DAY);
+  });
+
+  it('[DEL-1] a real dispatch date never brings back a deleted record, or one never kept', async () => {
+    const { id, update } = await shownShipped(daysAgo(20), daysAgo(1));
+    const ref = (await orderRow(id))?.pii_ref ?? '';
+    await deletion.delete({
+      workspace_id: ws,
+      run_id: randomUUID(),
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [ref] },
+    });
+    await root.query('UPDATE app.orders SET pii_deleted_at = now() WHERE pii_ref = $1', [ref]);
+    await update({ updated_at: daysAgo(0).toISOString(), shipped_at: daysAgo(3).toISOString() });
+    expect(await vaultRows(`${account}:${id}`)).toEqual([]);
+    expect(await expiryJob(id)).toBeUndefined();
+    // First seen shipped, past its window by the stand-in: a later real date does not restart it.
+    const created = daysAgo(60).toISOString();
+    const [old] = websiteOrders({
+      status: 'shipped',
+      created_at: created,
+      updated_at: daysAgo(50).toISOString(),
+    });
+    if (old === undefined) throw new Error('no order');
+    await poll([old]);
+    const [real] = websiteOrders({
+      id: old.externalId,
+      status: 'shipped',
+      created_at: created,
+      updated_at: daysAgo(0).toISOString(),
+      shipped_at: daysAgo(2).toISOString(),
+    });
+    if (real === undefined) throw new Error('no order');
+    await poll([real]);
+    expect(await vaultRows(`${account}:${old.externalId}`)).toEqual([]);
+  });
+
   const fullRead = async (externalId: string) =>
     (
       await web.readFull({
