@@ -262,6 +262,7 @@ export function toIncoming(o: ChannelOrder): IncomingOrder {
     channelTotal: o.totalPence === null ? null : pence(BigInt(o.totalPence)),
     shipToCountry: o.shipToCountry,
     fba: o.fba,
+    cancelRequested: o.cancelRequested,
     lines: o.lines.map((l) => ({
       lineId: l.lineId,
       sku: l.sku,

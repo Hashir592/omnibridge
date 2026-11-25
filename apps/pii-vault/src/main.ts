@@ -63,6 +63,17 @@ try {
     'exact buyer index backfill failed',
   );
 }
+// F-M10-end-15 (T-1004): records from before the names lost their punctuation are indexed again,
+// under the same rules as above (a failure is logged and retried at the next start; M22 removes it).
+try {
+  const reindexed = await vault.reindexNames();
+  logger.info({ event: 'vault.name_reindex', count: reindexed }, 'name and match keys ready');
+} catch (err) {
+  logger.error(
+    { event: 'vault.name_reindex_failed', error: err instanceof Error ? err.name : 'unknown' },
+    'name and match re-index failed',
+  );
+}
 const deletion = new DeletionService({
   pool,
   journal,

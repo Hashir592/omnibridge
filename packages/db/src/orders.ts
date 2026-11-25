@@ -61,6 +61,8 @@ export interface IncomingOrder {
   channelTotal: Pence | null;
   shipToCountry: string | null;
   fba: boolean;
+  /** The buyer has asked to cancel and the channel has not decided yet (never grouped). */
+  cancelRequested: boolean;
   lines: readonly {
     lineId: string;
     sku: string | null;
@@ -108,7 +110,7 @@ export interface OrderIngestPorts {
   ): Promise<void>;
   /**
    * ORD-9 (C3.2): an order entered or left the ones that can group (awaiting dispatch, its buyer's
-   * record held, not FBA), or its buyer was corrected: the account's groups are recomputed.
+   * record held, not FBA, no cancellation asked for), or its buyer was corrected: the account's groups are recomputed.
    */
   regroup(ctx: TenantContext, input: { channelAccountId: string }): Promise<void>;
 }
@@ -209,11 +211,18 @@ interface OrderRow {
   stock_moves: boolean;
   amounts_differ: AmountsDiffer[];
   fba: boolean;
+  cancel_requested: boolean;
 }
 
 /** ORD-9 (C3.1): the orders a recompute considers (OrderReads.groupCandidates). */
-const canGroup = (o: Pick<OrderRow, 'status' | 'fba' | 'pii_ref' | 'pii_deleted_at'>): boolean =>
-  o.status === 'awaiting_dispatch' && !o.fba && o.pii_ref !== null && o.pii_deleted_at === null;
+const canGroup = (
+  o: Pick<OrderRow, 'status' | 'fba' | 'cancel_requested' | 'pii_ref' | 'pii_deleted_at'>,
+): boolean =>
+  o.status === 'awaiting_dispatch' &&
+  !o.fba &&
+  !o.cancel_requested &&
+  o.pii_ref !== null &&
+  o.pii_deleted_at === null;
 
 interface LineRow {
   id: string;
@@ -240,7 +249,8 @@ const big = (v: string | number | bigint | null | undefined): bigint => BigInt(v
 const ORDER_COLUMNS = sql`id, company_id, status, raw_status, pii_subject, pii_ref, pii_deleted_at,
   paid_at, ship_by, dispatched_at, dispatch_estimated, delivered_at, cancelled_at, source_updated_at,
   to_char(tax_point_date, 'YYYY-MM-DD') AS tax_point_date, discount_pence, shipping_pence,
-  gross_pence, vat_recorded_at, stock_moves, amounts_differ, fba`;
+  gross_pence, vat_recorded_at, stock_moves, amounts_differ, fba,
+  cancel_requested`;
 
 /** VAT-3 needs discount <= goods; a channel discount beyond the goods comes off the shipping. */
 function amountsOf(o: Pick<IncomingOrder, 'lines' | 'discount' | 'shipping'>) {
@@ -601,14 +611,14 @@ export class OrderIngest implements UnmappedDemand {
          pii_subject, pii_ref, pii_deleted_at, status, raw_status, placed_at, paid_at, ship_by,
          dispatched_at, dispatch_estimated, delivered_at, cancelled_at, source_updated_at,
          tax_point_date, goods_pence, discount_pence, shipping_pence, gross_pence, vat_pence, ship_to_country,
-         unmapped, fba, stock_moves, amounts_differ, created_at, updated_at)
+         unmapped, fba, cancel_requested, stock_moves, amounts_differ, created_at, updated_at)
       VALUES (${ctx.workspaceId}::uuid, ${id}::uuid, ${account.company_id}::uuid, ${account.provider},
               ${account.provider}, ${account.id}::uuid, ${o.externalId},
               ${piiSubject(account.id, o.externalId)}, ${piiRef}::uuid, ${piiDeletedAt}, ${status},
               ${o.rawStatus}, ${o.placedAt}, ${o.paidAt}, ${o.shipBy}, ${dispatchedAt},
               ${dispatchedAt !== null && o.dispatchedAt === null}, ${o.deliveredAt}, ${status === 'cancelled' ? (o.cancelledAt ?? now) : null},
               ${o.updatedAt}, ${day}::date, ${goods}, ${discount}, ${shipping}, ${vat.gross},
-              ${vat.vat}, ${o.shipToCountry}, ${unmapped}, ${fba}, ${stockMoves},
+              ${vat.vat}, ${o.shipToCountry}, ${unmapped}, ${fba}, ${o.cancelRequested}, ${stockMoves},
               ${sql.val(mismatch ? ['channel_total'] : [])}::text[], ${now}, ${now})`.execute(trx);
 
     const lineIds: string[] = [];
@@ -844,6 +854,7 @@ export class OrderIngest implements UnmappedDemand {
              dispatch_estimated = ${estimated},
              delivered_at = ${deliveredAt},
              cancelled_at = ${cancelledAt},
+             cancel_requested = ${stale ? existing.cancel_requested : o.cancelRequested},
              pii_ref = ${piiRef}::uuid,
              pii_deleted_at = coalesce(pii_deleted_at,
                                        ${piiRef === null && o.pii.kind === 'refused' ? now : null}::timestamptz),

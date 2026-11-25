@@ -839,7 +839,7 @@ export class OrderReads {
     return withTenantTransaction(this.#db, ctx, (trx) => this.#group(trx, ctx, groupId));
   }
 
-  /** C3.2: the orders a recompute considers: awaiting dispatch, not FBA, buyer details held. */
+  /** C3.2: the orders a recompute considers: awaiting dispatch, not FBA, buyer details held, no open request to cancel. */
   async groupCandidates(
     ctx: TenantContext,
     channelAccountId: string,
@@ -848,7 +848,8 @@ export class OrderReads {
       const { rows } = await sql<{ id: string; pii_ref: string; pii_subject: string }>`
         SELECT o.id, o.pii_ref, o.pii_subject FROM app.orders o
          WHERE o.workspace_id = ${ctx.workspaceId}::uuid AND o.channel_account_id = ${channelAccountId}::uuid
-           AND o.status = 'awaiting_dispatch' AND NOT o.fba AND o.pii_ref IS NOT NULL
+           AND o.status = 'awaiting_dispatch' AND NOT o.fba AND NOT o.cancel_requested
+           AND o.pii_ref IS NOT NULL
            AND o.pii_deleted_at IS NULL
            AND NOT EXISTS (SELECT 1 FROM app.pii_tombstones t
                             WHERE t.workspace_id = o.workspace_id AND t.pii_ref = o.pii_ref)
@@ -880,7 +881,8 @@ export class OrderReads {
       }>`
         SELECT o.id, o.placed_at, o.pii_subject, o.order_group_id, o.company_id FROM app.orders o
          WHERE o.workspace_id = ${ctx.workspaceId}::uuid AND o.channel_account_id = ${channelAccountId}::uuid
-           AND o.status = 'awaiting_dispatch' AND NOT o.fba AND o.pii_ref IS NOT NULL
+           AND o.status = 'awaiting_dispatch' AND NOT o.fba AND NOT o.cancel_requested
+           AND o.pii_ref IS NOT NULL
            AND o.pii_deleted_at IS NULL
            AND NOT EXISTS (SELECT 1 FROM app.pii_tombstones t
                             WHERE t.workspace_id = o.workspace_id AND t.pii_ref = o.pii_ref)`.execute(

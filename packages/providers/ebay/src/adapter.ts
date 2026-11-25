@@ -155,6 +155,9 @@ type EbayOrder = ReturnType<typeof EbayOrdersV1.parse>['orders'][number];
 /** eBay payment statuses that mean the buyer's payment was captured. */
 const PAID_STATUSES: readonly string[] = ['PAID', 'PARTIALLY_REFUNDED', 'FULLY_REFUNDED'];
 
+/** eBay cancel states that are a request nobody has decided yet (F-M10-end-12; T-1501 checks them). */
+const OPEN_CANCEL_STATES: readonly string[] = ['CANCEL_REQUESTED', 'IN_PROGRESS', 'CANCEL_PENDING'];
+
 /** FA-10: eBay's fulfilment, payment and cancel states onto the channel lifecycle. */
 function ebayState(o: EbayOrder): ChannelOrderState {
   if (o.cancelStatus?.cancelState === 'CANCELED') return 'cancelled';
@@ -240,6 +243,7 @@ function ebayOrder(o: EbayOrder): ChannelOrder {
       o.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo?.contactAddress?.countryCode ??
       null,
     fba: false,
+    cancelRequested: OPEN_CANCEL_STATES.includes(o.cancelStatus?.cancelState ?? ''),
     lines: o.lineItems.map((l) => ({
       lineId: l.lineItemId,
       sku: l.sku ?? null,

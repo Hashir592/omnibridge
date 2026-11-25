@@ -903,6 +903,64 @@ export class Vault {
   }
 
   /**
+   * F-M10-end-15: names and addresses are indexed without their punctuation now, and records from
+   * before T-1002 have no such match key at all. Each record whose name or match key is not the one
+   * its fields give today gets it. Idempotent; one short transaction per workspace. Returns how many
+   * records changed (a count, never a value).
+   */
+  async reindexNames(): Promise<number> {
+    const directory = await this.#pool.query<{ workspace_id: string }>(
+      'SELECT workspace_id FROM vault.workspace_directory ORDER BY workspace_id',
+    );
+    let changed = 0;
+    for (const { workspace_id: workspaceId } of directory.rows) {
+      changed += await this.#tx(workspaceId, async (c, tx) => {
+        const keys = await this.#loadKeys(tx, workspaceId, false);
+        if (keys === undefined) return 0;
+        const records = await c.query<{ pii_ref: string }>(
+          `SELECT pii_ref FROM vault.records
+            WHERE workspace_id = $1 AND kind = 'buyer_contact' AND NOT canary
+            ORDER BY pii_ref FOR UPDATE`,
+          [workspaceId],
+        );
+        let count = 0;
+        for (const { pii_ref: ref } of records.rows) {
+          const { name, match } = indexValues(
+            await this.#decryptFields(c, keys.data, workspaceId, ref),
+          );
+          const want = Object.fromEntries(
+            Object.entries({ name, match }).filter(
+              (e): e is [string, string] => e[1] !== undefined,
+            ),
+          );
+          const had = await c.query<{ field: string; mac: Buffer }>(
+            `SELECT field, mac FROM vault.blind_index
+              WHERE workspace_id = $1 AND pii_ref = $2 AND field IN ('name', 'match')`,
+            [workspaceId, ref],
+          );
+          const same =
+            had.rows.length === Object.keys(want).length &&
+            had.rows.every((r) => {
+              const value = want[r.field];
+              return value !== undefined && keys.index.mac(r.field, value).equals(r.mac);
+            });
+          if (same) continue;
+          await c.query(
+            `DELETE FROM vault.blind_index
+              WHERE workspace_id = $1 AND pii_ref = $2 AND field IN ('name', 'match')`,
+            [workspaceId, ref],
+          );
+          await this.#writeIndex(c, keys, workspaceId, ref, want);
+          count += 1;
+        }
+        return count;
+      });
+    }
+    if (changed > 0) await this.#vacuumReplaced();
+    return changed;
+  }
+
+  /**
    * ADR-066 backfill (T-0407): records ingested before `buyer_exact` existed get that entry,
    * from their stored buyer fields. Idempotent: a record that has one is skipped. One short
    * transaction per workspace. Returns how many entries were added (a count, never a value).

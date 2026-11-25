@@ -163,6 +163,7 @@ function websiteOrder(o: WebsiteOrder): ChannelOrder {
     totalPence: null,
     shipToCountry: o.shipping_address?.country ?? null,
     fba: false,
+    cancelRequested: false,
     lines: o.lines.map((l) => ({
       lineId: l.id,
       sku: l.sku,
