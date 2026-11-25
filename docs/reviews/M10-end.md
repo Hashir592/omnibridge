@@ -156,7 +156,7 @@ Evidence: the eBay adapter uses `lastModifiedDate` as the dispatch time of a FUL
 
 Required fix: bound the expiry by placement + 90 days always. For an order first seen already shipped with no real dispatch time, do not treat a later edit as the dispatch: use the earliest defensible date (ship-by or placement), and store no vault record when that is past the window.
 
-Resolution: (S3)
+Resolution: fixed in T-1003 (with S5-20261124-10): one expiry sum for ingest and the expiry job, capped at placement + 90 days; a first-seen shipped order uses the earlier of ship-by and the update, or placement; eBay gives no dispatch time for FULFILLED. Red first, through the parsers.
 
 ## F-M10-end-07 — Major — A dismissed or removed pair is regrouped when a recompute is in flight
 Area: Correctness  IDs: ORD-9
@@ -277,7 +277,7 @@ Tests citing `[INV-3][CAT-6]`, red first:
 - a linked line dispatched between the mapping and its event, with the event run twice;
 - the existing "dispatch stored while the listing is being mapped" test for a linked line, with the sync transaction storing the dispatch before the mapping commits. It must fail when the first branch of `lockOrders` is removed.
 
-Resolution: (S3)
+Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispatch alone. Tests: the linked line dispatched between its mapping and the event (red first, event run twice), and the dispatch of a linked line stored while its listing is mapped (a guard, which fails when the first branch of `lockOrders` is removed). Four planted faults, all caught.
 
 ## Minors (follow-ups)
 
@@ -287,8 +287,8 @@ Resolution: (S3)
 - **F-M10-end-15** (ORD-9, C3.1): the spec says punctuation is removed; `normaliseName` turns it into a space, so "St John's" and "St Johns" do not match.
 - **F-M10-end-16** (VAT-3, INT-5): eBay's `pricingSummary.total` is parsed but never compared. A `deliveryDiscount` gave a gross of £15.00 against eBay's £13.00. Compare and raise a notice on a mismatch. Place in T-1501 with the spec check.
 - **F-M10-end-17** (INT-5): one non-GBP order fails the parser for its whole page, so no later order of that account is stored. Quarantine the one order with a notice. S1 to place, before eBay goes live.
-- **F-M10-end-18** (DEL-1, invariant 10): `vault.deleted_buyers` is not journalled, so a restore forgets notices that arrived after the backup. For S5 to judge.
-- **F-M10-end-19** (FA-10): a repeat ingest of an orphan returns the old record with its old (perhaps already expired) `delete_after`. By reading only.
+- **F-M10-end-18** (DEL-1, invariant 10): `vault.deleted_buyers` is not journalled, so a restore forgets notices that arrived after the backup. For S5 to judge. **Fixed in T-1003** (S5-20261124-08).
+- **F-M10-end-19** (FA-10): a repeat ingest of an orphan returns the old record with its old (perhaps already expired) `delete_after`. By reading only. **Fixed in T-1003** (S5-20261124-06).
 - **F-M10-end-20** (INV-4): lock order differs between mapping (stock row, then order) and an order update (order, then stock row). By reading only; a deadlock there is retried.
 - **F-M10-end-21** (ADR-080, CLAUDE.md): tests-first was not followed for most of T-1001 and T-1002, as S3 reported itself. For S1.
 - **F-M10-end-23** (INV-9): a line on an FBA listing moves the seller's own stock, at ingest and on back-fill (S3's note in #164; by reading only). Not reachable before M18. S1 to place there.

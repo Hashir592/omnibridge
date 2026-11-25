@@ -16,7 +16,9 @@ The ADR-080 halfway pause was taken after the T-1001 PR was opened (not after it
 | Contract (9 order routes) | light | #157 | merged |
 | T-1001 Order ingest and sales VAT | critical | #158 | merged (CI green on the third push) |
 | T-1002 Order list, detail, returns, export, groups | high | #159 | merged (CI green on the third push) |
-| T-1001 fixes (S5's critical check) | critical | branch `task/T-1001-fixes` | auto-merge on |
+| T-1001 fixes (S5's critical check) | critical | #160 | merged |
+| F-M10-end-01, S4's Blocker | critical | #164 | merged, confirmed by S4 |
+| T-1003 buyer data and retention, F-M10-end-22 | critical | branch `task/T-1003-m10-fixes-1` | auto-merge on |
 
 ## How it was built
 
@@ -88,7 +90,7 @@ S2 builds T-0318 on it.
   - a settings route for `group_midnight_grace_hours` (TEN-6 screen);
   - the Amazon returns report and Amazon orders (M18).
 - **Before M22:** vault records from before T-1002 keep the old match key (dev data only); re-index them.
-- **Waiting on S4:** T-1001's critical review findings. S5's check found no Blocker; its fixes are in the T-1001 fixes PR, each test seen failing first. Its report is committed once the last Major is closed (ADR-074).
+- **Reviews:** S4's milestone review is BLOCKED until T-1003 and T-1004 are confirmed (`docs/reviews/M10-end.md`). S5's check found no Blocker; its Majors are fixed in #160 and T-1003, and its report is committed with T-1003.
 - **Next for S3:** the T-1101 Connect route should create accounts with `holdStockPush: true` (FA-16).
 
 ## Process: where S3 fell short (for S4 and S1)
