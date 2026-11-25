@@ -14,6 +14,7 @@ import {
 } from '@omnibridge/core';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { CatalogueRepository } from './catalogue.ts';
+import type { AmountsDiffer } from './order-reads.ts';
 import type { MainDb } from './schema.ts';
 import type { StockEngine, UnmappedDemand } from './stock.ts';
 import { withBoundTenant, withTenantTransaction } from './tenant.ts';
@@ -89,7 +90,10 @@ export interface OrderIngestPorts {
     ctx: TenantContext,
     input: { orderId: string; reason: 'dispatch' | 'delivery'; real?: boolean },
   ): Promise<void>;
-  /** FIN-1: the order's pence do not add up to the total the channel states. */
+  /**
+   * FIN-1: the order's pence differ from the channel's: they do not add up to its total, or it
+   * changed them after they were fixed (ADR-081 1). Once per difference, not once per update.
+   */
   totalMismatch(
     ctx: TenantContext,
     input: { orderId: string; channelAccountId: string },
@@ -200,12 +204,14 @@ interface OrderRow {
   gross_pence: string;
   vat_recorded_at: Date | null;
   stock_moves: boolean;
+  amounts_differ: AmountsDiffer[];
 }
 
 interface LineRow {
   id: string;
   line_no: string;
   external_line_id: string;
+  external_sku: string | null;
   listing_id: string | null;
   quantity: string;
   line_gross_pence: string;
@@ -226,7 +232,39 @@ const big = (v: string | number | bigint | null | undefined): bigint => BigInt(v
 const ORDER_COLUMNS = sql`id, company_id, status, raw_status, pii_subject, pii_ref, pii_deleted_at,
   paid_at, ship_by, dispatched_at, dispatch_estimated, delivered_at, cancelled_at, source_updated_at,
   to_char(tax_point_date, 'YYYY-MM-DD') AS tax_point_date, discount_pence, shipping_pence,
-  gross_pence, vat_recorded_at, stock_moves`;
+  gross_pence, vat_recorded_at, stock_moves, amounts_differ`;
+
+/** VAT-3 needs discount <= goods; a channel discount beyond the goods comes off the shipping. */
+function amountsOf(o: Pick<IncomingOrder, 'lines' | 'discount' | 'shipping'>) {
+  const goods = o.lines.reduce((a, l) => a + l.linePrice, 0n);
+  const excess = o.discount > goods ? o.discount - goods : 0n;
+  return {
+    goods,
+    discount: pence(o.discount - excess),
+    shipping: pence(o.shipping > excess ? o.shipping - excess : 0n),
+  };
+}
+
+/** The marks an order should carry, in a fixed order, so equal sets compare equal. */
+function marksOf(set: ReadonlySet<AmountsDiffer>): AmountsDiffer[] {
+  const all: AmountsDiffer[] = ['channel_total', 'late_change', 'refund_above'];
+  return all.filter((m) => set.has(m));
+}
+
+type IncomingLine = IncomingOrder['lines'][number];
+
+interface ResolvedLine {
+  line: IncomingLine;
+  listing: { id: string; master_sku_id: string | null; fulfilment: string | null } | undefined;
+  snap: Snapshot | undefined;
+}
+
+interface Account {
+  id: string;
+  company_id: string;
+  provider: string;
+  created_at: Date;
+}
 
 /** The VAT of stored lines, recomputed exactly as at ingest (VAT-3 is deterministic). */
 function vatOf(
@@ -370,7 +408,7 @@ export class OrderIngest implements UnmappedDemand {
         if (existing === undefined) {
           await this.#create(trx, ctx, { id: channelAccountId, ...account }, defaultRate, order);
         } else {
-          await this.#update(trx, ctx, existing, order);
+          await this.#update(trx, ctx, channelAccountId, defaultRate, existing, order);
         }
       }
       await this.reportLateMapped(ctx, channelAccountId);
@@ -396,25 +434,23 @@ export class OrderIngest implements UnmappedDemand {
     return { masterSkuId, vatType, rateBp, cogs: cogs ?? null };
   }
 
-  async #create(
+  /** Each line with its listing, and the snapshot of its SKU on the order's day. */
+  async #resolve(
     trx: Transaction<MainDb>,
     ctx: TenantContext,
-    account: { id: string; company_id: string; provider: string; created_at: Date },
-    defaultRate: number,
-    o: IncomingOrder,
-  ): Promise<void> {
-    const now = this.#now();
-    const id = randomUUID();
-    const day = londonDate(o.placedAt);
-    const resolved = [];
-    for (const line of o.lines) {
+    accountId: string,
+    lines: readonly IncomingLine[],
+    day: string,
+  ): Promise<ResolvedLine[]> {
+    const resolved: ResolvedLine[] = [];
+    for (const line of lines) {
       const { rows } =
         line.sku === null
           ? { rows: [] }
           : await sql<{ id: string; master_sku_id: string | null; fulfilment: string | null }>`
             SELECT id, master_sku_id, fulfilment FROM app.listings
              WHERE workspace_id = ${ctx.workspaceId}::uuid
-               AND channel_account_id = ${account.id}::uuid AND external_sku = ${line.sku}`.execute(
+               AND channel_account_id = ${accountId}::uuid AND external_sku = ${line.sku}`.execute(
               trx,
             );
       const listing = rows[0];
@@ -424,21 +460,60 @@ export class OrderIngest implements UnmappedDemand {
           : await this.#snapshot(ctx, listing.master_sku_id, day);
       resolved.push({ line, listing, snap });
     }
-    // VAT-3 needs discount <= goods; a channel discount beyond the goods comes off the shipping.
-    const goods = resolved.reduce((a, r) => a + r.line.linePrice, 0n);
-    const excess = o.discount > goods ? o.discount - goods : 0n;
-    const discount = o.discount - excess;
-    const shipping = pence(o.shipping > excess ? o.shipping - excess : 0n);
+    return resolved;
+  }
+
+  async #insertLine(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    order: { id: string; companyId: string },
+    lineNo: number,
+    { line, listing, snap }: ResolvedLine,
+    share: OrderVat['lines'][number] | undefined,
+    defaultRate: number,
+  ): Promise<string> {
+    const now = this.#now();
+    const lineId = randomUUID();
+    await sql`
+      INSERT INTO app.order_lines
+        (workspace_id, id, company_id, order_id, line_no, external_line_id, listing_id,
+         external_sku, title, quantity, unit_gross_pence, line_gross_pence, discount_pence,
+         shipping_pence, vat_pence, master_sku_id, vat_type, vat_rate_bp, cogs_pence,
+         provisional_rate_bp, snapshot_at, fba, stored_unmapped, created_at)
+      VALUES (${ctx.workspaceId}::uuid, ${lineId}::uuid, ${order.companyId}::uuid, ${order.id}::uuid,
+              ${lineNo}, ${line.lineId}, ${listing?.id ?? null}::uuid, ${line.sku},
+              ${line.title}, ${line.quantity}, ${line.linePrice / BigInt(line.quantity)},
+              ${line.linePrice}, ${share?.discount ?? 0n}, ${share?.shipping ?? 0n},
+              ${share?.vat ?? 0n}, ${snap?.masterSkuId ?? null}::uuid, ${snap?.vatType ?? null},
+              ${snap?.rateBp ?? null}, ${snap?.cogs ?? null}, ${defaultRate},
+              ${snap === undefined ? null : now}, ${listing?.fulfilment === 'fba'},
+              ${listing?.master_sku_id == null}, ${now})`.execute(trx);
+    return lineId;
+  }
+
+  async #create(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    account: Account,
+    defaultRate: number,
+    o: IncomingOrder,
+  ): Promise<void> {
+    const now = this.#now();
+    const id = randomUUID();
+    const day = londonDate(o.placedAt);
+    const resolved = await this.#resolve(trx, ctx, account.id, o.lines, day);
+    const { goods, discount, shipping } = amountsOf(o);
     const vat = computeOrderVat({
       lines: resolved.map((r) => ({
         lineGross: r.line.linePrice,
         rateBp: r.snap?.rateBp ?? defaultRate,
         vatType: r.snap?.vatType ?? null,
       })),
-      discount: pence(discount),
+      discount,
       shipping,
     });
     const refunded = o.refunds.reduce((a, r) => a + r.amount, 0n);
+    const mismatch = o.channelTotal !== null && o.channelTotal !== vat.gross;
     const status = incomingStatus(o.state, refunded, vat.gross);
     // FA-16: an order placed before the account was connected is history the first stock take
     // already counts; it never moves stock.
@@ -455,37 +530,21 @@ export class OrderIngest implements UnmappedDemand {
          pii_subject, pii_ref, pii_deleted_at, status, raw_status, placed_at, paid_at, ship_by,
          dispatched_at, dispatch_estimated, delivered_at, cancelled_at, source_updated_at,
          tax_point_date, goods_pence, discount_pence, shipping_pence, gross_pence, vat_pence, ship_to_country,
-         unmapped, fba, stock_moves, created_at, updated_at)
+         unmapped, fba, stock_moves, amounts_differ, created_at, updated_at)
       VALUES (${ctx.workspaceId}::uuid, ${id}::uuid, ${account.company_id}::uuid, ${account.provider},
               ${account.provider}, ${account.id}::uuid, ${o.externalId},
               ${piiSubject(account.id, o.externalId)}, ${piiRef}::uuid, ${piiDeletedAt}, ${status},
               ${o.rawStatus}, ${o.placedAt}, ${o.paidAt}, ${o.shipBy}, ${dispatchedAt},
               ${dispatchedAt !== null && o.dispatchedAt === null}, ${o.deliveredAt}, ${status === 'cancelled' ? (o.cancelledAt ?? now) : null},
               ${o.updatedAt}, ${day}::date, ${goods}, ${discount}, ${shipping}, ${vat.gross},
-              ${vat.vat}, ${o.shipToCountry}, ${unmapped}, ${fba}, ${stockMoves}, ${now}, ${now})`.execute(
-      trx,
-    );
+              ${vat.vat}, ${o.shipToCountry}, ${unmapped}, ${fba}, ${stockMoves},
+              ${sql.val(mismatch ? ['channel_total'] : [])}::text[], ${now}, ${now})`.execute(trx);
 
     const lineIds: string[] = [];
-    for (const [index, { line, listing, snap }] of resolved.entries()) {
-      const lineId = randomUUID();
-      lineIds.push(lineId);
-      const v = vat.lines[index];
-      await sql`
-        INSERT INTO app.order_lines
-          (workspace_id, id, company_id, order_id, line_no, external_line_id, listing_id,
-           external_sku, title, quantity, unit_gross_pence, line_gross_pence, discount_pence,
-           shipping_pence, vat_pence, master_sku_id, vat_type, vat_rate_bp, cogs_pence,
-           provisional_rate_bp, snapshot_at, fba, stored_unmapped, created_at)
-        VALUES (${ctx.workspaceId}::uuid, ${lineId}::uuid, ${account.company_id}::uuid, ${id}::uuid,
-                ${index + 1}, ${line.lineId}, ${listing?.id ?? null}::uuid, ${line.sku},
-                ${line.title}, ${line.quantity}, ${line.linePrice / BigInt(line.quantity)},
-                ${line.linePrice}, ${v?.discount ?? 0n}, ${v?.shipping ?? 0n}, ${v?.vat ?? 0n},
-                ${snap?.masterSkuId ?? null}::uuid, ${snap?.vatType ?? null}, ${snap?.rateBp ?? null},
-                ${snap?.cogs ?? null}, ${defaultRate}, ${snap === undefined ? null : now},
-                ${listing?.fulfilment === 'fba'}, ${listing?.master_sku_id == null}, ${now})`.execute(
-        trx,
-      );
+    const at = { id, companyId: account.company_id };
+    for (const [index, r] of resolved.entries()) {
+      const share = vat.lines[index];
+      lineIds.push(await this.#insertLine(trx, ctx, at, index + 1, r, share, defaultRate));
     }
     await this.#event(trx, ctx, id, account.company_id, status, o);
 
@@ -517,24 +576,166 @@ export class OrderIngest implements UnmappedDemand {
         reason: o.deliveredAt === null ? 'dispatch' : 'delivery',
       });
     }
-    if (o.channelTotal !== null && o.channelTotal !== vat.gross) {
-      await this.#ports.totalMismatch(ctx, {
-        orderId: id,
-        channelAccountId: account.id,
-      });
+    if (mismatch) {
+      await this.#ports.totalMismatch(ctx, { orderId: id, channelAccountId: account.id });
     }
 
     const order = await this.#lock(trx, ctx, id);
     await this.#settle(trx, ctx, order, o);
   }
 
+  /**
+   * ADR-081 (1): until sale VAT is recorded (or the order is cancelled) a newer update replaces
+   * discount, shipping, gross, VAT shares and line prices. A line's SKU and quantity never change:
+   * one the channel changed or dropped is closed and its stock released, and a changed or added one
+   * is inserted with its own reservation and the snapshot of the placed date. After that, a
+   * different total or line set changes nothing: it marks the order and raises the notice, until a
+   * newer update agrees again. The lines of an unpaid order that has shipped stay too: what left
+   * cannot be released. An update with no lines says nothing about them.
+   */
+  async #amounts(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    accountId: string,
+    defaultRate: number,
+    existing: OrderRow,
+    o: IncomingOrder,
+  ): Promise<OrderRow> {
+    if (o.updatedAt <= existing.source_updated_at) return existing;
+    const now = this.#now();
+    const stored = await this.#lines(trx, ctx, existing.id);
+    const kept: { row: LineRow; line: IncomingLine }[] = [];
+    const added: IncomingLine[] = [];
+    for (const line of o.lines) {
+      const row = stored.find((l) => l.external_line_id === line.lineId);
+      const same =
+        row !== undefined &&
+        row.external_sku === line.sku &&
+        Number(row.quantity) === line.quantity;
+      if (same) kept.push({ row, line });
+      else added.push(line);
+    }
+    const closed = stored.filter((l) => !kept.some((k) => k.row.id === l.id));
+    const sameLines = closed.length === 0 && added.length === 0;
+    const repriced = kept.filter((k) => big(k.row.line_gross_pence) !== k.line.linePrice);
+    const want = amountsOf(o);
+    const sameTotals =
+      want.discount === big(existing.discount_pence) &&
+      want.shipping === big(existing.shipping_pence);
+    const marks = new Set(existing.amounts_differ);
+    const open =
+      existing.vat_recorded_at === null &&
+      existing.status !== 'cancelled' &&
+      o.lines.length > 0 &&
+      (sameLines || existing.dispatched_at === null);
+
+    let gross = big(existing.gross_pence);
+    if (!open) {
+      const otherTotal =
+        o.channelTotal !== null && o.channelTotal !== gross && !marks.has('channel_total');
+      if (sameLines && repriced.length === 0 && sameTotals && !otherTotal) {
+        marks.delete('late_change');
+      } else {
+        marks.add('late_change');
+      }
+    } else {
+      if (!sameLines || repriced.length > 0 || !sameTotals) {
+        for (const l of closed) {
+          await sql`UPDATE app.order_lines SET removed_at = ${now}
+                     WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${l.id}::uuid`.execute(
+            trx,
+          );
+          if (existing.stock_moves && l.listing_id !== null) {
+            await this.#stock?.release(ctx, {
+              orderLineId: l.id,
+              listingId: l.listing_id,
+              quantity: Number(l.quantity),
+              companyId: existing.company_id,
+            });
+          }
+        }
+        for (const { row, line } of repriced) {
+          await sql`UPDATE app.order_lines
+                       SET line_gross_pence = ${line.linePrice},
+                           unit_gross_pence = ${line.linePrice / BigInt(line.quantity)}
+                     WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${row.id}::uuid`.execute(
+            trx,
+          );
+        }
+        let lineNo = await this.#lastLineNo(trx, ctx, existing.id);
+        const at = { id: existing.id, companyId: existing.company_id };
+        for (const r of await this.#resolve(trx, ctx, accountId, added, existing.tax_point_date)) {
+          lineNo += 1;
+          const id = await this.#insertLine(trx, ctx, at, lineNo, r, undefined, defaultRate);
+          if (!existing.stock_moves || this.#stock === undefined) continue;
+          if (r.listing === undefined || o.state === 'cancelled') continue;
+          const reserved = await this.#stock.reserve(ctx, {
+            orderLineId: id,
+            listingId: r.listing.id,
+            quantity: r.line.quantity,
+            companyId: existing.company_id,
+          });
+          if (reserved.oversold) await this.markOversold(ctx, id);
+        }
+        const vat = vatOf(await this.#lines(trx, ctx, existing.id), {
+          discount_pence: String(want.discount),
+          shipping_pence: String(want.shipping),
+        });
+        gross = vat.gross;
+        await sql`
+          UPDATE app.orders o
+             SET goods_pence = ${want.goods}, discount_pence = ${want.discount},
+                 shipping_pence = ${want.shipping}, gross_pence = ${vat.gross},
+                 oversold = l.oversold, fba = ${o.fba} OR l.fba
+            FROM (SELECT bool_or(x.oversold) AS oversold, bool_or(x.fba) AS fba
+                    FROM app.order_lines x
+                   WHERE x.workspace_id = ${ctx.workspaceId}::uuid
+                     AND x.order_id = ${existing.id}::uuid AND x.removed_at IS NULL) l
+           WHERE o.workspace_id = ${ctx.workspaceId}::uuid AND o.id = ${existing.id}::uuid`.execute(
+          trx,
+        );
+        await this.#reallocate(trx, ctx, existing.id, vat);
+      }
+      marks.delete('late_change');
+      if (o.channelTotal !== null && o.channelTotal !== gross) marks.add('channel_total');
+      else marks.delete('channel_total');
+    }
+
+    const next = marksOf(marks);
+    if (next.some((m) => !existing.amounts_differ.includes(m))) {
+      await this.#ports.totalMismatch(ctx, { orderId: existing.id, channelAccountId: accountId });
+    }
+    if (next.join() !== existing.amounts_differ.join()) {
+      await sql`UPDATE app.orders SET amounts_differ = ${sql.val(next)}::text[]
+                 WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${existing.id}::uuid`.execute(
+        trx,
+      );
+    }
+    return this.#lock(trx, ctx, existing.id);
+  }
+
+  async #lastLineNo(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    orderId: string,
+  ): Promise<number> {
+    const { rows } = await sql<{ n: string | null }>`
+      SELECT max(line_no) AS n FROM app.order_lines
+       WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${orderId}::uuid`.execute(trx);
+    return Number(rows[0]?.n ?? 0);
+  }
+
   async #update(
     trx: Transaction<MainDb>,
     ctx: TenantContext,
-    existing: OrderRow,
+    accountId: string,
+    defaultRate: number,
+    stored: OrderRow,
     o: IncomingOrder,
   ): Promise<void> {
     const now = this.#now();
+    // The channel's amounts first; then payment is captured on them, and they are fixed.
+    const existing = await this.#amounts(trx, ctx, accountId, defaultRate, stored, o);
     const refunded = o.refunds.reduce((a, r) => a + r.amount, 0n);
     const next = nextOrderStatus(
       existing.status,
@@ -650,10 +851,11 @@ export class OrderIngest implements UnmappedDemand {
 
   async #lines(trx: Transaction<MainDb>, ctx: TenantContext, orderId: string): Promise<LineRow[]> {
     const { rows } = await sql<LineRow>`
-      SELECT id, line_no, external_line_id, listing_id, quantity, line_gross_pence, vat_type,
-             vat_rate_bp, provisional_rate_bp, stored_unmapped
+      SELECT id, line_no, external_line_id, external_sku, listing_id, quantity, line_gross_pence,
+             vat_type, vat_rate_bp, provisional_rate_bp, stored_unmapped
         FROM app.order_lines
        WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${orderId}::uuid
+         AND removed_at IS NULL
        ORDER BY line_no`.execute(trx);
     return rows;
   }
@@ -758,6 +960,14 @@ export class OrderIngest implements UnmappedDemand {
           taxPoint,
         });
       }
+      // ADR-081 (2): the refund keeps its whole amount; VAT went back up to what was left.
+      await sql`
+        UPDATE app.orders SET amounts_differ = array_append(amounts_differ, 'refund_above')
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${order.id}::uuid
+           AND NOT 'refund_above' = ANY (amounts_differ)
+           AND gross_pence < (SELECT sum(amount_pence) FROM app.refunds
+                               WHERE workspace_id = ${ctx.workspaceId}::uuid
+                                 AND order_id = ${order.id}::uuid)`.execute(trx);
     }
   }
 
@@ -849,7 +1059,7 @@ export class OrderIngest implements UnmappedDemand {
          SET listing_id = li.id, fba = (li.fulfilment IS NOT DISTINCT FROM 'fba')
         FROM app.orders o, app.listings li
        WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.listing_id IS NULL
-         AND l.vat_type IS NULL AND l.external_sku = li.external_sku
+         AND l.vat_type IS NULL AND l.removed_at IS NULL AND l.external_sku = li.external_sku
          AND o.workspace_id = l.workspace_id AND o.id = l.order_id
          AND li.workspace_id = l.workspace_id AND li.id = ${listingId}::uuid
          AND li.channel_account_id = o.channel_account_id
@@ -876,6 +1086,7 @@ export class OrderIngest implements UnmappedDemand {
                               AND li.channel_account_id = o.channel_account_id
                               AND li.external_sku = l.external_sku
          WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.vat_type IS NULL
+           AND l.removed_at IS NULL
            AND o.channel_account_id = ${channelAccountId}::uuid AND li.master_sku_id IS NOT NULL
          GROUP BY li.id, li.master_sku_id
          ORDER BY li.id`.execute(trx);
@@ -920,12 +1131,14 @@ export class OrderIngest implements UnmappedDemand {
              SELECT l.order_id FROM app.order_lines l
               WHERE l.workspace_id = ${ctx.workspaceId}::uuid
                 AND l.listing_id = ${listingId}::uuid AND l.stored_unmapped
+                AND l.removed_at IS NULL
              UNION ALL
              SELECT l.order_id FROM app.order_lines l
                JOIN app.listings li ON li.workspace_id = l.workspace_id
                                    AND li.external_sku = l.external_sku
               WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.vat_type IS NULL
-                AND l.listing_id IS NULL AND li.id = ${listingId}::uuid)
+                AND l.listing_id IS NULL AND l.removed_at IS NULL
+                AND li.id = ${listingId}::uuid)
            AND o.channel_account_id = (SELECT channel_account_id FROM app.listings
                                         WHERE workspace_id = ${ctx.workspaceId}::uuid
                                           AND id = ${listingId}::uuid)
@@ -953,7 +1166,8 @@ export class OrderIngest implements UnmappedDemand {
           FROM app.order_lines l
           JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
          WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.listing_id = ${listingId}::uuid
-           AND l.stored_unmapped AND o.stock_moves AND o.status <> 'cancelled'
+           AND l.stored_unmapped AND l.removed_at IS NULL
+           AND o.stock_moves AND o.status <> 'cancelled'
          ORDER BY o.placed_at, o.id, l.line_no`.execute(trx);
       return rows.map((r) => ({
         orderLineId: r.id,
@@ -984,7 +1198,7 @@ export class OrderIngest implements UnmappedDemand {
           JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
           JOIN app.listings li ON li.workspace_id = l.workspace_id AND li.id = l.listing_id
          WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.listing_id = ${listingId}::uuid
-           AND l.vat_type IS NULL AND li.master_sku_id IS NOT NULL
+           AND l.vat_type IS NULL AND l.removed_at IS NULL AND li.master_sku_id IS NOT NULL
          ORDER BY l.order_id, l.line_no`.execute(trx);
       let filled = 0;
       const byOrder = new Map<string, typeof pending>();

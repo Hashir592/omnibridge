@@ -194,7 +194,7 @@ function orderWhere(ctx: TenantContext, f: OrderFilter, now: Date): RawBuilder<u
     parts.push(sql`(o.external_order_id ILIKE ${q} OR EXISTS (
       SELECT 1 FROM app.order_lines l
         LEFT JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
-       WHERE l.workspace_id = o.workspace_id AND l.order_id = o.id
+       WHERE l.workspace_id = o.workspace_id AND l.order_id = o.id AND l.removed_at IS NULL
          AND (l.external_sku ILIKE ${q} OR s.sku ILIKE ${q})))`);
   }
   if (f.piiRefs !== undefined) parts.push(sql`o.pii_ref = ANY (${sql.val(f.piiRefs)}::uuid[])`);
@@ -298,7 +298,8 @@ function enriched(ctx: TenantContext) {
                sum(l.quantity) AS items
           FROM app.order_lines l
           LEFT JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
-         WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.order_id = f.id) li ON TRUE
+         WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.order_id = f.id
+           AND l.removed_at IS NULL) li ON TRUE
       LEFT JOIN LATERAL (
         SELECT count(*) AS size,
                count(*) FILTER (WHERE (m.placed_at, m.id) <= (f.placed_at, f.id)) AS position
@@ -438,6 +439,7 @@ export class OrderReads {
           FROM app.order_lines l
           LEFT JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
          WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.order_id = ${orderId}::uuid
+           AND l.removed_at IS NULL
          ORDER BY l.line_no`.execute(trx);
       const lines: OrderLineView[] = lineRows.map((l) => ({
         id: l.id,
@@ -640,6 +642,7 @@ export class OrderReads {
                   FROM app.order_lines l
                   LEFT JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
                  WHERE l.workspace_id = r.workspace_id AND l.order_id = r.order_id
+                   AND l.removed_at IS NULL
                    AND (NOT EXISTS (SELECT 1 FROM app.refund_lines x
                                      WHERE x.workspace_id = r.workspace_id AND x.refund_id = r.id)
                         OR l.id IN (SELECT x.order_line_id FROM app.refund_lines x
