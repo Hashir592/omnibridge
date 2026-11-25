@@ -325,6 +325,7 @@ Everything else is high, normal or light. M21 is itself the final review.
 - **Depends on:** M17, M15.
 - **External gate:** none for building (mocks). Live checks wait for M22: developer profile and roles approved (architecture review).
 - **Before the gate:** an Amazon mock built from the official selling-partner-api-models. Each [Verify in testing] item becomes a verify-live task.
+- **Carried in:** F-M10-end-23 (ADR-082): FBA lines move no own stock, with tests for ingest, back-fill and returns, before any Amazon order is read.
 
 ### M19 Amazon Ads
 
