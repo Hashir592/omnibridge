@@ -594,6 +594,75 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await fullRead(stale.externalId)).address_line1).toBe(kept);
   });
 
+  it('[ORD-4] a correction that comes after a failed first store is not lost', async () => {
+    const username = () => `${PII_MARKER}lost-${randomUUID().slice(0, 8)}`;
+    for (const swept of [false, true]) {
+      const buyer = { username: username() };
+      const [first] = ebayOrders({ ...shipTo(fullAddress), buyer });
+      if (first === undefined) throw new Error('no order');
+      // The vault write happened, the db-main write did not.
+      const [ready] = (await stream().prepare?.(job, [first])) ?? [];
+      const piiRef = ready?.pii?.kind === 'stored' ? ready.pii.piiRef : '';
+      if (swept) {
+        await worker.setExpiry({
+          workspace_id: ws,
+          pii_refs: [piiRef],
+          delete_after: new Date(Date.now() - 1000).toISOString(),
+          reason: 'orphan',
+        });
+      }
+      const [fixed] = ebayOrders({
+        orderId: first.externalId,
+        creationDate: first.placedAt.toISOString(),
+        lastModifiedDate: new Date().toISOString(),
+        buyer,
+        ...shipTo({ ...fullAddress, addressLine1: `${PII_MARKER}4 Corrected Way` }),
+      });
+      if (fixed === undefined) throw new Error('no order');
+      await poll([fixed]);
+      expect((await orderRow(first.externalId))?.pii_ref).toBe(piiRef);
+      expect((await fullRead(first.externalId)).address_line1).toBe(`${PII_MARKER}4 Corrected Way`);
+      const [record] = await vaultRows(`${account}:${first.externalId}`);
+      expect(record?.delete_after.getTime()).toBe(first.placedAt.getTime() + 90 * DAY);
+    }
+  });
+
+  it('[ORD-4] a masked email, phone or second address line never overwrites the real one', async () => {
+    const real = {
+      email: `${PII_MARKER}eve@example.test`,
+      primaryPhone: { phoneNumber: '+447700900321' },
+    };
+    const to = (contactAddress: Record<string, unknown>, rest: Record<string, unknown>) => ({
+      fulfillmentStartInstructions: [
+        {
+          shippingStep: { shipTo: { fullName: `${PII_MARKER}Eve Bay`, contactAddress, ...rest } },
+        },
+      ],
+    });
+    const [first] = ebayOrders({ ...to({ ...fullAddress, addressLine2: 'Flat 9' }, real) });
+    if (first === undefined) throw new Error('no order');
+    await poll([first]);
+    const again = async (o: Record<string, unknown>, at: number) => {
+      const [next] = ebayOrders({
+        orderId: first.externalId,
+        lastModifiedDate: new Date(Date.now() - at).toISOString(),
+        ...o,
+      });
+      if (next === undefined) throw new Error('no order');
+      return (await poll([next]))[0]?.pii?.kind;
+    };
+    const masked = { email: 'j***@e***', primaryPhone: { phoneNumber: '*****123' } };
+    expect(await again(to({ ...fullAddress, addressLine2: 'F***' }, real), 3000)).toBe('unchanged');
+    expect((await fullRead(first.externalId)).address_line2).toBe('Flat 9');
+    const moved = { ...fullAddress, addressLine1: `${PII_MARKER}5 Next Way` };
+    expect(await again(to(moved, masked), 1000)).toBe('replaced');
+    expect(await fullRead(first.externalId)).toMatchObject({
+      address_line1: `${PII_MARKER}5 Next Way`,
+      email: real.email,
+      phone: real.primaryPhone.phoneNumber,
+    });
+  });
+
   it('[AT-10][ORD-4] an eBay deletion never refuses a website buyer with the same ID', async () => {
     const customer = `${PII_MARKER}shared-${randomUUID().slice(0, 8)}`;
     await web.ebayUserMatch({ user_id: customer });
@@ -610,6 +679,58 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     await tenancy.runWorkspace({ workspaceId: ws }, (c) => stream().sink(c, site, ready ?? []));
     const same = await stream().prepare?.(job, [{ ...o, externalId: `${o.externalId}-e` }]);
     expect(same?.[0]?.pii).toEqual({ kind: 'refused' });
+  });
+
+  it('[AT-10][ORD-4] a correction refused for a deleted buyer leaves the order as it is, and the poll goes on', async () => {
+    const username = `${PII_MARKER}refused-${randomUUID().slice(0, 8)}`;
+    const [first, other] = ebayOrders(
+      { ...shipTo(fullAddress), buyer: { username } },
+      { ...shipTo(fullAddress) },
+    );
+    if (first === undefined || other === undefined) throw new Error('no orders');
+    await poll([first]);
+    await web.ebayUserMatch({ user_id: username });
+    const [fixed] = ebayOrders({
+      orderId: first.externalId,
+      lastModifiedDate: new Date().toISOString(),
+      buyer: { username },
+      ...shipTo({ ...fullAddress, addressLine1: `${PII_MARKER}9 Not Kept` }),
+    });
+    if (fixed === undefined) throw new Error('no order');
+    const ready = await poll([fixed, other]);
+    expect(ready.map((o) => o.pii?.kind)).toEqual(['unchanged', 'stored']);
+    expect((await fullRead(first.externalId)).address_line1).toBe(`${PII_MARKER}3 Auction Way`);
+  });
+
+  it('[AT-10][ORD-4] a website buyer with a deleted eBay ID has a corrected address applied', async () => {
+    const customer = `${PII_MARKER}site-${randomUUID().slice(0, 8)}`;
+    await web.ebayUserMatch({ user_id: customer });
+    const site = randomUUID();
+    await root.query(
+      `INSERT INTO app.channel_accounts (id, workspace_id, company_id, provider, display_name)
+       VALUES ($1, $2, $3, 'website', 'Site 2')`,
+      [site, ws, company],
+    );
+    const siteJob = { workspaceId: ws, channelAccountId: site };
+    const [first] = websiteOrders({ customer: { id: customer } });
+    if (first === undefined) throw new Error('no order');
+    const ready = (await stream().prepare?.(siteJob, [first])) ?? [];
+    await tenancy.runWorkspace({ workspaceId: ws }, (c) => stream().sink(c, site, ready));
+    const [fixed] = websiteOrders({
+      id: first.externalId,
+      updated_at: new Date().toISOString(),
+      customer: { id: customer },
+      shipping_address: {
+        name: `${PII_MARKER}Web Buyer`,
+        line1: `${PII_MARKER}10 Moved Road`,
+        city: 'Testville',
+        postcode: 'TE2 2ND',
+        country: 'GB',
+      },
+    });
+    if (fixed === undefined) throw new Error('no order');
+    expect((await stream().prepare?.(siteJob, [fixed]))?.[0]?.pii).toEqual({ kind: 'replaced' });
+    expect((await fullRead(first.externalId)).address_line1).toBe(`${PII_MARKER}10 Moved Road`);
   });
 
   it('[DEL-1] a record written before the order shipped is corrected when the order is first stored shipped', async () => {

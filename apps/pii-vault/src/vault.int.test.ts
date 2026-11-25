@@ -33,6 +33,8 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
   let cluster: RoleCluster;
   let appPool: pg.Pool;
   let ownerPool: pg.Pool;
+  /** The cluster's superuser: reads raw heap pages, nothing else. */
+  let rootPool: pg.Pool;
   let close: () => Promise<void>;
   let vault: Vault;
   let baseUrl = '';
@@ -95,6 +97,8 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     await migratePii(cluster.connection('vault_owner'));
     appPool = new pg.Pool({ ...cluster.connection('vault_app'), max: 4 });
     ownerPool = new pg.Pool({ ...cluster.connection('vault_owner'), max: 2 });
+    rootPool = new pg.Pool({ connectionString: cluster.container.getConnectionUri(), max: 1 });
+    await rootPool.query('CREATE EXTENSION IF NOT EXISTS pageinspect');
     const logger = createLogger({
       service: 'pii-vault',
       version: 'test',
@@ -134,7 +138,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
 
   afterAll(async () => {
     await close();
-    await Promise.all([appPool.end(), ownerPool.end()]);
+    await Promise.all([appPool.end(), ownerPool.end(), rootPool.end()]);
     await cluster.container.stop();
   });
 
@@ -1267,6 +1271,38 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     ...over,
   });
 
+  /** The stored bytes of a record's fields and blind indexes. */
+  const oldBytes = async (W: string, piiRef: string): Promise<Buffer[]> => [
+    ...(
+      await raw(
+        ownerPool,
+        W,
+        'SELECT ciphertext AS b FROM vault.record_fields WHERE pii_ref = $1',
+        [piiRef],
+      )
+    ).map((r) => r.b as Buffer),
+    ...(
+      await raw(ownerPool, W, 'SELECT mac AS b FROM vault.blind_index WHERE pii_ref = $1', [piiRef])
+    ).map((r) => r.b as Buffer),
+  ];
+  /** How many rows of the two tables' heap pages, dead or alive, still hold one of these values. */
+  const inHeap = async (values: readonly Buffer[]): Promise<number> => {
+    let n = 0;
+    for (const table of ['vault.record_fields', 'vault.blind_index']) {
+      const { rows } = await rootPool.query<{ n: string }>(
+        `SELECT count(*) AS n
+           FROM generate_series(0, pg_relation_size($1::text::regclass)
+                                     / current_setting('block_size')::bigint - 1) AS p
+          CROSS JOIN LATERAL heap_page_items(get_raw_page($1::text, p)) AS i
+          WHERE EXISTS (SELECT 1 FROM unnest($2::bytea[]) AS v
+                         WHERE position(v IN i.t_data) > 0)`,
+        [table, values],
+      );
+      n += Number(rows[0]?.n ?? 0);
+    }
+    return n;
+  };
+
   it('[ORD-4][ORD-9] a corrected address replaces the one record in place: same ref, same date, new indexes', async () => {
     const W = randomUUID();
     const first = await order(
@@ -1394,6 +1430,161 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(await codeOf(ask())).toBe('workspace_closed');
   });
 
+  it('[ORD-4] a masked delivery field refuses the block; a masked email, phone or ID is left out', async () => {
+    const W = randomUUID();
+    const email = `${PII_MARKER}real@example.test`;
+    const stored = address('21', {
+      email,
+      phone: '+447700900121',
+      channel_username: 'real-21',
+      channel_buyer_id: 'real-id-21',
+    });
+    const { pii_ref } = await order(W, 'MASK', stored, { source_updated_at: ago(2 * DAY) });
+    let step = 0;
+    const ask = async (fields: Record<string, string>) => {
+      step += 1;
+      const { changed } = await clients.worker.replace({
+        workspace_id: W,
+        pii_ref,
+        subject_id: `${account}:MASK`,
+        source_updated_at: ago(DAY - step * 1000),
+        fields,
+      });
+      return changed;
+    };
+    const delivery = [
+      'name',
+      'address_line1',
+      'address_line2',
+      'address_line3',
+      'city',
+      'county',
+      'postcode',
+      'country',
+      'delivery_instructions',
+    ];
+    for (const key of delivery) {
+      for (const mask of ['F***', 'F\u2022\u2022']) {
+        expect(await ask({ ...address('22'), [key]: mask }), key).toBe(false);
+      }
+    }
+    expect(await read(W, pii_ref)).toEqual(stored);
+    const masked = {
+      email: 'j***@e***',
+      phone: '*****123',
+      channel_username: 'r***1',
+      channel_buyer_id: '\u2022\u2022\u2022',
+    };
+    expect(await ask({ ...address('23'), ...masked })).toBe(true);
+    expect(await read(W, pii_ref)).toEqual({ ...stored, ...address('23') });
+    // The blind indexes hold the real values still.
+    const { matches } = await clients.web.search({
+      workspaceId: W,
+      purpose: 'order_search',
+      query: { email },
+    });
+    expect(matches.map((m) => m.pii_ref)).toEqual([pii_ref]);
+    expect(await ask({ ...address('23'), ...masked })).toBe(false);
+  });
+
+  it('[ORD-4][DEL-1] an ingest that finds an older record applies its newer block, and only then', async () => {
+    const W = randomUUID();
+    const first = await order(
+      W,
+      'ING',
+      address('31', { email: `${PII_MARKER}kept@example.test` }),
+      { source_updated_at: ago(3 * DAY) },
+    );
+    const [was] = await raw(
+      ownerPool,
+      W,
+      'SELECT delete_after FROM vault.records WHERE pii_ref = $1',
+      [first.pii_ref],
+    );
+    const again = (fields: Record<string, string>, at?: string) =>
+      order(W, 'ING', fields, at === undefined ? {} : { source_updated_at: at });
+    // Older, the same time, no time, masked or no whole address: the record stays.
+    expect(await again(address('32'), ago(4 * DAY))).toEqual(first);
+    expect(await again(address('32'))).toEqual(first);
+    expect(await again(address('32', { address_line2: 'F***' }), ago(2.9 * DAY))).toEqual(first);
+    expect(await again({ name: 'X', postcode: 'NE1 1ST' }, ago(2.8 * DAY))).toEqual(first);
+    expect(await read(W, first.pii_ref)).toMatchObject(address('31'));
+    // A newer one is applied, as a correction is.
+    const newer = ago(2 * DAY);
+    expect(await again(address('33'), newer)).toEqual(first);
+    expect(await read(W, first.pii_ref)).toEqual({
+      ...address('33'),
+      email: `${PII_MARKER}kept@example.test`,
+    });
+    expect(await again(address('32'), newer)).toEqual(first);
+    expect(await read(W, first.pii_ref)).toMatchObject(address('33'));
+    const rows = await raw(
+      ownerPool,
+      W,
+      'SELECT pii_ref, delete_after FROM vault.records WHERE NOT canary',
+    );
+    expect(rows).toEqual([{ pii_ref: first.pii_ref, delete_after: was?.delete_after }]);
+    // The buyer the record would hold is checked: an ID it already has counts.
+    const userId = `PIIMARK-ing-${randomUUID().slice(0, 8)}`;
+    await order(W, 'ING2', address('34', { channel_buyer_id: userId }), {
+      source_updated_at: ago(DAY),
+    });
+    await clients.web.ebayUserMatch({ user_id: userId });
+    const late = order(W, 'ING2', address('35'), { source_updated_at: ago(1000) });
+    expect(await codeOf(late)).toBe('buyer_deleted');
+  });
+
+  it('[DEL-1][DP-6] an ingest that applies a newer block leaves no old value in the heap', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await order(W, 'HEAP1', address('41'), { source_updated_at: ago(DAY) });
+    const old = await oldBytes(W, pii_ref);
+    const moved = address('42', { city: 'Elsewhere', country: 'IE', postcode: 'D02 1AA' });
+    await order(W, 'HEAP1', moved, { source_updated_at: ago(1000) });
+    expect(await inHeap(old)).toBe(0);
+  });
+
+  it('[ORD-4] a correction never waits for another VACUUM, and a failed one is logged, not thrown', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await order(W, 'VAC', address('51'), { source_updated_at: ago(DAY) });
+    const ask = (v: Pick<VaultClient, 'replace'>, n: string, ms: number) =>
+      v.replace({
+        workspace_id: W,
+        pii_ref,
+        subject_id: `${account}:VAC`,
+        source_updated_at: ago(ms),
+        fields: address(n),
+      });
+    const c = await ownerPool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('LOCK TABLE vault.record_fields IN SHARE UPDATE EXCLUSIVE MODE');
+      const started = Date.now();
+      expect(await ask(clients.worker, '52', 60_000)).toEqual({ changed: true });
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
+    const failed: string[] = [];
+    const failing = {
+      connect: () => appPool.connect(),
+      query: (text: string, params?: unknown[]) =>
+        text.startsWith('VACUUM')
+          ? Promise.reject(new TypeError(`${PII_MARKER}no`))
+          : appPool.query(text, params),
+    } as unknown as pg.Pool;
+    const other = new Vault({
+      pool: failing,
+      keyring,
+      onVacuumFailed: (name: string) => {
+        failed.push(name);
+      },
+    });
+    expect(await ask(other, '53', 1_000)).toEqual({ changed: true });
+    expect(failed).toEqual(['TypeError']);
+    expect(await read(W, pii_ref)).toMatchObject(address('53'));
+  });
+
   it('[DEL-1][AT-10] a correction that leaves the buyer ID out is still checked against the record it would change', async () => {
     const W = randomUUID();
     const userId = `PIIMARK-kept-id-${randomUUID().slice(0, 8)}`;
@@ -1438,6 +1629,115 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       c.release();
     }
     expect((await deleted).counts.records).toBe(1);
+  });
+
+  it('[DEL-1][DP-6] a correction leaves no old value or index in the heap', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await order(W, 'HEAP2', address('61'), { source_updated_at: ago(DAY) });
+    const old = await oldBytes(W, pii_ref);
+    expect(await inHeap(old)).toBe(old.length);
+    await clients.worker.replace({
+      workspace_id: W,
+      pii_ref,
+      subject_id: `${account}:HEAP2`,
+      source_updated_at: ago(1000),
+      fields: address('62', { city: 'Elsewhere', country: 'IE', postcode: 'D02 1AA' }),
+    });
+    expect(await inHeap(old)).toBe(0);
+  });
+
+  it('[DEL-1][AT-10] a write sent while a notice is being recorded waits for it, and is refused', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-order-${randomUUID().slice(0, 8)}`;
+    const { pii_ref } = await order(W, 'V04', address('71', { channel_buyer_id: userId }), {
+      source_updated_at: ago(DAY),
+    });
+    let reached: () => void = () => undefined;
+    const atJournal = new Promise<void>((r) => (reached = r));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    // A vault whose notice stops with its lock held, before its entries are written.
+    const slow = new Vault({
+      pool: appPool,
+      keyring,
+      journal: {
+        append: async () => {
+          reached();
+          await gate;
+        },
+      },
+    });
+    const notice = slow.ebayUserMatch({ user_id: userId }, { caller: 'web' });
+    await atJournal;
+    const stored = order(W, 'V04-2', address('72', { channel_buyer_id: userId }));
+    const fixed = clients.worker.replace({
+      workspace_id: W,
+      pii_ref,
+      channel: 'ebay',
+      subject_id: `${account}:V04`,
+      source_updated_at: ago(1000),
+      fields: address('73', { channel_buyer_id: userId }),
+    });
+    const codes = Promise.all([codeOf(stored), codeOf(fixed)]);
+    await new Promise((r) => setTimeout(r, 400));
+    release();
+    expect(await codes).toEqual(['buyer_deleted', 'buyer_deleted']);
+    expect((await notice).workspaces).toEqual([
+      { workspace_id: W, matches: [expect.objectContaining({ pii_ref })] },
+    ]);
+  });
+
+  it('[DEL-1][AT-10] a username with no placed date is refused', async () => {
+    const username = `PIIMARK-undated-${randomUUID().slice(0, 8)}`;
+    await clients.web.ebayUserMatch({ username });
+    const undated = order(randomUUID(), 'V18', contact('718', { channel_username: username }));
+    expect(await codeOf(undated)).toBe('buyer_deleted');
+  });
+
+  it('[ORD-4] two corrections at once: the older one never lands on the newer', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await order(W, 'V24', address('81'), { source_updated_at: ago(2 * DAY) });
+    const c = await ownerPool.connect();
+    let late;
+    try {
+      // A newer correction in progress: it holds the record and has moved its update time.
+      await c.query('BEGIN');
+      await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [W]);
+      await c.query('UPDATE vault.records SET source_updated_at = $2 WHERE pii_ref = $1', [
+        pii_ref,
+        ago(1000),
+      ]);
+      late = clients.worker.replace({
+        workspace_id: W,
+        pii_ref,
+        subject_id: `${account}:V24`,
+        source_updated_at: ago(DAY),
+        fields: address('82'),
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      await c.query('COMMIT');
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
+    expect(await late).toEqual({ changed: false });
+    expect(await read(W, pii_ref)).toEqual(address('81'));
+  });
+
+  it('[EBAY-2][AT-10] the vault itself answers 503 busy while a write holds the notice lock', async () => {
+    const c = await ownerPool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('SELECT pg_advisory_xact_lock_shared(8711, 1)');
+      const err: unknown = await clients.web
+        .ebayUserMatch({ user_id: `PIIMARK-busy-${randomUUID().slice(0, 8)}` })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(VaultError);
+      expect(err).toMatchObject({ status: 503, code: 'busy' });
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
   });
 
   it('[ORD-4][SEC-12] a correction never touches the canary', async () => {
