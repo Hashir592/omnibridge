@@ -64,6 +64,7 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
     channelTotal: null,
     shipToCountry: 'GB',
     fba: false,
+    cancelRequested: false,
     lines: [{ lineId: 'L1', sku: null, quantity: 1, title: null, linePrice: p(1200) }],
     refunds: [],
     pii: { kind: 'stored', piiRef: randomUUID() },
@@ -260,6 +261,72 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
         if (d.status === 'rejected') seen.push((d.reason as { code?: string }).code);
     }
     expect(seen).toEqual([]);
+  });
+
+  it('[ORD-9] an order whose buyer asked to cancel is in no group, until the channel refuses', async () => {
+    const w = await world();
+    const asked: string[] = [];
+    const noting = new OrderIngest(db, {
+      catalogue: new CatalogueRepository(db),
+      ports: {
+        cancelPii: () => Promise.resolve(),
+        shortenPii: () => Promise.resolve(),
+        totalMismatch: () => Promise.resolve(),
+        lateMapped: () => Promise.resolve(),
+        regroup: (_ctx, i) => {
+          asked.push(i.channelAccountId);
+          return Promise.resolve();
+        },
+      },
+      now: () => now,
+    });
+    const { classes, orders } = await sameBuyer(w, 3);
+    await reads.applyGroups(w.ctx, w.account, classes);
+    const [first] = orders;
+    if (first === undefined) throw new Error('no order');
+    const send = (hour: number, cancelRequested: boolean) =>
+      noting.apply(w.ctx, w.account, [
+        {
+          ...first,
+          cancelRequested,
+          pii: { kind: 'unchanged' },
+          updatedAt: new Date(Date.UTC(2026, 10, 20, hour)),
+        },
+      ]);
+    const grouped = async () => {
+      await reads.applyGroups(w.ctx, w.account, classes);
+      const rows = await links(w);
+      const ids = new Set((await reads.groupCandidates(w.ctx, w.account)).map((c) => c.piiSubject));
+      return orders.map((o) => [
+        rows.get(o.externalId)?.order_group_id != null,
+        ids.has(piiSubject(w.account, o.externalId)),
+      ]);
+    };
+    const all = [
+      [true, true],
+      [true, true],
+      [true, true],
+    ];
+    expect(await grouped()).toEqual(all);
+    await send(12, true);
+    expect(asked).toHaveLength(1);
+    expect(await grouped()).toEqual([[false, false], ...all.slice(1)]);
+    // An older update says nothing about it now; a repeat asks for nothing.
+    await send(11, false);
+    await send(12, true);
+    expect(asked).toHaveLength(1);
+    expect(await grouped()).toEqual([[false, false], ...all.slice(1)]);
+    await send(13, false);
+    expect(asked).toHaveLength(2);
+    expect(await grouped()).toEqual(all);
+    // First seen with the request open.
+    const late = order(40, { cancelRequested: true });
+    asked.length = 0;
+    await noting.apply(w.ctx, w.account, [late]);
+    expect(asked).toEqual([]);
+    const more = new Map([...classes, [piiSubject(w.account, late.externalId), 'buyer']]);
+    await reads.applyGroups(w.ctx, w.account, more);
+    expect((await links(w)).get(late.externalId)?.order_group_id).toBeNull();
   });
 
   it('[ORD-9] a recompute never waits for, or stops, the actions of another account', async () => {

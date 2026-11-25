@@ -181,6 +181,7 @@ describe('order ingest (T-1001)', () => {
     channelTotal: null,
     shipToCountry: 'GB',
     fba: false,
+    cancelRequested: false,
     lines: [
       { lineId: 'L1', sku: 'STD-1', quantity: 1, title: 'Standard', linePrice: p(1200) },
       { lineId: 'L2', sku: 'ZERO-1', quantity: 1, title: 'Zero', linePrice: p(600) },

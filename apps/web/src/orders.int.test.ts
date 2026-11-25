@@ -117,6 +117,7 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
         channelTotal: null,
         shipToCountry: 'GB',
         fba: false,
+        cancelRequested: false,
         lines: [
           { lineId: 'L1', sku: `SKU-${ref}`, quantity: 1, title: 'Item', linePrice: pence(1200n) },
         ],
@@ -420,6 +421,29 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
     expect((await rows(admin)).find((r) => r.id === none)?.customer_state).toBe('none');
   });
 
+  it('[ORD-6] a customer whose record has just gone is not found, and no view is recorded', async () => {
+    const id = await place(accX, 'GONE-1', '2026-11-19T09:00:00Z', buyer('Gil Gone'));
+    const [row] = (
+      await mainRoot.query<{ pii_ref: string }>('SELECT pii_ref FROM app.orders WHERE id = $1', [
+        id,
+      ])
+    ).rows;
+    // The vault has deleted it; db-main has no tombstone yet.
+    await clients.deletion.delete({
+      workspace_id: A,
+      run_id: randomUUID(),
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [row?.pii_ref ?? ''] },
+    });
+    const res = await app().inject({
+      method: 'POST',
+      url: `/api/orders/${id}/customer`,
+      headers: headers(admin),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(await auditRows('order.customer_viewed', id)).toEqual([]);
+  });
+
   it('[ORD-8][AT-9] the CSV export holds no PII, not even masked values', async () => {
     await place(accX, 'E-1', '2026-11-18T09:00:00Z', buyer('Eve Export'));
     const res = await get(admin, '/api/orders/export');
@@ -489,6 +513,7 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
         channelTotal: null,
         shipToCountry: 'GB',
         fba: false,
+        cancelRequested: false,
         lines: [
           { lineId: 'L1', sku: 'SKU-RF-1', quantity: 1, title: 'Item', linePrice: pence(1200n) },
         ],

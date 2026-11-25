@@ -773,6 +773,76 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(await vault.backfillBuyerExact()).toBe(0);
   });
 
+  it('[ORD-9][DP-7] the start-up re-index gives older records the name and match keys of today, once', async () => {
+    const W = randomUUID();
+    const at = (n: string, name: string) =>
+      ingest(W, `RX-${n}`, {
+        name,
+        address_line1: "2 St John's Road",
+        postcode: 'RX1 1RX',
+        email: `${PII_MARKER}rx${n}@example.test`,
+      });
+    const refs = [
+      (await at('1', `${PII_MARKER}Mary O'Neil`)).pii_ref,
+      (await at('2', `${PII_MARKER}Mary ONeil`)).pii_ref,
+    ];
+    const match = async () =>
+      (
+        await clients.worker.match({
+          workspace_id: W,
+          channel_account_id: account,
+          pii_refs: refs,
+        })
+      ).groups;
+    const found = async () =>
+      (
+        await clients.web.search({
+          workspaceId: W,
+          purpose: 'order_search',
+          query: { name: `${PII_MARKER}mary o'neil` },
+        })
+      ).matches
+        .map((m) => m.pii_ref)
+        .sort();
+    const both = [['RX-1', 'RX-2']];
+    expect(await match()).toEqual(both);
+    // As an older vault left them: another key, or (before T-1002) none.
+    await raw(
+      ownerPool,
+      W,
+      `UPDATE vault.blind_index SET mac = sha256(mac) WHERE pii_ref = $1 AND field IN ('name', 'match')`,
+      [refs[0]],
+    );
+    await raw(
+      ownerPool,
+      W,
+      `DELETE FROM vault.blind_index WHERE pii_ref = $1 AND field IN ('name', 'match')`,
+      [refs[1]],
+    );
+    expect(await match()).toEqual([]);
+    expect(await found()).toEqual([]);
+    const rest = () =>
+      raw(
+        ownerPool,
+        W,
+        `SELECT * FROM vault.blind_index WHERE field NOT IN ('name', 'match') ORDER BY pii_ref, field`,
+      );
+    const before = await rest();
+    expect(await vault.reindexNames()).toBeGreaterThanOrEqual(2);
+    expect(await match()).toEqual(both);
+    expect(await found()).toEqual([...refs].sort());
+    // Nothing else is touched, the canary gets no key, and a second run finds nothing to do.
+    expect(await rest()).toEqual(before);
+    expect(
+      await raw(
+        ownerPool,
+        W,
+        `SELECT 1 FROM vault.blind_index b JOIN vault.records r ON r.pii_ref = b.pii_ref WHERE r.canary`,
+      ),
+    ).toEqual([]);
+    expect(await vault.reindexNames()).toBe(0);
+  });
+
   it('[ORD-4] one buyer record per order: a repeated ingest returns the same ref and adds nothing', async () => {
     const W = randomUUID();
     const subject = `${account}:ORDER-ONCE`;

@@ -16,7 +16,12 @@ import {
 describe('normalising and masking', () => {
   it('[DP-7] normalising makes equal identifiers equal, exactly and never fuzzily', () => {
     expect(normalisePostcode(' g2 1aa ')).toBe('G21AA');
-    expect(normaliseName("  Zoë  O'Brien ")).toBe('zoe o brien');
+    expect(normaliseName("  Zoë  O'Brien ")).toBe('zoe obrien');
+    // C3.1: punctuation is removed, not turned into a space.
+    expect(normaliseName("St John's")).toBe(normaliseName('St Johns'));
+    expect(normaliseName('St. John\u2019s')).toBe('st johns');
+    expect(normaliseName('1-3 High St.,')).toBe('13 high st');
+    expect(normaliseName(' - ')).toBe('');
     expect(normalisePhone('+44 (0)7700 900123')).toBe('07700900123');
     expect(normalisePhone('07700 900123')).toBe('07700900123');
     expect(normaliseName('Jon Smith')).not.toBe(normaliseName('John Smith'));

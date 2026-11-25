@@ -24,6 +24,7 @@ const order = (over: Partial<ChannelOrder> = {}): ChannelOrder => ({
   totalPence: null,
   shipToCountry: 'GB',
   fba: false,
+  cancelRequested: false,
   lines: [],
   refunds: [],
   buyer: { name: 'PIIMARK-A', address_line1: 'PIIMARK-1', postcode: 'TE1 1ST' },

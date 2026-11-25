@@ -90,6 +90,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     shippingPence: 300,
     shipToCountry: 'GB',
     fba: false,
+    cancelRequested: false,
     totalPence: null,
     lines: [{ lineId: 'L1', sku: 'MOCK-SKU-1', quantity: 1, title: 'Mock', linePricePence: 1200 }],
     refunds: [],
@@ -1207,6 +1208,35 @@ describe('order ingest across the PII boundary (T-1001)', () => {
       [skuId],
     );
     expect(rows).toEqual([{ on_hand: '5', reserved: '75' }]);
+  });
+
+  it('[ORD-9] an open eBay cancellation request reaches the order as one, and a decided one does not', async () => {
+    const asked = async (cancelState: string | undefined, over: Record<string, unknown> = {}) => {
+      const [o] = ebayOrders({
+        ...shipTo(fullAddress),
+        ...(cancelState === undefined ? {} : { cancelStatus: { cancelState } }),
+        ...over,
+      });
+      if (o === undefined) throw new Error('no order');
+      await poll([o]);
+      const { rows } = await root.query<{ cancel_requested: boolean; status: string }>(
+        'SELECT cancel_requested, status FROM app.orders WHERE external_order_id = $1',
+        [o.externalId],
+      );
+      return [rows[0]?.cancel_requested, rows[0]?.status];
+    };
+    for (const state of ['CANCEL_REQUESTED', 'IN_PROGRESS', 'CANCEL_PENDING']) {
+      expect(await asked(state), state).toEqual([true, 'awaiting_dispatch']);
+    }
+    for (const state of [
+      undefined,
+      'NONE_REQUESTED',
+      'CANCEL_REJECTED',
+      'CANCEL_CLOSED_NO_REFUND',
+    ]) {
+      expect(await asked(state), state).toEqual([false, 'awaiting_dispatch']);
+    }
+    expect(await asked('CANCELED')).toEqual([false, 'cancelled']);
   });
 
   it('[ORD-9] repeats of a group recompute collapse into one job that starts after they end', async () => {
