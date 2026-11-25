@@ -2284,12 +2284,16 @@
         "AT-8",
         "AT-9",
         "AT-10",
-        "EBAY-2"
+        "EBAY-2",
+        "INV-1",
+        "INV-3",
+        "CAT-6"
       ],
       "scope": [
         "The open points of S5's T-1001 check and F-M10-end-06, -18 and -19, exactly as S1's private handoff of 25 Nov 2026 rules them (docs/private/, ADR-074)",
         "PS-035 as accepted in ADR-081 (8)",
-        "Commit S5's report docs/reviews/security/20261124-M10-T1001.md with its Resolution lines once every Major in it is fixed, and write ADR-081's private points into docs/DECISIONS.md as a Proposed row for S1"
+        "Commit S5's report docs/reviews/security/20261124-M10-T1001.md with its Resolution lines once every Major in it is fixed, and write ADR-081's private points into docs/DECISIONS.md as a Proposed row for S1",
+        "F-M10-end-22 (ADR-082), first commits: the back-fill reserves only lines still to ship; a shipped line takes dispatch alone. Red tests first: a linked line dispatched between the mapping and its event (event run twice), and the 'dispatch stored while the listing is being mapped' race for a linked line, which must fail when the first branch of lockOrders is removed"
       ],
       "out_of_scope": [
         "Index-key rotation (M22)",
@@ -2302,7 +2306,8 @@
         "Every probe and finding has a test, committed failing first, citing its PRD IDs",
         "Marker scan, RLS coverage and restore tests pass",
         "S4 reviews this PR and S5 confirms it, right after merge",
-        "CI full gate green at merge (Semgrep included)"
+        "CI full gate green at merge (Semgrep included)",
+        "S4's F-22 probe and random runs give 0 wrong lines; the F-22 race test stays and passes after T-1004 changes lockOrders"
       ],
       "risk": "critical",
       "status": "todo"
@@ -2341,7 +2346,7 @@
         "F-07: dismiss and remove take the account's advisory lock first; applyGroups links only to a group it re-checked as open",
         "F-08: one vault match call and one access-log row per recompute; queue one only when an order is new or enters or leaves Awaiting dispatch, with a collapsing key",
         "F-09: index-first paging, hidden members counted for the page only, capped count, prefix search (ADR-081 6); plan-shape test at 100,000 rows",
-        "F-10: short transactions (25 to 50 orders), cursor moved only after the last, stock rows locked in component id order, stop before the job expiry and resume; F-20 lock order with it",
+        "F-10: short transactions (25 to 50 orders), cursor moved only after the last, stock rows locked in component id order, stop before the job expiry and resume; F-20 lock order with it. Each chunk locks in this order: its existing orders in id order, then the stock rows in component id order, then it stores; listings are locked FOR NO KEY UPDATE, on the mapping side too (S4's text of 25 Nov in docs/reviews/M10-end.md)",
         "F-11: the 37 required tests, each shown red against its fault; G02, G09 and G10 with F-07; the other survivors ride along",
         "Minors F-12 (open cancellation requests kept and excluded from groups), F-13 (404) and F-15 (name punctuation removed, match keys re-indexed)"
       ],
@@ -2353,6 +2358,7 @@
       ],
       "acceptance": [
         "Tests first, as their own commits: the S4 probes for F-05, F-07 (two connections), F-08 (call count), F-09 and F-10 (opposite order; a stock movement waits for one chunk only)",
+        "F-10: S4's three deadlock rows (4 open orders in falling id order; a new sale then 4 orders in rising order; 5 new sales) run through the real apply against a mapping event with no 40P01; the sale inserts its line first, as a real sale does",
         "F-09 p95 under 1 s at 100,000 orders in the plan test's setting",
         "S4 reviews this PR right after merge",
         "CI full gate green at merge (Semgrep included)"
