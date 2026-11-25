@@ -362,7 +362,7 @@ Everything else is high, normal or light. M21 is itself the final review.
   - CI deploys: staging automatically, production blue/green on Hashir's approval
   - backups switched from the local restic repository to B2 EU Central (hide-only keys, off-server prune)
   - host timer for the 15-minute tombstone-journal restic run, before go-live (ADR-068)
-  - restore, before real data (ADR-083): the order re-read after a restore; the drill migrates the restored copies first (tested with a copy one migration behind) and tests an address corrected, and an order stored, after the backup; deleted-buyer journal files of their own, trimmed after 181 days; deleted-buyer key rotation
+  - restore, before real data (ADR-083): the order re-read after a restore; the drill migrates the restored copies first (tested with a copy one migration behind) and tests an address corrected, and an order stored, after the backup; deleted-buyer journal files of their own, trimmed after 181 days; deleted-buyer key rotation; the drill fails when a deletion entry has no key; master-key rotation re-wraps `vault.vault_keys` (ADR-084)
   - every same-buyer match key from before T-1002 re-indexed, and a check that none is left, before real data (ADR-081)
   - production `PLATFORM_IP_ALLOWLIST` is the VPN range only; `TRUSTED_PROXIES` is the edge's pinned address; the shared edge sets no Caddy `trusted_proxies` (ADR-076)
   - public site live on HTTPS (AT-23); eBay deletion endpoint subscribed; Amazon, Ads and eBay applications sent

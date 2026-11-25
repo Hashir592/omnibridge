@@ -66,7 +66,7 @@
 
 6. **Run the marker scan** (AT-9): `node scripts/lib/marker-scan.mjs <files>` over a plain dump of db-main and the logs. Any hit stops the restore: report it, do not start the apps.
 
-7. **Start the apps** and check the following:
+7. **Start the apps** (pii-vault never before step 5 has run: a vault started first on a copy with no deleted-buyer key makes a new one, and the "entries without their key" count then wrongly says 0). Check the following:
    - `/healthz` on web and pii-vault
    - the next hourly `pii.expiry-sweep` runs
    - a deletion certificate (DEL-3) still lists the old runs
@@ -74,7 +74,7 @@
 ## Afterwards
 
 - Record what you did in the incident log: snapshot ids, times, and the counts printed by step 5.
-- **The deletion window (S5-20261118-01).** The journal leaves the host every 15 minutes (`journal.sh`), so after a host loss the deletions of the last 15 minutes before it may be missing from every source. Re-run them: in the deletion runs list (DEL-3), find every run started in the 15 minutes before the loss and request it again with the same trigger and scope.
+- **The deletion window (S5-20261118-01).** The journal leaves the host every 15 minutes (`journal.sh`), so after a host loss the deletions of the last 15 minutes before it may be missing from every source. Re-run them: in the deletion runs list (DEL-3), find every run started in the 15 minutes before the loss and request it again with the same trigger and scope. An eBay deletion notice answered in those 15 minutes leaves no entry, and eBay does not send it again: write the gap (from, to) in the incident log and tell the admin.
 - **VACUUM residue (accepted, invariant 10).** VACUUM frees deleted rows but does not overwrite the disk pages or old WAL files that held them, so ciphertext can stay on disk until it is overwritten. It cannot be read without the workspace's key, and a closed workspace has none. Read DEL-2's "even with the highest database privilege" with this in mind.
 - **Order re-read (ADR-083, built in M22; required before real data).** Keep the maintenance switch on after step 7. Rewind every order stream's cursor to the older snapshot's time less 1 hour, and let waiting orders whose ref has no vault record and no tombstone give up that ref. The next polls bring back corrected addresses and the buyers stored after the backup. Take maintenance off only when every order account has synced past the restore point. Orders lost with an older db-main snapshot come back the same way; a vault record left with no order is expired by the orphan sweep.
 
