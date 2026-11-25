@@ -1629,11 +1629,14 @@ describe('order ingest (T-1001)', () => {
     const o = pending();
     await ingest.apply(w.ctx, w.account, [o]);
     await catalogue.setCogs(w.ctx, w.zero, p(999), '2026-11-11', null, clock);
+    const was = clock;
+    clock = new Date('2026-11-13T12:00:00.000Z');
     await ingest.apply(w.ctx, w.account, [
       next(o, 30, {
         lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 1, 600n)],
       }),
     ]);
+    clock = was;
     const rows = await lineRows(w, (await orderRow(w, o.externalId))?.id);
     expect(rows.map((l) => l.cogs_pence)).toEqual(['400', '200']);
   });
@@ -2029,6 +2032,9 @@ describe('order ingest (T-1001)', () => {
         clock,
       );
     }
+    // Stored, and mapped, after the change.
+    const was = clock;
+    clock = new Date('2026-11-13T12:00:00.000Z');
     await ingest.apply(w.ctx, w.account, [early]);
     const id = (await orderRow(w, early.externalId))?.id;
     const snaps = async () =>
@@ -2045,6 +2051,7 @@ describe('order ingest (T-1001)', () => {
       ['STD-1', 'standard', '400'],
       ['NEW-ITEM', 'zero', '200'],
     ]);
+    clock = was;
   });
 
   it('[VAT-3][CAT-6] a late mapping shares discount, shipping and VAT between the lines again', async () => {
