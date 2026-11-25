@@ -26,3 +26,6 @@ infra/early-deploy/.env
 
 # Local restic repositories and dev passwords (infra/backup, T-0405).
 .backup/
+
+# Open security and PII findings and their handoffs: the repo is public (ADR-074, ADR-081).
+docs/private/
