@@ -6,6 +6,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CatalogueRepository } from './catalogue.ts';
 import { migrateMain } from './migrate.ts';
+import { OrderReads, type OrderFilter } from './order-reads.ts';
 import { OrderIngest, type IncomingOrder, type OrderIngestPorts } from './orders.ts';
 import { OutboundWriteRepository } from './outbound.ts';
 import type { MainDb } from './schema.ts';
@@ -1245,6 +1246,494 @@ describe('order ingest (T-1001)', () => {
         column,
       ).rejects.toThrow(/never change/);
     }
+  });
+
+  // ---- F-M10-end-05 (ADR-081 1 to 3): amounts follow the channel until payment, never after ------
+
+  const pending = (over: Partial<IncomingOrder> = {}): IncomingOrder =>
+    order({
+      state: 'pending_payment',
+      rawStatus: 'NOT_STARTED/PENDING',
+      paidAt: null,
+      pii: { kind: 'none' },
+      lines: [{ lineId: 'L1', sku: 'STD-1', quantity: 1, title: 'Standard', linePrice: p(1200) }],
+      shipping: p(600),
+      ...over,
+    });
+  /** The same order, `n` hours later. */
+  const next = (o: IncomingOrder, n: number, over: Partial<IncomingOrder> = {}): IncomingOrder => ({
+    ...o,
+    updatedAt: new Date(o.updatedAt.getTime() + n * 3_600_000),
+    ...over,
+  });
+  const paid = {
+    state: 'awaiting_dispatch' as const,
+    rawStatus: 'NOT_STARTED/PAID',
+    paidAt: new Date('2026-11-10T11:00:00.000Z'),
+  };
+  const lineRows = (w: World, orderId: unknown, live = true) =>
+    q<{
+      id: string;
+      line_no: string;
+      external_line_id: string;
+      external_sku: string;
+      quantity: string;
+      unit_gross_pence: string;
+      line_gross_pence: string;
+      discount_pence: string;
+      shipping_pence: string;
+      vat_pence: string;
+      vat_type: string | null;
+      cogs_pence: string | null;
+    }>(
+      w,
+      sql`SELECT id, line_no, external_line_id, external_sku, quantity, unit_gross_pence,
+                 line_gross_pence, discount_pence, shipping_pence, vat_pence, vat_type, cogs_pence
+            FROM app.order_lines
+           WHERE order_id = ${String(orderId)}::uuid AND (removed_at IS NULL) = ${live}
+           ORDER BY line_no`,
+    );
+  const notices = (orderId: unknown) =>
+    calls.filter((c) => c.op === 'total' && c.orderId === orderId).length;
+  const line = (
+    lineId: string,
+    sku: string,
+    quantity: number,
+    price: bigint,
+  ): IncomingOrder['lines'][number] => ({
+    lineId,
+    sku,
+    quantity,
+    title: null,
+    linePrice: pence(price),
+  });
+
+  it('[VAT-3][VAT-6] the update that captures payment sets discount, shipping and gross, then books the VAT', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1800',
+      vat_pence: '300',
+    });
+    const first = await lineRows(w, (await orderRow(w, o.externalId))?.id);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 1, { ...paid, shipping: p(300), discount: p(120) }),
+    ]);
+    const row = await orderRow(w, o.externalId);
+    expect(row).toMatchObject({
+      goods_pence: '1200',
+      discount_pence: '120',
+      shipping_pence: '300',
+      gross_pence: '1380',
+      vat_pence: '230',
+      amounts_differ: [],
+    });
+    expect(await lineRows(w, row?.id)).toEqual([
+      { ...first[0], discount_pence: '120', shipping_pence: '300', vat_pence: '230' },
+    ]);
+    expect(await totals(w, row?.id)).toEqual([
+      { group_key: 'rate:2000', gross: '1380', vat: '230' },
+    ]);
+  });
+
+  it('[VAT-3][FIN-1] before payment a new price replaces the line price in place; an older or repeated update changes nothing', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 2, 2400n), line('L2', 'ZERO-1', 1, 600n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    const before = await lineRows(w, id);
+    const cheaper = next(o, 2, {
+      lines: [line('L1', 'STD-1', 2, 1800n), line('L2', 'ZERO-1', 1, 600n)],
+    });
+    await ingest.apply(w.ctx, w.account, [cheaper]);
+    const after = await lineRows(w, id);
+    expect(after.map((l) => l.id)).toEqual(before.map((l) => l.id));
+    expect(after.map((l) => [l.unit_gross_pence, l.line_gross_pence])).toEqual([
+      ['900', '1800'],
+      ['600', '600'],
+    ]);
+    const stored = await orderRow(w, o.externalId);
+    // 1800 + 450 of the shipping at 20%; 600 + 150 at 0%.
+    expect(stored).toMatchObject({ goods_pence: '2400', gross_pence: '3000', vat_pence: '375' });
+    expect(after.map((l) => [l.shipping_pence, l.vat_pence])).toEqual([
+      ['450', '375'],
+      ['150', '0'],
+    ]);
+    // Older, and the same time with other amounts.
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { shipping: p(0) })]);
+    await ingest.apply(w.ctx, w.account, [{ ...cheaper, shipping: p(0) }]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({ gross_pence: '3000' });
+    expect(await lineRows(w, id)).toEqual(after);
+    expect(notices(id)).toBe(0);
+    expect(await ledger(w, id)).toEqual([]);
+  });
+
+  it('[INV-3][VAT-3][FIN-1] before payment a changed, dropped or added line closes the old one and takes its own stock', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 2, 1200n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    const [first, second] = await lineRows(w, id);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '2' });
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 1, { lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 5, 3000n)] }),
+    ]);
+    let live = await lineRows(w, id);
+    expect(live.map((l) => [l.external_line_id, l.quantity, l.line_no, l.vat_type])).toEqual([
+      ['L1', '1', '1', 'standard'],
+      ['L2', '5', '3', 'zero'],
+    ]);
+    expect(live[0]?.id).toBe(first?.id);
+    expect((await lineRows(w, id, false)).map((l) => [l.id, l.quantity])).toEqual([
+      [second?.id, '2'],
+    ]);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '5' });
+    // Another SKU under the same line ID, the second line dropped, a third added.
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { lines: [line('L1', 'ZERO-1', 1, 600n), line('L3', 'STD-1', 3, 3600n)] }),
+    ]);
+    live = await lineRows(w, id);
+    expect(live.map((l) => [l.external_line_id, l.external_sku, l.quantity])).toEqual([
+      ['L1', 'ZERO-1', '1'],
+      ['L3', 'STD-1', '3'],
+    ]);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '1' });
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '3' });
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      goods_pence: '4200',
+      gross_pence: '4800',
+    });
+    // A dropped line that comes back is a new line; then everything ships once.
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 3, {
+        ...paid,
+        lines: [line('L1', 'ZERO-1', 1, 600n), line('L2', 'ZERO-1', 2, 1200n)],
+      }),
+    ]);
+    expect((await lineRows(w, id)).map((l) => l.external_line_id)).toEqual(['L1', 'L2']);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '3' });
+    expect(await totals(w, id)).toEqual([{ group_key: 'zero:zero', gross: '2400', vat: '0' }]);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 4, { ...paid, state: 'dispatched', lines: [], dispatchedAt: clock }),
+    ]);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '7', reserved: '0' });
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+  });
+
+  it('[VAT-7][AT-6] a line added before payment takes the snapshot of the placed date', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await catalogue.setCogs(w.ctx, w.zero, p(999), '2026-11-11', null, clock);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 30, {
+        lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 1, 600n)],
+      }),
+    ]);
+    const rows = await lineRows(w, (await orderRow(w, o.externalId))?.id);
+    expect(rows.map((l) => l.cogs_pence)).toEqual(['400', '200']);
+  });
+
+  it('[ORD-1][ORD-2][ORD-6] a closed line is in no total, list, search or detail', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 2, 1200n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [line('L1', 'STD-1', 1, 1200n)] })]);
+    const reads = new OrderReads(db, { now: () => clock });
+    const page = (f: OrderFilter) => reads.list(w.ctx, f, { offset: 0, limit: 10 }, 100);
+    const { items } = await page({});
+    expect(items.map((r) => [r.skus, r.itemCount, r.grossPence])).toEqual([[['STD-1'], 1, 1800n]]);
+    expect((await page({ q: 'ZERO-1' })).items).toEqual([]);
+    expect((await page({ q: 'STD-1' })).items).toHaveLength(1);
+    const detail = await reads.detail(w.ctx, items[0]?.id ?? '');
+    expect(detail?.lines.map((l) => l.sku)).toEqual(['STD-1']);
+    expect(detail?.money).toMatchObject({ goodsPence: 1200n, grossPence: 1800n, vatPence: 300n });
+    expect(detail?.money.vatGroups.map((g) => g.key)).toEqual(['rate:2000']);
+  });
+
+  it('[CAT-6][VAT-2] a closed line is never linked, reported, back-filled or filled', async () => {
+    const w = await world();
+    const o = pending({
+      lines: [line('L1', 'NEW-ITEM', 1, 1200n), line('L2', 'LATER-ITEM', 1, 600n)],
+      shipping: p(0),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    expect((await orderRow(w, o.externalId))?.unmapped).toBe(true);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [line('L3', 'STD-1', 1, 1200n)] })]);
+    expect((await orderRow(w, o.externalId))?.unmapped).toBe(false);
+    const closed = await lineRows(w, id, false);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    late.length = 0;
+    expect(await ingest.reportLateMapped(w.ctx, w.account)).toBe(0);
+    expect(await mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero })).toEqual({
+      filled: 0,
+    });
+    expect(await lineRows(w, id, false)).toEqual(closed);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '0' });
+    expect(await ingest.openLines(w.ctx, w.listings.unmapped)).toEqual([]);
+  });
+
+  it('[INV-6][ORD-1] the Oversold flag goes when its line is closed, and comes with the new one', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 50, 60000n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    expect((await orderRow(w, o.externalId))?.oversold).toBe(true);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [line('L1', 'STD-1', 5, 6000n)] })]);
+    expect((await orderRow(w, o.externalId))?.oversold).toBe(false);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { lines: [line('L1', 'STD-1', 40, 48000n)] }),
+    ]);
+    expect((await orderRow(w, o.externalId))?.oversold).toBe(true);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '40' });
+  });
+
+  it('[FIN-1][VAT-6][ORD-6] after payment a different total or line set changes nothing: one mark and one notice', async () => {
+    const w = await world();
+    const o = pending({ ...paid });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const frozen = async () => {
+      const row = await orderRow(w, o.externalId);
+      const moving = ['amounts_differ', 'source_updated_at', 'updated_at'];
+      const rest = Object.fromEntries(
+        Object.entries(row ?? {}).filter(([k]) => !moving.includes(k)),
+      );
+      const differ = row?.amounts_differ;
+      return {
+        differ,
+        rest,
+        lines: await lineRows(w, row?.id),
+        closed: await lineRows(w, row?.id, false),
+        vat: await ledger(w, row?.id),
+        stock: await level(w, w.std),
+      };
+    };
+    const id = (await orderRow(w, o.externalId))?.id;
+    const was = await frozen();
+    expect(was.differ).toEqual([]);
+    const changes: Partial<IncomingOrder>[] = [
+      { shipping: p(500) },
+      { discount: p(10) },
+      { lines: [line('L1', 'STD-1', 1, 1100n)] },
+      { lines: [line('L1', 'STD-1', 2, 1200n)] },
+      { lines: [line('L1', 'ZERO-1', 1, 1200n)] },
+      { lines: [line('L9', 'STD-1', 1, 1200n)] },
+      { lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 1, 0n)] },
+      { lines: [] },
+    ];
+    for (const [i, change] of changes.entries()) {
+      await ingest.apply(w.ctx, w.account, [next(o, 2 * i + 1, change)]);
+      expect(await frozen(), JSON.stringify(Object.keys(change))).toEqual({
+        ...was,
+        differ: ['late_change'],
+      });
+      expect(notices(id)).toBe(i + 1);
+      // A repeat of the difference is not a second notice; the stored amounts again clear the mark.
+      await ingest.apply(w.ctx, w.account, [next(o, 2 * i + 1.5, change)]);
+      expect(notices(id)).toBe(i + 1);
+      await ingest.apply(w.ctx, w.account, [next(o, 2 * i + 2)]);
+      expect((await frozen()).differ).toEqual([]);
+    }
+    // An older update says nothing about the order now.
+    await ingest.apply(w.ctx, w.account, [next(o, 0.5, { shipping: p(1) })]);
+    expect((await frozen()).differ).toEqual([]);
+  });
+
+  it('[FIN-1][VAT-6] an order cancelled unpaid is frozen too', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { state: 'cancelled', cancelledAt: clock })]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { state: 'cancelled', lines: [line('L1', 'STD-1', 3, 3600n)] }),
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1800',
+      amounts_differ: ['late_change'],
+      status: 'cancelled',
+    });
+    expect((await lineRows(w, id)).map((l) => l.quantity)).toEqual(['1']);
+    expect(notices(id)).toBe(1);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+    expect(await ledger(w, id)).toEqual([]);
+  });
+
+  it('[INV-3] an update that cancels an unpaid order with other lines leaves no stock reserved', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 1, {
+        state: 'cancelled',
+        cancelledAt: clock,
+        lines: [line('L1', 'STD-1', 4, 4800n), line('L2', 'ZERO-1', 1, 600n)],
+      }),
+    ]);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '0' });
+  });
+
+  it('[INV-3][FIN-1] an unpaid order that has shipped keeps its lines: other lines are only marked', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 1, { state: 'dispatched', dispatchedAt: clock, shipping: p(100) }),
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({ gross_pence: '1300' });
+    const id = (await orderRow(w, o.externalId))?.id;
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { state: 'dispatched', lines: [line('L1', 'STD-1', 4, 4800n)] }),
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1300',
+      amounts_differ: ['late_change'],
+    });
+    expect((await lineRows(w, id)).map((l) => l.quantity)).toEqual(['1']);
+    expect(await level(w, w.std)).toEqual({ on_hand: '9', reserved: '0' });
+    // A new price is still taken, and the mark goes with it.
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 3, { state: 'dispatched', lines: [line('L1', 'STD-1', 1, 900n)], shipping: p(100) }),
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1000',
+      amounts_differ: [],
+    });
+  });
+
+  it('[FIN-1][ORD-6] pence that differ from the channel total are marked until a newer update adds up', async () => {
+    const w = await world();
+    const o = pending({ channelTotal: p(1700) });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    const differ = async () => (await orderRow(w, o.externalId))?.amounts_differ;
+    expect(await differ()).toEqual(['channel_total']);
+    expect(notices(id)).toBe(1);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { channelTotal: p(1750) })]);
+    expect(await differ()).toEqual(['channel_total']);
+    expect(notices(id)).toBe(1);
+    await ingest.apply(w.ctx, w.account, [next(o, 2, { channelTotal: p(1800) })]);
+    expect(await differ()).toEqual([]);
+    await ingest.apply(w.ctx, w.account, [next(o, 3, { ...paid, channelTotal: p(1790) })]);
+    expect(await differ()).toEqual(['channel_total']);
+    expect(notices(id)).toBe(2);
+    // Fixed now: a channel total that differs from the stored gross is a late change.
+    const fixed = order({ channelTotal: p(2100) });
+    await ingest.apply(w.ctx, w.account, [fixed]);
+    expect((await orderRow(w, fixed.externalId))?.amounts_differ).toEqual([]);
+    await ingest.apply(w.ctx, w.account, [next(fixed, 1, { channelTotal: p(2000) })]);
+    expect((await orderRow(w, fixed.externalId))?.amounts_differ).toEqual(['late_change']);
+    const reads = new OrderReads(db, { now: () => clock });
+    expect((await reads.detail(w.ctx, String(id)))?.money.amountsDiffer).toEqual(['channel_total']);
+  });
+
+  it('[VAT-5][FIN-1] a refund above what is left keeps its amount, books VAT up to what is left, and marks the order', async () => {
+    const w = await world();
+    const o = order({
+      lines: [line('L1', 'STD-1', 1, 1200n)],
+      shipping: p(0),
+      state: 'dispatched',
+      dispatchedAt: new Date('2026-11-10T10:00:00Z'),
+    });
+    const refund = (refundId: string, amount: bigint) => ({
+      refundId,
+      refundedAt: new Date('2026-11-12T09:00:00Z'),
+      amount: pence(amount),
+      lines: null,
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { refunds: [refund('R1', 1200n)] })]);
+    expect((await orderRow(w, o.externalId))?.amounts_differ).toEqual([]);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { refunds: [refund('R1', 1200n), refund('R2', 300n)] }),
+    ]);
+    const row = await orderRow(w, o.externalId);
+    expect(row?.amounts_differ).toEqual(['refund_above']);
+    expect(await totals(w, row?.id)).toEqual([{ group_key: 'rate:2000', gross: '0', vat: '0' }]);
+    expect(
+      await q(
+        w,
+        sql<object>`SELECT amount_pence, vat_pence FROM app.refunds
+                     WHERE order_id = ${String(row?.id)}::uuid ORDER BY amount_pence`,
+      ),
+    ).toEqual([
+      { amount_pence: '300', vat_pence: '0' },
+      { amount_pence: '1200', vat_pence: '200' },
+    ]);
+    // The mark stays with the refund, whatever later updates say.
+    await ingest.apply(w.ctx, w.account, [next(o, 3, { refunds: [] })]);
+    expect((await orderRow(w, o.externalId))?.amounts_differ).toEqual(['refund_above']);
+    expect(notices(row?.id)).toBe(0);
+  });
+
+  it('[FIN-1][VAT-6] the database fixes amounts and lines at payment or an unpaid cancellation, and not before', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 1, 600n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = String((await orderRow(w, o.externalId))?.id);
+    const run = (query: ReturnType<typeof sql<object>>) => q(w, query);
+    const one = sql`WHERE order_id = ${id}::uuid AND external_line_id = 'L1'`;
+    // Open: amounts, prices and closing are free; identity, SKU and quantity never are.
+    await run(sql`UPDATE app.orders SET gross_pence = gross_pence + 1 WHERE id = ${id}::uuid`);
+    await run(
+      sql`UPDATE app.order_lines SET line_gross_pence = 1201, unit_gross_pence = 1201 ${one}`,
+    );
+    const never = [
+      sql<object>`UPDATE app.order_lines SET quantity = 2 ${one}`,
+      sql<object>`UPDATE app.order_lines SET external_sku = 'OTHER' ${one}`,
+      sql<object>`UPDATE app.order_lines SET external_line_id = 'L7' ${one}`,
+      sql<object>`UPDATE app.order_lines SET line_no = 7 ${one}`,
+    ];
+    for (const query of never) await expect(run(query)).rejects.toThrow(/write-once/);
+    await run(sql`UPDATE app.order_lines SET removed_at = now()
+                   WHERE order_id = ${id}::uuid AND external_line_id = 'L2'`);
+    const closed = [
+      sql<object>`UPDATE app.order_lines SET removed_at = NULL WHERE external_line_id = 'L2'`,
+      sql<object>`UPDATE app.order_lines SET removed_at = now() + interval '1 day' WHERE external_line_id = 'L2'`,
+      sql<object>`UPDATE app.order_lines SET line_gross_pence = 1 WHERE external_line_id = 'L2'`,
+      sql<object>`UPDATE app.order_lines SET vat_pence = 1 WHERE external_line_id = 'L2'`,
+    ];
+    for (const query of closed) await expect(run(query)).rejects.toThrow(/write-once/);
+    const insert = sql<object>`
+      INSERT INTO app.order_lines (workspace_id, id, company_id, order_id, line_no, external_line_id,
+        quantity, unit_gross_pence, line_gross_pence, provisional_rate_bp, stored_unmapped, created_at)
+      SELECT workspace_id, gen_random_uuid(), company_id, id, 9, 'L9', 1, 1, 1, 2000, true, now()
+        FROM app.orders WHERE id = ${id}::uuid`;
+    const frozen = async () => {
+      for (const column of ['goods_pence', 'discount_pence', 'shipping_pence', 'gross_pence']) {
+        await expect(
+          run(sql<object>`UPDATE app.orders SET ${sql.ref(column)} = 1 WHERE id = ${id}::uuid`),
+          column,
+        ).rejects.toThrow(/never change/);
+      }
+      for (const change of ['line_gross_pence = 1', 'unit_gross_pence = 1', 'removed_at = now()']) {
+        await expect(
+          run(sql<object>`UPDATE app.order_lines SET ${sql.raw(change)} ${one}`),
+          change,
+        ).rejects.toThrow(/write-once/);
+      }
+      await expect(run(insert), 'insert').rejects.toThrow(/write-once/);
+    };
+    // Payment recorded: fixed for good, and it can never be unrecorded.
+    await run(sql`UPDATE app.orders SET vat_recorded_at = now() WHERE id = ${id}::uuid`);
+    await frozen();
+    await expect(
+      run(sql<object>`UPDATE app.orders SET vat_recorded_at = NULL WHERE id = ${id}::uuid`),
+    ).rejects.toThrow(/never change/);
+    const c = pending();
+    await ingest.apply(w.ctx, w.account, [c, next(c, 1, { state: 'cancelled' })]);
+    const cancelled = String((await orderRow(w, c.externalId))?.id);
+    await expect(
+      run(sql<object>`UPDATE app.orders SET gross_pence = 1 WHERE id = ${cancelled}::uuid`),
+    ).rejects.toThrow(/never change/);
+    await expect(
+      run(
+        sql<object>`UPDATE app.order_lines SET line_gross_pence = 1 WHERE order_id = ${cancelled}::uuid`,
+      ),
+    ).rejects.toThrow(/write-once/);
   });
 
   it('[ORD-3][INV-3] a channel that reports delivery without a dispatch time still dispatches the stock', async () => {
