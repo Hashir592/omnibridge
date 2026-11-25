@@ -111,6 +111,12 @@ export class DeletionService {
       if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
         await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(ws)]);
       }
+      // Records before their fields, as an ingest or a correction takes them (no deadlock).
+      await c.query(
+        `SELECT 1 FROM vault.records WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[])
+          ORDER BY pii_ref FOR UPDATE`,
+        [ws, refs],
+      );
       const fields = await c.query(
         'DELETE FROM vault.record_fields WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[])',
         [ws, refs],
