@@ -238,7 +238,6 @@ export class Vault {
     if (!isWholeAddress(req.fields)) return { changed: false };
     const changed = await this.#tx(req.workspace_id, async (c, tx) => {
       await this.#ingestLocks(c, req.workspace_id, true);
-      await this.#refuseDeletedBuyer(c, req);
       const keys = await this.#loadKeys(tx, req.workspace_id, false);
       if (keys === undefined) return false;
       const found = await c.query<{ source_updated_at: Date | null }>(
@@ -263,6 +262,8 @@ export class Vault {
         if (!DELIVERY_FIELDS.has(field)) next[field] = value;
       }
       for (const [field, value] of Object.entries(req.fields)) next[field] = value;
+      // The buyer as the record would hold it: an ID the channel did not send again still counts.
+      await this.#refuseDeletedBuyer(c, { ...req, fields: next });
       const names = new Set([...Object.keys(old), ...Object.keys(next)]);
       const differing = [...names].filter((n) => old[n] !== next[n]);
       if (differing.length === 0) return false;
@@ -495,7 +496,7 @@ export class Vault {
    */
   async #refuseDeletedBuyer(
     c: PoolClient,
-    req: Pick<IngestRequest, 'channel' | 'placed_at' | 'fields'> | ReplaceRequest,
+    req: Pick<IngestRequest, 'channel' | 'placed_at' | 'fields'>,
   ): Promise<void> {
     if (req.channel !== undefined && req.channel !== 'ebay') return;
     const id = normaliseBuyerExact(req.fields.channel_buyer_id ?? '');
