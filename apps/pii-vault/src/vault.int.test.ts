@@ -3,7 +3,12 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
+import {
+  generateIndexKey,
+  generateKekLine,
+  parseKeyring,
+  unwrapIndexKey,
+} from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { migratePii } from '@omnibridge/pii-db';
 import {
@@ -18,7 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildVaultApp } from './app.ts';
 import { ServiceTokens } from './auth.ts';
 import { DeletionJournal, DeletionService } from './deletion.ts';
-import { Vault, workspaceLock } from './vault.ts';
+import { Vault, VAULT_KEY_SCOPE } from './vault.ts';
 
 // T-0402: the PII store and its capability-scoped API, against a real db-pii with the real roles.
 
@@ -106,6 +111,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
         );
       },
     });
+    await vault.ensureVaultKey();
     const app = buildVaultApp({
       logger,
       version: 'test',
@@ -871,32 +877,582 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     ).toEqual([pii_ref]);
   });
 
-  it('[DEL-2][AT-10] a notice that waited for a closing workspace writes nothing into it', async () => {
+  /** Ingest as the order stream does: the channel and the placed time with the buyer. */
+  const order = (
+    workspaceId: string,
+    subject: string,
+    fields: Record<string, string>,
+    over: {
+      placed_at?: string;
+      channel?: 'amazon' | 'ebay' | 'website';
+      delete_after?: string;
+      source_updated_at?: string;
+    } = {},
+  ) =>
+    clients.worker.ingest({
+      workspace_id: workspaceId,
+      kind: 'buyer_contact',
+      channel_account_id: account,
+      subject_type: 'order',
+      subject_id: `${account}:${subject}`,
+      fields,
+      ...over,
+    });
+  const codeOf = async (p: Promise<unknown>) => {
+    const e: unknown = await p.catch((err: unknown) => err);
+    return e instanceof VaultError ? e.code : 'stored';
+  };
+  const soon = () => new Date(Date.now() + 60_000).toISOString();
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  const DAY = 86_400_000;
+  /** A pool whose ingest stops just before it writes its record. */
+  const gatedPool = () => {
+    let reached: () => void = () => undefined;
+    const atWrite = new Promise<void>((r) => (reached = r));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const pool = {
+      query: appPool.query.bind(appPool),
+      connect: async () => {
+        const c = await appPool.connect();
+        return {
+          release: () => {
+            c.release();
+          },
+          query: async (text: string, params?: unknown[]) => {
+            if (text.trimStart().startsWith('INSERT INTO vault.records')) {
+              reached();
+              await gate;
+            }
+            return c.query(text, params);
+          },
+        };
+      },
+    } as unknown as pg.Pool;
+    return {
+      pool,
+      atWrite,
+      release: () => {
+        release();
+      },
+    };
+  };
+
+  it('[DEL-1][AT-10] a notice covers a workspace that holds nothing yet: its first orders are refused', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const userId = `PIIMARK-first-${tag}`;
+    const username = `PIIMARK-name-${tag}`;
+    await clients.web.ebayUserMatch({ user_id: userId, username });
+    const byId = order(randomUUID(), 'F1', contact('701', { channel_buyer_id: userId }));
+    expect(await codeOf(byId)).toBe('buyer_deleted');
+    const byName = order(randomUUID(), 'F2', contact('702', { channel_username: username }), {
+      placed_at: ago(DAY),
+    });
+    expect(await codeOf(byName)).toBe('buyer_deleted');
+  });
+
+  it('[DEL-1][AT-10] a notice waits for the very first ingest of a new workspace, and finds its record', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-newws-${randomUUID().slice(0, 8)}`;
+    const g = gatedPool();
+    const slow = new Vault({ pool: g.pool, keyring }).ingest({
+      workspace_id: W,
+      kind: 'buyer_contact',
+      channel_account_id: account,
+      subject_type: 'order',
+      subject_id: `${account}:NEWWS`,
+      fields: contact('703', { channel_buyer_id: userId }),
+    });
+    await g.atWrite;
+    const notice = clients.web.ebayUserMatch({ user_id: userId });
+    await new Promise((r) => setTimeout(r, 300));
+    g.release();
+    const { pii_ref } = await slow;
+    expect((await notice).workspaces).toEqual([
+      { workspace_id: W, matches: [expect.objectContaining({ pii_ref })] },
+    ]);
+  });
+
+  it('[DEL-1][AT-10] a notice never stalls ingest for long: it gives up, and eBay sends it again', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-stall-${randomUUID().slice(0, 8)}`;
+    const g = gatedPool();
+    const slow = new Vault({ pool: g.pool, keyring }).ingest({
+      workspace_id: W,
+      kind: 'buyer_contact',
+      channel_account_id: account,
+      subject_type: 'order',
+      subject_id: `${account}:STALL`,
+      fields: contact('704'),
+    });
+    await g.atWrite;
+    const started = Date.now();
+    try {
+      expect(await codeOf(clients.web.ebayUserMatch({ user_id: userId }))).not.toBe('stored');
+      expect(Date.now() - started).toBeLessThan(4_000);
+    } finally {
+      g.release();
+      await slow;
+    }
+    await clients.web.ebayUserMatch({ user_id: userId });
+    const again = order(W, 'STALL-2', contact('705', { channel_buyer_id: userId }));
+    expect(await codeOf(again)).toBe('buyer_deleted');
+  });
+
+  it('[AT-10][EBAY-2] an eBay deletion refuses eBay buyers only; a buyer with no channel counts as eBay', async () => {
+    const userId = `PIIMARK-channel-${randomUUID().slice(0, 8)}`;
+    const W = randomUUID();
+    await clients.web.ebayUserMatch({ user_id: userId });
+    const fields = contact('706', { channel_buyer_id: userId });
+    expect(await codeOf(order(W, 'C-WEB', fields, { channel: 'website' }))).toBe('stored');
+    expect(await codeOf(order(W, 'C-AMZ', fields, { channel: 'amazon' }))).toBe('stored');
+    expect(await codeOf(order(W, 'C-EBAY', fields, { channel: 'ebay' }))).toBe('buyer_deleted');
+    expect(await codeOf(order(W, 'C-NONE', fields))).toBe('buyer_deleted');
+  });
+
+  it('[DEL-1][AT-10] a username entry is dated from the notice, at most now, and only moves forward', async () => {
+    const W = randomUUID();
+    const name = () => `PIIMARK-dated-${randomUUID().slice(0, 8)}`;
+    const placed = (n: string, at: string) =>
+      codeOf(
+        order(W, randomUUID(), contact('707', { channel_username: n }), {
+          placed_at: at,
+          channel: 'ebay',
+        }),
+      );
+    // The account was closed two days ago; the name's new owner ordered yesterday.
+    const old = name();
+    await clients.web.ebayUserMatch({ username: old, noticed_at: ago(2 * DAY) });
+    expect(await placed(old, ago(3 * DAY))).toBe('buyer_deleted');
+    expect(await placed(old, ago(DAY))).toBe('stored');
+    // Sent again (or replayed) days later: the date is still the notice's own.
+    await clients.web.ebayUserMatch({ username: old, noticed_at: ago(2 * DAY) });
+    expect(await placed(old, ago(DAY))).toBe('stored');
+    // A date in the future counts as now.
+    const future = name();
+    await clients.web.ebayUserMatch({ username: future, noticed_at: ago(-5 * DAY) });
+    expect(await placed(future, ago(60_000))).toBe('buyer_deleted');
+    expect(await placed(future, soon())).toBe('stored');
+    // No date means now; an older notice that arrives later never moves it back.
+    const none = name();
+    await clients.web.ebayUserMatch({ username: none });
+    await clients.web.ebayUserMatch({ username: none, noticed_at: ago(30 * DAY) });
+    expect(await placed(none, ago(DAY))).toBe('buyer_deleted');
+  });
+
+  it('[DEL-2][AT-10] a closed workspace takes nothing with it: the buyer stays refused elsewhere', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-kept-${randomUUID().slice(0, 8)}`;
+    await order(W, 'K1', contact('708', { channel_buyer_id: userId }));
+    await clients.web.ebayUserMatch({ user_id: userId });
+    await clients.deletion.delete({
+      workspace_id: W,
+      run_id: randomUUID(),
+      trigger: 'workspace_closure',
+      scope: { type: 'workspace' },
+    });
+    const elsewhere = order(randomUUID(), 'K2', contact('709', { channel_buyer_id: userId }));
+    expect(await codeOf(elsewhere)).toBe('buyer_deleted');
+  });
+
+  it('[DEL-2][AT-10] a notice writes nothing into any workspace, so a closing one is never written to', async () => {
     const W = randomUUID();
     const userId = `PIIMARK-closing-${randomUUID().slice(0, 8)}`;
-    await ingest(W, `${account}:CLOSING`, contact('645', { channel_buyer_id: userId }));
-    // Closure's last batch, held open: the lock alone, then the keys and rows go with the marker.
-    const c = await ownerPool.connect();
-    let found;
-    try {
-      await c.query('BEGIN');
-      await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [W]);
-      await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(W)]);
-      const notice = clients.web.ebayUserMatch({ user_id: userId });
-      await new Promise((r) => setTimeout(r, 300));
-      await c.query(
-        'INSERT INTO vault.closed_workspaces (workspace_id, closed_at) VALUES ($1, now())',
-        [W],
-      );
-      await c.query('COMMIT');
-      found = await notice;
-    } finally {
-      c.release();
-    }
-    expect(found.workspaces.filter((w) => w.workspace_id === W)).toEqual([]);
+    await order(W, 'W1', contact('710', { channel_buyer_id: userId }));
+    await clients.web.ebayUserMatch({ user_id: userId });
     expect(
       await raw(ownerPool, W, 'SELECT 1 FROM vault.deleted_buyers WHERE workspace_id = $1', [W]),
     ).toEqual([]);
+  });
+
+  it('[DP-6][AT-10] a deleted-buyer entry is a MAC with its key version, under a key of its own', async () => {
+    const userId = `PIIMARK-shape-${randomUUID().slice(0, 8)}`;
+    const before = (await appPool.query('SELECT 1 FROM vault.ebay_deleted_buyers')).rowCount ?? 0;
+    await clients.web.ebayUserMatch({ user_id: userId });
+    // Pages and repeats add nothing.
+    await clients.web.ebayUserMatch({ user_id: userId });
+    const { rows } = await ownerPool.query<Record<string, unknown>>(
+      'SELECT * FROM vault.ebay_deleted_buyers ORDER BY received_at',
+    );
+    expect(rows).toHaveLength(before + 1);
+    const row = rows.at(-1) ?? {};
+    expect(Object.keys(row).sort()).toEqual(
+      ['field', 'key_version', 'mac', 'noticed_at', 'received_at'].sort(),
+    );
+    expect(JSON.stringify(rows)).not.toContain(PII_MARKER);
+    expect((row.mac as Buffer).length).toBe(32);
+    // The key is made once, whoever starts first, and the vault cannot change or delete it.
+    await vault.ensureVaultKey();
+    await new Vault({ pool: appPool, keyring }).ensureVaultKey();
+    const keys = await ownerPool.query('SELECT version FROM vault.vault_keys');
+    expect(keys.rowCount).toBe(1);
+    for (const sql of [
+      'DELETE FROM vault.vault_keys',
+      'UPDATE vault.vault_keys SET kek_version = 2',
+      'DELETE FROM vault.ebay_deleted_buyers',
+      `UPDATE vault.ebay_deleted_buyers SET mac = decode(repeat('00', 32), 'hex')`,
+    ]) {
+      await expect(appPool.query(sql), sql).rejects.toThrow(/permission denied/);
+    }
+  });
+
+  it('[DP-6][AT-10] an entry under any stored key version still refuses; without the key nothing is stored', async () => {
+    const userId = `PIIMARK-version-${randomUUID().slice(0, 8)}`;
+    const next = generateIndexKey(keyring, VAULT_KEY_SCOPE, 2);
+    await ownerPool.query(
+      `INSERT INTO vault.vault_keys (kind, version, kek_version, wrapped, created_at)
+       VALUES ('deleted_buyers', 2, $1, $2, now())`,
+      [next.wrapped.kekVersion, next.wrapped.wrapped],
+    );
+    const older = `PIIMARK-older-${randomUUID().slice(0, 8)}`;
+    const oldKey = await ownerPool.query<{ kek_version: string; wrapped: Buffer }>(
+      'SELECT kek_version, wrapped FROM vault.vault_keys WHERE version = 1',
+    );
+    const v1 = unwrapIndexKey(keyring, {
+      workspaceId: VAULT_KEY_SCOPE,
+      version: 1,
+      kekVersion: Number(oldKey.rows[0]?.kek_version),
+      wrapped: oldKey.rows[0]?.wrapped ?? Buffer.alloc(0),
+    });
+    await ownerPool.query(
+      `INSERT INTO vault.ebay_deleted_buyers (key_version, field, mac, noticed_at, received_at)
+       VALUES (1, 'ebay_user_id', $1, now(), now() - interval '1 day')`,
+      [v1.mac('ebay_user_id', older)],
+    );
+    await clients.web.ebayUserMatch({ user_id: userId });
+    await ownerPool.query(
+      `UPDATE vault.ebay_deleted_buyers SET key_version = 2, mac = $1
+        WHERE received_at = (SELECT max(received_at) FROM vault.ebay_deleted_buyers)`,
+      [next.indexKey.mac('ebay_user_id', userId)],
+    );
+    const store = (v: Vault, subject: string, who = userId) =>
+      v
+        .ingest({
+          workspace_id: randomUUID(),
+          kind: 'buyer_contact',
+          subject_type: 'order',
+          subject_id: subject,
+          fields: contact('711', { channel_buyer_id: who }),
+        })
+        .then(
+          () => 'stored',
+          (e: unknown) => (e instanceof Error ? e.constructor.name : 'error'),
+        );
+    expect(await store(new Vault({ pool: appPool, keyring }), 'V2')).toBe('BuyerDeleted');
+    expect(await store(new Vault({ pool: appPool, keyring }), 'V1', older)).toBe('BuyerDeleted');
+    await ownerPool.query('DELETE FROM vault.vault_keys WHERE version = 2');
+    await ownerPool.query('DELETE FROM vault.ebay_deleted_buyers WHERE key_version = 2');
+    // No key at all (a vault that never ran its start-up step) stores no buyer.
+    const { rows } = await ownerPool.query('DELETE FROM vault.vault_keys RETURNING *');
+    const k = rows[0] as Record<string, unknown>;
+    try {
+      expect(await store(new Vault({ pool: appPool, keyring }), 'NOKEY')).toBe('Error');
+    } finally {
+      await ownerPool.query(
+        `INSERT INTO vault.vault_keys (kind, version, kek_version, wrapped, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [k.kind, k.version, k.kek_version, k.wrapped, k.created_at],
+      );
+    }
+  });
+
+  it('[DP-5][DEL-1] deleted-buyer entries go 180 days after the last notice, and only through the purge', async () => {
+    const add = (days: number) =>
+      ownerPool.query(
+        `INSERT INTO vault.ebay_deleted_buyers (key_version, field, mac, noticed_at, received_at)
+         VALUES (1, 'ebay_user_id', $1, now() - interval '400 days', now() - make_interval(days => $2))`,
+        [randomBytes(32), days],
+      );
+    await add(179);
+    await add(181);
+    const count = async () =>
+      (await ownerPool.query('SELECT 1 FROM vault.ebay_deleted_buyers')).rowCount ?? 0;
+    const before = await count();
+    expect(await vault.purgeDeletedBuyers()).toBe(1);
+    expect(await count()).toBe(before - 1);
+    expect(await vault.purgeDeletedBuyers()).toBe(0);
+    // A notice sent again counts from then: its entry is not old.
+    const again = `PIIMARK-again-${randomUUID().slice(0, 8)}`;
+    await clients.web.ebayUserMatch({ user_id: again });
+    await ownerPool.query(
+      `UPDATE vault.ebay_deleted_buyers SET received_at = now() - interval '200 days'
+        WHERE received_at = (SELECT max(received_at) FROM vault.ebay_deleted_buyers)`,
+    );
+    await clients.web.ebayUserMatch({ user_id: again });
+    expect(await vault.purgeDeletedBuyers()).toBe(0);
+  });
+
+  it('[AT-10] a later page of one notice writes no entry and no journal line', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-pages-${randomUUID().slice(0, 8)}`;
+    for (const n of ['1', '2']) {
+      await order(W, `PG${n}`, contact(`72${n}`, { channel_buyer_id: userId }));
+    }
+    const lines = () => journalLines().filter((l) => l.type === 'ebay_deleted').length;
+    const before = lines();
+    const first = await vault.ebayUserMatch({ user_id: userId }, { caller: 'web' }, 1);
+    expect(first.next).not.toBeNull();
+    const second = await vault.ebayUserMatch(
+      { user_id: userId, cursor: first.next ?? undefined },
+      { caller: 'web' },
+      1,
+    );
+    expect(second.workspaces).toHaveLength(1);
+    expect(lines()).toBe(before + 1);
+  });
+
+  it('[DEL-1][DP-8] a deleted-buyer entry is journalled off-site before it commits: a MAC and dates, no value', async () => {
+    const userId = `PIIMARK-journal-${randomUUID().slice(0, 8)}`;
+    const before = journalLines().filter((l) => l.type === 'ebay_deleted').length;
+    await clients.web.ebayUserMatch({ user_id: userId, username: `${userId}-name` });
+    const lines = journalLines().filter((l) => l.type === 'ebay_deleted');
+    expect(lines).toHaveLength(before + 2);
+    for (const line of lines.slice(before)) {
+      expect(Object.keys(line).sort()).toEqual(
+        ['at', 'field', 'key_version', 'mac', 'noticed_at', 'type'].sort(),
+      );
+      expect(line.mac).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(scanTextForMarkers(journalLines().map((l) => JSON.stringify(l)))).toEqual([]);
+  });
+
+  it('[ORD-4][DEL-1] a record already expired takes the date asked for when its order is stored again', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await order(W, 'AGAIN', contact('712'));
+    const expiry = async () =>
+      (
+        await raw(ownerPool, W, 'SELECT delete_after FROM vault.records WHERE pii_ref = $1', [
+          pii_ref,
+        ])
+      )[0]?.delete_after as Date;
+    // The orphan sweep expired it; then its order arrives after all.
+    await clients.worker.setExpiry({
+      workspace_id: W,
+      pii_refs: [pii_ref],
+      delete_after: ago(1000),
+      reason: 'orphan',
+    });
+    const wanted = ago(-30 * DAY);
+    const again = await order(W, 'AGAIN', contact('712'), { delete_after: wanted });
+    expect(again.pii_ref).toBe(pii_ref);
+    expect((await expiry()).toISOString()).toBe(wanted);
+    expect(
+      journalLines()
+        .filter((l) => l.pii_ref === pii_ref)
+        .at(-1),
+    ).toMatchObject({
+      type: 'expiry',
+      delete_after: wanted,
+    });
+    // A live record keeps its date: a repeat never moves it.
+    await order(W, 'AGAIN', contact('712'), { delete_after: ago(-80 * DAY) });
+    expect((await expiry()).toISOString()).toBe(wanted);
+  });
+
+  const read = async (W: string, piiRef: string) =>
+    (
+      await clients.web.readFull({
+        workspaceId: W,
+        piiRef,
+        purpose: 'order_detail',
+        actorUserId: randomUUID(),
+      })
+    ).fields;
+  const address = (n: string, over: Record<string, string> = {}) => ({
+    name: `${PII_MARKER}Ada ${n}`,
+    address_line1: `${PII_MARKER}${n} New Street`,
+    city: 'Newtown',
+    postcode: 'NE1 1ST',
+    country: 'GB',
+    ...over,
+  });
+
+  it('[ORD-4][ORD-9] a corrected address replaces the one record in place: same ref, same date, new indexes', async () => {
+    const W = randomUUID();
+    const first = await order(
+      W,
+      'R1',
+      address('1', {
+        address_line2: 'Flat 2',
+        email: `${PII_MARKER}ada@example.test`,
+        channel_username: 'ada-1',
+      }),
+      { source_updated_at: ago(2 * DAY) },
+    );
+    const twin = await order(
+      W,
+      'R2',
+      address('9', { postcode: 'NE9 9ZZ', channel_username: 'ada-1' }),
+    );
+    const before = await raw(ownerPool, W, 'SELECT * FROM vault.records WHERE pii_ref = $1', [
+      first.pii_ref,
+    ]);
+    const match = async () => (await clients.worker.match(W, first.pii_ref)).subject_ids;
+    expect(await match()).toEqual([]);
+    expect(
+      await clients.worker.replace({
+        workspace_id: W,
+        pii_ref: first.pii_ref,
+        channel: 'ebay',
+        subject_id: `${account}:R1`,
+        source_updated_at: ago(DAY),
+        fields: address('9', { postcode: 'NE9 9ZZ', channel_username: 'ada-1' }),
+      }),
+    ).toEqual({ changed: true });
+    // The delivery block is replaced whole; the email it did not send is kept.
+    expect(await read(W, first.pii_ref)).toEqual({
+      ...address('9', { postcode: 'NE9 9ZZ', channel_username: 'ada-1' }),
+      email: `${PII_MARKER}ada@example.test`,
+    });
+    const found = async (postcode: string) =>
+      (
+        await clients.web.search({ workspaceId: W, purpose: 'order_search', query: { postcode } })
+      ).matches.map((m) => m.pii_ref);
+    expect(await found('NE1 1ST')).toEqual([]);
+    expect((await found('NE9 9ZZ')).sort()).toEqual([first.pii_ref, twin.pii_ref].sort());
+    // The same buyer and address now: the match key moved with it.
+    expect(await match()).toEqual([`${account}:R2`]);
+    const after = await raw(ownerPool, W, 'SELECT * FROM vault.records WHERE pii_ref = $1', [
+      first.pii_ref,
+    ]);
+    expect(after).toEqual([{ ...before[0], source_updated_at: after[0]?.source_updated_at }]);
+    expect((after[0]?.source_updated_at as Date).getTime()).toBeGreaterThan(Date.now() - 1.5 * DAY);
+    const stored = await raw(ownerPool, W, 'SELECT ciphertext FROM vault.record_fields');
+    expect(stored.some((r) => (r.ciphertext as Buffer).includes(Buffer.from('New Street')))).toBe(
+      false,
+    );
+  });
+
+  it('[ORD-4][DEL-1] a correction that must change nothing changes nothing', async () => {
+    const W = randomUUID();
+    const stored = address('5', { channel_username: 'eve-5' });
+    const { pii_ref } = await order(W, 'N1', stored, { source_updated_at: ago(DAY) });
+    const ask = (over: Record<string, unknown> = {}) =>
+      clients.worker.replace({
+        workspace_id: W,
+        pii_ref,
+        channel: 'ebay',
+        subject_id: `${account}:N1`,
+        source_updated_at: ago(1000),
+        fields: address('6'),
+        ...over,
+      });
+    const without = (key: string) =>
+      Object.fromEntries(Object.entries(address('6')).filter(([k]) => k !== key));
+    const same = { changed: false };
+    // Older, or the same update seen again.
+    expect(await ask({ source_updated_at: ago(2 * DAY) })).toEqual(same);
+    // No address, no name, or masked by the channel.
+    expect(await ask({ fields: without('address_line1') })).toEqual(same);
+    expect(await ask({ fields: without('postcode') })).toEqual(same);
+    expect(await ask({ fields: without('name') })).toEqual(same);
+    for (const key of ['name', 'address_line1', 'postcode']) {
+      expect(await ask({ fields: { ...address('6'), [key]: 'A***' } }), key).toEqual(same);
+    }
+    // Another order's subject, or a ref that is not there.
+    expect(await ask({ subject_id: `${account}:OTHER` })).toEqual(same);
+    expect(await ask({ pii_ref: randomUUID() })).toEqual(same);
+    expect(await read(W, pii_ref)).toEqual(stored);
+    // The same values again: nothing written, but the update's time now counts.
+    expect(await ask({ fields: stored, source_updated_at: ago(5000) })).toEqual(same);
+    expect(await ask({ source_updated_at: ago(6000) })).toEqual(same);
+    expect(await read(W, pii_ref)).toEqual(stored);
+    // A deleted buyer, and a record past its date.
+    await clients.web.ebayUserMatch({ user_id: 'PIIMARK-gone-6' });
+    const gone = { ...address('6'), channel_username: 'PIIMARK-gone-6' };
+    expect(await codeOf(ask({ fields: gone }))).toBe('buyer_deleted');
+    expect(
+      await codeOf(
+        clients.web.replace({
+          workspace_id: W,
+          pii_ref,
+          subject_id: `${account}:N1`,
+          source_updated_at: ago(1000),
+          fields: address('6'),
+        }),
+      ),
+    ).toBe('capability_missing');
+    await clients.worker.setExpiry({
+      workspace_id: W,
+      pii_refs: [pii_ref],
+      delete_after: ago(1000),
+      reason: 'orphan',
+    });
+    expect(await ask()).toEqual(same);
+    // It never makes a record, and a closed workspace takes none.
+    const { rows } = await appPool.query('SELECT 1');
+    expect(rows).toHaveLength(1);
+    expect(await raw(ownerPool, W, 'SELECT pii_ref FROM vault.records WHERE NOT canary')).toEqual([
+      { pii_ref },
+    ]);
+    await clients.deletion.delete({
+      workspace_id: W,
+      run_id: randomUUID(),
+      trigger: 'workspace_closure',
+      scope: { type: 'workspace' },
+    });
+    expect(await codeOf(ask())).toBe('workspace_closed');
+  });
+
+  it('[DEL-1][AT-10] a correction that leaves the buyer ID out is still checked against the record it would change', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-kept-id-${randomUUID().slice(0, 8)}`;
+    const { pii_ref } = await order(W, 'KID', address('8', { channel_buyer_id: userId }), {
+      source_updated_at: ago(DAY),
+    });
+    await clients.web.ebayUserMatch({ user_id: userId });
+    const fix = clients.worker.replace({
+      workspace_id: W,
+      pii_ref,
+      channel: 'ebay',
+      subject_id: `${account}:KID`,
+      source_updated_at: ago(1000),
+      fields: address('9'),
+    });
+    expect(await codeOf(fix)).toBe('buyer_deleted');
+    expect((await read(W, pii_ref)).address_line1).toBe(address('8').address_line1);
+  });
+
+  it('[DEL-1][ORD-4] a deletion and a correction of one record take their locks in the same order', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await order(W, 'LOCKS', address('3'));
+    // A correction in progress: it holds the record, and then rewrites its fields.
+    const c = await ownerPool.connect();
+    let deleted;
+    try {
+      await c.query('BEGIN');
+      await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [W]);
+      await c.query('SELECT 1 FROM vault.records WHERE pii_ref = $1 FOR UPDATE', [pii_ref]);
+      deleted = clients.deletion.delete({
+        workspace_id: W,
+        run_id: randomUUID(),
+        trigger: 'erasure',
+        scope: { type: 'refs', pii_refs: [pii_ref] },
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      await c.query(`SET LOCAL lock_timeout = '500ms'`);
+      await c.query('DELETE FROM vault.record_fields WHERE pii_ref = $1', [pii_ref]);
+      await c.query('COMMIT');
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
+    expect((await deleted).counts.records).toBe(1);
+  });
+
+  it('[ORD-4][SEC-12] a correction never touches the canary', async () => {
+    const W = randomUUID();
+    await order(W, 'CAN', contact('713'));
+    const [canary] = await raw(ownerPool, W, 'SELECT pii_ref FROM vault.records WHERE canary');
+    expect(
+      await clients.worker.replace({
+        workspace_id: W,
+        pii_ref: String(canary?.pii_ref),
+        subject_id: 'canary',
+        source_updated_at: ago(0),
+        fields: address('7'),
+      }),
+    ).toEqual({ changed: false });
   });
 
   it('[DP-4][DEL-1] only the worker may move an expiry', async () => {

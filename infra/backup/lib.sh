@@ -1,7 +1,7 @@
 # Shared settings for the backup, retention and restore scripts (T-0405, ADR-016). Sourced, not run.
 #
 # Two restic repositories with separate passwords (and, on B2, separate buckets and keys):
-#   main: db-main dumps and the off-site tombstone journal (IDs only)
+#   main: db-main dumps and the off-site tombstone journal (IDs and MACs, no values)
 #   pii:  db-pii dumps only (ciphertext; 3 daily snapshots, P-010)
 # The vault volume (label files, M12) and the files volume are never backed up here.
 #

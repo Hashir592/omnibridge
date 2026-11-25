@@ -23,7 +23,8 @@ export interface LabelFiles {
 export const NO_LABEL_FILES: LabelFiles = { deleteFor: () => Promise.resolve(0) };
 
 /**
- * The off-site tombstone journal (invariant 10): one JSON line per deleted ref, IDs only, appended
+ * The off-site tombstone journal (invariant 10): one JSON line per deleted ref (IDs only), expiry
+ * change (IDs and a date) or eBay deletion entry (a MAC and dates), never a value, appended
  * and fsynced before the delete commits, so a restore can always re-apply it. In dev and CI the
  * directory is a local volume standing in for the B2 bucket (T-0405 ships it off-site).
  */
@@ -111,6 +112,12 @@ export class DeletionService {
       if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
         await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(ws)]);
       }
+      // Records before their fields, as an ingest or a correction takes them (no deadlock).
+      await c.query(
+        `SELECT 1 FROM vault.records WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[])
+          ORDER BY pii_ref FOR UPDATE`,
+        [ws, refs],
+      );
       const fields = await c.query(
         'DELETE FROM vault.record_fields WHERE workspace_id = $1 AND pii_ref = ANY($2::uuid[])',
         [ws, refs],
@@ -150,7 +157,6 @@ export class DeletionService {
       if (req.scope.type === 'workspace' && !more) {
         // Closure: the keys go last, once no record is left that they could open. The marker
         // makes the vault refuse any later ingest for this workspace (ADR-065, F-M04h-04).
-        await c.query('DELETE FROM vault.deleted_buyers WHERE workspace_id = $1', [ws]);
         await c.query('DELETE FROM vault.workspace_keys WHERE workspace_id = $1', [ws]);
         await c.query('DELETE FROM vault.workspace_directory WHERE workspace_id = $1', [ws]);
         await c.query(

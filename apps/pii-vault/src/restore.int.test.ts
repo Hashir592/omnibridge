@@ -4,9 +4,10 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { PII_MARKER, startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
-import { VaultClient } from '@omnibridge/vault-client';
+import { VaultClient, VaultError } from '@omnibridge/vault-client';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startTestVault, type TestVault } from './testing.ts';
@@ -29,6 +30,7 @@ describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
   let clock = new Date('2026-11-18T09:00:00.000Z');
   const journalDir = mkdtempSync(join(tmpdir(), 'ob-journal-'));
   const clients = {} as Record<'web' | 'worker' | 'deletion', VaultClient>;
+  const keyring = parseKeyring('pii', generateKekLine(1));
   const A = randomUUID();
   const C = randomUUID();
 
@@ -112,6 +114,7 @@ describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
       }),
       journalDir,
       now: () => clock,
+      keyring,
     });
     for (const caller of ['web', 'worker', 'deletion'] as const) {
       clients[caller] = new VaultClient({ baseUrl: vault.baseUrl, token: vault.tokens[caller] });
@@ -261,6 +264,77 @@ describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
       ),
     ).toEqual([]);
   }, 300_000);
+  it('[DEL-1][AT-10] a backup older than an eBay notice, restored and replayed, still refuses the buyer', async () => {
+    const user = cluster.container.getUsername();
+    const tag = randomUUID().slice(0, 8);
+    const recent = `PIIMARK-restored-${tag}`;
+    const name = `PIIMARK-restored-name-${tag}`;
+    const old = `PIIMARK-restored-old-${tag}`;
+    const today = clock;
+    await sh(`pg_dump -U ${user} -Fc -f /tmp/notice.dump omnibridge_pii`);
+    // After the backup: one notice long ago, then one user twice, then its username.
+    clock = new Date(today.getTime() - 181 * DAY);
+    await clients.web.ebayUserMatch({ user_id: old });
+    clock = new Date(today.getTime() - 20 * DAY);
+    await clients.web.ebayUserMatch({ username: name });
+    clock = new Date(today.getTime() - 10 * DAY);
+    await clients.web.ebayUserMatch({ user_id: recent });
+    await clients.web.ebayUserMatch({ username: name });
+    clock = today;
+
+    await sh(
+      `createdb -U ${user} restored_notice && pg_restore -U ${user} -d restored_notice /tmp/notice.dump`,
+    );
+    await replay('restored_notice');
+    await replay('restored_notice');
+    const entries = await rows(
+      'restored_notice',
+      randomUUID(),
+      `SELECT field, noticed_at FROM vault.ebay_deleted_buyers WHERE $1::uuid IS NOT NULL
+        ORDER BY field`,
+    );
+    // Both fields once each; the old one is past its 180 days; the newest date wins.
+    expect(entries.map((e) => [e.field, (e.noticed_at as Date).getTime()])).toEqual([
+      ['ebay_user_id', today.getTime() - 10 * DAY],
+      ['ebay_username', today.getTime() - 10 * DAY],
+    ]);
+    const restored = await startTestVault({
+      owner: { ...cluster.connection('vault_owner'), database: 'restored_notice' },
+      app: { ...cluster.connection('vault_app'), database: 'restored_notice' },
+      logger: createLogger({
+        service: 'pii-vault',
+        version: 'test',
+        destination: { write: () => true },
+      }),
+      journalDir: mkdtempSync(join(tmpdir(), 'ob-journal-')),
+      now: () => clock,
+      keyring,
+    });
+    try {
+      const worker = new VaultClient({ baseUrl: restored.baseUrl, token: restored.tokens.worker });
+      const store = (fields: Record<string, string>, placedAt: Date) =>
+        worker
+          .ingest({
+            workspace_id: randomUUID(),
+            kind: 'buyer_contact',
+            subject_type: 'order',
+            subject_id: randomUUID(),
+            placed_at: placedAt.toISOString(),
+            fields: { name: `${PII_MARKER}back`, ...fields },
+          })
+          .then(
+            () => 'stored',
+            (e: unknown) => (e instanceof VaultError ? e.code : 'error'),
+          );
+      expect(await store({ channel_buyer_id: recent }, today)).toBe('buyer_deleted');
+      const before = new Date(today.getTime() - 15 * DAY);
+      expect(await store({ channel_username: name }, before)).toBe('buyer_deleted');
+      expect(await store({ channel_username: name }, today)).toBe('stored');
+    } finally {
+      await restored.close();
+    }
+  }, 300_000);
+
   it('[DEL-1][AT-8] an expiry shortened after the backup is re-applied by the restore, so the copy goes on time (ADR-068)', async () => {
     const W = randomUUID();
     // Stored with the 90-day backstop; the backup holds that date.

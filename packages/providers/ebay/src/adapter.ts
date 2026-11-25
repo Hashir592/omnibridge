@@ -230,9 +230,9 @@ function ebayOrder(o: EbayOrder): ChannelOrder {
           ? new Date(o.creationDate)
           : null,
     shipBy: shipBy === undefined ? null : new Date(shipBy),
-    // getOrders has no dispatch time: the update that first shows FULFILLED stands in for it.
-    // M12 records its own dispatch time for labels it makes.
-    dispatchedAt: state === 'dispatched' ? new Date(o.lastModifiedDate) : null,
+    // getOrders has no dispatch time, and the last edit is not one: ingest works out a stand-in
+    // (effectiveDispatch). M12 records its own dispatch time for labels it makes.
+    dispatchedAt: null,
     deliveredAt: null,
     cancelledAt: state === 'cancelled' ? new Date(o.lastModifiedDate) : null,
     ...ebayAmounts(o.pricingSummary),

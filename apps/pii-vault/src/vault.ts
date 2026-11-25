@@ -9,6 +9,7 @@ import {
 } from '@omnibridge/crypto';
 import type { Pool, PoolClient } from '@omnibridge/pii-db';
 import {
+  hasDeliveryAddress,
   PURPOSE_KINDS,
   type EbayUserMatchRequest,
   type EbayUserMatchResponse,
@@ -19,6 +20,7 @@ import {
   type ReadFullResponse,
   type RecordKind,
   type ReadPurpose,
+  type ReplaceRequest,
   type SearchResponse,
   type SignalsRequest,
   type SignalsResponse,
@@ -60,7 +62,7 @@ export class WorkspaceClosed extends Error {}
  */
 export class BuyerDeleted extends Error {}
 
-/** The off-site journal (invariant 10, ADR-068): IDs and dates only, fsynced before commit. */
+/** The off-site journal (invariant 10, ADR-068): IDs, dates and MACs, fsynced before commit. */
 export interface Journal {
   append(lines: readonly Record<string, string | null>[]): Promise<void>;
 }
@@ -69,6 +71,37 @@ interface Keys {
   data: DataKey;
   index: IndexKey;
 }
+
+/** A lock could not be had in time: 503, and the caller asks again. */
+export class VaultBusy extends Error {}
+
+/** The address block of a buyer, replaced whole by a correction (ORD-4). */
+const DELIVERY_FIELDS: ReadonlySet<string> = new Set([
+  'name',
+  'address_line1',
+  'address_line2',
+  'address_line3',
+  'city',
+  'county',
+  'postcode',
+  'country',
+  'delivery_instructions',
+]);
+
+/** A named, unmasked delivery address. A channel masks old buyers' details with stars or dots. */
+function isWholeAddress(fields: ReplaceRequest['fields']): boolean {
+  const named = fields.name !== undefined && fields.name.trim() !== '';
+  const masked = [fields.name, fields.address_line1, fields.city, fields.postcode].some(
+    (v) => v !== undefined && /[*\u2022]/.test(v),
+  );
+  return named && !masked && hasDeliveryAddress(fields);
+}
+
+/**
+ * The vault-wide advisory lock of eBay notices (two-key space, so never a workspace's lock):
+ * shared by every buyer write, taken alone by a notice.
+ */
+const NOTICE_LOCK = '8711, 1';
 
 /** One transaction: keys it read or made are cached only once it commits. */
 interface Tx {
@@ -105,6 +138,8 @@ export function workspaceLock(workspaceId: string): string {
 }
 
 const KEY_VERSION = 1;
+/** Stands for the vault itself where a key belongs to a workspace: never a UUID, so never one. */
+export const VAULT_KEY_SCOPE = 'vault-wide';
 /** PRD 7.3: PII of an order never dispatched goes at most 90 days after it arrived. */
 export const HARD_LIMIT_MS = 90 * 24 * 60 * 60 * 1000;
 /** ADR-065: an expiry may lie at most a day in the past (a late caller), never further. */
@@ -125,6 +160,8 @@ export class Vault {
   readonly #now: () => Date;
   /** Unwrapped keys per workspace, cached only after the transaction that read them commits. */
   readonly #keys = new Map<string, Keys>();
+  /** The vault-wide keys by version, unwrapped once. */
+  readonly #vaultKeys = new Map<number, IndexKey>();
 
   readonly #onCanary: (event: CanaryEvent) => void;
   readonly #journal: Journal | undefined;
@@ -150,33 +187,188 @@ export class Vault {
     this.#keys.delete(workspaceId);
   }
 
+  /**
+   * PS-035 (ADR-081 8): makes the vault-wide index key, once, whoever starts first. Called before
+   * the vault serves, never at the first notice: a key made after a backup would be lost by the
+   * restore, and the entries replayed from the journal would then match nothing.
+   */
+  async ensureVaultKey(): Promise<void> {
+    const { wrapped } = generateIndexKey(this.#keyring, VAULT_KEY_SCOPE, KEY_VERSION);
+    await this.#pool.query(
+      `INSERT INTO vault.vault_keys (kind, version, kek_version, wrapped, created_at)
+       VALUES ('deleted_buyers', $1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+      [wrapped.version, wrapped.kekVersion, wrapped.wrapped, this.#now()],
+    );
+    await this.#vaultKeyList(this.#pool);
+  }
+
+  /** The vault-wide keys, oldest first. None is an error: without one nothing can be checked. */
+  async #vaultKeyList(c: Pick<PoolClient, 'query'>): Promise<[IndexKey, ...IndexKey[]]> {
+    const { rows } = await c.query<{ version: string; kek_version: string; wrapped: Buffer }>(
+      `SELECT version, kek_version, wrapped FROM vault.vault_keys
+        WHERE kind = 'deleted_buyers' ORDER BY version`,
+    );
+    const keys = rows.map((r) => {
+      const version = Number(r.version);
+      const cached = this.#vaultKeys.get(version);
+      if (cached !== undefined) return cached;
+      const key = unwrapIndexKey(this.#keyring, {
+        workspaceId: VAULT_KEY_SCOPE,
+        version,
+        kekVersion: Number(r.kek_version),
+        wrapped: r.wrapped,
+      });
+      this.#vaultKeys.set(version, key);
+      return key;
+    });
+    const [first, ...rest] = keys;
+    if (first === undefined) throw new Error('the vault-wide key is missing');
+    return [first, ...rest];
+  }
+
+  /**
+   * ORD-4 (ADR-081, T-1003): the channel corrected an order's buyer block before dispatch. The one
+   * record takes it in place: same pii_ref, same delete_after, with its blind indexes and match
+   * key, in one transaction. The delivery block is replaced whole; an email, phone or channel ID
+   * the channel did not send again is kept. It never makes a record, and it changes nothing for a
+   * record that is gone or past its date, an older update, or a block that is masked or no whole
+   * address.
+   */
+  async replace(req: ReplaceRequest): Promise<{ changed: boolean }> {
+    if (!isWholeAddress(req.fields)) return { changed: false };
+    const changed = await this.#tx(req.workspace_id, async (c, tx) => {
+      await this.#ingestLocks(c, req.workspace_id, true);
+      const keys = await this.#loadKeys(tx, req.workspace_id, false);
+      if (keys === undefined) return false;
+      const found = await c.query<{ source_updated_at: Date | null }>(
+        `SELECT source_updated_at FROM vault.records
+          WHERE workspace_id = $1 AND pii_ref = $2 AND kind = 'buyer_contact'
+            AND subject_type = 'order' AND subject_id = $3 AND NOT canary
+            AND (delete_after IS NULL OR delete_after > $4)
+          FOR UPDATE`,
+        [req.workspace_id, req.pii_ref, req.subject_id, this.#now()],
+      );
+      const record = found.rows[0];
+      const at = new Date(req.source_updated_at);
+      if (record === undefined) return false;
+      if (record.source_updated_at !== null && record.source_updated_at >= at) return false;
+      await c.query(
+        'UPDATE vault.records SET source_updated_at = $3 WHERE workspace_id = $1 AND pii_ref = $2',
+        [req.workspace_id, req.pii_ref, at],
+      );
+      const old = await this.#decryptFields(c, keys.data, req.workspace_id, req.pii_ref);
+      const next: Record<string, string> = {};
+      for (const [field, value] of Object.entries(old)) {
+        if (!DELIVERY_FIELDS.has(field)) next[field] = value;
+      }
+      for (const [field, value] of Object.entries(req.fields)) next[field] = value;
+      // The buyer as the record would hold it: an ID the channel did not send again still counts.
+      await this.#refuseDeletedBuyer(c, { ...req, fields: next });
+      const names = new Set([...Object.keys(old), ...Object.keys(next)]);
+      const differing = [...names].filter((n) => old[n] !== next[n]);
+      if (differing.length === 0) return false;
+      await c.query(
+        `DELETE FROM vault.record_fields
+          WHERE workspace_id = $1 AND pii_ref = $2 AND field = ANY($3::text[])`,
+        [req.workspace_id, req.pii_ref, differing],
+      );
+      await c.query('DELETE FROM vault.blind_index WHERE workspace_id = $1 AND pii_ref = $2', [
+        req.workspace_id,
+        req.pii_ref,
+      ]);
+      const write = Object.fromEntries(Object.entries(next).filter(([n]) => differing.includes(n)));
+      await this.#writeFields(c, keys, req.workspace_id, req.pii_ref, write);
+      await this.#writeIndex(c, keys, req.workspace_id, req.pii_ref, indexValues(next));
+      return true;
+    });
+    // Invariant 10: the replaced values leave no dead tuple behind. Best effort: the hourly
+    // deletion run and autovacuum clear the same tables, and the values are ciphertext.
+    if (changed) {
+      await this.#pool
+        .query('VACUUM vault.record_fields, vault.blind_index')
+        .catch(() => undefined);
+    }
+    return { changed };
+  }
+
+  /** Deleted-buyer entries past their 180 days go (0011). Run daily; returns how many went. */
+  async purgeDeletedBuyers(): Promise<number> {
+    const res = await this.#pool.query<{ n: string }>('SELECT vault.purge_deleted_buyers() AS n');
+    return Number(res.rows[0]?.n ?? '0');
+  }
+
+  /**
+   * The locks every write of a buyer takes, in this order, until it commits. The vault-wide one,
+   * shared, orders it against an eBay notice (which takes it alone): an ingest past its check is
+   * committed, with its workspace's directory row, before the notice looks. The workspace one,
+   * shared, orders it against closure's last batch (ADR-065).
+   */
+  async #ingestLocks(c: PoolClient, workspaceId: string, buyer: boolean): Promise<void> {
+    if (buyer) await c.query(`SELECT pg_advisory_xact_lock_shared(${NOTICE_LOCK})`);
+    await c.query('SELECT pg_advisory_xact_lock_shared($1::bigint)', [workspaceLock(workspaceId)]);
+    // ADR-065 (F-M04h-04): a closed workspace takes no new PII and gets no new keys, so a record is
+    // either seen and deleted by closure, or refused here once the marker exists.
+    const closed = await c.query('SELECT 1 FROM vault.closed_workspaces WHERE workspace_id = $1', [
+      workspaceId,
+    ]);
+    if ((closed.rowCount ?? 0) > 0) throw new WorkspaceClosed();
+  }
+
+  async #writeFields(
+    c: PoolClient,
+    keys: Keys,
+    workspaceId: string,
+    piiRef: string,
+    fields: Readonly<Record<string, string>>,
+  ): Promise<void> {
+    for (const [field, value] of Object.entries(fields)) {
+      const aad = { workspaceId, table: FIELD_TABLE, column: field, rowId: piiRef };
+      await c.query(
+        `INSERT INTO vault.record_fields (workspace_id, pii_ref, field, ciphertext) VALUES ($1, $2, $3, $4)`,
+        [workspaceId, piiRef, field, keys.data.encrypt(value, aad)],
+      );
+    }
+  }
+
+  async #writeIndex(
+    c: PoolClient,
+    keys: Keys,
+    workspaceId: string,
+    piiRef: string,
+    values: Readonly<Record<string, string>>,
+  ): Promise<void> {
+    for (const [field, value] of Object.entries(values)) {
+      await c.query(
+        `INSERT INTO vault.blind_index (workspace_id, pii_ref, field, mac, key_version) VALUES ($1, $2, $3, $4, $5)`,
+        [workspaceId, piiRef, field, keys.index.mac(field, value), keys.index.version],
+      );
+    }
+  }
+
   async ingest(req: IngestRequest): Promise<{ pii_ref: string }> {
     this.#checkExpiry(req.delete_after);
     const index = indexValues(req.fields);
     return this.#tx(req.workspace_id, async (c, tx) => {
-      // ADR-065 (F-M04h-04): a closed workspace takes no new PII and gets no new keys. The shared
-      // lock orders this ingest against closure's last batch (which takes it exclusively), so a
-      // record is either seen and deleted by closure, or refused here once the marker exists.
-      await c.query('SELECT pg_advisory_xact_lock_shared($1::bigint)', [
-        workspaceLock(req.workspace_id),
-      ]);
-      const closed = await c.query(
-        'SELECT 1 FROM vault.closed_workspaces WHERE workspace_id = $1',
-        [req.workspace_id],
-      );
-      if ((closed.rowCount ?? 0) > 0) throw new WorkspaceClosed();
+      const buyer = req.kind === 'buyer_contact';
+      await this.#ingestLocks(c, req.workspace_id, buyer);
+      if (buyer) await this.#refuseDeletedBuyer(c, req);
       // Keys are made here and only here, never by a read (F-M04h-04).
       const keys = await this.#loadKeys(tx, req.workspace_id, true);
       if (keys === undefined) throw new Error('keys were not created');
       if (tx.created === true) await this.#insertCanary(c, req.workspace_id, keys);
-      if (req.kind === 'buyer_contact') await this.#refuseDeletedBuyer(c, req, keys);
       // pii_ref defaults to uuidv7() (PostgreSQL 18): time-ordered, so the key index stays compact.
       // ORD-4 (ADR-079 3): one buyer record per order. A retried or repeated ingest of the same
       // order finds the record already there and gets its ref back; nothing is added or changed.
+      const deleteAfter =
+        req.delete_after === undefined
+          ? // A backstop until the caller sets the real expiry at dispatch or delivery (DEL-1).
+            new Date(this.#now().getTime() + HARD_LIMIT_MS)
+          : new Date(req.delete_after);
       const inserted = await c.query<{ pii_ref: string }>(
         `INSERT INTO vault.records (workspace_id, kind, channel_account_id, subject_type,
-                                    subject_id, data_key_version, delete_after, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                    subject_id, data_key_version, delete_after, created_at,
+                                    source_updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (workspace_id, kind, subject_type, subject_id)
            WHERE subject_type = 'order' AND NOT canary DO NOTHING
          RETURNING pii_ref`,
@@ -187,41 +379,40 @@ export class Vault {
           req.subject_type,
           req.subject_id,
           keys.data.version,
-          // A backstop until the caller sets the real expiry at dispatch or delivery (DEL-1).
-          req.delete_after ?? new Date(this.#now().getTime() + HARD_LIMIT_MS),
+          deleteAfter,
           this.#now(),
+          req.source_updated_at ?? null,
         ],
       );
       if (inserted.rows.length === 0) {
-        const existing = await c.query<{ pii_ref: string }>(
-          `SELECT pii_ref FROM vault.records
+        const existing = await c.query<{ pii_ref: string; delete_after: Date | null }>(
+          `SELECT pii_ref, delete_after FROM vault.records
             WHERE workspace_id = $1 AND kind = $2 AND subject_type = $3 AND subject_id = $4
-              AND NOT canary`,
+              AND NOT canary
+            FOR UPDATE`,
           [req.workspace_id, req.kind, req.subject_type, req.subject_id],
         );
-        const ref = existing.rows[0]?.pii_ref;
-        if (ref === undefined) throw new Error('order record conflict without a record');
-        return { pii_ref: ref };
+        const record = existing.rows[0];
+        if (record === undefined) throw new Error('order record conflict without a record');
+        // FA-10: the sweep expired it as an orphan, and its order is being stored after all. A live
+        // order never gets a record the next hourly run deletes.
+        if (record.delete_after !== null && record.delete_after <= this.#now()) {
+          await this.#journalExpiry(
+            req.workspace_id,
+            [record.pii_ref],
+            deleteAfter,
+            'stored_again',
+          );
+          await c.query(
+            'UPDATE vault.records SET delete_after = $3 WHERE workspace_id = $1 AND pii_ref = $2',
+            [req.workspace_id, record.pii_ref, deleteAfter],
+          );
+        }
+        return { pii_ref: record.pii_ref };
       }
       const piiRef = inserted.rows[0]?.pii_ref ?? '';
-      const aad = (field: string) => ({
-        workspaceId: req.workspace_id,
-        table: FIELD_TABLE,
-        column: field,
-        rowId: piiRef,
-      });
-      for (const [field, value] of Object.entries(req.fields)) {
-        await c.query(
-          `INSERT INTO vault.record_fields (workspace_id, pii_ref, field, ciphertext) VALUES ($1, $2, $3, $4)`,
-          [req.workspace_id, piiRef, field, keys.data.encrypt(value, aad(field))],
-        );
-      }
-      for (const [field, value] of Object.entries(index)) {
-        await c.query(
-          `INSERT INTO vault.blind_index (workspace_id, pii_ref, field, mac, key_version) VALUES ($1, $2, $3, $4, $5)`,
-          [req.workspace_id, piiRef, field, keys.index.mac(field, value), keys.index.version],
-        );
-      }
+      await this.#writeFields(c, keys, req.workspace_id, piiRef, req.fields);
+      await this.#writeIndex(c, keys, req.workspace_id, piiRef, index);
       return { pii_ref: piiRef };
     });
   }
@@ -242,20 +433,33 @@ export class Vault {
       );
       // ADR-068: every change is journalled off-site before it commits, so a restore of an older
       // backup re-applies it and no copy outlives its date. IDs and the date only.
-      const at = this.#now().toISOString();
-      const deleteAfter = new Date(req.delete_after).toISOString();
-      await this.#journal?.append(
-        res.rows.map((r) => ({
-          type: 'expiry',
-          workspace_id: req.workspace_id,
-          pii_ref: r.pii_ref,
-          delete_after: deleteAfter,
-          reason: req.reason,
-          at,
-        })),
+      await this.#journalExpiry(
+        req.workspace_id,
+        res.rows.map((r) => r.pii_ref),
+        new Date(req.delete_after),
+        req.reason,
       );
       return { updated: res.rowCount ?? 0 };
     });
+  }
+
+  async #journalExpiry(
+    workspaceId: string,
+    piiRefs: readonly string[],
+    deleteAfter: Date,
+    reason: string,
+  ): Promise<void> {
+    const at = this.#now().toISOString();
+    await this.#journal?.append(
+      piiRefs.map((ref) => ({
+        type: 'expiry',
+        workspace_id: workspaceId,
+        pii_ref: ref,
+        delete_after: deleteAfter.toISOString(),
+        reason,
+        at,
+      })),
+    );
   }
 
   /**
@@ -286,25 +490,94 @@ export class Vault {
    * as the username, and orders carry the username only). A username can be reused by someone
    * else, so it decides only for a record with no ID, and only for an order placed before the
    * notice (a re-poll or backfill of the deleted buyer's own orders).
+   *
+   * One table for the whole vault (PS-035), looked up under every key version. eBay buyers only:
+   * a website or Amazon customer with the same ID is somebody else. No channel counts as eBay.
    */
-  async #refuseDeletedBuyer(c: PoolClient, req: IngestRequest, keys: Keys): Promise<void> {
+  async #refuseDeletedBuyer(
+    c: PoolClient,
+    req: Pick<IngestRequest, 'channel' | 'placed_at' | 'fields'>,
+  ): Promise<void> {
+    if (req.channel !== undefined && req.channel !== 'ebay') return;
     const id = normaliseBuyerExact(req.fields.channel_buyer_id ?? '');
     const username = normaliseBuyerExact(req.fields.channel_username ?? '');
-    const lookup = (field: string, value: string) =>
-      c.query<{ created_at: Date }>(
-        `SELECT created_at FROM vault.deleted_buyers
-          WHERE workspace_id = $1 AND field = $2 AND mac = $3`,
-        [req.workspace_id, field, keys.index.mac(field, value)],
-      );
+    const asked: [string, string][] = [];
     for (const value of new Set([id, username])) {
-      if (value === '') continue;
-      if (((await lookup('ebay_user_id', value)).rowCount ?? 0) > 0) throw new BuyerDeleted();
+      if (value !== '') asked.push(['ebay_user_id', value]);
     }
-    if (id !== '' || username === '') return;
-    const hit = (await lookup('ebay_username', username)).rows[0];
-    if (hit === undefined) return;
+    if (id === '' && username !== '') asked.push(['ebay_username', username]);
+    if (asked.length === 0) return;
+    const look = (await this.#vaultKeyList(c)).flatMap((key) =>
+      asked.map(([field, value]) => ({ version: key.version, field, mac: key.mac(field, value) })),
+    );
+    const { rows } = await c.query<{ field: string; noticed_at: Date }>(
+      `SELECT d.field, d.noticed_at FROM vault.ebay_deleted_buyers d
+         JOIN unnest($1::bigint[], $2::text[], $3::bytea[]) AS q(version, field, mac)
+           ON d.key_version = q.version AND d.field = q.field AND d.mac = q.mac`,
+      [look.map((l) => l.version), look.map((l) => l.field), look.map((l) => l.mac)],
+    );
     const placed = req.placed_at === undefined ? undefined : new Date(req.placed_at);
-    if (placed === undefined || placed < hit.created_at) throw new BuyerDeleted();
+    for (const hit of rows) {
+      if (hit.field === 'ebay_user_id') throw new BuyerDeleted();
+      if (placed === undefined || placed < hit.noticed_at) throw new BuyerDeleted();
+    }
+  }
+
+  /**
+   * An eBay deletion notice, before anything is read: its entries are written once, for the whole
+   * vault, under the notice lock taken alone, and committed. So every ingest already past its check
+   * has committed (with its workspace's directory row) and is found by the match that follows, and
+   * every later one is refused. Journalled off-site first (invariant 10): a MAC and dates, never
+   * the ID or name. The wait is short: eBay sends again what was not answered 200.
+   */
+  async #recordNotice(req: EbayUserMatchRequest): Promise<void> {
+    const entries: [string, string][] = [];
+    const userId = normaliseBuyerExact(req.user_id ?? '');
+    const username = normaliseBuyerExact(req.username ?? '');
+    if (userId !== '') entries.push(['ebay_user_id', userId]);
+    if (username !== '') entries.push(['ebay_username', username]);
+    if (entries.length === 0) return;
+    const c = await this.#pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query(`SET LOCAL lock_timeout = '2s'`);
+      await c.query(`SELECT pg_advisory_xact_lock(${NOTICE_LOCK})`);
+      const keys = await this.#vaultKeyList(c);
+      const key = keys.at(-1) ?? keys[0];
+      const at = this.#now();
+      const said = req.noticed_at === undefined ? at : new Date(req.noticed_at);
+      const noticedAt = said < at ? said : at;
+      const rows = entries.map(([field, value]) => ({ field, mac: key.mac(field, value) }));
+      await this.#journal?.append(
+        rows.map((r) => ({
+          type: 'ebay_deleted',
+          field: r.field,
+          mac: r.mac.toString('hex'),
+          key_version: String(key.version),
+          noticed_at: noticedAt.toISOString(),
+          at: at.toISOString(),
+        })),
+      );
+      for (const r of rows) {
+        // A second notice for a reused username covers its second owner's orders too; an older or
+        // repeated one never moves the date back.
+        await c.query(
+          `INSERT INTO vault.ebay_deleted_buyers AS d (key_version, field, mac, noticed_at, received_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (key_version, field, mac) DO UPDATE
+             SET noticed_at = greatest(d.noticed_at, excluded.noticed_at),
+                 received_at = greatest(d.received_at, excluded.received_at)`,
+          [key.version, r.field, r.mac, noticedAt, at],
+        );
+      }
+      await c.query('COMMIT');
+    } catch (err) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      if ((err as { code?: string }).code === '55P03') throw new VaultBusy();
+      throw err;
+    } finally {
+      c.release();
+    }
   }
 
   async readFull(
@@ -464,6 +737,8 @@ export class Vault {
       .map(normaliseBuyerExact)
       .filter((v) => v !== '');
     const cursor = req.cursor;
+    // Written once, on the first page, and committed before the directory is read.
+    if (cursor === undefined) await this.#recordNotice(req);
     const directory = await this.#pool.query<{ workspace_id: string }>(
       `SELECT workspace_id FROM vault.workspace_directory
         WHERE $1::uuid IS NULL OR workspace_id >= $1::uuid
@@ -485,35 +760,6 @@ export class Vault {
       const page = await this.#tx(workspaceId, async (c, tx) => {
         const keys = await this.#loadKeys(tx, workspaceId, false);
         if (keys === undefined || values.length === 0) return { rows: [], more: false };
-        // ADR-068: the buyer is never stored again in this workspace (the ingest check): the user
-        // ID always, the username for orders placed before now. Repeated pages add nothing.
-        const userId = normaliseBuyerExact(req.user_id ?? '');
-        const username = normaliseBuyerExact(req.username ?? '');
-        const tombs: [string, string][] = [];
-        if (userId !== '') tombs.push(['ebay_user_id', userId]);
-        if (username !== '') tombs.push(['ebay_username', username]);
-        if (after === null) {
-          // Ingest holds this lock (shared) from before its check to its commit. Taking it alone
-          // means every ingest already past its check is visible to the match below, and every
-          // later one sees these rows.
-          await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(workspaceId)]);
-          // Closure may have held the lock: its records and entries are gone and stay gone.
-          const closed = await c.query(
-            'SELECT 1 FROM vault.closed_workspaces WHERE workspace_id = $1',
-            [workspaceId],
-          );
-          if ((closed.rowCount ?? 0) > 0) return { rows: [], more: false };
-          for (const [field, value] of tombs) {
-            // A second notice for a reused username covers its second owner's orders too.
-            await c.query(
-              `INSERT INTO vault.deleted_buyers AS d (workspace_id, field, mac, key_version, created_at)
-               VALUES ($1, $2, $3, $4, $5)
-               ON CONFLICT (workspace_id, field, mac) DO UPDATE SET created_at = excluded.created_at
-                 WHERE d.created_at < excluded.created_at`,
-              [workspaceId, field, keys.index.mac(field, value), keys.index.version, this.#now()],
-            );
-          }
-        }
         // One more than fits, so a full page knows whether this workspace has more.
         const res = await c.query<SearchResponse['matches'][number]>(
           `SELECT r.pii_ref, r.kind, r.subject_type, r.subject_id, r.channel_account_id

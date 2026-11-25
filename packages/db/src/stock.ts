@@ -592,31 +592,8 @@ export class StockEngine {
         );
       }
       for (const line of (await this.#demand?.openLines(ctx, change.listingId)) ?? []) {
-        const qty = units(line.quantity) * sku.pack;
-        const base = {
-          sourceKind: 'order_line' as const,
-          sourceId: line.orderLineId,
-          orderLineId: line.orderLineId,
-          listingId: change.listingId,
-          companyId: line.companyId,
-          now,
-        };
-        const moved = await this.#move(trx, ctx, sku.component, {
-          ...base,
-          kind: 'reserve',
-          onHand: 0,
-          reserved: qty,
-        });
-        // INV-6, as for a sale: a line still to ship that takes available below 0 is oversold.
-        if (
-          !line.dispatched &&
-          moved !== undefined &&
-          moved.onHandAfter - moved.reservedAfter < 0
-        ) {
-          await this.#oversold(ctx, line.orderLineId, line.companyId);
-          await this.#demand?.markOversold(ctx, line.orderLineId);
-        }
-        // A line already shipped goes through the same line-based dispatch (F-M09-T0901-01).
+        // A line already shipped takes its dispatch alone (line-based, F-M09-T0901-01): it may have
+        // moved the stock itself after the mapping, and a reserve added now would never be released.
         if (line.dispatched) {
           await this.dispatch(ctx, {
             orderLineId: line.orderLineId,
@@ -624,6 +601,23 @@ export class StockEngine {
             quantity: line.quantity,
             companyId: line.companyId,
           });
+          continue;
+        }
+        const moved = await this.#move(trx, ctx, sku.component, {
+          kind: 'reserve',
+          sourceKind: 'order_line',
+          sourceId: line.orderLineId,
+          orderLineId: line.orderLineId,
+          onHand: 0,
+          reserved: units(line.quantity) * sku.pack,
+          listingId: change.listingId,
+          companyId: line.companyId,
+          now,
+        });
+        // INV-6, as for a sale: a line still to ship that takes available below 0 is oversold.
+        if (moved !== undefined && moved.onHandAfter - moved.reservedAfter < 0) {
+          await this.#oversold(ctx, line.orderLineId, line.companyId);
+          await this.#demand?.markOversold(ctx, line.orderLineId);
         }
       }
       await this.#lock(trx, ctx, sku.component, now);

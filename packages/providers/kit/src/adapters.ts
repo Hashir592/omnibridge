@@ -117,7 +117,7 @@ export interface ChannelOrder extends OrderSummary {
    */
   readonly pii?:
     | { readonly kind: 'stored'; readonly piiRef: string }
-    | { readonly kind: 'none' | 'refused' | 'unchanged' };
+    | { readonly kind: 'none' | 'refused' | 'unchanged' | 'replaced' };
 }
 
 /** A channel whose order read returns whole orders (eBay and the website in M10; Amazon in M18). */

@@ -31,7 +31,7 @@ import { DailyCallBudget, EBAY_WEBHOOK_DAILY_BUDGET } from '@omnibridge/governor
 import type { ChannelAccountRepository } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { requestDeletion, type JobQueue } from '@omnibridge/queue';
-import type { EbayUserMatchCursor, VaultClient } from '@omnibridge/vault-client';
+import { VaultError, type EbayUserMatchCursor, type VaultClient } from '@omnibridge/vault-client';
 import {
   challengeResponse,
   EbayBudgetExhausted,
@@ -73,17 +73,23 @@ export interface EbayDeletionDeps {
 }
 
 /** The notice's own fields (eBay's schema): read here, never logged or stored. */
-function noticeUser(notification: Record<string, unknown>): {
+export function noticeUser(notification: Record<string, unknown>): {
   notificationId: string | undefined;
   userId: string | undefined;
   username: string | undefined;
+  noticedAt: string | undefined;
 } {
   const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  const instant = (v: string | undefined) => {
+    const at = v === undefined ? Number.NaN : Date.parse(v);
+    return Number.isNaN(at) ? undefined : new Date(at).toISOString();
+  };
   const data = (notification.data ?? {}) as Record<string, unknown>;
   return {
     notificationId: text(notification.notificationId),
     userId: text(data.userId),
     username: text(data.username),
+    noticedAt: instant(text(notification.eventDate)),
   };
 }
 
@@ -125,11 +131,21 @@ async function queueEbayDeletion(
       throw new ApiError({ status: 503, code: 'service_unavailable' });
     }
     pages += 1;
-    const found = await deps.vault.ebayUserMatch({
-      ...(notice.userId === undefined ? {} : { user_id: notice.userId }),
-      ...(notice.username === undefined ? {} : { username: notice.username }),
-      ...(cursor === null ? {} : { cursor }),
-    });
+    const found: Awaited<ReturnType<VaultClient['ebayUserMatch']>> = await deps.vault
+      .ebayUserMatch({
+        ...(notice.userId === undefined ? {} : { user_id: notice.userId }),
+        ...(notice.username === undefined ? {} : { username: notice.username }),
+        ...(notice.noticedAt === undefined ? {} : { noticed_at: notice.noticedAt }),
+        ...(cursor === null ? {} : { cursor }),
+      })
+      .catch((err: unknown) => {
+        // The vault could not take its notice lock in time: 503, and eBay sends the notice again.
+        if (err instanceof VaultError && err.code === 'busy') {
+          logger.warn({ event: 'ebay.account_deletion.busy' }, 'vault busy: eBay will retry');
+          throw new ApiError({ status: 503, code: 'service_unavailable' });
+        }
+        throw err;
+      });
     for (const page of found.workspaces) {
       const queued = await queueWorkspaceBatch(deps, page, key);
       if (queued > 0) {

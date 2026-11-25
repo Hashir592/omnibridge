@@ -45,6 +45,11 @@ describe('eBay getOrders parser (M10)', () => {
     expect(shipped?.state).toBe('dispatched');
   });
 
+  it('[ORD-3][DEL-1] a fulfilled order has no dispatch time: eBay sends none, and an edit is not one', () => {
+    const [o] = parseEbayOrders(page(order({ orderFulfillmentStatus: 'FULFILLED' })));
+    expect(o).toMatchObject({ state: 'dispatched', dispatchedAt: null, deliveredAt: null });
+  });
+
   it('[ORD-4][FIN-1] money is pence, the country upper case, and buyer fields only in the buyer block', () => {
     const [o] = parseEbayOrders(page(order()));
     expect(o).toMatchObject({

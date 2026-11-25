@@ -13,6 +13,7 @@ import {
   type OrderIngest,
   type OrderIngestPorts,
   type OrderReads,
+  type StoredOrderPii,
 } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import type { BuyerDetails, ChannelOrder, SyncStream } from '@omnibridge/provider-kit';
@@ -29,6 +30,7 @@ import {
   type SyncStreamName,
 } from '@omnibridge/queue';
 import { VaultError, type VaultClient } from '@omnibridge/vault-client';
+import { hasDeliveryAddress } from '@omnibridge/vault-client/schemas';
 import { sendMappingChanged } from './catalogue.ts';
 
 /*
@@ -49,37 +51,46 @@ export const PII_HARD_LIMIT_MS = 90 * DAY_MS;
 const ORPHAN_GRACE_MS = DAY_MS;
 
 /**
- * DEL-1, PRD 7.3: when an order's buyer record must be gone. Delivery (or dispatch when delivery is
- * unknown) plus the workspace's PII window; an order not yet dispatched keeps the 90-day backstop.
- * A shipped order the channel gave no date for counts from the update that shows it shipped, and a
+ * DEL-1, PRD 7.3: when an order's buyer record must be gone, used at ingest and by the expiry job.
+ * Delivery (or dispatch when delivery is unknown) plus the workspace's PII window, and never past
+ * placement + 90 days, whatever the dates say; an order not yet dispatched keeps that limit. A
  * date in the future counts as now.
  */
-export function piiDeleteAfter(
-  order: Pick<ChannelOrder, 'placedAt' | 'state' | 'dispatchedAt' | 'deliveredAt' | 'updatedAt'>,
-  retentionDays: number,
-  now: Date,
-): Date {
-  const shipped = order.deliveredAt ?? effectiveDispatch(order);
-  return shipped === null
-    ? new Date(order.placedAt.getTime() + PII_HARD_LIMIT_MS)
-    : new Date(Math.min(shipped.getTime(), now.getTime()) + retentionDays * DAY_MS);
+export function piiExpiryDate(input: {
+  placedAt: Date;
+  shippedAt: Date | null;
+  retentionDays: number;
+  now: Date;
+}): Date {
+  const limit = input.placedAt.getTime() + PII_HARD_LIMIT_MS;
+  if (input.shippedAt === null) return new Date(limit);
+  const shipped = Math.min(input.shippedAt.getTime(), input.now.getTime());
+  return new Date(Math.min(shipped + input.retentionDays * DAY_MS, limit));
 }
 
-/**
- * ORD-4: a buyer record is written once per order, so it waits for a delivery address: the first
- * line and the postcode (or, outside the UK, where some addresses have none, the town).
- */
-function hasDeliveryAddress(buyer: BuyerDetails): boolean {
-  const given = (v: string | undefined) => v !== undefined && v.trim() !== '';
-  const abroad = given(buyer.country) && buyer.country?.toUpperCase() !== 'GB';
-  return given(buyer.address_line1) && (given(buyer.postcode) || (abroad && given(buyer.city)));
+/** The expiry of an order as the channel reports it now (see effectiveDispatch for its dates). */
+export function piiDeleteAfter(
+  order: Pick<
+    ChannelOrder,
+    'placedAt' | 'shipBy' | 'state' | 'dispatchedAt' | 'deliveredAt' | 'updatedAt'
+  >,
+  retentionDays: number,
+  now: Date,
+  storedUnshipped = false,
+): Date {
+  return piiExpiryDate({
+    placedAt: order.placedAt,
+    shippedAt: order.deliveredAt ?? effectiveDispatch(order, storedUnshipped),
+    retentionDays,
+    now,
+  });
 }
 
 export interface OrderStreamDeps {
   tenancy: Pick<TenantRunner, 'runWorkspace'>;
   ingest: Pick<OrderIngest, 'piiState' | 'apply'>;
   /** The worker's token: `ingest` (and `subjects` for the sweep). */
-  vault: Pick<VaultClient, 'ingest'>;
+  vault: Pick<VaultClient, 'ingest' | 'replace'>;
   logger: Logger;
   now?: () => Date;
 }
@@ -98,7 +109,7 @@ export function orderIngestStream(
     prepare: async (job, items) => {
       if (items.length === 0) return items;
       const actor = { workspaceId: job.workspaceId };
-      const { known, dates, retentionDays } = await deps.tenancy.runWorkspace(actor, (ctx) =>
+      const { orders, provider, retentionDays } = await deps.tenancy.runWorkspace(actor, (ctx) =>
         deps.ingest.piiState(
           ctx,
           job.channelAccountId,
@@ -114,22 +125,23 @@ export function orderIngestStream(
       async function vaultFirst(order: ChannelOrder): Promise<NonNullable<ChannelOrder['pii']>> {
         // Settled already (a record, a deletion, a refusal or a cancellation): a deleted record is
         // never brought back by a later poll.
-        if (known.has(order.externalId)) return { kind: 'unchanged' };
+        const stored = orders.get(order.externalId);
+        if (stored?.settled === true) return corrected(order, stored);
         if (order.buyer === null || order.state === 'cancelled') return { kind: 'none' };
         // DP-5: nothing is kept of a buyer who has not paid, and nothing is settled until there
         // is somewhere to send the parcel. A later poll asks again.
         if (order.state === 'pending_payment' || !hasDeliveryAddress(order.buyer)) {
           return { kind: 'none' };
         }
-        const first = dates.get(order.externalId);
         const deleteAfter = piiDeleteAfter(
           {
             ...order,
-            dispatchedAt: first?.dispatchedAt ?? order.dispatchedAt,
-            deliveredAt: first?.deliveredAt ?? order.deliveredAt,
+            dispatchedAt: stored?.dispatchedAt ?? order.dispatchedAt,
+            deliveredAt: stored?.deliveredAt ?? order.deliveredAt,
           },
           retentionDays,
           now(),
+          stored !== undefined && stored.dispatchedAt === null,
         );
         // FA-16: an order already past its PII window (a backfill at cutover) is stored with no
         // vault record at all.
@@ -144,11 +156,9 @@ export function orderIngestStream(
             subject_id: `${job.channelAccountId}:${order.externalId}`,
             delete_after: new Date(Math.min(deleteAfter.getTime(), cap)).toISOString(),
             placed_at: order.placedAt.toISOString(),
-            fields: Object.fromEntries(
-              Object.entries(order.buyer).filter(
-                (e): e is [string, string] => typeof e[1] === 'string' && e[1].trim() !== '',
-              ),
-            ),
+            source_updated_at: order.updatedAt.toISOString(),
+            ...(provider === undefined ? {} : { channel: provider }),
+            fields: givenFields(order.buyer),
           });
           return { kind: 'stored', piiRef: pii_ref };
         } catch (err) {
@@ -167,10 +177,55 @@ export function orderIngestStream(
           throw err;
         }
       }
+
+      /**
+       * ORD-4: an address the channel corrects before dispatch reaches the one record, in place.
+       * Only for an order that is paid and waiting on both sides; the vault refuses an older
+       * update, a masked or partial block, and a record that is gone.
+       */
+      async function corrected(
+        order: ChannelOrder,
+        stored: StoredOrderPii,
+      ): Promise<NonNullable<ChannelOrder['pii']>> {
+        const waiting =
+          order.state === 'awaiting_dispatch' &&
+          (stored.status === 'awaiting_dispatch' || stored.status === 'label_created') &&
+          stored.dispatchedAt === null &&
+          (order.paidAt ?? stored.paidAt) !== null;
+        if (!waiting || stored.piiRef === null || !stored.live) return { kind: 'unchanged' };
+        if (order.buyer === null || !hasDeliveryAddress(order.buyer)) return { kind: 'unchanged' };
+        try {
+          const { changed } = await deps.vault.replace({
+            workspace_id: job.workspaceId,
+            pii_ref: stored.piiRef,
+            subject_id: `${job.channelAccountId}:${order.externalId}`,
+            placed_at: order.placedAt.toISOString(),
+            source_updated_at: order.updatedAt.toISOString(),
+            ...(provider === undefined ? {} : { channel: provider }),
+            fields: givenFields(order.buyer),
+          });
+          return { kind: changed ? 'replaced' : 'unchanged' };
+        } catch (err) {
+          // ADR-068: the buyer's account was deleted: its record is on its way out, not corrected.
+          if (err instanceof VaultError && err.code === 'buyer_deleted') {
+            return { kind: 'unchanged' };
+          }
+          throw err;
+        }
+      }
     },
     sink: (ctx, channelAccountId, items) =>
       deps.ingest.apply(ctx, channelAccountId, items.map(toIncoming)),
   };
+}
+
+/** The buyer block with its blank values left out. */
+function givenFields(buyer: BuyerDetails): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(buyer).filter(
+      (e): e is [string, string] => typeof e[1] === 'string' && e[1].trim() !== '',
+    ),
+  );
 }
 
 /** A parsed channel order, without its buyer, as db-main's ingest takes it (pence as bigint). */
@@ -329,9 +384,12 @@ export function ordersPiiExpiryHandler(deps: {
       });
       if (target === undefined) return { updated: 0 };
       // The job is queued only once dispatch or delivery is known, so `shipped` is set.
-      // A date in the future counts as now.
-      const shipped = target.deliveredAt ?? target.dispatchedAt ?? now();
-      const due = new Date(Math.min(shipped.getTime(), now().getTime()) + days * DAY_MS);
+      const due = piiExpiryDate({
+        placedAt: target.placedAt,
+        shippedAt: target.deliveredAt ?? target.dispatchedAt ?? now(),
+        retentionDays: days,
+        now: now(),
+      });
       const at = Math.min(
         Math.max(due.getTime(), now().getTime()),
         now().getTime() + PII_HARD_LIMIT_MS,

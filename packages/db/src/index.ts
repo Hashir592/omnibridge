@@ -210,6 +210,7 @@ export {
   type IncomingPii,
   type IncomingState,
   type OrderIngestPorts,
+  type StoredOrderPii,
 } from './orders.ts';
 export {
   OrderGroupRefused,

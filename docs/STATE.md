@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 25 Nov 2026 by S3 (F-M10-end-01).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 25 Nov 2026 by S3 (T-1003).
 
 ## Now
 
@@ -10,13 +10,14 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **M10 built** (`docs/reviews/M10-end-report.md`):
   - #156 T-1000, #157 contract, #158 T-1001 (critical), #159 T-1002: merged;
   - #160 T-1001 fixes (S5's critical check): merged;
-  - F-M10-end-01, S4's Blocker (branch `task/T-1001-late-lines`): auto-merge on, CI running.
+  - #164 F-M10-end-01, S4's Blocker: merged and confirmed by S4;
+  - T-1003 buyer data and F-M10-end-22 (critical, branch `task/T-1003-m10-fixes-1`): auto-merge on, CI running.
 - **Waiting on reviews:**
-  - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`). F-01 is in its own PR; the rest is ruled in ADR-081 and goes into T-1003 and T-1004;
-  - S5 check of #158 is in (no Blocker). Its report stays out of git until every Major is fixed (ADR-074, ADR-081); T-1003 closes the open points;
+  - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`) until S4 confirms T-1003 and T-1004 (ADR-081 10);
+  - S5 check of #158: no Blocker, every Major fixed in #160 and T-1003; its report is committed with T-1003. S5 confirms T-1003;
   - **Review (S4, 25 Nov 2026): M09 + M10 BLOCKED**, open on main 32c8f7a: 0 Blockers (F-01 confirmed fixed, #164), 8 Majors (F-05 to F-11, new F-22), 10 Minors (`docs/reviews/M10-end.md`, Update: #164);
   - Fix rule: Blockers at once; Majors in the first commit of S3's next task.
-- **Next (S3):** T-1003 (critical), then T-1004 (critical), when Hashir pastes them; both before M11.
+- **Next (S3):** the halfway pause (ADR-080) after T-1003's PR, then T-1004 (critical) on Hashir's "continue"; M11 after it. T-1004 drops the unused `vault.deleted_buyers` and keeps F-22's race test.
 - **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
 
 ## M10 in short (what later modules use)
@@ -27,10 +28,11 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **PII:**
   - one vault record per order, subject `<channel_account_id>:<external_order_id>` (`orders.pii_subject`);
   - a record is written only once the order is paid and has a delivery address;
-  - backstop: placement + 90 days; dispatch or delivery + 25 days via `orders.pii_expiry` (journalled); `effectiveDispatch()` is the one dispatch date;
+  - expiry: dispatch or delivery + 25 days, never past placement + 90 (`piiExpiryDate`, at ingest and in `orders.pii_expiry`, journalled); `effectiveDispatch()` is the one dispatch date;
+  - an address the channel corrects before dispatch replaces the record in place (`/v1/replace`, worker only);
   - cancellation calls `requestDeletion`;
   - the nightly `orders.orphan-sweep` expires orphan records older than a day;
-  - eBay tombstones are in `vault.deleted_buyers`.
+  - eBay deletion entries are in `vault.ebay_deleted_buyers` (vault-wide, 180 days).
 - **Status:** the FA-10 table is in `packages/core/src/order-status.ts`. M12's label and dispatch moves (label_created, the void back to awaiting_dispatch) go through `nextOrderStatus`.
 - **VAT:**
   - `computeOrderVat` / `computeRefundVat` (`packages/core/src/vat.ts`);

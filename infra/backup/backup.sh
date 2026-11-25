@@ -4,7 +4,7 @@
 # 1. db-main: pg_dump (custom format) streamed into the main repository, tag db-main.
 # 2. db-pii:  pg_dump streamed into the PII repository, tag db-pii (fields are ciphertext; the
 #    master key is never in a backup, invariant 9).
-# 3. The off-site tombstone journal (pii_journal volume, IDs only) into the main repository,
+# 3. The off-site tombstone journal (pii_journal volume, IDs and MACs, no values) into the main repository,
 #    tag journal, so a restore can always re-apply every deletion (invariant 10). journal.sh also
 #    ships it every 15 minutes between nightly runs (S5-20261118-01).
 # Never backed up: the vault's label files, the files volume, keys or secrets.

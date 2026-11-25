@@ -54,6 +54,7 @@ describe('db-pii roles and migrations', () => {
       '0008_order_ingest',
       '0009_order_subject_index',
       '0010_deleted_buyer_date',
+      '0011_vault_wide_deleted_buyers',
     ]);
     expect((await migratePii(owner)).applied).toEqual([]);
   });

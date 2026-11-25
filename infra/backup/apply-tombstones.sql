@@ -43,6 +43,20 @@ UPDATE vault.records r SET delete_after = e.delete_after
  WHERE r.workspace_id = e.workspace_id AND r.pii_ref = e.pii_ref AND NOT r.canary
    AND r.delete_after IS DISTINCT FROM e.delete_after;
 
+-- eBay deletion notices that arrived after the backup (T-1003): their entries come back, each with
+-- its newest dates; lines past the 180 days the vault keeps an entry are left out.
+INSERT INTO vault.ebay_deleted_buyers AS d (key_version, field, mac, noticed_at, received_at)
+SELECT (j->>'key_version')::bigint, j->>'field', decode(j->>'mac', 'hex'),
+       max((j->>'noticed_at')::timestamptz), max((j->>'at')::timestamptz)
+  FROM replay_lines
+ WHERE j->>'type' = 'ebay_deleted'
+   AND (j->>'at')::timestamptz >= coalesce(nullif(current_setting('restore.now', true), '')::timestamptz,
+                                           now()) - interval '180 days'
+ GROUP BY 1, 2, 3
+ON CONFLICT (key_version, field, mac) DO UPDATE
+  SET noticed_at = greatest(d.noticed_at, excluded.noticed_at),
+      received_at = greatest(d.received_at, excluded.received_at);
+
 -- What must not survive: a tombstoned ref, anything of a closed workspace, anything past its
 -- delete_after (the expiry job re-run, FA-21).
 CREATE TEMP TABLE doomed ON COMMIT DROP AS
@@ -77,6 +91,10 @@ DELETE FROM vault.workspace_directory
  WHERE workspace_id IN (SELECT workspace_id FROM vault.closed_workspaces);
 
 SELECT count(*) AS records_deleted FROM doomed;
+-- Entries whose key is not in this backup match nothing: 0 unless the key was made after it.
+SELECT count(*) AS ebay_entries_without_key FROM vault.ebay_deleted_buyers d
+ WHERE NOT EXISTS (SELECT 1 FROM vault.vault_keys k
+                    WHERE k.kind = 'deleted_buyers' AND k.version = d.key_version);
 
 COMMIT;
 

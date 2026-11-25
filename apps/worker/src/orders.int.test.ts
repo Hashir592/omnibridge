@@ -296,12 +296,13 @@ describe('order ingest across the PII boundary (T-1001)', () => {
       )
     ).rows.map((r) => r.field);
 
-  it('[DEL-1][AT-8] a website order first seen shipped with no ship date counts from the update that shows it', async () => {
+  it('[DEL-1][AT-8] a website order first seen shipped with no ship date counts from its placement', async () => {
     const updated = new Date(Date.now() - 5 * DAY);
+    const created = new Date(Date.now() - 10 * DAY);
     const [recent, old] = websiteOrders(
       {
         status: 'shipped',
-        created_at: new Date(Date.now() - 10 * DAY).toISOString(),
+        created_at: created.toISOString(),
         updated_at: updated.toISOString(),
       },
       {
@@ -313,7 +314,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     if (recent === undefined || old === undefined) throw new Error('no orders');
     await poll([recent, old]);
     const [record] = await vaultRows(`${account}:${recent.externalId}`);
-    expect(record?.delete_after.getTime()).toBe(updated.getTime() + 25 * DAY);
+    expect(record?.delete_after.getTime()).toBe(created.getTime() + 25 * DAY);
     // Past its window already: stored with no record at all (FA-16).
     expect(await vaultRows(`${account}:${old.externalId}`)).toEqual([]);
     expect(await orderRow(old.externalId)).toMatchObject({ pii_ref: null });
@@ -337,6 +338,278 @@ describe('order ingest across the PII boundary (T-1001)', () => {
       expect(await vaultRows(`${account}:${o.externalId}`)).toEqual([]);
       expect(await orderRow(o.externalId)).toMatchObject({ pii_ref: null });
     }
+  });
+
+  const daysAgo = (n: number) => new Date(Date.now() - n * DAY);
+  const expiryJob = async (externalId: string) => {
+    const id = (await orderRow(externalId))?.id ?? '';
+    await ordersPiiExpiryHandler({ tenancy, ingest, vault: worker }).prepare(
+      preparing('orders.pii_expiry', { order_id: id, reason: 'dispatch' as const }),
+    );
+    return (await vaultRows(`${account}:${externalId}`))[0]?.delete_after;
+  };
+
+  it('[DEL-1][AT-8] an order first seen shipped and edited late never keeps its buyer past placement + 90 days', async () => {
+    const edited = daysAgo(1).toISOString();
+    const [ebay] = ebayOrders({
+      creationDate: daysAgo(89).toISOString(),
+      lastModifiedDate: edited,
+      orderFulfillmentStatus: 'FULFILLED',
+      ...shipTo(fullAddress),
+    });
+    const [web] = websiteOrders({
+      status: 'shipped',
+      created_at: daysAgo(89).toISOString(),
+      updated_at: edited,
+    });
+    if (ebay === undefined || web === undefined) throw new Error('no orders');
+    await poll([ebay, web]);
+    // No real dispatch time and no ship-by: placement + 25 days, long past. Nothing is stored.
+    for (const o of [ebay, web]) {
+      expect(await vaultRows(`${account}:${o.externalId}`)).toEqual([]);
+      expect(await orderRow(o.externalId)).toMatchObject({ pii_ref: null });
+    }
+  });
+
+  it('[DEL-1][AT-8] an order first seen shipped counts from its ship-by date when that is earlier than the edit', async () => {
+    const by = daysAgo(15);
+    const [o] = ebayOrders({
+      creationDate: daysAgo(20).toISOString(),
+      lastModifiedDate: daysAgo(1).toISOString(),
+      orderFulfillmentStatus: 'FULFILLED',
+      lineItems: [
+        {
+          lineItemId: 'L1',
+          sku: 'S-1',
+          quantity: 1,
+          lineItemCost: { value: '12.00', currency: 'GBP' },
+          lineItemFulfillmentInstructions: { shipByDate: by.toISOString() },
+        },
+      ],
+      ...shipTo(fullAddress),
+    });
+    if (o === undefined) throw new Error('no order');
+    await poll([o]);
+    const [record] = await vaultRows(`${account}:${o.externalId}`);
+    expect(record?.delete_after.getTime()).toBe(by.getTime() + 25 * DAY);
+    expect((await expiryJob(o.externalId))?.getTime()).toBe(by.getTime() + 25 * DAY);
+  });
+
+  it('[DEL-1][AT-8] a stored order first shown shipped late is never kept past placement + 90 days', async () => {
+    const placed = daysAgo(80);
+    const base = { creationDate: placed.toISOString(), ...shipTo(fullAddress) };
+    const [waiting] = ebayOrders({ ...base, lastModifiedDate: daysAgo(79).toISOString() });
+    if (waiting === undefined) throw new Error('no order');
+    await poll([waiting]);
+    const cap = placed.getTime() + 90 * DAY;
+    const [before] = await vaultRows(`${account}:${waiting.externalId}`);
+    expect(before?.delete_after.getTime()).toBe(cap);
+    const [shipped] = ebayOrders({
+      ...base,
+      orderId: waiting.externalId,
+      orderFulfillmentStatus: 'FULFILLED',
+      lastModifiedDate: daysAgo(0).toISOString(),
+    });
+    if (shipped === undefined) throw new Error('no order');
+    await poll([shipped]);
+    expect((await expiryJob(waiting.externalId))?.getTime()).toBe(cap);
+    // Shipped early, the same update is its dispatch: 25 days from it.
+    const shown = daysAgo(3);
+    const [early] = ebayOrders({ ...shipTo(fullAddress), creationDate: daysAgo(9).toISOString() });
+    if (early === undefined) throw new Error('no order');
+    await poll([early]);
+    const [gone] = ebayOrders({
+      ...shipTo(fullAddress),
+      orderId: early.externalId,
+      creationDate: daysAgo(9).toISOString(),
+      orderFulfillmentStatus: 'FULFILLED',
+      lastModifiedDate: shown.toISOString(),
+    });
+    if (gone === undefined) throw new Error('no order');
+    await poll([{ ...gone, updatedAt: shown }]);
+    expect((await expiryJob(early.externalId))?.getTime()).toBe(shown.getTime() + 25 * DAY);
+  });
+
+  it('[DEL-1][ORD-4] an order seen unpaid first, then shipped, counts from the update that shows it shipped', async () => {
+    const base = { creationDate: daysAgo(40).toISOString() };
+    const [unpaid] = ebayOrders({ ...base, orderPaymentStatus: 'PENDING', ...shipTo(fullAddress) });
+    if (unpaid === undefined) throw new Error('no order');
+    await poll([unpaid]);
+    const shown = daysAgo(1);
+    const [shipped] = ebayOrders({
+      ...base,
+      orderId: unpaid.externalId,
+      orderFulfillmentStatus: 'FULFILLED',
+      lastModifiedDate: shown.toISOString(),
+      ...shipTo(fullAddress),
+    });
+    if (shipped === undefined) throw new Error('no order');
+    await poll([shipped]);
+    const [record] = await vaultRows(`${account}:${unpaid.externalId}`);
+    expect(record?.delete_after.getTime()).toBe(shown.getTime() + 25 * DAY);
+  });
+
+  it('[ORD-4] an address with no country counts as a UK one: without a postcode it is not whole', async () => {
+    const [o] = ebayOrders({
+      ...shipTo({ addressLine1: `${PII_MARKER}1 Nowhere`, city: 'Testville' }),
+    });
+    if (o === undefined) throw new Error('no order');
+    await poll([o]);
+    expect(await vaultRows(`${account}:${o.externalId}`)).toEqual([]);
+  });
+
+  it('[DEL-1][AT-8] a real but late dispatch or delivery is still capped at placement + 90 days', async () => {
+    const placed = daysAgo(80);
+    const [o] = websiteOrders({
+      status: 'shipped',
+      created_at: placed.toISOString(),
+      shipped_at: daysAgo(1).toISOString(),
+    });
+    if (o === undefined) throw new Error('no order');
+    await poll([o]);
+    const cap = placed.getTime() + 90 * DAY;
+    const [record] = await vaultRows(`${account}:${o.externalId}`);
+    expect(record?.delete_after.getTime()).toBe(cap);
+    await poll([{ ...o, state: 'delivered', deliveredAt: new Date(), updatedAt: new Date() }]);
+    expect((await expiryJob(o.externalId))?.getTime()).toBe(cap);
+  });
+
+  const fullRead = async (externalId: string) =>
+    (
+      await web.readFull({
+        workspaceId: ws,
+        piiRef: (await orderRow(externalId))?.pii_ref ?? '',
+        purpose: 'order_detail',
+        actorUserId: randomUUID(),
+      })
+    ).fields;
+
+  it('[ORD-4] an address the channel corrects before dispatch reaches the one record, and groups are worked out again', async () => {
+    const username = `${PII_MARKER}fix-${randomUUID().slice(0, 8)}`;
+    const [first] = ebayOrders({ ...shipTo(fullAddress), buyer: { username } });
+    const [site] = websiteOrders({});
+    if (first === undefined || site === undefined) throw new Error('no orders');
+    await poll([first, site]);
+    const before = {
+      ebay: (await vaultRows(`${account}:${first.externalId}`))[0],
+      site: (await vaultRows(`${account}:${site.externalId}`))[0],
+    };
+    sent.length = 0;
+    const [fixed] = ebayOrders({
+      orderId: first.externalId,
+      lastModifiedDate: new Date().toISOString(),
+      buyer: { username },
+      ...shipTo({ ...fullAddress, addressLine1: `${PII_MARKER}4 Corrected Way` }),
+    });
+    const [fixedSite] = websiteOrders({
+      id: site.externalId,
+      updated_at: new Date().toISOString(),
+      shipping_address: {
+        name: `${PII_MARKER}Web Buyer`,
+        line1: `${PII_MARKER}8 Moved Road`,
+        city: 'Testville',
+        postcode: 'TE8 8TH',
+        country: 'GB',
+      },
+    });
+    if (fixed === undefined || fixedSite === undefined) throw new Error('no orders');
+    const ready = await poll([fixed, fixedSite]);
+    expect(ready.map((o) => [o.buyer, o.pii?.kind])).toEqual([
+      [null, 'replaced'],
+      [null, 'replaced'],
+    ]);
+    expect(await fullRead(first.externalId)).toMatchObject({
+      address_line1: `${PII_MARKER}4 Corrected Way`,
+      postcode: 'TE3 3RD',
+      channel_username: username,
+    });
+    const siteFields = await fullRead(site.externalId);
+    expect(siteFields).toMatchObject({
+      address_line1: `${PII_MARKER}8 Moved Road`,
+      email: `${PII_MARKER}web@example.test`,
+    });
+    expect(siteFields.delivery_instructions).toBeUndefined();
+    // One record each, the same ref and the same date.
+    expect(await vaultRows(`${account}:${first.externalId}`)).toEqual([before.ebay]);
+    expect(await vaultRows(`${account}:${site.externalId}`)).toEqual([before.site]);
+    expect(sent.some((s) => s.type === 'orders.group_recompute')).toBe(true);
+    // The same page again asks for nothing new.
+    expect((await poll([fixed])).map((o) => o.pii?.kind)).toEqual(['unchanged']);
+    expect(JSON.stringify(sent)).not.toContain(PII_MARKER);
+    expect(await scanDatabaseForMarkers(main)).toEqual([]);
+    expect(scanTextForMarkers(logs)).toEqual([]);
+  });
+
+  it('[ORD-4][DEL-1] a later address changes nothing once the order has shipped or is cancelled, or when it is no whole address', async () => {
+    const moved = { ...fullAddress, addressLine1: `${PII_MARKER}66 Too Late` };
+    const make = async () => {
+      const [o] = ebayOrders({ ...shipTo(fullAddress) });
+      if (o === undefined) throw new Error('no order');
+      await poll([o]);
+      return o;
+    };
+    const again = async (id: string, over: Record<string, unknown>) => {
+      const [o] = ebayOrders({
+        orderId: id,
+        lastModifiedDate: new Date().toISOString(),
+        ...shipTo(moved),
+        ...over,
+      });
+      if (o === undefined) throw new Error('no order');
+      const [ready] = await poll([o]);
+      return ready?.pii?.kind;
+    };
+    const kept = `${PII_MARKER}3 Auction Way`;
+    const shipped = await make();
+    expect(await again(shipped.externalId, { orderFulfillmentStatus: 'FULFILLED' })).toBe(
+      'unchanged',
+    );
+    // Shown unshipped again by a late page: db-main knows it shipped.
+    expect(await again(shipped.externalId, {})).toBe('unchanged');
+    expect((await fullRead(shipped.externalId)).address_line1).toBe(kept);
+    const cancelled = await make();
+    expect(await again(cancelled.externalId, { cancelStatus: { cancelState: 'CANCELED' } })).toBe(
+      'unchanged',
+    );
+    expect(await again(cancelled.externalId, {})).toBe('unchanged');
+    expect((await fullRead(cancelled.externalId)).address_line1).toBe(kept);
+    const unpaid = await make();
+    expect(await again(unpaid.externalId, { orderPaymentStatus: 'PENDING' })).toBe('unchanged');
+    const partial = await make();
+    expect(
+      await again(partial.externalId, shipTo({ countryCode: 'GB', postalCode: 'TE9 9TH' })),
+    ).toBe('unchanged');
+    const masked = await make();
+    expect(
+      await again(masked.externalId, shipTo({ ...fullAddress, addressLine1: '6* ******' })),
+    ).toBe('unchanged');
+    for (const o of [unpaid, partial, masked]) {
+      expect((await fullRead(o.externalId)).address_line1).toBe(kept);
+    }
+    // An older copy of the order arriving late.
+    const stale = await make();
+    expect(await again(stale.externalId, { lastModifiedDate: daysAgo(1.5).toISOString() })).toBe(
+      'unchanged',
+    );
+    expect((await fullRead(stale.externalId)).address_line1).toBe(kept);
+  });
+
+  it('[AT-10][ORD-4] an eBay deletion never refuses a website buyer with the same ID', async () => {
+    const customer = `${PII_MARKER}shared-${randomUUID().slice(0, 8)}`;
+    await web.ebayUserMatch({ user_id: customer });
+    const site = randomUUID();
+    await root.query(
+      `INSERT INTO app.channel_accounts (id, workspace_id, company_id, provider, display_name)
+       VALUES ($1, $2, $3, 'website', 'Site')`,
+      [site, ws, company],
+    );
+    const [o] = websiteOrders({ customer: { id: customer } });
+    if (o === undefined) throw new Error('no order');
+    const ready = await stream().prepare?.({ workspaceId: ws, channelAccountId: site }, [o]);
+    expect(ready?.[0]?.pii).toMatchObject({ kind: 'stored' });
+    await tenancy.runWorkspace({ workspaceId: ws }, (c) => stream().sink(c, site, ready ?? []));
+    const same = await stream().prepare?.(job, [{ ...o, externalId: `${o.externalId}-e` }]);
+    expect(same?.[0]?.pii).toEqual({ kind: 'refused' });
   });
 
   it('[DEL-1] a record written before the order shipped is corrected when the order is first stored shipped', async () => {

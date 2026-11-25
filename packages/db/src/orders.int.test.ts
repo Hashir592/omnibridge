@@ -994,6 +994,50 @@ describe('order ingest (T-1001)', () => {
     expect(await level(w, w.zero)).toEqual({ on_hand: '8', reserved: '0' });
   });
 
+  it('[INV-3][CAT-6] a line dispatched between its mapping and the event holds nothing reserved', async () => {
+    const w = await world();
+    const o = order({
+      lines: [{ lineId: 'L1', sku: 'NEW-ITEM', quantity: 2, title: null, linePrice: p(1200) }],
+      shipping: p(0),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    // The listing is mapped, its event has not run yet: the dispatch moves the stock itself.
+    await ingest.apply(w.ctx, w.account, [shippedOn(o)]);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '8', reserved: '0' });
+    const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+    expect(await mapped(w, change)).toEqual({ filled: 1 });
+    expect(await mapped(w, change)).toEqual({ filled: 0 });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '8', reserved: '0' });
+  });
+
+  it('[INV-3][CAT-6] a dispatch of a linked line, stored while its listing is mapped, is not lost', async () => {
+    const w = await world();
+    const o = order({
+      lines: [{ lineId: 'L1', sku: 'NEW-ITEM', quantity: 2, title: null, linePrice: p(1200) }],
+      shipping: p(0),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    let stored: () => void = () => undefined;
+    const isStored = new Promise<void>((r) => (stored = r));
+    // The sync job stores the dispatch while the listing is still unmapped, and is held open.
+    const sync = new Tenancy(db).runWorkspace({ workspaceId: w.ctx.workspaceId }, async (ctx) => {
+      await ingest.apply(ctx, w.account, [shippedOn(o)]);
+      stored();
+      await gate;
+    });
+    await isStored;
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    const job = mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero });
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await sync;
+    expect(await job).toEqual({ filled: 1 });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '8', reserved: '0' });
+  });
+
   it('[CAT-6] a listing matched while an order was being stored is reported by the next page, once per set of lines', async () => {
     const w = await world();
     const sku = await lateItem(w);
@@ -1072,8 +1116,18 @@ describe('order ingest (T-1001)', () => {
     expect(await details(delivered)).toEqual(['delivery']);
     expect(await details(noRecord)).toEqual([]);
     expect(await details(waiting)).toEqual([]);
-    // No ship date from the channel: the update that first shows it shipped stands in for it.
-    expect((await orderRow(w, bare.externalId))?.dispatched_at).toEqual(bare.updatedAt);
+    // No ship date from the channel and no ship-by: a late edit is never taken for the dispatch.
+    expect((await orderRow(w, bare.externalId))?.dispatched_at).toEqual(bare.placedAt);
+    const by = new Date('2026-11-10T08:30:00Z');
+    const early = order({ state: 'dispatched', shipBy: by });
+    const late = order({ state: 'dispatched', shipBy: new Date('2026-11-15T08:00:00Z') });
+    await ingest.apply(w.ctx, w.account, [early, late]);
+    expect((await orderRow(w, early.externalId))?.dispatched_at).toEqual(by);
+    expect((await orderRow(w, late.externalId))?.dispatched_at).toEqual(late.updatedAt);
+    // Seen waiting before: the update that shows it shipped is the dispatch.
+    const shown = new Date('2026-11-12T09:00:00Z');
+    await ingest.apply(w.ctx, w.account, [{ ...waiting, state: 'dispatched', updatedAt: shown }]);
+    expect((await orderRow(w, waiting.externalId))?.dispatched_at).toEqual(shown);
   });
 
   it('[DEL-1] a record that arrives after the order shipped has its expiry moved too', async () => {
