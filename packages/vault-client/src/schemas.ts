@@ -70,6 +70,9 @@ export type SearchPurpose = (typeof SEARCH_PURPOSES)[number];
 
 const fieldValue = z.string().min(1).max(4000);
 
+/** The sales channels a buyer can come from. */
+export const CHANNELS = ['amazon', 'ebay', 'website'] as const;
+
 export const IngestRequest = z
   .object({
     workspace_id: uuid,
@@ -85,6 +88,10 @@ export const IngestRequest = z
      * reused username belongs to someone else.
      */
     placed_at: z.iso.datetime({ offset: true }).optional(),
+    /** The channel the buyer came from. The eBay deletion check covers eBay; absent means eBay. */
+    channel: z.enum(CHANNELS).optional(),
+    /** The channel's time of the update these fields came with (orders only). */
+    source_updated_at: z.iso.datetime({ offset: true }).optional(),
     fields: z.record(z.string(), fieldValue),
   })
   .strict()
@@ -106,6 +113,26 @@ export const IngestRequest = z
 export type IngestRequest = z.infer<typeof IngestRequest>;
 export const IngestResponse = z.object({ pii_ref: uuid }).strict();
 export type IngestResponse = z.infer<typeof IngestResponse>;
+
+/**
+ * The buyer block of an order's one record, corrected by the channel before dispatch. Same
+ * pii_ref, same delete_after; it never makes a record. `changed` is false whenever nothing was
+ * written: no live record, an older update, the same values, or a block that is no address.
+ */
+export const ReplaceRequest = z
+  .object({
+    workspace_id: uuid,
+    pii_ref: uuid,
+    channel: z.enum(CHANNELS).optional(),
+    subject_id: z.string().min(1).max(200),
+    placed_at: z.iso.datetime({ offset: true }).optional(),
+    source_updated_at: z.iso.datetime({ offset: true }),
+    fields: z.partialRecord(z.enum(RECORD_FIELDS.buyer_contact), fieldValue),
+  })
+  .strict();
+export type ReplaceRequest = z.infer<typeof ReplaceRequest>;
+export const ReplaceResponse = z.object({ changed: z.boolean() }).strict();
+export type ReplaceResponse = z.infer<typeof ReplaceResponse>;
 
 /**
  * Why an expiry moves (DEL-1): the order was dispatched or delivered, so the live copy goes
@@ -210,6 +237,8 @@ export const EbayUserMatchRequest = z
   .object({
     user_id: z.string().min(1).max(200).optional(),
     username: z.string().min(1).max(200).optional(),
+    /** The notice's eventDate; absent means now, and it never counts as later than now. */
+    noticed_at: z.iso.datetime({ offset: true }).optional(),
     cursor: EbayUserMatchCursor.optional(),
   })
   .strict()

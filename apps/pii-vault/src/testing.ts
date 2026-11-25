@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
-import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
+import { generateKekLine, parseKeyring, type Keyring } from '@omnibridge/crypto';
 import type { Logger } from '@omnibridge/logger';
 import { createPiiPool, migratePii, type PoolConfig } from '@omnibridge/pii-db';
 import { buildVaultApp } from './app.ts';
@@ -28,6 +28,8 @@ export async function startTestVault(options: {
   /** The off-site journal stand-in (a temporary directory in tests). */
   journalDir: string;
   now?: () => Date;
+  /** Two vaults over copies of one database (a restore) share the master key. */
+  keyring?: Keyring;
 }): Promise<TestVault> {
   await migratePii(options.owner);
   const pool = createPiiPool({ ...options.app, max: 4 }, (err) => {
@@ -42,7 +44,7 @@ export async function startTestVault(options: {
   const journal = new DeletionJournal(options.journalDir);
   const vault = new Vault({
     pool,
-    keyring: parseKeyring('pii', generateKekLine(1)),
+    keyring: options.keyring ?? parseKeyring('pii', generateKekLine(1)),
     now,
     journal,
     onCanary: (event) => {
@@ -52,6 +54,7 @@ export async function startTestVault(options: {
       );
     },
   });
+  await vault.ensureVaultKey();
   const deletion = new DeletionService({
     pool,
     journal,

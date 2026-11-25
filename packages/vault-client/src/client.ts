@@ -9,6 +9,7 @@ import {
   MaskResponse,
   MatchResponse,
   ReadFullResponse,
+  ReplaceResponse,
   SearchResponse,
   SubjectsResponse,
   type DeleteRequest,
@@ -16,6 +17,7 @@ import {
   type ExpiryRequest,
   type IngestRequest,
   type ReadPurpose,
+  type ReplaceRequest,
   type SearchPurpose,
   type SearchRequest,
   type SubjectsRequest,
@@ -63,6 +65,11 @@ export class VaultClient {
 
   ingest(request: IngestRequest): Promise<IngestResponse> {
     return this.#post('/v1/ingest', request, IngestResponse);
+  }
+
+  /** ORD-4: a buyer block the channel corrected before dispatch (worker token). */
+  replace(request: ReplaceRequest): Promise<ReplaceResponse> {
+    return this.#post('/v1/replace', request, ReplaceResponse);
   }
 
   setExpiry(request: ExpiryRequest): Promise<ExpiryResponse> {

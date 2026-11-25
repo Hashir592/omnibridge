@@ -73,10 +73,11 @@ export interface EbayDeletionDeps {
 }
 
 /** The notice's own fields (eBay's schema): read here, never logged or stored. */
-function noticeUser(notification: Record<string, unknown>): {
+export function noticeUser(notification: Record<string, unknown>): {
   notificationId: string | undefined;
   userId: string | undefined;
   username: string | undefined;
+  noticedAt: string | undefined;
 } {
   const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
   const data = (notification.data ?? {}) as Record<string, unknown>;
@@ -84,6 +85,7 @@ function noticeUser(notification: Record<string, unknown>): {
     notificationId: text(notification.notificationId),
     userId: text(data.userId),
     username: text(data.username),
+    noticedAt: undefined,
   };
 }
 

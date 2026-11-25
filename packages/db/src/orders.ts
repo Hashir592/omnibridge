@@ -39,7 +39,9 @@ export type IncomingPii =
   /** Refused: the buyer was deleted by an eBay account-deletion notice. */
   | { kind: 'refused' }
   /** The order is already stored with its outcome; nothing was sent to the vault. */
-  | { kind: 'unchanged' };
+  | { kind: 'unchanged' }
+  /** The channel corrected the buyer block before dispatch; the one record was updated. */
+  | { kind: 'replaced' };
 
 export interface IncomingOrder {
   externalId: string;

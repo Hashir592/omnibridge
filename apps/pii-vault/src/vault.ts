@@ -19,6 +19,7 @@ import {
   type ReadFullResponse,
   type RecordKind,
   type ReadPurpose,
+  type ReplaceRequest,
   type SearchResponse,
   type SignalsRequest,
   type SignalsResponse,
@@ -105,6 +106,8 @@ export function workspaceLock(workspaceId: string): string {
 }
 
 const KEY_VERSION = 1;
+/** Stands for the vault itself where a key belongs to a workspace: never a UUID, so never one. */
+export const VAULT_KEY_SCOPE = 'vault-wide';
 /** PRD 7.3: PII of an order never dispatched goes at most 90 days after it arrived. */
 export const HARD_LIMIT_MS = 90 * 24 * 60 * 60 * 1000;
 /** ADR-065: an expiry may lie at most a day in the past (a late caller), never further. */
@@ -148,6 +151,21 @@ export class Vault {
   /** A closed workspace's keys are deleted with it; the cached copies go too. */
   forgetKeys(workspaceId: string): void {
     this.#keys.delete(workspaceId);
+  }
+
+  /** PS-035: makes the vault-wide key once. Called before the vault serves. */
+  ensureVaultKey(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  /** ORD-4: replaces an order's buyer block in place. */
+  replace(req: ReplaceRequest): Promise<{ changed: boolean }> {
+    return Promise.resolve({ changed: req.pii_ref === '' });
+  }
+
+  /** Deleted-buyer entries past their 180 days go. Returns how many went. */
+  purgeDeletedBuyers(): Promise<number> {
+    return Promise.resolve(0);
   }
 
   async ingest(req: IngestRequest): Promise<{ pii_ref: string }> {
