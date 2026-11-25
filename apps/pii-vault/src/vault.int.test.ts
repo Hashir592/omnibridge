@@ -1394,6 +1394,25 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(await codeOf(ask())).toBe('workspace_closed');
   });
 
+  it('[DEL-1][AT-10] a correction that leaves the buyer ID out is still checked against the record it would change', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-kept-id-${randomUUID().slice(0, 8)}`;
+    const { pii_ref } = await order(W, 'KID', address('8', { channel_buyer_id: userId }), {
+      source_updated_at: ago(DAY),
+    });
+    await clients.web.ebayUserMatch({ user_id: userId });
+    const fix = clients.worker.replace({
+      workspace_id: W,
+      pii_ref,
+      channel: 'ebay',
+      subject_id: `${account}:KID`,
+      source_updated_at: ago(1000),
+      fields: address('9'),
+    });
+    expect(await codeOf(fix)).toBe('buyer_deleted');
+    expect((await read(W, pii_ref)).address_line1).toBe(address('8').address_line1);
+  });
+
   it('[ORD-4][SEC-12] a correction never touches the canary', async () => {
     const W = randomUUID();
     await order(W, 'CAN', contact('713'));
