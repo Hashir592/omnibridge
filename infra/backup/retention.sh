@@ -3,7 +3,7 @@
 # Actions `backup-admin` environment (M22): the server's own keys cannot delete. Locally it
 # keeps the drill repositories the same shape.
 #   main db-main: 7 daily + 4 weekly + 6 monthly
-#   main journal: 6 monthly (IDs only; it must outlive every main snapshot it may be applied to)
+#   main journal: 6 monthly (IDs and MACs, no values; it must outlive every main snapshot it may be applied to)
 #   pii  db-pii:  3 daily, so with the live copy gone at day 25 no copy survives day 30 (DEL-2),
 #                 plus an absolute limit (A-004, ADR-069): any db-pii snapshot older than 3 days
 #                 by its own time is forgotten whatever the count. --keep-daily counts days that

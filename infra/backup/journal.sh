@@ -2,7 +2,7 @@
 # Journal-only backup (T-0409, S5-20261118-01, ADR-068; invariant 10, DEL-2). From the repo root:
 #   infra/backup/journal.sh              one run
 #   infra/backup/journal.sh --every 900  a run every 15 minutes until stopped (the local scheduler)
-# Ships the tombstone journal (IDs only) off-site soon after each deletion, not only with the
+# Ships the tombstone journal (IDs and MACs, no values) off-site soon after each deletion, not only with the
 # nightly backup, so a host loss can undo at most the last 15 minutes of deletions (see the
 # restore runbook). M22 schedules it every 15 minutes with a host timer.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

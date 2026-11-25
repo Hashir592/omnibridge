@@ -60,7 +60,7 @@ psql_main -d "$MAIN_DB" -Atc \
   printf '\\.\n'
   cat "$REPO_ROOT/infra/backup/apply-tombstones.sql"
 } | psql_pii -d "$PII_DB" -At >"$WORK/replay.out"
-echo "drill: tombstones re-applied (journal lines: $JOURNAL_LINES, db-main tombstones: $(wc -l <"$WORK/main-tombstones.csv"), records deleted: $(head -1 "$WORK/replay.out"))"
+echo "drill: tombstones re-applied (journal lines: $JOURNAL_LINES, db-main tombstones: $(wc -l <"$WORK/main-tombstones.csv"), records deleted: $(head -1 "$WORK/replay.out"), eBay entries without their key: $(sed -n 2p "$WORK/replay.out"))"
 
 # AT-9: no PII marker anywhere outside the PII store's ciphertext.
 "${COMPOSE[@]}" exec -T db-main pg_dump -U postgres "$MAIN_DB" >"$WORK/db-main.sql"

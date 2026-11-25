@@ -62,7 +62,7 @@ export class WorkspaceClosed extends Error {}
  */
 export class BuyerDeleted extends Error {}
 
-/** The off-site journal (invariant 10, ADR-068): IDs and dates only, fsynced before commit. */
+/** The off-site journal (invariant 10, ADR-068): IDs, dates and MACs, fsynced before commit. */
 export interface Journal {
   append(lines: readonly Record<string, string | null>[]): Promise<void>;
 }

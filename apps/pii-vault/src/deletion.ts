@@ -23,7 +23,8 @@ export interface LabelFiles {
 export const NO_LABEL_FILES: LabelFiles = { deleteFor: () => Promise.resolve(0) };
 
 /**
- * The off-site tombstone journal (invariant 10): one JSON line per deleted ref, IDs only, appended
+ * The off-site tombstone journal (invariant 10): one JSON line per deleted ref (IDs only), expiry
+ * change (IDs and a date) or eBay deletion entry (a MAC and dates), never a value, appended
  * and fsynced before the delete commits, so a restore can always re-apply it. In dev and CI the
  * directory is a local volume standing in for the B2 bucket (T-0405 ships it off-site).
  */
