@@ -118,7 +118,7 @@ const orderFilter = {
   to: Day.optional(),
   ship_by: z.enum(['today', 'overdue']).optional(),
   flag: OrderFlagSchema.optional(),
-  /** Order reference or SKU (Master or channel), case-insensitive. Never buyer details. */
+  /** How an order reference or SKU (Master or channel) starts, any case. Never buyer details. */
   q: z.string().trim().min(1).max(100).optional(),
 };
 

@@ -116,6 +116,8 @@ describe('db-main roles and migrations', () => {
       '0056_amounts_fixed_at_payment',
       '0057_live_line_index',
       '0058_line_uniqueness',
+      '0059_search_columns',
+      '0060_search_indexes',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

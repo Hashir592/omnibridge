@@ -34,7 +34,7 @@ export interface OrderFilter {
   to?: string | undefined;
   shipBy?: 'today' | 'overdue' | undefined;
   flag?: OrderFlag | undefined;
-  /** Order reference or SKU (Master or channel), case-insensitive. */
+  /** How an order reference or SKU (Master or channel) starts, case-insensitive (ADR-081 6). */
   q?: string | undefined;
   /** ORD-2 buyer search: only orders whose vault record is one of these. */
   piiRefs?: readonly string[] | undefined;
@@ -161,43 +161,72 @@ export class OrderGroupRefused extends Error {
 
 const big = (v: string | number | bigint | null | undefined): bigint => BigInt(v ?? 0);
 const LONDON = sql.lit('Europe/London');
-const like = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+/** The workspace of the tenant transaction (the one the rows belong to anyway, by RLS). */
+const WORKSPACE = sql`nullif(current_setting('app.workspace_id', true), '')::uuid`;
 
-/** The ORD-2 filters as SQL on `o`, the orders row. */
-function orderWhere(ctx: TenantContext, f: OrderFilter, now: Date): RawBuilder<unknown> {
-  const parts: RawBuilder<unknown>[] = [sql`o.workspace_id = ${ctx.workspaceId}::uuid`];
-  if (f.companyId !== undefined) parts.push(sql`o.company_id = ${f.companyId}::uuid`);
+/** A normalised column starts with `q`: a range in the C collation, so its index is used (0059). */
+function startsWith(column: RawBuilder<unknown>, q: string): RawBuilder<unknown> {
+  const from = sql`lower(${q.trim()}::text)`;
+  return sql`${column} >= ${from} AND ${column} < ${from} || chr(1114111)`;
+}
+
+/**
+ * ORD-2: the orders a search finds (with the other filters), once for the whole statement, with what
+ * the list needs of them; or nothing, when there is no search.
+ */
+function hits(ctx: TenantContext, f: OrderFilter, now: Date): RawBuilder<unknown> {
+  if (f.q === undefined) return sql``;
+  const ws = sql`${ctx.workspaceId}::uuid`;
+  const where = orderWhere(ctx, f, now);
+  return sql`hit AS MATERIALIZED (
+    SELECT o.id, o.placed_at, o.order_group_id FROM app.orders o
+     WHERE ${where} AND ${startsWith(sql`o.search_ref`, f.q)}
+    UNION
+    SELECT o.id, o.placed_at, o.order_group_id FROM app.order_lines l
+      JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
+     WHERE l.workspace_id = ${ws} AND l.removed_at IS NULL
+       AND ${startsWith(sql`l.search_sku`, f.q)} AND ${where}
+    UNION
+    SELECT o.id, o.placed_at, o.order_group_id FROM app.master_skus s
+      JOIN app.order_lines l ON l.workspace_id = s.workspace_id AND l.master_sku_id = s.id
+                            AND l.removed_at IS NULL
+      JOIN app.orders o ON o.workspace_id = l.workspace_id AND o.id = l.order_id
+     WHERE s.workspace_id = ${ws} AND ${startsWith(sql`s.search_sku`, f.q)} AND ${where}),`;
+}
+
+/** The ORD-2 filters but the search, as SQL on one orders row, `o` or `m`. */
+function orderWhere(
+  ctx: TenantContext,
+  f: OrderFilter,
+  now: Date,
+  row: 'o' | 'm' = 'o',
+): RawBuilder<unknown> {
+  const o = sql.raw(row);
+  const parts: RawBuilder<unknown>[] = [sql`${o}.workspace_id = ${ctx.workspaceId}::uuid`];
+  if (f.companyId !== undefined) parts.push(sql`${o}.company_id = ${f.companyId}::uuid`);
   if (f.channelAccountId !== undefined)
-    parts.push(sql`o.channel_account_id = ${f.channelAccountId}::uuid`);
-  if (f.status !== undefined) parts.push(sql`o.status = ${f.status}`);
+    parts.push(sql`${o}.channel_account_id = ${f.channelAccountId}::uuid`);
+  if (f.status !== undefined) parts.push(sql`${o}.status = ${f.status}`);
   if (f.from !== undefined)
-    parts.push(sql`o.placed_at >= (${f.from}::date)::timestamp AT TIME ZONE ${LONDON}`);
+    parts.push(sql`${o}.placed_at >= (${f.from}::date)::timestamp AT TIME ZONE ${LONDON}`);
   if (f.to !== undefined)
-    parts.push(sql`o.placed_at < ((${f.to}::date + 1)::timestamp AT TIME ZONE ${LONDON})`);
+    parts.push(sql`${o}.placed_at < ((${f.to}::date + 1)::timestamp AT TIME ZONE ${LONDON})`);
   if (f.shipBy === 'today') {
-    parts.push(sql`o.ship_by >= date_trunc('day', ${now}::timestamptz AT TIME ZONE ${LONDON}) AT TIME ZONE ${LONDON}
-                   AND o.ship_by < (date_trunc('day', ${now}::timestamptz AT TIME ZONE ${LONDON}) + interval '1 day') AT TIME ZONE ${LONDON}`);
+    parts.push(sql`${o}.ship_by >= date_trunc('day', ${now}::timestamptz AT TIME ZONE ${LONDON}) AT TIME ZONE ${LONDON}
+                   AND ${o}.ship_by < (date_trunc('day', ${now}::timestamptz AT TIME ZONE ${LONDON}) + interval '1 day') AT TIME ZONE ${LONDON}`);
   }
   if (f.shipBy === 'overdue') {
     parts.push(
-      sql`o.ship_by < ${now} AND o.status IN ('pending_payment', 'awaiting_dispatch', 'label_created')`,
+      sql`${o}.ship_by < ${now} AND ${o}.status IN ('pending_payment', 'awaiting_dispatch', 'label_created')`,
     );
   }
-  if (f.flag === 'oversold') parts.push(sql`o.oversold`);
-  if (f.flag === 'unmapped') parts.push(sql`o.unmapped`);
-  if (f.flag === 'address_shortened') parts.push(sql`o.address_shortened`);
-  if (f.flag === 'fba') parts.push(sql`o.fba`);
+  if (f.flag === 'oversold') parts.push(sql`${o}.oversold`);
+  if (f.flag === 'unmapped') parts.push(sql`${o}.unmapped`);
+  if (f.flag === 'address_shortened') parts.push(sql`${o}.address_shortened`);
+  if (f.flag === 'fba') parts.push(sql`${o}.fba`);
   // Tracking confirmation arrives with M12: no order carries the flag yet.
   if (f.flag === 'tracking_not_confirmed') parts.push(sql`FALSE`);
-  if (f.q !== undefined) {
-    const q = like(f.q);
-    parts.push(sql`(o.external_order_id ILIKE ${q} OR EXISTS (
-      SELECT 1 FROM app.order_lines l
-        LEFT JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
-       WHERE l.workspace_id = o.workspace_id AND l.order_id = o.id AND l.removed_at IS NULL
-         AND (l.external_sku ILIKE ${q} OR s.sku ILIKE ${q})))`);
-  }
-  if (f.piiRefs !== undefined) parts.push(sql`o.pii_ref = ANY (${sql.val(f.piiRefs)}::uuid[])`);
+  if (f.piiRefs !== undefined) parts.push(sql`${o}.pii_ref = ANY (${sql.val(f.piiRefs)}::uuid[])`);
   return sql.join(parts, sql` AND `);
 }
 
@@ -265,44 +294,74 @@ function listRow(r: ListSqlRow): OrderListRow {
   };
 }
 
-/** The filtered orders with what every list row needs (C2 SKUs, flags, customer, group). */
-function filtered(ctx: TenantContext, f: OrderFilter, now: Date) {
+/** The open group of a row `o` (an order, or one a search found), as `g`. */
+const OPEN_GROUP = sql`
+  LEFT JOIN app.order_groups g ON g.workspace_id = ${WORKSPACE} AND g.id = o.order_group_id
+                              AND g.state = 'open'`;
+
+/** The rows a list is made of: every order the filter keeps, or those the search found. */
+function rowsOf(ctx: TenantContext, f: OrderFilter, now: Date, row: 'o' | 'm' = 'o') {
+  return f.q === undefined
+    ? { from: sql`app.orders ${sql.raw(row)}`, where: orderWhere(ctx, f, now, row) }
+    : { from: sql`hit ${sql.raw(row)}`, where: sql`TRUE` };
+}
+
+/**
+ * ORD-1: the units of a list, newest first when ordered by (unit_at DESC, id): an order in no open
+ * group, or the earliest member of its group that the filter keeps. With no search they are read
+ * from the placed index, so a page costs what it shows (CAP-7); with one, from what it found.
+ */
+function heads(ctx: TenantContext, f: OrderFilter, now: Date): RawBuilder<unknown> {
+  const o = rowsOf(ctx, f, now);
+  if (f.q !== undefined) {
+    return sql`
+      SELECT o.id, o.placed_at AS unit_at, NULL::uuid AS open_group
+        FROM ${o.from} ${OPEN_GROUP} WHERE g.id IS NULL
+      UNION ALL
+      (SELECT DISTINCT ON (g.id) o.id, o.placed_at, g.id
+         FROM ${o.from} ${OPEN_GROUP} WHERE g.id IS NOT NULL
+        ORDER BY g.id, o.placed_at, o.id)`;
+  }
+  return sql`
+    SELECT o.id, o.placed_at AS unit_at, g.id AS open_group
+      FROM ${o.from} ${OPEN_GROUP}
+     WHERE ${o.where}
+       AND (g.id IS NULL OR NOT EXISTS (
+         SELECT 1 FROM app.orders m
+          WHERE m.order_group_id = g.id AND (m.placed_at, m.id) < (o.placed_at, o.id)
+            AND ${orderWhere(ctx, f, now, 'm')}))`;
+}
+
+/**
+ * What every list row needs (C2 SKUs, flags, customer, group size and place) of the orders in
+ * `src(id, unit, unit_at, open_group)` only: the caller puts the page (or the export's rows) there
+ * first, so this never runs over a whole workspace (CAP-7).
+ */
+function enriched(ctx: TenantContext): RawBuilder<unknown> {
   return sql`
     SELECT o.id, o.provider, o.channel_account_id, a.display_name AS account_name, o.company_id,
            o.external_order_id, o.placed_at, o.status, o.raw_status, o.gross_pence, o.ship_by,
            o.oversold, o.unmapped, o.address_shortened, o.fba, o.pii_ref,
            (o.pii_ref IS NOT NULL AND o.pii_deleted_at IS NULL AND t.pii_ref IS NULL) AS customer_present,
            coalesce(o.pii_deleted_at, t.deleted_at) AS customer_deleted_at,
-           CASE WHEN g.state = 'open' THEN o.order_group_id END AS open_group,
+           f.unit, f.unit_at, f.open_group,
            -- C3.3 "+N related order not shown": the group's members this filter keeps.
-           count(*) OVER (PARTITION BY CASE WHEN g.state = 'open' THEN o.order_group_id END)
-             AS group_visible
-      FROM app.orders o
+           count(*) OVER (PARTITION BY f.open_group) AS group_visible,
+           li.skus, li.items, gs.size AS group_size, gs.position AS group_position
+      FROM src f
+      JOIN app.orders o ON o.workspace_id = ${ctx.workspaceId}::uuid AND o.id = f.id
       JOIN app.channel_accounts a ON a.workspace_id = o.workspace_id AND a.id = o.channel_account_id
       LEFT JOIN app.pii_tombstones t ON t.workspace_id = o.workspace_id AND t.pii_ref = o.pii_ref
-      LEFT JOIN app.order_groups g ON g.workspace_id = o.workspace_id AND g.id = o.order_group_id
-     WHERE ${orderWhere(ctx, f, now)}`;
-}
-
-/**
- * The SKUs, item count and group size and place of the rows in `src` only: the caller puts the
- * page (or the export's rows) there first, so this never runs over a whole workspace (CAP-7).
- */
-function enriched(ctx: TenantContext) {
-  return sql`
-    SELECT f.*, li.skus, li.items,
-           gs.size AS group_size, gs.position AS group_position
-      FROM src f
       LEFT JOIN LATERAL (
         SELECT array_agg(coalesce(s.sku, l.external_sku, '') ORDER BY l.line_no) AS skus,
                sum(l.quantity) AS items
           FROM app.order_lines l
           LEFT JOIN app.master_skus s ON s.workspace_id = l.workspace_id AND s.id = l.master_sku_id
-         WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.order_id = f.id
+         WHERE l.workspace_id = ${ctx.workspaceId}::uuid AND l.order_id = o.id
            AND l.removed_at IS NULL) li ON TRUE
       LEFT JOIN LATERAL (
         SELECT count(*) AS size,
-               count(*) FILTER (WHERE (m.placed_at, m.id) <= (f.placed_at, f.id)) AS position
+               count(*) FILTER (WHERE (m.placed_at, m.id) <= (o.placed_at, o.id)) AS position
           FROM app.orders m
          WHERE m.workspace_id = ${ctx.workspaceId}::uuid AND m.order_group_id = f.open_group) gs
         ON f.open_group IS NOT NULL`;
@@ -335,7 +394,7 @@ export class OrderReads {
   /**
    * ORD-1: one page of orders, newest first. A same-buyer group is one unit sorted by its earliest
    * visible member, and a page never splits a group, so it may hold more than `limit` rows (C3.3).
-   * `total` counts units.
+   * `total` counts units. Compiling the statement (jit) takes longer than running it.
    */
   async list(
     ctx: TenantContext,
@@ -344,23 +403,35 @@ export class OrderReads {
     countUpTo: number,
   ): Promise<{ items: OrderListRow[]; total: number }> {
     const now = this.#now();
+    const m = rowsOf(ctx, f, now, 'm');
     return withTenantTransaction(this.#db, ctx, async (trx) => {
-      const { rows } = await sql<ListSqlRow & { unit_at: Date }>`
-        WITH f AS (${filtered(ctx, f, now)}),
-             u AS (SELECT coalesce(open_group, id) AS unit, min(placed_at) AS unit_at
-                     FROM f GROUP BY 1),
-             p AS (SELECT unit, unit_at FROM u ORDER BY unit_at DESC, unit LIMIT ${page.limit}
-                    OFFSET ${page.offset}),
-             src AS (SELECT f.*, p.unit_at FROM f JOIN p ON p.unit = coalesce(f.open_group, f.id)),
+      await sql`SET LOCAL jit = off`.execute(trx);
+      // A search counts what it found already; without one the count stops at its cap by itself.
+      const counted = f.q !== undefined;
+      const { rows } = await sql<ListSqlRow & { total: string | null }>`
+        WITH ${hits(ctx, f, now)}
+             u AS ${counted ? sql`MATERIALIZED` : sql`NOT MATERIALIZED`} (${heads(ctx, f, now)}),
+             p AS (SELECT * FROM u
+                    ORDER BY u.unit_at DESC, u.id LIMIT ${page.limit} OFFSET ${page.offset}),
+             src AS (SELECT p.id, p.id AS unit, p.unit_at, p.open_group FROM p
+                      WHERE p.open_group IS NULL
+                     UNION ALL
+                     SELECT m.id, p.id, p.unit_at, p.open_group FROM p
+                       JOIN ${m.from} ON m.order_group_id = p.open_group
+                      WHERE ${m.where}),
              e AS (${enriched(ctx)})
-        SELECT e.* FROM e
-         ORDER BY e.unit_at DESC, coalesce(e.open_group, e.id), e.placed_at, e.id`.execute(trx);
-      const { rows: counted } = await sql<{ n: string }>`
-        WITH f AS (${filtered(ctx, f, now)})
-        SELECT count(*) AS n FROM (SELECT DISTINCT coalesce(open_group, id) FROM f LIMIT ${countUpTo}) x`.execute(
-        trx,
-      );
-      return { items: rows.map(listRow), total: Number(counted[0]?.n ?? 0) };
+        SELECT e.*, ${
+          counted ? sql`(SELECT count(*) FROM (SELECT 1 FROM u LIMIT ${countUpTo}) x)` : sql`NULL`
+        } AS total
+          FROM e ORDER BY e.unit_at DESC, e.unit, e.placed_at, e.id`.execute(trx);
+      const items = rows.map(listRow);
+      const known = rows[0]?.total ?? null;
+      if (known !== null) return { items, total: Number(known) };
+      const { rows: total } = await sql<{ n: string }>`
+        WITH ${hits(ctx, f, now)}
+             u AS (SELECT 1 FROM (${heads(ctx, f, now)}) x LIMIT ${countUpTo})
+        SELECT count(*) AS n FROM u`.execute(trx);
+      return { items, total: Number(total[0]?.n ?? 0) };
     });
   }
 
@@ -371,10 +442,15 @@ export class OrderReads {
     cap: number,
   ): Promise<OrderListRow[] | undefined> {
     const now = this.#now();
+    const o = rowsOf(ctx, f, now);
     return withTenantTransaction(this.#db, ctx, async (trx) => {
+      await sql`SET LOCAL jit = off`.execute(trx);
       const { rows } = await sql<ListSqlRow>`
-        WITH f AS (${filtered(ctx, f, now)}),
-             src AS (SELECT * FROM f ORDER BY placed_at DESC, id LIMIT ${cap + 1}),
+        WITH ${hits(ctx, f, now)}
+             src AS (SELECT o.id, o.id AS unit, o.placed_at AS unit_at, g.id AS open_group
+                       FROM ${o.from} ${OPEN_GROUP}
+                      WHERE ${o.where}
+                      ORDER BY o.placed_at DESC, o.id LIMIT ${cap + 1}),
              e AS (${enriched(ctx)})
         SELECT * FROM e ORDER BY placed_at DESC, id`.execute(trx);
       return rows.length > cap ? undefined : rows.map(listRow);
@@ -383,11 +459,12 @@ export class OrderReads {
 
   /** ORD-6: everything the detail page shows, or undefined (404) when the user cannot see it. */
   async detail(ctx: TenantContext, orderId: string): Promise<OrderDetailView | undefined> {
-    const now = this.#now();
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const { rows } = await sql<ListSqlRow>`
-        WITH f AS (${filtered(ctx, {}, now)} AND o.id = ${orderId}::uuid),
-             src AS (SELECT * FROM f), e AS (${enriched(ctx)})
+        WITH src AS (SELECT o.id, o.id AS unit, o.placed_at AS unit_at, g.id AS open_group
+                       FROM app.orders o ${OPEN_GROUP}
+                      WHERE o.workspace_id = ${ctx.workspaceId}::uuid AND o.id = ${orderId}::uuid),
+             e AS (${enriched(ctx)})
         SELECT * FROM e`.execute(trx);
       const head = rows[0];
       if (head === undefined) return undefined;
