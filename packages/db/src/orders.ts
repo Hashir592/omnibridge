@@ -190,6 +190,7 @@ interface OrderRow {
   paid_at: Date | null;
   ship_by: Date | null;
   dispatched_at: Date | null;
+  dispatch_estimated: boolean;
   delivered_at: Date | null;
   cancelled_at: Date | null;
   source_updated_at: Date;
@@ -223,7 +224,7 @@ interface Snapshot {
 
 const big = (v: string | number | bigint | null | undefined): bigint => BigInt(v ?? 0);
 const ORDER_COLUMNS = sql`id, company_id, status, raw_status, pii_subject, pii_ref, pii_deleted_at,
-  paid_at, ship_by, dispatched_at, delivered_at, cancelled_at, source_updated_at,
+  paid_at, ship_by, dispatched_at, dispatch_estimated, delivered_at, cancelled_at, source_updated_at,
   to_char(tax_point_date, 'YYYY-MM-DD') AS tax_point_date, discount_pence, shipping_pence,
   gross_pence, vat_recorded_at, stock_moves`;
 
@@ -452,14 +453,14 @@ export class OrderIngest implements UnmappedDemand {
       INSERT INTO app.orders
         (workspace_id, id, company_id, provider, origin, channel_account_id, external_order_id,
          pii_subject, pii_ref, pii_deleted_at, status, raw_status, placed_at, paid_at, ship_by,
-         dispatched_at, delivered_at, cancelled_at, source_updated_at, tax_point_date,
-         goods_pence, discount_pence, shipping_pence, gross_pence, vat_pence, ship_to_country,
+         dispatched_at, dispatch_estimated, delivered_at, cancelled_at, source_updated_at,
+         tax_point_date, goods_pence, discount_pence, shipping_pence, gross_pence, vat_pence, ship_to_country,
          unmapped, fba, stock_moves, created_at, updated_at)
       VALUES (${ctx.workspaceId}::uuid, ${id}::uuid, ${account.company_id}::uuid, ${account.provider},
               ${account.provider}, ${account.id}::uuid, ${o.externalId},
               ${piiSubject(account.id, o.externalId)}, ${piiRef}::uuid, ${piiDeletedAt}, ${status},
               ${o.rawStatus}, ${o.placedAt}, ${o.paidAt}, ${o.shipBy}, ${dispatchedAt},
-              ${o.deliveredAt}, ${status === 'cancelled' ? (o.cancelledAt ?? now) : null},
+              ${dispatchedAt !== null && o.dispatchedAt === null}, ${o.deliveredAt}, ${status === 'cancelled' ? (o.cancelledAt ?? now) : null},
               ${o.updatedAt}, ${day}::date, ${goods}, ${discount}, ${shipping}, ${vat.gross},
               ${vat.vat}, ${o.shipToCountry}, ${unmapped}, ${fba}, ${stockMoves}, ${now}, ${now})`.execute(
       trx,
@@ -540,10 +541,16 @@ export class OrderIngest implements UnmappedDemand {
       incomingStatus(o.state, refunded, big(existing.gross_pence)),
     );
     const stale = o.updatedAt < existing.source_updated_at;
+    // PS-036 (a): the first real dispatch date replaces a stand-in, once; a date already real stays.
+    const real = existing.dispatch_estimated && o.dispatchedAt !== null;
     const dispatchedAt =
-      existing.dispatched_at ??
+      (real ? o.dispatchedAt : existing.dispatched_at) ??
       o.dispatchedAt ??
       (SHIPPED.includes(next) ? effectiveDispatch(o, true) : null);
+    const estimated =
+      existing.dispatched_at === null
+        ? dispatchedAt !== null && o.dispatchedAt === null
+        : existing.dispatch_estimated && !real;
     const deliveredAt = existing.delivered_at ?? o.deliveredAt;
     const cancelledAt =
       next === 'cancelled'
@@ -561,6 +568,7 @@ export class OrderIngest implements UnmappedDemand {
              paid_at = coalesce(paid_at, ${o.paidAt}),
              ship_by = ${stale ? existing.ship_by : (o.shipBy ?? existing.ship_by)},
              dispatched_at = ${dispatchedAt},
+             dispatch_estimated = ${estimated},
              delivered_at = ${deliveredAt},
              cancelled_at = ${cancelledAt},
              pii_ref = ${piiRef}::uuid,
@@ -606,6 +614,8 @@ export class OrderIngest implements UnmappedDemand {
           await this.#ports.shortenPii(ctx, { orderId: existing.id, reason: 'delivery' });
         } else if (dispatchedAt !== null && (joined || existing.dispatched_at === null)) {
           await this.#ports.shortenPii(ctx, { orderId: existing.id, reason: 'dispatch' });
+        } else if (real && deliveredAt === null) {
+          await this.#ports.shortenPii(ctx, { orderId: existing.id, reason: 'dispatch', real });
         }
       }
     }

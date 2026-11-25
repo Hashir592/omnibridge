@@ -136,7 +136,7 @@ export function orderIngestStream(
         const deleteAfter = piiDeleteAfter(
           {
             ...order,
-            dispatchedAt: stored?.dispatchedAt ?? order.dispatchedAt,
+            dispatchedAt: knownDispatch(order, stored),
             deliveredAt: stored?.deliveredAt ?? order.deliveredAt,
           },
           retentionDays,
@@ -217,6 +217,19 @@ export function orderIngestStream(
     sink: (ctx, channelAccountId, items) =>
       deps.ingest.apply(ctx, channelAccountId, items.map(toIncoming)),
   };
+}
+
+/**
+ * When the order left, for a record not stored yet. The stored date stands: a later update never
+ * restarts a window that has passed. A real date earlier than a stored stand-in counts instead.
+ */
+function knownDispatch(
+  order: Pick<ChannelOrder, 'dispatchedAt'>,
+  stored: StoredOrderPii | undefined,
+): Date | null {
+  if (stored === undefined || stored.dispatchedAt === null) return order.dispatchedAt;
+  const real = stored.dispatchEstimated ? order.dispatchedAt : null;
+  return real !== null && real < stored.dispatchedAt ? real : stored.dispatchedAt;
 }
 
 /** The buyer block with its blank values left out. */
@@ -311,7 +324,8 @@ export function orderIngestPorts(
     shortenPii: async (ctx, input) => {
       await queue.send(ordersPiiExpiryJob, {
         ctx,
-        idempotencyKey: `orders.pii_expiry:${input.orderId}:${input.reason}`,
+        // The first real dispatch date is a job of its own: the stand-in's key is taken.
+        idempotencyKey: `orders.pii_expiry:${input.orderId}:${input.reason}${input.real === true ? ':real' : ''}`,
         payload: { order_id: input.orderId, reason: input.reason },
       });
     },
