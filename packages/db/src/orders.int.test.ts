@@ -1072,8 +1072,18 @@ describe('order ingest (T-1001)', () => {
     expect(await details(delivered)).toEqual(['delivery']);
     expect(await details(noRecord)).toEqual([]);
     expect(await details(waiting)).toEqual([]);
-    // No ship date from the channel: the update that first shows it shipped stands in for it.
-    expect((await orderRow(w, bare.externalId))?.dispatched_at).toEqual(bare.updatedAt);
+    // No ship date from the channel and no ship-by: a late edit is never taken for the dispatch.
+    expect((await orderRow(w, bare.externalId))?.dispatched_at).toEqual(bare.placedAt);
+    const by = new Date('2026-11-10T08:30:00Z');
+    const early = order({ state: 'dispatched', shipBy: by });
+    const late = order({ state: 'dispatched', shipBy: new Date('2026-11-15T08:00:00Z') });
+    await ingest.apply(w.ctx, w.account, [early, late]);
+    expect((await orderRow(w, early.externalId))?.dispatched_at).toEqual(by);
+    expect((await orderRow(w, late.externalId))?.dispatched_at).toEqual(late.updatedAt);
+    // Seen waiting before: the update that shows it shipped is the dispatch.
+    const shown = new Date('2026-11-12T09:00:00Z');
+    await ingest.apply(w.ctx, w.account, [{ ...waiting, state: 'dispatched', updatedAt: shown }]);
+    expect((await orderRow(w, waiting.externalId))?.dispatched_at).toEqual(shown);
   });
 
   it('[DEL-1] a record that arrives after the order shipped has its expiry moved too', async () => {

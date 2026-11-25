@@ -10,13 +10,20 @@ import { EBAY_SDK_SAMPLE as SAMPLE } from '@omnibridge/provider-ebay/testing';
 import type { RaiseInput } from '@omnibridge/core';
 import { describe, expect, it } from 'vitest';
 import { buildWebApp } from '../app.ts';
-import { ebayWebhook } from './ebay.ts';
+import { ebayWebhook, noticeUser, type EbayDeletionDeps } from './ebay.ts';
 
 const TOKEN = 'synthetic-verification-token-0123456789abcdef';
 const ENDPOINT = 'https://app.omnibridge.test/webhooks/ebay/account-deletion';
 const PATH = '/webhooks/ebay/account-deletion';
 
-function server(opts: { keyDelayMs?: number; perMinute?: number; configured?: boolean } = {}) {
+function server(
+  opts: {
+    keyDelayMs?: number;
+    perMinute?: number;
+    configured?: boolean;
+    deletion?: EbayDeletionDeps;
+  } = {},
+) {
   const lines: string[] = [];
   const logger = createLogger({
     service: 'test',
@@ -41,6 +48,7 @@ function server(opts: { keyDelayMs?: number; perMinute?: number; configured?: bo
             keys: keys.get,
             logger,
             ...(opts.perMinute === undefined ? {} : { perMinute: opts.perMinute }),
+            ...(opts.deletion === undefined ? {} : { deletion: opts.deletion }),
           }),
         }),
   });
@@ -154,6 +162,38 @@ describe('eBay account deletion endpoint (EBAY-2)', () => {
       expect({ id, logged: text.includes(id) }).toEqual({ id, logged: false });
     }
     await app.close();
+  });
+
+  it("[AT-10][EBAY-2] the vault is given the notice's own date; a missing or unreadable one is left out", async () => {
+    const asked: unknown[] = [];
+    const { app } = server({
+      deletion: {
+        vault: {
+          ebayUserMatch: (request) => {
+            asked.push(request);
+            return Promise.resolve({ workspaces: [], next: null });
+          },
+        },
+        accounts: { list: () => Promise.resolve([]) },
+        tenancy: { runWorkspace: () => Promise.reject(new Error('not reached')) } as never,
+        queue: { send: () => Promise.reject(new Error('not reached')) },
+      },
+    });
+    expect((await app.inject(notice())).statusCode).toBe(200);
+    const { data, eventDate } = SAMPLE.message.notification;
+    expect(asked).toEqual([
+      { user_id: data.userId, username: data.username, noticed_at: eventDate },
+    ]);
+    await app.close();
+    for (const bad of [undefined, '', 'soon', 5, '2026-13-45T00:00:00Z']) {
+      expect(noticeUser({ ...SAMPLE.message.notification, eventDate: bad }).noticedAt).toBe(
+        undefined,
+      );
+    }
+    // Any readable form becomes the same UTC instant.
+    expect(noticeUser({ eventDate: '2026-11-20T10:00:00+01:00' }).noticedAt).toBe(
+      '2026-11-20T09:00:00.000Z',
+    );
   });
 
   it('[EBAY-2] no CSRF token is needed, nothing is accepted unconfigured, and floods are cut', async () => {
