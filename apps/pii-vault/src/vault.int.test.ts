@@ -1413,6 +1413,33 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect((await read(W, pii_ref)).address_line1).toBe(address('8').address_line1);
   });
 
+  it('[DEL-1][ORD-4] a deletion and a correction of one record take their locks in the same order', async () => {
+    const W = randomUUID();
+    const { pii_ref } = await order(W, 'LOCKS', address('3'));
+    // A correction in progress: it holds the record, and then rewrites its fields.
+    const c = await ownerPool.connect();
+    let deleted;
+    try {
+      await c.query('BEGIN');
+      await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [W]);
+      await c.query('SELECT 1 FROM vault.records WHERE pii_ref = $1 FOR UPDATE', [pii_ref]);
+      deleted = clients.deletion.delete({
+        workspace_id: W,
+        run_id: randomUUID(),
+        trigger: 'erasure',
+        scope: { type: 'refs', pii_refs: [pii_ref] },
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      await c.query(`SET LOCAL lock_timeout = '500ms'`);
+      await c.query('DELETE FROM vault.record_fields WHERE pii_ref = $1', [pii_ref]);
+      await c.query('COMMIT');
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
+    expect((await deleted).counts.records).toBe(1);
+  });
+
   it('[ORD-4][SEC-12] a correction never touches the canary', async () => {
     const W = randomUUID();
     await order(W, 'CAN', contact('713'));

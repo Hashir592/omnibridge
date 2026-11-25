@@ -8,6 +8,7 @@ import {
 } from '@omnibridge/provider-ebay';
 import { EBAY_SDK_SAMPLE as SAMPLE } from '@omnibridge/provider-ebay/testing';
 import type { RaiseInput } from '@omnibridge/core';
+import { VaultError } from '@omnibridge/vault-client';
 import { describe, expect, it } from 'vitest';
 import { buildWebApp } from '../app.ts';
 import { ebayWebhook, noticeUser, type EbayDeletionDeps } from './ebay.ts';
@@ -194,6 +195,19 @@ describe('eBay account deletion endpoint (EBAY-2)', () => {
     expect(noticeUser({ eventDate: '2026-11-20T10:00:00+01:00' }).noticedAt).toBe(
       '2026-11-20T09:00:00.000Z',
     );
+  });
+
+  it('[EBAY-2][AT-10] a busy vault answers 503, so eBay sends the notice again', async () => {
+    const { app } = server({
+      deletion: {
+        vault: { ebayUserMatch: () => Promise.reject(new VaultError(503, 'busy')) },
+        accounts: { list: () => Promise.resolve([]) },
+        tenancy: { runWorkspace: () => Promise.reject(new Error('not reached')) } as never,
+        queue: { send: () => Promise.reject(new Error('not reached')) },
+      },
+    });
+    expect((await app.inject(notice())).statusCode).toBe(503);
+    await app.close();
   });
 
   it('[EBAY-2] no CSRF token is needed, nothing is accepted unconfigured, and floods are cut', async () => {
