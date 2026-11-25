@@ -117,16 +117,39 @@ export function vatPeriodDate(taxPoint: string): string {
 }
 
 /**
- * DEL-1: when a shipped order left, as far as the channel says: its dispatch time, else delivery,
- * else the update that first shows it shipped. Null until it has shipped. The vault-first step and
- * db-main both use this, so a record's expiry and the stored date always agree.
+ * DEL-1: when a shipped order left, as far as the channel says: its dispatch time, else delivery.
+ * With neither, an order seen waiting before (`storedUnshipped`) left with the update that shows it
+ * shipped. One first seen shipped may have been edited long after it left, so its stand-in is the
+ * earlier of ship-by and that update, or its placement when there is no ship-by. Null until it has
+ * shipped. The vault-first step and db-main both use this, so a record's expiry and the stored date
+ * always agree.
  */
 export function effectiveDispatch(
-  o: Pick<IncomingOrder, 'state' | 'dispatchedAt' | 'deliveredAt' | 'updatedAt'>,
+  o: Pick<
+    IncomingOrder,
+    'state' | 'placedAt' | 'shipBy' | 'dispatchedAt' | 'deliveredAt' | 'updatedAt'
+  >,
+  storedUnshipped: boolean,
 ): Date | null {
   if (o.dispatchedAt !== null) return o.dispatchedAt;
-  const shipped = o.state === 'dispatched' || o.state === 'delivered';
-  return shipped ? (o.deliveredAt ?? o.updatedAt) : null;
+  if (o.state !== 'dispatched' && o.state !== 'delivered') return null;
+  if (o.deliveredAt !== null) return o.deliveredAt;
+  if (storedUnshipped) return o.updatedAt;
+  if (o.shipBy === null) return o.placedAt;
+  return o.shipBy < o.updatedAt ? o.shipBy : o.updatedAt;
+}
+
+/** What the vault-first step needs to know of an order db-main already holds. */
+export interface StoredOrderPii {
+  /** It has its outcome (a record, a deletion, a refusal or a cancellation). */
+  settled: boolean;
+  piiRef: string | null;
+  /** The record is still there, as far as db-main knows. */
+  live: boolean;
+  status: OrderStatus;
+  paidAt: Date | null;
+  dispatchedAt: Date | null;
+  deliveredAt: Date | null;
 }
 
 /** A fixed-length name for a set of order lines, for a ledger key (the column holds 300). */
@@ -240,45 +263,65 @@ export class OrderIngest implements UnmappedDemand {
   }
 
   /**
-   * For the vault-first step, before any transaction holds a lock: which of these orders already
-   * have a settled PII outcome (a pii_ref, deleted or refused, or cancelled), so the vault is asked
-   * only about the others. An order stored without details (a pending order with no address yet)
-   * is not settled: its buyer is stored once the channel sends one. `dates` holds the dispatch and
-   * delivery the stored orders already have, so a later update never restarts their window.
+   * For the vault-first step, before any transaction holds a lock: what db-main already knows of
+   * these orders, so the vault is asked only what it must be. An order stored without details (a
+   * pending order with no address yet) is not settled: its buyer is stored once the channel sends
+   * one. The dates it already has stand: a later update never restarts its window.
    */
   async piiState(
     ctx: TenantContext,
     channelAccountId: string,
     externalIds: readonly string[],
   ): Promise<{
-    known: ReadonlySet<string>;
-    dates: ReadonlyMap<string, { dispatchedAt: Date | null; deliveredAt: Date | null }>;
+    orders: ReadonlyMap<string, StoredOrderPii>;
+    provider: 'amazon' | 'ebay' | 'website' | undefined;
     retentionDays: number;
   }> {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const { rows } = await sql<{
         external_order_id: string;
         settled: boolean;
+        pii_ref: string | null;
+        live: boolean;
+        status: OrderStatus;
+        paid_at: Date | null;
         dispatched_at: Date | null;
         delivered_at: Date | null;
       }>`
-        SELECT external_order_id, dispatched_at, delivered_at,
-               (pii_ref IS NOT NULL OR pii_deleted_at IS NOT NULL OR status = 'cancelled') AS settled
-          FROM app.orders
-         WHERE workspace_id = ${ctx.workspaceId}::uuid
-           AND channel_account_id = ${channelAccountId}::uuid
-           AND external_order_id = ANY (${sql.val(externalIds)}::text[])`.execute(trx);
+        SELECT o.external_order_id, o.status, o.paid_at, o.dispatched_at, o.delivered_at, o.pii_ref,
+               (o.pii_ref IS NOT NULL OR o.pii_deleted_at IS NOT NULL OR o.status = 'cancelled')
+                 AS settled,
+               (o.pii_ref IS NOT NULL AND o.pii_deleted_at IS NULL AND t.pii_ref IS NULL) AS live
+          FROM app.orders o
+          LEFT JOIN app.pii_tombstones t
+            ON t.workspace_id = o.workspace_id AND t.pii_ref = o.pii_ref
+         WHERE o.workspace_id = ${ctx.workspaceId}::uuid
+           AND o.channel_account_id = ${channelAccountId}::uuid
+           AND o.external_order_id = ANY (${sql.val(externalIds)}::text[])`.execute(trx);
       const { rows: ws } = await sql<{ days: string }>`
         SELECT pii_retention_days AS days FROM app.workspaces
          WHERE id = ${ctx.workspaceId}::uuid`.execute(trx);
+      const { rows: account } = await sql<{ provider: 'amazon' | 'ebay' | 'website' }>`
+        SELECT provider FROM app.channel_accounts
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${channelAccountId}::uuid`.execute(
+        trx,
+      );
       return {
-        known: new Set(rows.filter((r) => r.settled).map((r) => r.external_order_id)),
-        dates: new Map(
+        orders: new Map(
           rows.map((r) => [
             r.external_order_id,
-            { dispatchedAt: r.dispatched_at, deliveredAt: r.delivered_at },
+            {
+              settled: r.settled,
+              piiRef: r.pii_ref,
+              live: r.live,
+              status: r.status,
+              paidAt: r.paid_at,
+              dispatchedAt: r.dispatched_at,
+              deliveredAt: r.delivered_at,
+            },
           ]),
         ),
+        provider: account[0]?.provider,
         retentionDays: Number(ws[0]?.days ?? 25),
       };
     });
@@ -391,7 +434,7 @@ export class OrderIngest implements UnmappedDemand {
     // FA-16: an order placed before the account was connected is history the first stock take
     // already counts; it never moves stock.
     const stockMoves = o.placedAt >= account.created_at;
-    const dispatchedAt = effectiveDispatch(o);
+    const dispatchedAt = effectiveDispatch(o, false);
     const piiRef = o.pii.kind === 'stored' ? o.pii.piiRef : null;
     const piiDeletedAt = o.pii.kind === 'refused' ? now : null;
     const unmapped = resolved.some((r) => r.listing?.master_sku_id == null);
@@ -492,7 +535,7 @@ export class OrderIngest implements UnmappedDemand {
     const dispatchedAt =
       existing.dispatched_at ??
       o.dispatchedAt ??
-      (SHIPPED.includes(next) ? effectiveDispatch(o) : null);
+      (SHIPPED.includes(next) ? effectiveDispatch(o, true) : null);
     const deliveredAt = existing.delivered_at ?? o.deliveredAt;
     const cancelledAt =
       next === 'cancelled'
@@ -1088,16 +1131,23 @@ export class OrderIngest implements UnmappedDemand {
     ctx: TenantContext,
     orderIds: readonly string[],
   ): Promise<
-    { orderId: string; piiRef: string; dispatchedAt: Date | null; deliveredAt: Date | null }[]
+    {
+      orderId: string;
+      piiRef: string;
+      placedAt: Date;
+      dispatchedAt: Date | null;
+      deliveredAt: Date | null;
+    }[]
   > {
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       const { rows } = await sql<{
         id: string;
         pii_ref: string;
+        placed_at: Date;
         dispatched_at: Date | null;
         delivered_at: Date | null;
       }>`
-        SELECT o.id, o.pii_ref, o.dispatched_at, o.delivered_at FROM app.orders o
+        SELECT o.id, o.pii_ref, o.placed_at, o.dispatched_at, o.delivered_at FROM app.orders o
          WHERE o.workspace_id = ${ctx.workspaceId}::uuid AND o.id = ANY (${sql.val(orderIds)}::uuid[])
            AND o.pii_ref IS NOT NULL AND o.pii_deleted_at IS NULL AND o.status <> 'cancelled'
            AND NOT EXISTS (SELECT 1 FROM app.pii_tombstones t
@@ -1107,6 +1157,7 @@ export class OrderIngest implements UnmappedDemand {
       return rows.map((r) => ({
         orderId: r.id,
         piiRef: r.pii_ref,
+        placedAt: r.placed_at,
         dispatchedAt: r.dispatched_at,
         deliveredAt: r.delivered_at,
       }));

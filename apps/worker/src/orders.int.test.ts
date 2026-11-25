@@ -579,6 +579,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     if (o === undefined) throw new Error('no order');
     const ready = await stream().prepare?.({ workspaceId: ws, channelAccountId: site }, [o]);
     expect(ready?.[0]?.pii).toMatchObject({ kind: 'stored' });
+    await tenancy.runWorkspace({ workspaceId: ws }, (c) => stream().sink(c, site, ready ?? []));
     const same = await stream().prepare?.(job, [{ ...o, externalId: `${o.externalId}-e` }]);
     expect(same?.[0]?.pii).toEqual({ kind: 'refused' });
   });

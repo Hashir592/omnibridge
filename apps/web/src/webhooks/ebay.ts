@@ -80,12 +80,16 @@ export function noticeUser(notification: Record<string, unknown>): {
   noticedAt: string | undefined;
 } {
   const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  const instant = (v: string | undefined) => {
+    const at = v === undefined ? Number.NaN : Date.parse(v);
+    return Number.isNaN(at) ? undefined : new Date(at).toISOString();
+  };
   const data = (notification.data ?? {}) as Record<string, unknown>;
   return {
     notificationId: text(notification.notificationId),
     userId: text(data.userId),
     username: text(data.username),
-    noticedAt: undefined,
+    noticedAt: instant(text(notification.eventDate)),
   };
 }
 
@@ -130,6 +134,7 @@ async function queueEbayDeletion(
     const found = await deps.vault.ebayUserMatch({
       ...(notice.userId === undefined ? {} : { user_id: notice.userId }),
       ...(notice.username === undefined ? {} : { username: notice.username }),
+      ...(notice.noticedAt === undefined ? {} : { noticed_at: notice.noticedAt }),
       ...(cursor === null ? {} : { cursor }),
     });
     for (const page of found.workspaces) {

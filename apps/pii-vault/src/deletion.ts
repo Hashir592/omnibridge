@@ -150,7 +150,6 @@ export class DeletionService {
       if (req.scope.type === 'workspace' && !more) {
         // Closure: the keys go last, once no record is left that they could open. The marker
         // makes the vault refuse any later ingest for this workspace (ADR-065, F-M04h-04).
-        await c.query('DELETE FROM vault.deleted_buyers WHERE workspace_id = $1', [ws]);
         await c.query('DELETE FROM vault.workspace_keys WHERE workspace_id = $1', [ws]);
         await c.query('DELETE FROM vault.workspace_directory WHERE workspace_id = $1', [ws]);
         await c.query(

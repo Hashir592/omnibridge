@@ -33,6 +33,16 @@ export type RecordKind = keyof typeof RECORD_FIELDS;
 export const RECORD_KINDS = Object.keys(RECORD_FIELDS) as [RecordKind, ...RecordKind[]];
 export type FieldName = (typeof RECORD_FIELDS)[RecordKind][number];
 
+/** A delivery address (ADR-081 7): line 1 and the postcode; outside the UK the town is enough. */
+export function hasDeliveryAddress(
+  fields: Readonly<Partial<Record<FieldName, string | undefined>>>,
+): boolean {
+  const given = (v: string | undefined) => v !== undefined && v.trim() !== '';
+  // No country counts as the UK.
+  const abroad = given(fields.country) && fields.country?.trim().toUpperCase() !== 'GB';
+  return given(fields.address_line1) && (given(fields.postcode) || (abroad && given(fields.city)));
+}
+
 /** The capabilities of invariant 8. Each caller's token carries a fixed set of them. */
 export const CAPABILITIES = [
   'ingest',

@@ -7,6 +7,7 @@ import {
   MaskRequest,
   MatchRequest,
   ReadFullRequest,
+  ReplaceRequest,
   SearchRequest,
   SignalsRequest,
   SubjectsRequest,
@@ -22,6 +23,7 @@ import {
   PurposeRefused,
   WorkspaceClosed,
   BuyerDeleted,
+  VaultBusy,
   type Caller,
   type Vault,
 } from './vault.ts';
@@ -102,6 +104,7 @@ export function buildVaultApp({
       return reply.code(403).send({ error: 'purpose_not_allowed' });
     if (err instanceof BadExpiry) return reply.code(400).send({ error: 'invalid_expiry' });
     if (err instanceof WorkspaceClosed) return reply.code(409).send({ error: 'workspace_closed' });
+    if (err instanceof VaultBusy) return reply.code(503).send({ error: 'busy' });
     if (err instanceof BuyerDeleted) return reply.code(409).send({ error: 'buyer_deleted' });
     const status = (err as { statusCode?: number }).statusCode;
     if (status !== undefined && status >= 400 && status < 500) {
@@ -119,6 +122,13 @@ export function buildVaultApp({
     authorise(request, 'ingest');
     const body = parse(IngestRequest, request.body);
     return reply.code(201).send(await vault.ingest(body));
+  });
+
+  // ORD-4: an address corrected before dispatch; the worker's order sync only.
+  app.post('/v1/replace', async (request) => {
+    const caller = authorise(request, 'ingest');
+    if (caller !== 'worker') throw new HttpError(403, 'capability_missing');
+    return vault.replace(parse(ReplaceRequest, request.body));
   });
 
   // DEL-1: the worker's expiry jobs only; web never moves a date.

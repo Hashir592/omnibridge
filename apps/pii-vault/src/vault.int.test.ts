@@ -3,7 +3,12 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateIndexKey, generateKekLine, parseKeyring } from '@omnibridge/crypto';
+import {
+  generateIndexKey,
+  generateKekLine,
+  parseKeyring,
+  unwrapIndexKey,
+} from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { migratePii } from '@omnibridge/pii-db';
 import {
@@ -1099,26 +1104,42 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
        VALUES ('deleted_buyers', 2, $1, $2, now())`,
       [next.wrapped.kekVersion, next.wrapped.wrapped],
     );
+    const older = `PIIMARK-older-${randomUUID().slice(0, 8)}`;
+    const oldKey = await ownerPool.query<{ kek_version: string; wrapped: Buffer }>(
+      'SELECT kek_version, wrapped FROM vault.vault_keys WHERE version = 1',
+    );
+    const v1 = unwrapIndexKey(keyring, {
+      workspaceId: VAULT_KEY_SCOPE,
+      version: 1,
+      kekVersion: Number(oldKey.rows[0]?.kek_version),
+      wrapped: oldKey.rows[0]?.wrapped ?? Buffer.alloc(0),
+    });
+    await ownerPool.query(
+      `INSERT INTO vault.ebay_deleted_buyers (key_version, field, mac, noticed_at, received_at)
+       VALUES (1, 'ebay_user_id', $1, now(), now() - interval '1 day')`,
+      [v1.mac('ebay_user_id', older)],
+    );
     await clients.web.ebayUserMatch({ user_id: userId });
     await ownerPool.query(
       `UPDATE vault.ebay_deleted_buyers SET key_version = 2, mac = $1
         WHERE received_at = (SELECT max(received_at) FROM vault.ebay_deleted_buyers)`,
       [next.indexKey.mac('ebay_user_id', userId)],
     );
-    const store = (v: Vault, subject: string) =>
+    const store = (v: Vault, subject: string, who = userId) =>
       v
         .ingest({
           workspace_id: randomUUID(),
           kind: 'buyer_contact',
           subject_type: 'order',
           subject_id: subject,
-          fields: contact('711', { channel_buyer_id: userId }),
+          fields: contact('711', { channel_buyer_id: who }),
         })
         .then(
           () => 'stored',
           (e: unknown) => (e instanceof Error ? e.constructor.name : 'error'),
         );
     expect(await store(new Vault({ pool: appPool, keyring }), 'V2')).toBe('BuyerDeleted');
+    expect(await store(new Vault({ pool: appPool, keyring }), 'V1', older)).toBe('BuyerDeleted');
     await ownerPool.query('DELETE FROM vault.vault_keys WHERE version = 2');
     await ownerPool.query('DELETE FROM vault.ebay_deleted_buyers WHERE key_version = 2');
     // No key at all (a vault that never ran its start-up step) stores no buyer.
@@ -1150,6 +1171,34 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(await vault.purgeDeletedBuyers()).toBe(1);
     expect(await count()).toBe(before - 1);
     expect(await vault.purgeDeletedBuyers()).toBe(0);
+    // A notice sent again counts from then: its entry is not old.
+    const again = `PIIMARK-again-${randomUUID().slice(0, 8)}`;
+    await clients.web.ebayUserMatch({ user_id: again });
+    await ownerPool.query(
+      `UPDATE vault.ebay_deleted_buyers SET received_at = now() - interval '200 days'
+        WHERE received_at = (SELECT max(received_at) FROM vault.ebay_deleted_buyers)`,
+    );
+    await clients.web.ebayUserMatch({ user_id: again });
+    expect(await vault.purgeDeletedBuyers()).toBe(0);
+  });
+
+  it('[AT-10] a later page of one notice writes no entry and no journal line', async () => {
+    const W = randomUUID();
+    const userId = `PIIMARK-pages-${randomUUID().slice(0, 8)}`;
+    for (const n of ['1', '2']) {
+      await order(W, `PG${n}`, contact(`72${n}`, { channel_buyer_id: userId }));
+    }
+    const lines = () => journalLines().filter((l) => l.type === 'ebay_deleted').length;
+    const before = lines();
+    const first = await vault.ebayUserMatch({ user_id: userId }, { caller: 'web' }, 1);
+    expect(first.next).not.toBeNull();
+    const second = await vault.ebayUserMatch(
+      { user_id: userId, cursor: first.next ?? undefined },
+      { caller: 'web' },
+      1,
+    );
+    expect(second.workspaces).toHaveLength(1);
+    expect(lines()).toBe(before + 1);
   });
 
   it('[DEL-1][DP-8] a deleted-buyer entry is journalled off-site before it commits: a MAC and dates, no value', async () => {

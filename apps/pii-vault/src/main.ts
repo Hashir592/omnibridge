@@ -38,6 +38,9 @@ const vault = new Vault({
     );
   },
 });
+// PS-035: the vault-wide key exists before anything is served, so every backup holds it. A vault
+// that cannot make or open it does not start.
+await vault.ensureVaultKey();
 // ADR-066 (T-0407): give records from before the exact buyer index their entry. Runs before
 // the vault serves, so an eBay notice never meets a record without one; a no-op once done.
 // A failure is logged (no values) and never keeps the vault down: the next start retries.
@@ -82,8 +85,27 @@ const purgeSecurityLogs = async () => {
     );
   }
 };
-void purgeSecurityLogs();
-const purgeTimer = setInterval(() => void purgeSecurityLogs(), DAY_MS);
+// DP-5: eBay deletion entries go 180 days after the last notice, in the same daily run.
+const purgeDeletedBuyers = async () => {
+  try {
+    const count = await vault.purgeDeletedBuyers();
+    logger.info({ event: 'vault.deleted_buyer_purge', count }, 'deleted-buyer entries purged');
+  } catch (err) {
+    logger.error(
+      {
+        event: 'vault.deleted_buyer_purge_failed',
+        error: err instanceof Error ? err.name : 'unknown',
+      },
+      'deleted-buyer purge failed',
+    );
+  }
+};
+const dailyPurge = () => {
+  void purgeSecurityLogs();
+  void purgeDeletedBuyers();
+};
+dailyPurge();
+const purgeTimer = setInterval(dailyPurge, DAY_MS);
 purgeTimer.unref();
 
 const app = buildVaultApp({
