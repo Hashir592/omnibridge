@@ -1210,6 +1210,47 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect(rows).toEqual([{ on_hand: '5', reserved: '75' }]);
   });
 
+  it('[DEL-1][AT-8] at ingest delivery wins over dispatch, with the workspace window of 25 days', async () => {
+    const dates = { placedAt: daysAgo(20), paidAt: daysAgo(20), updatedAt: daysAgo(1) };
+    const both = channelOrder({
+      ...dates,
+      state: 'delivered',
+      dispatchedAt: daysAgo(18),
+      deliveredAt: daysAgo(10),
+    });
+    const shipped = channelOrder({ ...dates, state: 'dispatched', dispatchedAt: daysAgo(18) });
+    await poll([both, shipped]);
+    const gone = async (o: ChannelOrder) =>
+      (await vaultRows(`${account}:${o.externalId}`))[0]?.delete_after.getTime();
+    expect(await gone(both)).toBe((both.deliveredAt?.getTime() ?? 0) + 25 * DAY);
+    expect(await gone(shipped)).toBe((shipped.dispatchedAt?.getTime() ?? 0) + 25 * DAY);
+    expect((await expiryJob(both.externalId))?.getTime()).toBe(
+      (both.deliveredAt?.getTime() ?? 0) + 25 * DAY,
+    );
+  });
+
+  it('[ORD-4][DEL-1] a record that was stored and then erased is never made again by a later poll', async () => {
+    const o = channelOrder();
+    await poll([o]);
+    const subject = `${account}:${o.externalId}`;
+    const [record] = await vaultRows(subject);
+    await deletion.delete({
+      workspace_id: ws,
+      run_id: randomUUID(),
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [record?.pii_ref ?? ''] },
+    });
+    // Before db-main knows, and after.
+    expect((await poll([{ ...o, updatedAt: new Date() }]))[0]?.pii).toEqual({ kind: 'unchanged' });
+    expect(await vaultRows(subject)).toEqual([]);
+    await root.query('UPDATE app.orders SET pii_deleted_at = now() WHERE pii_ref = $1', [
+      record?.pii_ref,
+    ]);
+    const later = { ...o, updatedAt: new Date(Date.now() + 1000) };
+    expect((await poll([later]))[0]?.pii).toEqual({ kind: 'unchanged' });
+    expect(await vaultRows(subject)).toEqual([]);
+  });
+
   it('[ORD-9] an open eBay cancellation request reaches the order as one, and a decided one does not', async () => {
     const asked = async (cancelState: string | undefined, over: Record<string, unknown> = {}) => {
       const [o] = ebayOrders({

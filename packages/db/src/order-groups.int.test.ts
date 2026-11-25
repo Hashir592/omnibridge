@@ -22,6 +22,7 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
   let cluster: RoleCluster;
   let db: Kysely<MainDb>;
   let pool: pg.Pool;
+  let root: pg.Pool;
   let ingest: OrderIngest;
   let reads: OrderReads;
   const now = new Date('2026-11-20T12:00:00Z');
@@ -146,6 +147,7 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
   beforeAll(async () => {
     cluster = await startRoleCluster('db-main', 'omnibridge', ['ob_owner', 'ob_app']);
     await migrateMain(cluster.connection('ob_owner'));
+    root = new pg.Pool({ connectionString: cluster.container.getConnectionUri(), max: 1 });
     pool = new pg.Pool({ ...cluster.connection('ob_app'), max: 8 });
     db = new Kysely<MainDb>({ dialect: new PostgresDialect({ pool }) });
     reads = new OrderReads(db, { now: () => now });
@@ -164,6 +166,7 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
 
   afterAll(async () => {
     await db.destroy();
+    await root.end();
     await cluster.container.stop();
   });
 
@@ -261,6 +264,101 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
         if (d.status === 'rejected') seen.push((d.reason as { code?: string }).code);
     }
     expect(seen).toEqual([]);
+  });
+
+  it('[ORD-9] an order that is dispatched or cancelled leaves its group, and a group of one closes', async () => {
+    for (const leaving of [
+      { state: 'dispatched' as const, dispatchedAt: now },
+      { state: 'cancelled' as const, cancelledAt: now },
+    ]) {
+      const w = await world();
+      const { classes, orders } = await sameBuyer(w, 3);
+      await reads.applyGroups(w.ctx, w.account, classes);
+      const [groupId] = await groupIds(w);
+      const leave = async (i: number) => {
+        const o = orders[i];
+        if (o === undefined) throw new Error('no order');
+        await ingest.apply(w.ctx, w.account, [{ ...o, ...leaving, updatedAt: now }]);
+        await reads.applyGroups(w.ctx, w.account, classes);
+        const rows = await links(w);
+        return orders.map((x) => rows.get(x.externalId)?.order_group_id ?? null);
+      };
+      expect(await leave(0)).toEqual([null, groupId, groupId]);
+      expect(await groups(w, 'open')).toEqual([groupId]);
+      expect(await leave(1)).toEqual([null, null, null]);
+      expect(await groups(w, 'open')).toEqual([]);
+      expect(await groups(w, 'closed')).toEqual([groupId]);
+      const { rows } = await withTenantTransaction(db, w.ctx, (trx) =>
+        sql<{ ended_at: Date | null }>`SELECT ended_at FROM app.order_groups`.execute(trx),
+      );
+      expect(rows.map((r) => r.ended_at)).toEqual([now]);
+    }
+  });
+
+  it('[ORD-9] the workspace decides how near midnight two days still group, and a group holds 20', async () => {
+    const w = await world();
+    const at = (iso: string) => ({
+      placedAt: new Date(iso),
+      paidAt: new Date(iso),
+      updatedAt: new Date(iso),
+    });
+    const evening = order(0, at('2026-11-18T22:00:00Z'));
+    const night = order(0, at('2026-11-19T00:30:00Z'));
+    await ingest.apply(w.ctx, w.account, [evening, night]);
+    const classes = new Map(
+      [evening, night].map((o) => [piiSubject(w.account, o.externalId), 'buyer']),
+    );
+    const grouped = async (hours: number) => {
+      // No route sets it yet (TEN-6), so no app role may.
+      await root.query('UPDATE app.workspaces SET group_midnight_grace_hours = $1 WHERE id = $2', [
+        hours,
+        w.ctx.workspaceId,
+      ]);
+      return (await reads.applyGroups(w.ctx, w.account, classes)).groups;
+    };
+    expect(await grouped(3)).toBe(1);
+    expect(await grouped(2)).toBe(0);
+    expect(await groupIds(w)).toEqual([null]);
+    const many = await world();
+    const big = await sameBuyer(many, 21);
+    await reads.applyGroups(many.ctx, many.account, big.classes);
+    const rows = [...(await links(many)).values()].filter((r) => r.order_group_id !== null);
+    expect(rows).toHaveLength(20);
+    expect(new Set(rows.map((r) => r.order_group_id)).size).toBe(1);
+  });
+
+  it('[ORD-9] a group says what differs between its members, and the earliest ship-by', async () => {
+    const w = await world();
+    const by = (day: number) => new Date(Date.UTC(2026, 10, day, 9));
+    const orders = [
+      order(0, { shipBy: by(23) }),
+      order(1, { shipBy: by(22) }),
+      order(2, { shipBy: null }),
+    ];
+    await ingest.apply(w.ctx, w.account, orders);
+    const classes = new Map(orders.map((o) => [piiSubject(w.account, o.externalId), 'buyer']));
+    await reads.applyGroups(w.ctx, w.account, classes);
+    const [groupId] = await groupIds(w);
+    const view = await reads.group(w.ctx, groupId ?? '');
+    expect(view).toMatchObject({
+      state: 'open',
+      channelAccountId: w.account,
+      warnings: ['different_ship_by', 'unmapped'],
+      earliestShipBy: by(22),
+    });
+    expect(view?.members.map((m) => [m.orderRef, m.status, m.shipBy])).toEqual(
+      orders.map((o) => [o.externalId, 'awaiting_dispatch', o.shipBy]),
+    );
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      sql`UPDATE app.orders SET address_shortened = true, unmapped = false, ship_by = ${by(22)}
+           WHERE external_order_id = ${orders[0]?.externalId ?? ''}`.execute(trx),
+    );
+    expect((await reads.group(w.ctx, groupId ?? ''))?.warnings).toEqual([
+      'address_shortened',
+      'unmapped',
+    ]);
+    const stranger: TenantContext = { workspaceId: w.ctx.workspaceId, companyIds: [randomUUID()] };
+    expect(await reads.group(stranger, groupId ?? '')).toBeUndefined();
   });
 
   it('[ORD-9] an order whose buyer asked to cancel is in no group, until the channel refuses', async () => {

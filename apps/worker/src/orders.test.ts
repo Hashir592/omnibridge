@@ -3,7 +3,7 @@ import type { StoredOrderPii } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import type { ChannelOrder } from '@omnibridge/provider-kit';
 import { describe, expect, it } from 'vitest';
-import { orderIngestStream } from './orders.ts';
+import { orderIngestStream, ordersOrphanSweepHandler, ordersPiiExpiryHandler } from './orders.ts';
 
 const job = { workspaceId: 'w', channelAccountId: 'a' };
 const at = new Date('2026-11-20T09:00:00Z');
@@ -74,6 +74,120 @@ async function asked(o: ChannelOrder, known: StoredOrderPii) {
   const [ready] = (await stream.prepare?.(job, [o])) ?? [];
   return { calls, kind: ready?.pii?.kind, buyer: ready?.buyer };
 }
+
+const prepared = <T>(payload: T) => ({
+  jobId: 'j',
+  envelope: { workspace_id: 'w', idempotency_key: 'k', attempt: 1, type: 't', payload },
+  payload,
+  attempt: 1,
+  progress: () => Promise.resolve(),
+});
+const tenancy = {
+  runWorkspace: <T>(_actor: unknown, fn: (ctx: TenantContext) => Promise<T>) =>
+    fn({ workspaceId: 'w', companyIds: [] }),
+};
+const logger = createLogger({ service: 'test', version: '0', destination: { write: () => true } });
+const DAY = 86_400_000;
+
+describe('the nightly orphan sweep (FA-10)', () => {
+  it('[ORD-4][DEL-1] it looks only at records a day old, reads every page, and expires only those no order points at', async () => {
+    const now = new Date('2026-11-20T03:00:00Z');
+    const asked: { before: string; after: string | undefined }[] = [];
+    const expired: { refs: readonly string[]; at: string; reason: string }[] = [];
+    const pages = [
+      { records: ['r1', 'r2'], next: 'r2' },
+      { records: ['r3'], next: 'r3' },
+      { records: ['r4', 'r5'], next: null },
+    ];
+    const sweep = ordersOrphanSweepHandler({
+      tenancy,
+      ingest: { knownPiiRefs: () => Promise.resolve(new Set(['r1', 'r4'])) },
+      vault: {
+        subjects: (req) => {
+          asked.push({ before: req.created_before, after: req.after });
+          const page = pages[asked.length - 1];
+          return Promise.resolve({
+            records: (page?.records ?? []).map((r) => ({ pii_ref: r, subject_id: r })),
+            next: page?.next ?? null,
+          });
+        },
+        setExpiry: (req) => {
+          expired.push({ refs: req.pii_refs, at: req.delete_after, reason: req.reason });
+          return Promise.resolve({ updated: req.pii_refs.length });
+        },
+      },
+      logger,
+      now: () => now,
+    });
+    expect(await sweep.prepare(prepared({}))).toEqual({ orphans: 3 });
+    const before = new Date(now.getTime() - DAY).toISOString();
+    expect(asked).toEqual([
+      { before, after: undefined },
+      { before, after: 'r2' },
+      { before, after: 'r3' },
+    ]);
+    expect(expired).toEqual([
+      { refs: ['r2'], at: now.toISOString(), reason: 'orphan' },
+      { refs: ['r3'], at: now.toISOString(), reason: 'orphan' },
+      { refs: ['r5'], at: now.toISOString(), reason: 'orphan' },
+    ]);
+  });
+});
+
+describe('the expiry job (DEL-1)', () => {
+  const run = async (dates: {
+    placed: number;
+    dispatched: number | null;
+    delivered: number | null;
+  }) => {
+    const now = new Date('2026-11-20T10:00:00Z');
+    const ago = (days: number) => new Date(now.getTime() - days * DAY);
+    const asked: string[] = [];
+    const handler = ordersPiiExpiryHandler({
+      tenancy,
+      ingest: {
+        piiExpiryOf: () =>
+          Promise.resolve([
+            {
+              orderId: 'o',
+              piiRef: 'r',
+              placedAt: ago(dates.placed),
+              dispatchedAt: dates.dispatched === null ? null : ago(dates.dispatched),
+              deliveredAt: dates.delivered === null ? null : ago(dates.delivered),
+            },
+          ]),
+        retentionDays: () => Promise.resolve(25),
+      },
+      vault: {
+        setExpiry: (req) => {
+          asked.push(req.delete_after);
+          return Promise.resolve({ updated: 1 });
+        },
+      },
+      now: () => now,
+    });
+    await handler.prepare(prepared({ order_id: 'o', reason: 'dispatch' as const }));
+    return (Date.parse(asked[0] ?? '') - now.getTime()) / DAY;
+  };
+
+  it('[DEL-1][AT-8] delivery wins over dispatch, the limit is placement + 90 days, and a past date is sent as now', async () => {
+    expect(await run({ placed: 20, dispatched: 18, delivered: null })).toBe(7);
+    expect(await run({ placed: 20, dispatched: 18, delivered: 10 })).toBe(15);
+    expect(await run({ placed: 80, dispatched: 10, delivered: 1 })).toBe(10);
+    expect(await run({ placed: 80, dispatched: 60, delivered: null })).toBe(0);
+    expect(await run({ placed: 120, dispatched: 100, delivered: 99 })).toBe(0);
+  });
+
+  it('[DEL-1] an order the job is not given changes nothing', async () => {
+    const handler = ordersPiiExpiryHandler({
+      tenancy,
+      ingest: { piiExpiryOf: () => Promise.resolve([]), retentionDays: () => Promise.resolve(25) },
+      vault: { setExpiry: () => Promise.reject(new Error('not asked')) },
+    });
+    const job = prepared({ order_id: 'o', reason: 'delivery' as const });
+    expect(await handler.prepare(job)).toEqual({ updated: 0 });
+  });
+});
 
 describe('the vault-first step for a stored order (ORD-4)', () => {
   it('[ORD-4] a paid order waiting on both sides has its address corrected', async () => {

@@ -483,6 +483,20 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
     expect((await rows(child)).map((r) => r.id)).not.toContain(yOrder);
     expect((await get(child, `/api/orders/${yOrder}`)).status).toBe(404);
     expect((await get(child, `/api/orders?channel_account_id=${accY}`)).status).toBe(404);
+    // A company filter is a 404 too, on every route that takes one, and the admin's is fine.
+    for (const route of ['/api/orders', '/api/returns', '/api/orders/export']) {
+      expect((await get(child, `${route}?company_id=${companyY}`)).status, route).toBe(404);
+      expect((await get(child, `${route}?channel_account_id=${accY}`)).status, route).toBe(404);
+      expect((await get(admin, `${route}?company_id=${companyY}`)).status, route).toBe(200);
+      expect((await get(child, `${route}?company_id=${companyX}`)).status, route).toBe(200);
+    }
+    const search = await app().inject({
+      method: 'POST',
+      url: `/api/orders/search?company_id=${companyY}`,
+      headers: headers(child),
+      payload: { buyer_name: 'Yan Hidden' },
+    });
+    expect(search.statusCode).toBe(404);
     expect(
       (
         await app().inject({

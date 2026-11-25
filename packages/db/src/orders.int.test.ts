@@ -1968,6 +1968,336 @@ describe('order ingest (T-1001)', () => {
     expect(await asked(order({ fba: true }))).toBe(0);
   });
 
+  // ---- F-M10-end-11: what the ingest must keep doing ---------------------------------------------
+
+  it('[VAT-1][VAT-5] the tax point of a sale and of a refund is the London day, not the UTC one', async () => {
+    const w = await world();
+    const placedAt = new Date('2026-06-30T23:30:00Z');
+    const o = order({
+      placedAt,
+      paidAt: placedAt,
+      updatedAt: placedAt,
+      lines: [line('L1', 'STD-1', 1, 1200n)],
+      shipping: p(0),
+      state: 'dispatched',
+      dispatchedAt: placedAt,
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        updatedAt: new Date('2026-08-01T00:00:00Z'),
+        refunds: [
+          {
+            refundId: 'R1',
+            refundedAt: new Date('2026-07-31T23:30:00Z'),
+            amount: p(600),
+            lines: null,
+          },
+        ],
+      },
+    ]);
+    const row = await orderRow(w, o.externalId);
+    expect(
+      (await ledger(w, row?.id)).map((r) => [r.kind, r.tax_point_date, r.period_date]),
+    ).toEqual([
+      ['sale', '2026-07-01', '2026-07-01'],
+      ['refund', '2026-08-01', '2026-08-01'],
+    ]);
+    const days = await q<{ o: string; r: string }>(
+      w,
+      sql`SELECT to_char(o.tax_point_date, 'YYYY-MM-DD') AS o, to_char(r.tax_point_date, 'YYYY-MM-DD') AS r
+            FROM app.orders o JOIN app.refunds r ON r.order_id = o.id
+           WHERE o.id = ${String(row?.id)}::uuid`,
+    );
+    expect(days).toEqual([{ o: '2026-07-01', r: '2026-08-01' }]);
+  });
+
+  it('[VAT-7][AT-6] an order stored after a COGS or VAT-type change takes the values of its own day, mapped now or later', async () => {
+    const w = await world();
+    const early = order({
+      lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'NEW-ITEM', 1, 600n)],
+      shipping: p(0),
+    });
+    for (const sku of [w.std, w.zero]) {
+      await catalogue.setCogs(w.ctx, sku, p(999), '2026-11-12', null, clock);
+      await catalogue.updateSku(
+        w.ctx,
+        sku,
+        { vat: { vatType: 'reduced', effectiveFrom: '2026-11-12' } },
+        null,
+        clock,
+      );
+    }
+    await ingest.apply(w.ctx, w.account, [early]);
+    const id = (await orderRow(w, early.externalId))?.id;
+    const snaps = async () =>
+      (await lineRows(w, id)).map((l) => [l.external_sku, l.vat_type, l.cogs_pence]);
+    expect(await snaps()).toEqual([
+      ['STD-1', 'standard', '400'],
+      ['NEW-ITEM', null, null],
+    ]);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    expect(await mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero })).toEqual({
+      filled: 1,
+    });
+    expect(await snaps()).toEqual([
+      ['STD-1', 'standard', '400'],
+      ['NEW-ITEM', 'zero', '200'],
+    ]);
+  });
+
+  it('[VAT-3][CAT-6] a late mapping shares discount, shipping and VAT between the lines again', async () => {
+    const w = await world();
+    const o = order({
+      lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'NEW-ITEM', 1, 600n)],
+      shipping: p(300),
+      discount: p(90),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    const shares = async () =>
+      (await lineRows(w, id)).map((l) => [l.discount_pence, l.shipping_pence, l.vat_pence]);
+    // One group at 20%: 2010 gross, 335 VAT.
+    expect(await shares()).toEqual([
+      ['60', '200', '223'],
+      ['30', '100', '112'],
+    ]);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    await mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero });
+    expect(await shares()).toEqual([
+      ['60', '200', '223'],
+      ['30', '100', '0'],
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      vat_pence: '223',
+      gross_pence: '2010',
+    });
+    expect(await totals(w, id)).toEqual([
+      { group_key: 'rate:2000', gross: '1340', vat: '223' },
+      { group_key: 'zero:zero', gross: '670', vat: '0' },
+    ]);
+  });
+
+  it('[VAT-2] an unmapped line counts at the workspace own default rate', async () => {
+    const w = await world();
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      sql`UPDATE app.workspaces SET default_vat_rate_bp = 500`.execute(trx),
+    );
+    const o = order({ lines: [line('L1', 'NEW-ITEM', 1, 1050n)], shipping: p(0) });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const row = await orderRow(w, o.externalId);
+    expect(row).toMatchObject({ vat_pence: '50' });
+    expect(await totals(w, row?.id)).toEqual([{ group_key: 'rate:500', gross: '1050', vat: '50' }]);
+  });
+
+  it('[VAT-1][VAT-6] the first payment date seen is kept', async () => {
+    const w = await world();
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+        paidAt: new Date('2026-11-12T08:00:00Z'),
+      },
+    ]);
+    await ingest.apply(w.ctx, w.account, [
+      { ...o, updatedAt: new Date('2026-11-13T09:00:00Z'), paidAt: null },
+    ]);
+    expect((await orderRow(w, o.externalId))?.paid_at).toEqual(o.paidAt);
+  });
+
+  it('[VAT-3] a discount above the goods comes off the shipping, and never makes the order negative', async () => {
+    const w = await world();
+    const one = { lines: [line('L1', 'STD-1', 1, 1200n)], shipping: p(600) };
+    const some = order({ ...one, discount: p(1500) });
+    const all = order({ ...one, discount: p(5000) });
+    await ingest.apply(w.ctx, w.account, [some, all]);
+    expect(await orderRow(w, some.externalId)).toMatchObject({
+      goods_pence: '1200',
+      discount_pence: '1200',
+      shipping_pence: '300',
+      gross_pence: '300',
+      vat_pence: '50',
+    });
+    expect(await orderRow(w, all.externalId)).toMatchObject({
+      discount_pence: '1200',
+      shipping_pence: '0',
+      gross_pence: '0',
+      vat_pence: '0',
+    });
+  });
+
+  it('[VAT-7][FIN-1] every snapshot and fixed value of a paid order refuses a second write', async () => {
+    const w = await world();
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = String((await orderRow(w, o.externalId))?.id);
+    const refuse = async (table: string, set: string, where: string, why: RegExp) =>
+      expect(
+        q(w, sql<object>`UPDATE ${sql.raw(table)} SET ${sql.raw(set)} WHERE ${sql.raw(where)}`),
+        set,
+      ).rejects.toThrow(why);
+    const ofLine = `order_id = '${id}' AND external_line_id = 'L1'`;
+    for (const set of [
+      `vat_type = 'reduced'`,
+      'vat_rate_bp = 500',
+      'cogs_pence = 999',
+      `master_sku_id = '${w.zero}'`,
+      'master_sku_id = NULL',
+      `snapshot_at = snapshot_at + interval '1 day'`,
+      'provisional_rate_bp = 500',
+      'quantity = 2',
+      'unit_gross_pence = 1',
+      'line_gross_pence = 1',
+      'stored_unmapped = NOT stored_unmapped',
+      `company_id = '${randomUUID()}'`,
+      `order_id = '${randomUUID()}'`,
+    ]) {
+      await refuse('app.order_lines', set, ofLine, /write-once/);
+    }
+    for (const set of [
+      `tax_point_date = '2026-12-01'`,
+      `placed_at = placed_at + interval '1 day'`,
+      `company_id = '${randomUUID()}'`,
+      `channel_account_id = '${randomUUID()}'`,
+      `external_order_id = 'OTHER'`,
+      `pii_subject = 'OTHER'`,
+    ]) {
+      await refuse('app.orders', set, `id = '${id}'`, /never change/);
+    }
+  });
+
+  it('[VAT-5][FIN-1] the VAT ledger, refunds and history are only ever added to', async () => {
+    const w = await world();
+    const o = order({ state: 'dispatched', dispatchedAt: clock });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+        refunds: [
+          {
+            refundId: 'R1',
+            refundedAt: new Date('2026-11-12T09:00:00Z'),
+            amount: p(600),
+            lines: [{ lineId: 'L1', quantity: 1, amount: p(600) }],
+          },
+        ],
+      },
+    ]);
+    const tables: [string, string][] = [
+      ['app.vat_ledger', 'vat_pence = vat_pence'],
+      ['app.refunds', 'amount_pence = amount_pence'],
+      ['app.refund_lines', 'amount_pence = amount_pence'],
+      ['app.order_status_events', 'raw_status = raw_status'],
+    ];
+    for (const [table, set] of tables) {
+      const rows = await q(w, sql<object>`SELECT 1 FROM ${sql.raw(table)}`);
+      expect(rows.length, table).toBeGreaterThan(0);
+      await expect(
+        q(w, sql<object>`UPDATE ${sql.raw(table)} SET ${sql.raw(set)}`),
+        table,
+      ).rejects.toThrow(/permission denied/);
+      await expect(q(w, sql<object>`DELETE FROM ${sql.raw(table)}`), table).rejects.toThrow(
+        /permission denied/,
+      );
+    }
+    for (const table of ['app.orders', 'app.order_lines']) {
+      await expect(q(w, sql<object>`DELETE FROM ${sql.raw(table)}`), table).rejects.toThrow(
+        /permission denied/,
+      );
+    }
+  });
+
+  it('[INV-3] an order first seen cancelled reserves nothing', async () => {
+    const w = await world();
+    const o = order({ state: 'cancelled', cancelledAt: clock });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const row = await orderRow(w, o.externalId);
+    expect(row).toMatchObject({ status: 'cancelled', stock_moves: true });
+    expect(await movements(w, row?.id)).toEqual([]);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+  });
+
+  it('[INV-6][ORD-1] a sale that takes available below 0 flags its own line and its order, and no other', async () => {
+    const w = await world();
+    const o = order({ lines: [line('L1', 'STD-1', 11, 13200n), line('L2', 'ZERO-1', 10, 6000n)] });
+    const other = order({ lines: [line('L1', 'ZERO-1', 1, 600n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const flags = async (x: IncomingOrder) => {
+      const row = await orderRow(w, x.externalId);
+      const lines = await q<{ oversold: boolean }>(
+        w,
+        sql`SELECT oversold FROM app.order_lines WHERE order_id = ${String(row?.id)}::uuid ORDER BY line_no`,
+      );
+      return [row?.oversold, lines.map((l) => l.oversold)];
+    };
+    expect(await flags(o)).toEqual([true, [true, false]]);
+    await ingest.apply(w.ctx, w.account, [other]);
+    expect(await flags(other)).toEqual([true, [true]]);
+    expect(await flags(o)).toEqual([true, [true, false]]);
+    const fine = order({ lines: [line('L1', 'NEW-ITEM', 99, 600n)] });
+    await ingest.apply(w.ctx, w.account, [fine]);
+    expect(await flags(fine)).toEqual([false, [false]]);
+  });
+
+  it('[CAT-6][INV-3] a back-fill moves nothing for a cancelled order or for history', async () => {
+    const w = await world();
+    const item = { lines: [line('L1', 'NEW-ITEM', 2, 1200n)], shipping: p(0) };
+    const gone = order(item);
+    const old = order({
+      ...item,
+      placedAt: new Date('2026-10-20T08:00:00Z'),
+      updatedAt: new Date('2026-10-20T09:00:00Z'),
+    });
+    const oldShipped = order({
+      ...item,
+      placedAt: new Date('2026-10-20T08:00:00Z'),
+      updatedAt: new Date('2026-10-20T09:00:00Z'),
+      state: 'dispatched',
+      dispatchedAt: new Date('2026-10-21T09:00:00Z'),
+    });
+    const live = order(item);
+    await ingest.apply(w.ctx, w.account, [gone, old, oldShipped, live]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...gone,
+        state: 'cancelled',
+        cancelledAt: clock,
+        updatedAt: new Date('2026-11-11T09:00:00Z'),
+      },
+    ]);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    await mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '2' });
+    for (const o of [gone, old, oldShipped]) {
+      expect(await movements(w, (await orderRow(w, o.externalId))?.id)).toEqual([]);
+    }
+  });
+
+  it('[DEL-1] the expiry job is given no cancelled order, no deleted record and no order without one', async () => {
+    const w = await world();
+    const shipped = { state: 'dispatched' as const, dispatchedAt: clock };
+    const orders = [
+      order(shipped),
+      order({ state: 'cancelled', cancelledAt: clock }),
+      order({ ...shipped, pii: { kind: 'none' } }),
+      order({ ...shipped, pii: { kind: 'refused' } }),
+      order(shipped),
+    ];
+    await ingest.apply(w.ctx, w.account, orders);
+    const ids: string[] = [];
+    for (const o of orders) ids.push(String((await orderRow(w, o.externalId))?.id));
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      sql`UPDATE app.orders SET pii_deleted_at = now() WHERE id = ${ids[4] ?? ''}::uuid`.execute(
+        trx,
+      ),
+    );
+    expect((await ingest.piiExpiryOf(w.ctx, ids)).map((r) => r.orderId)).toEqual([ids[0]]);
+  });
+
   it('[ORD-3][INV-3] a channel that reports delivery without a dispatch time still dispatches the stock', async () => {
     const w = await world();
     const o = order({ placedAt: new Date('2026-11-10T08:00:00Z') });
@@ -2083,5 +2413,75 @@ describe('order ingest (T-1001)', () => {
     );
     expect(seen.rows[0]?.n).toBe('0');
     clock = new Date(clock.getTime());
+  });
+
+  it('[TEN-5][PERM-3] refunds, refund lines, groups and the pairs kept apart show and take only the user’s companies', async () => {
+    const w = await world();
+    const o = order({ state: 'dispatched', dispatchedAt: clock });
+    const o2 = order();
+    await ingest.apply(w.ctx, w.account, [o, o2]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+        refunds: [
+          {
+            refundId: 'R1',
+            refundedAt: new Date('2026-11-12T09:00:00Z'),
+            amount: p(600),
+            lines: [{ lineId: 'L1', quantity: 1, amount: p(600) }],
+          },
+        ],
+      },
+    ]);
+    const ids = [
+      String((await orderRow(w, o.externalId))?.id),
+      String((await orderRow(w, o2.externalId))?.id),
+    ].sort();
+    const [refund] = await q<{ id: string; line: string }>(
+      w,
+      sql`SELECT r.id, l.id AS line FROM app.refunds r
+            JOIN app.order_lines l ON l.order_id = r.order_id AND l.external_line_id = 'L2'`,
+    );
+    const inserts: Record<string, (company: string) => ReturnType<typeof sql<object>>> = {
+      order_groups: (company) => sql<object>`
+        INSERT INTO app.order_groups (workspace_id, id, company_id, channel_account_id, state, created_at)
+        VALUES (${w.ctx.workspaceId}::uuid, gen_random_uuid(), ${company}::uuid, ${w.account}::uuid, 'open', now())`,
+      order_group_exclusions: (company) => sql<object>`
+        INSERT INTO app.order_group_exclusions (workspace_id, order_a, order_b, company_id, kind, created_at)
+        VALUES (${w.ctx.workspaceId}::uuid, ${ids[0] ?? ''}::uuid, ${ids[1] ?? ''}::uuid, ${company}::uuid, 'removed', now())
+        ON CONFLICT DO NOTHING`,
+      refunds: (company) => sql<object>`
+        INSERT INTO app.refunds (workspace_id, id, company_id, order_id, external_refund_id, refunded_at,
+                                 tax_point_date, amount_pence, vat_pence, created_at)
+        VALUES (${w.ctx.workspaceId}::uuid, gen_random_uuid(), ${company}::uuid, ${ids[0] ?? ''}::uuid,
+                'X' || gen_random_uuid(), now(), '2026-11-12', 1, 0, now())`,
+      refund_lines: (company) => sql<object>`
+        INSERT INTO app.refund_lines (workspace_id, id, company_id, refund_id, order_line_id, quantity, amount_pence)
+        VALUES (${w.ctx.workspaceId}::uuid, gen_random_uuid(), ${company}::uuid, ${refund?.id ?? ''}::uuid,
+                ${refund?.line ?? ''}::uuid, 1, 1) ON CONFLICT DO NOTHING`,
+    };
+    await q(w, inserts.order_groups?.(w.company) ?? sql<object>`SELECT 1`);
+    await q(w, inserts.order_group_exclusions?.(w.company) ?? sql<object>`SELECT 1`);
+    const other: World = {
+      ...w,
+      ctx: { workspaceId: w.ctx.workspaceId, companyIds: [randomUUID()] },
+    };
+    const both = {
+      ...w,
+      ctx: { ...w.ctx, companyIds: [...w.ctx.companyIds, ...other.ctx.companyIds] },
+    };
+    for (const [table, insert] of Object.entries(inserts)) {
+      const count = async (x: World) =>
+        (await q(x, sql<object>`SELECT 1 FROM app.${sql.raw(table)}`)).length;
+      expect(await count(w), table).toBeGreaterThan(0);
+      expect(await count(both), table).toBe(await count(w));
+      expect(await count(other), table).toBe(0);
+      // Nor may a user write a row into a company they do not have.
+      await expect(q(w, insert(other.ctx.companyIds[0] ?? '')), table).rejects.toThrow(
+        /row-level security|foreign key/,
+      );
+      await expect(q(other, insert(w.company)), table).rejects.toThrow(/row-level security/);
+    }
   });
 });

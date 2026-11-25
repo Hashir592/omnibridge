@@ -231,6 +231,108 @@ describe('the order list (T-1004)', () => {
     expect((await refs(w, { q: 'grp-2' })).items.map((i) => i.group?.hidden)).toEqual([2]);
   });
 
+  it('[ORD-2][TEN-5] each filter keeps its own orders: London days, ship-by, flags, status, account, company, buyer', async () => {
+    const w = await world();
+    const set = (ref: string, sqlSet: string) =>
+      root.query(
+        `UPDATE app.orders SET ${sqlSet} WHERE workspace_id = $1 AND external_order_id = $2`,
+        [w.ctx.workspaceId, ref],
+      );
+    // Either side of London midnight in summer time (23:00 UTC).
+    await put(w, { ref: 'JUN30', at: '2026-06-30T22:59:59Z' });
+    await put(w, { ref: 'JUL1', at: '2026-06-30T23:00:00Z' });
+    await put(w, { ref: 'JUL1-LATE', at: '2026-07-01T22:59:59Z' });
+    await put(w, { ref: 'JUL2', at: '2026-07-01T23:00:00Z', status: 'cancelled' });
+    const found = async (f: OrderFilter) => (await refs(w, f)).refs.sort();
+    expect(await found({ from: '2026-07-01', to: '2026-07-01' })).toEqual(['JUL1', 'JUL1-LATE']);
+    expect(await found({ to: '2026-06-30' })).toEqual(['JUN30']);
+    expect(await found({ from: '2026-07-02' })).toEqual(['JUL2']);
+    expect(await found({ status: 'cancelled' })).toEqual(['JUL2']);
+    // Now is 20 Nov, 12:00 in London.
+    await set('JUN30', `ship_by = '2026-11-20T11:59:59Z'`);
+    await set('JUL1', `ship_by = '2026-11-20T23:59:59Z'`);
+    await set('JUL1-LATE', `ship_by = '2026-11-21T00:00:00Z'`);
+    await set('JUL2', `ship_by = '2026-11-19T10:00:00Z'`);
+    expect(await found({ shipBy: 'today' })).toEqual(['JUL1', 'JUN30']);
+    // Overdue is for orders still to ship.
+    expect(await found({ shipBy: 'overdue' })).toEqual(['JUN30']);
+    for (const flag of ['oversold', 'unmapped', 'address_shortened', 'fba'] as const) {
+      expect(await found({ flag }), flag).toEqual([]);
+      await set('JUL1', `${flag} = true`);
+      expect(await found({ flag }), flag).toEqual(['JUL1']);
+    }
+    expect(await found({ flag: 'tracking_not_confirmed' })).toEqual([]);
+    const { items } = await refs(w, { flag: 'fba' });
+    expect(items[0]?.flags).toEqual(['oversold', 'unmapped', 'address_shortened', 'fba']);
+    expect(await found({ channelAccountId: randomUUID() })).toEqual([]);
+    expect(await found({ channelAccountId: w.account, status: 'cancelled' })).toEqual(['JUL2']);
+    expect(await found({ companyId: randomUUID() })).toEqual([]);
+    expect(await found({ companyId: w.ctx.companyIds[0] ?? '' })).toHaveLength(4);
+    const ref = randomUUID();
+    await set('JUL2', `pii_ref = '${ref}'`);
+    expect(await found({ piiRefs: [ref] })).toEqual(['JUL2']);
+    expect(await found({ piiRefs: [] })).toEqual([]);
+    // Another company's user sees none of it, filter or not, and cannot name the filter either.
+    const stranger = { workspaceId: w.ctx.workspaceId, companyIds: [randomUUID()] };
+    expect((await reads.list(stranger, {}, { offset: 0, limit: 5 }, 10)).items).toEqual([]);
+    expect(await reads.filterVisible(w.ctx, {})).toBe(true);
+    expect(await reads.filterVisible(w.ctx, { companyId: w.ctx.companyIds[0] })).toBe(true);
+    expect(await reads.filterVisible(w.ctx, { channelAccountId: w.account })).toBe(true);
+    expect(await reads.filterVisible(stranger, { companyId: w.ctx.companyIds[0] })).toBe(false);
+    expect(await reads.filterVisible(stranger, { channelAccountId: w.account })).toBe(false);
+    expect(await reads.filterVisible(w.ctx, { companyId: randomUUID() })).toBe(false);
+  });
+
+  it('[ORD-5][ORD-6] a row says whether the customer is held, deleted (and when) or was never kept', async () => {
+    const w = await world();
+    const [held, deleted, tombstoned] = [randomUUID(), randomUUID(), randomUUID()];
+    for (const ref of ['HELD', 'DELETED', 'TOMB', 'NONE', 'REFUSED']) {
+      await put(w, { ref, at: '2026-11-01T10:00:00Z' });
+    }
+    const set = (ref: string, values: string) =>
+      root.query(
+        `UPDATE app.orders SET ${values} WHERE workspace_id = $1 AND external_order_id = $2`,
+        [w.ctx.workspaceId, ref],
+      );
+    await set('HELD', `pii_ref = '${held}'`);
+    await set('DELETED', `pii_ref = '${deleted}', pii_deleted_at = '2026-11-10T00:00:00Z'`);
+    await set('TOMB', `pii_ref = '${tombstoned}'`);
+    await set('REFUSED', `pii_deleted_at = '2026-11-11T00:00:00Z'`);
+    const run = randomUUID();
+    await root.query(
+      `INSERT INTO app.deletion_runs (workspace_id, id, trigger, scope_type, scope, records_deleted,
+                                      result, started_at, finished_at)
+       VALUES ($1, $2, 'erasure', 'refs', '{}', 1, 'done', now(), now())`,
+      [w.ctx.workspaceId, run],
+    );
+    await root.query(
+      `INSERT INTO app.pii_tombstones (workspace_id, pii_ref, run_id, deleted_at)
+       VALUES ($1, $2, $3, '2026-11-12T00:00:00Z')`,
+      [w.ctx.workspaceId, tombstoned, run],
+    );
+    const { items } = await refs(w, {});
+    const state = Object.fromEntries(
+      items.map((i) => [
+        i.orderRef,
+        [i.customer, i.piiRef, i.customerDeletedAt?.toISOString().slice(0, 10) ?? null],
+      ]),
+    );
+    expect(state).toEqual({
+      HELD: ['present', held, null],
+      DELETED: ['deleted', null, '2026-11-10'],
+      TOMB: ['deleted', null, '2026-11-12'],
+      NONE: ['none', null, null],
+      REFUSED: ['deleted', null, '2026-11-11'],
+    });
+    const byRef = new Map(items.map((i) => [i.orderRef, i.id]));
+    const customer = async (ref: string) =>
+      (await reads.customerRef(w.ctx, byRef.get(ref) ?? ''))?.piiRef;
+    expect(await customer('HELD')).toBe(held);
+    expect(await customer('DELETED')).toBeNull();
+    expect(await customer('TOMB')).toBeNull();
+    expect(await reads.customerRef(w.ctx, randomUUID())).toBeUndefined();
+  });
+
   it('[ORD-2][TEN-1] rows from before the search columns are filled, and the tenant rules are back on afterwards', async () => {
     const w = await world();
     await put(w, { ref: 'OLD-1', at: '2026-11-01T10:00:00Z', sku: 'OLDSKU', external: 'Old-Ext' });

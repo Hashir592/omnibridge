@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -334,6 +334,46 @@ describe('restore with tombstones re-applied [AT-8][DEL-2]', () => {
       await restored.close();
     }
   }, 300_000);
+
+  it('[DEL-1][AT-8] of several journalled dates for one record the newest line wins, wherever it stands in the files', async () => {
+    const user = cluster.container.getUsername();
+    const refs = [await ingest(A, 'newest-1'), await ingest(A, 'newest-2')];
+    await sh(`pg_dump -U ${user} -Fc -f /tmp/newest.dump omnibridge_pii`);
+    const at = (minutes: number) => new Date(clock.getTime() + minutes * 60_000).toISOString();
+    const until = (days: number) => new Date(clock.getTime() + days * DAY).toISOString();
+    const entry = (ref: string, minute: number, days: number) =>
+      JSON.stringify({
+        type: 'expiry',
+        workspace_id: A,
+        pii_ref: ref,
+        delete_after: until(days),
+        reason: 'dispatch',
+        at: at(minute),
+      });
+    const dir = mkdtempSync(join(tmpdir(), 'ob-newest-'));
+    // Newest first for one, last for the other, across two files.
+    writeFileSync(
+      join(dir, 'tombstones-2026-01-01.jsonl'),
+      [entry(refs[0] ?? '', 30, 40), entry(refs[1] ?? '', 10, 70)].join('\n') + '\n',
+    );
+    writeFileSync(
+      join(dir, 'tombstones-2026-01-02.jsonl'),
+      [entry(refs[0] ?? '', 20, 60), entry(refs[1] ?? '', 40, 45)].join('\n') + '\n',
+    );
+    await sh(
+      `createdb -U ${user} restored_newest && pg_restore -U ${user} -d restored_newest /tmp/newest.dump`,
+    );
+    await replay('restored_newest', [], dir);
+    const dates = await rows(
+      'restored_newest',
+      A,
+      `SELECT pii_ref, delete_after FROM vault.records
+        WHERE workspace_id = $1 AND pii_ref IN ('${refs.join("','")}') ORDER BY pii_ref`,
+    );
+    expect(
+      Object.fromEntries(dates.map((d) => [d.pii_ref, (d.delete_after as Date).toISOString()])),
+    ).toEqual({ [refs[0] ?? '']: until(40), [refs[1] ?? '']: until(45) });
+  });
 
   it('[DEL-1][AT-8] an expiry shortened after the backup is re-applied by the restore, so the copy goes on time (ADR-068)', async () => {
     const W = randomUUID();
