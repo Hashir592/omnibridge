@@ -266,6 +266,43 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
     expect(seen).toEqual([]);
   });
 
+  it('[ORD-9][INV-4] a recompute, dismissal or removal locks the account’s open orders before it changes any', async () => {
+    for (const act of ['recompute', 'dismiss', 'remove'] as const) {
+      const w = await world();
+      const { classes, ids } = await sameBuyer(w, 3);
+      await reads.applyGroups(w.ctx, w.account, classes);
+      const [groupId = ''] = await groupIds(w);
+      // Another buyer's order of the same account: none of the three changes it.
+      const stranger = order(9);
+      await ingest.apply(w.ctx, w.account, [stranger]);
+      const strangerId = (await links(w)).get(stranger.externalId)?.id ?? '';
+      let locked: () => void = () => undefined;
+      const isLocked = new Promise<void>((r) => (locked = r));
+      let unlock: () => void = () => undefined;
+      const gate = new Promise<void>((r) => (unlock = r));
+      // A page of orders holding it, as F-M10-end-10's lock order has a page do.
+      const page = withTenantTransaction(db, w.ctx, async (trx) => {
+        await sql`SELECT 1 FROM app.orders WHERE id = ${strangerId}::uuid FOR UPDATE`.execute(trx);
+        locked();
+        await gate;
+      });
+      await isLocked;
+      let finished = false;
+      const run = (
+        act === 'recompute'
+          ? reads.applyGroups(w.ctx, w.account, classes)
+          : act === 'dismiss'
+            ? reads.dismissGroup(w.ctx, groupId)
+            : reads.removeMember(w.ctx, groupId, ids[1] ?? '')
+      ).then(() => (finished = true));
+      await pause(300);
+      expect(finished, act).toBe(false);
+      unlock();
+      await Promise.all([page, run]);
+      expect(finished, act).toBe(true);
+    }
+  });
+
   it('[ORD-9] an order that is dispatched or cancelled leaves its group, and a group of one closes', async () => {
     for (const leaving of [
       { state: 'dispatched' as const, dispatchedAt: now },
