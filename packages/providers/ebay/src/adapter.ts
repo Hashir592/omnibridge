@@ -22,6 +22,7 @@ import {
   type ListingInfo,
   type OrderSource,
   type Page,
+  type SetAside,
   type ProviderHttp,
   type StockLevel,
   type SyncStream,
@@ -192,6 +193,14 @@ function ebayBuyer(o: EbayOrder): BuyerDetails | null {
 /** One getOrders page's orders as whole channel orders (M10); the buyer block is PII. */
 export function parseEbayOrders(body: unknown): ChannelOrder[] {
   return EbayOrdersV1.parse(body).orders.map(ebayOrder);
+}
+
+/** One getOrders page: its orders, and the ones set aside (shape only; T-1101 fills it). */
+export function parseEbayOrderPage(body: unknown): {
+  orders: ChannelOrder[];
+  setAside: SetAside[];
+} {
+  return { orders: parseEbayOrders(body), setAside: [] };
 }
 
 /**

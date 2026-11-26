@@ -14,6 +14,7 @@ import {
   type ChannelOrder,
   type ChannelOrderState,
   type OrderSource,
+  type SetAside,
   type ProviderHttp,
   type SyncStream,
 } from '@omnibridge/provider-kit';
@@ -142,6 +143,14 @@ const at = (v: string | null | undefined) => (v === null || v === undefined ? nu
 /** One orders page as whole channel orders (M10); the buyer block is PII. */
 export function parseWebsiteOrders(body: unknown): ChannelOrder[] {
   return OrdersV1.parse(body).orders.map(websiteOrder);
+}
+
+/** One orders page: its orders, and the ones set aside (shape only; T-1101 fills it). */
+export function parseWebsiteOrderPage(body: unknown): {
+  orders: ChannelOrder[];
+  setAside: SetAside[];
+} {
+  return { orders: parseWebsiteOrders(body), setAside: [] };
 }
 
 function websiteOrder(o: WebsiteOrder): ChannelOrder {

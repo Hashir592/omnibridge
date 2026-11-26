@@ -38,14 +38,15 @@ export class DeletionLog {
 
   /**
    * Records a run and its tombstones in one transaction. A retried job writes the same run id
-   * again: nothing is duplicated, and tombstones the earlier attempt missed are added.
+   * again: nothing is duplicated, and tombstones the earlier attempt missed are added. Answers the
+   * channel accounts whose same-buyer groups held a tombstoned order (shape only; T-1101 fills it).
    */
   async record(
     ctx: TenantContext,
     run: Omit<DeletionRun, 'recordsDeleted'>,
     tombstones: readonly { piiRef: string; channelAccountId: string | null }[],
-  ): Promise<void> {
-    await withTenantTransaction(this.#db, ctx, async (trx) => {
+  ): Promise<{ regroup: string[] }> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
       await trx
         .insertInto('app.deletion_runs')
         .values({
@@ -62,7 +63,7 @@ export class DeletionLog {
         })
         .onConflict((oc) => oc.column('id').doNothing())
         .execute();
-      if (tombstones.length === 0) return;
+      if (tombstones.length === 0) return { regroup: [] };
       await trx
         .insertInto('app.pii_tombstones')
         .values(
@@ -76,6 +77,7 @@ export class DeletionLog {
         )
         .onConflict((oc) => oc.columns(['workspace_id', 'pii_ref']).doNothing())
         .execute();
+      return { regroup: [] };
     });
   }
 

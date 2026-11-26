@@ -34,7 +34,7 @@ describe('deletion job phases', () => {
       log: {
         record: (_ctx, run, tombstones) => {
           calls.push(`log:${run.id}:${String(tombstones.length)}`);
-          return Promise.resolve();
+          return Promise.resolve({ regroup: [] });
         },
       },
       erasures: {

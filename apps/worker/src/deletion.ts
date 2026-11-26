@@ -1,4 +1,4 @@
-import type { Notifier } from '@omnibridge/core';
+import type { Notifier, TenantContext } from '@omnibridge/core';
 import type { DeletionLog, ErasureRequestRepository } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { deletionRunId, piiExpiryJob, type JobQueue, type PhasedHandler } from '@omnibridge/queue';
@@ -23,6 +23,11 @@ export interface DeletionDeps {
    * hook's own transaction; a completed one resolves it (NTF-1).
    */
   notifier?: Pick<Notifier, 'raise' | 'resolve'>;
+  /**
+   * ADR-086 (3): queues a same-buyer group recompute for an account whose group held a tombstoned
+   * order (IDs only, F-M10-end-08's key), in the commit's transaction.
+   */
+  regroup?: (ctx: TenantContext, input: { channelAccountId: string }) => Promise<void>;
   logger: Logger;
   now?: () => Date;
 }
