@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseWebsiteOrders } from './index.ts';
+import { parseWebsiteOrderPage, parseWebsiteOrders } from './index.ts';
 
 const order = (over: Record<string, unknown> = {}) => ({
   id: 'W-1',
@@ -49,22 +49,51 @@ describe('website orders parser (M10, provisional until M11)', () => {
     expect(JSON.stringify({ ...o, buyer: null })).not.toContain('PIIMARK');
   });
 
-  it('[FIN-1] a negative line or refund fails the parser; a discount may carry its minus', () => {
-    const parse = (over: Record<string, unknown>) =>
-      parseWebsiteOrders({ orders: [order(over)], next_cursor: null });
+  const page = (...orders: unknown[]) => parseWebsiteOrderPage({ orders, next_cursor: null });
+  const unreadable = { orders: [], setAside: [{ externalId: 'W-1', reason: 'unreadable' }] };
+
+  it('[FIN-1] a negative line or refund is set aside, never stored; a discount may carry its minus', () => {
     const line = { id: 'L1', sku: 'SKU-1', quantity: 1, total: '-5.00' };
-    expect(() => parse({ lines: [line] })).toThrow();
+    expect(page(order({ lines: [line] }))).toEqual(unreadable);
     const refund = { id: 'R1', created_at: '2026-11-21T09:00:00Z', amount: '-4.00' };
-    expect(() => parse({ refunds: [refund] })).toThrow();
-    expect(parse({ discount_total: '-2.00' })[0]?.discountPence).toBe(200);
+    expect(page(order({ refunds: [refund] }))).toEqual(unreadable);
+    expect(page(order({ discount_total: '-2.00' })).orders[0]?.discountPence).toBe(200);
   });
 
-  it('[ORD-4] a bad country or an over-long SKU fails the parser, not the insert', () => {
-    const bad = (over: Record<string, unknown>) => () =>
-      parseWebsiteOrders({ orders: [order(over)], next_cursor: null });
-    expect(bad({ shipping_address: { country: 'G1' } })).toThrow();
+  it('[ORD-4] a bad country or an over-long SKU is set aside, not refused by the insert', () => {
+    expect(page(order({ shipping_address: { country: 'G1' } }))).toEqual(unreadable);
     expect(
-      bad({ lines: [{ id: 'L1', sku: 'x'.repeat(201), quantity: 1, total: '1.00' }] }),
-    ).toThrow();
+      page(order({ lines: [{ id: 'L1', sku: 'x'.repeat(201), quantity: 1, total: '1.00' }] })),
+    ).toEqual(unreadable);
+  });
+
+  // F-M10-end-14, F-M10-end-17, S5-20261124-07: one order never stops its account's sync.
+  it('[INT-5][ORD-4] an order that cannot be stored is set aside and the rest of its page is kept', () => {
+    const tooLong = 'y'.repeat(164);
+    const { orders, setAside } = page(
+      order({ id: 'W-OK' }),
+      order({ id: 'W-EUR', currency: 'EUR' }),
+      order({ id: 'W-NOLINES', lines: [] }),
+      order({ id: tooLong }),
+      order({
+        id: 'W-TEXT',
+        lines: [{ id: 'L1', sku: 'SKU-1', quantity: 1, name: 'Mug\u0000', total: '1.00' }],
+        shipping_address: {
+          name: 'PIIMARK-Web',
+          line1: 'PIIMARK-2 Road',
+          postcode: 'TE2 2ND',
+          country: 'gb',
+          instructions: `PIIMARK-${'i'.repeat(5000)}`,
+        },
+      }),
+    );
+    expect(orders.map((o) => o.externalId)).toEqual(['W-OK', 'W-TEXT']);
+    expect(setAside).toEqual([
+      { externalId: 'W-EUR', reason: 'not_gbp' },
+      { externalId: 'W-NOLINES', reason: 'no_lines' },
+      { externalId: tooLong, reason: 'id_too_long' },
+    ]);
+    expect(orders[1]?.lines[0]?.title).toBe('Mug');
+    expect(orders[1]?.buyer?.delivery_instructions).toHaveLength(4000);
   });
 });

@@ -1563,7 +1563,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(await codeOf(ask())).toBe('workspace_closed');
   });
 
-  it('[ORD-4] a masked delivery field refuses the block; a masked email, phone or ID is left out', async () => {
+  it('[ORD-4] a masked delivery field refuses the block; a masked email, phone, ID or instruction is left out', async () => {
     const W = randomUUID();
     const email = `${PII_MARKER}real@example.test`;
     const stored = address('21', {
@@ -1571,6 +1571,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       phone: '+447700900121',
       channel_username: 'real-21',
       channel_buyer_id: 'real-id-21',
+      delivery_instructions: 'Leave by the blue door',
     });
     const { pii_ref } = await order(W, 'MASK', stored, { source_updated_at: ago(2 * DAY) });
     let step = 0;
@@ -1594,7 +1595,6 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       'county',
       'postcode',
       'country',
-      'delivery_instructions',
     ];
     for (const key of delivery) {
       for (const mask of ['F***', 'F\u2022\u2022']) {
@@ -1607,6 +1607,8 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       phone: '*****123',
       channel_username: 'r***1',
       channel_buyer_id: '\u2022\u2022\u2022',
+      // ADR-086 (2): free text, not identity. A star in it never refuses the address.
+      delivery_instructions: 'Leave by door *2*',
     };
     expect(await ask({ ...address('23'), ...masked })).toBe(true);
     expect(await read(W, pii_ref)).toEqual({ ...stored, ...address('23') });
@@ -1618,6 +1620,15 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     });
     expect(matches.map((m) => m.pii_ref)).toEqual([pii_ref]);
     expect(await ask({ ...address('23'), ...masked })).toBe(false);
+    // A real instruction replaces the stored one; one left out keeps it, as for email and phone.
+    expect(await ask({ ...address('24'), delivery_instructions: 'Ring twice' })).toBe(true);
+    expect(await read(W, pii_ref)).toEqual({
+      ...stored,
+      ...address('24'),
+      delivery_instructions: 'Ring twice',
+    });
+    expect(await ask(address('25'))).toBe(true);
+    expect((await read(W, pii_ref)).delivery_instructions).toBe('Ring twice');
   });
 
   it('[ORD-4][DEL-1] an ingest that finds an older record applies its newer block, and only then', async () => {
