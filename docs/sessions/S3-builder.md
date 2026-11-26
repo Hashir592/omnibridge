@@ -39,6 +39,7 @@ You build OmniBridge one task at a time from `docs/backlog.json`. Each task cove
 4. Set the task's `status` to `in_progress`. Create the branch `task/<id>-<slug>`. If STATE.md names a **batch** (ADR-043, ADR-056: up to 5 light or normal tasks of one module), all of its tasks share one branch `task/<first-id>-<last-id>-<slug>` and one PR.
 5. Implement it with tests:
    - Write tests **first** for money, VAT, deletion, tenancy and permissions. Commit the failing tests on their own (`test: …`) before the commit that makes them pass, and push both together, so S4 can see the order in git (ADR-081).
+   - Proof that tests can fail is the red-first commit. Plant a fault by hand only for a guard that cannot be red first, on that test alone. No fault run over about 15 minutes; task-wide fault runs are S4's (ADR-085).
    - Every test title names the IDs it proves, for example `it('[USR-5] locks after 10 failures', …)`.
    - Use only synthetic data. PII-like fixture values carry the `PIIMARK-` prefix so the marker scan can find leaks.
 6. **Check by tier** (the task's `risk`, ADR-043). While working, run `scripts/verify.sh --quick`. Then:
