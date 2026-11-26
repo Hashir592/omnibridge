@@ -59,6 +59,34 @@ const checks = { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resol
 const MARKER = 'WSB-MARKER';
 const PDF = Buffer.from('%PDF-1.7\n% synthetic marker file\n%%EOF\n');
 const address = { line1: '1 Example Street', city: 'Testville', postcode: 'TE1 1ST' };
+/** A whole website order (WEB-3) whose every free field carries the marker. */
+const websiteOrder = (marker: string) => ({
+  externalOrderId: marker,
+  status: 'paid',
+  currency: 'GBP',
+  placedAt: '2026-11-20T09:00:00Z',
+  updatedAt: '2026-11-20T09:05:00Z',
+  paidAt: '2026-11-20T09:01:00Z',
+  lines: [
+    {
+      externalLineId: 'L1',
+      externalSku: marker,
+      title: marker,
+      quantity: 1,
+      unitPriceGross: 1200,
+    },
+  ],
+  shippingGross: 0,
+  discountGross: 0,
+  buyer: { name: `PIIMARK-${marker}`, email: 'piimark@example.test' },
+  shippingAddress: {
+    name: `PIIMARK-${marker}`,
+    line1: '1 Example Street',
+    city: 'Testville',
+    postcode: 'TE1 1ST',
+    country: 'GB',
+  },
+});
 
 describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => {
   let cluster: RoleCluster;
@@ -817,6 +845,41 @@ ${MARKER}-SKU,99`,
         removeOrderGroupMember: {
           params: { groupId: ordersB.group, orderId: ordersB.second },
           body: { reason: MARKER },
+        },
+        // Website connector and Disconnect (M11): B's account is never set up, read, changed or
+        // disconnected from A; a push to B's connection ID never stores anything.
+        createWebsiteConnection: {
+          body: {
+            company_id: b.company,
+            display_name: MARKER,
+            base_url: 'https://website.example.test',
+            outbound_api_key: `${MARKER}-outbound-key`,
+          },
+        },
+        getWebsiteSettings: { params: { accountId: b.account } },
+        updateWebsiteSettings: {
+          params: { accountId: b.account },
+          body: { base_url: 'https://website.example.test' },
+        },
+        reissueWebsiteKeys: { params: { accountId: b.account } },
+        disconnectAccount: { params: { accountId: b.account } },
+        websitePushOrder: { params: { connectionId: b.account }, body: websiteOrder(MARKER) },
+        websiteCancelOrder: {
+          params: { connectionId: b.account, externalOrderId: MARKER },
+          body: { cancelledAt: '2026-11-20T10:00:00Z', reason: MARKER },
+        },
+        websiteRefundOrder: {
+          params: { connectionId: b.account, externalOrderId: MARKER },
+          body: {
+            refundId: MARKER,
+            amountGross: 100,
+            reason: MARKER,
+            refundedAt: '2026-11-20T10:00:00Z',
+          },
+        },
+        websitePushProducts: {
+          params: { connectionId: b.account },
+          body: { products: [{ externalSku: MARKER, title: MARKER }] },
         },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },

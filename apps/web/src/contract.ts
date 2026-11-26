@@ -418,6 +418,7 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
           tab: route.tab,
           adminOnly: route.adminOnly,
           companyScoped: route.companyScoped,
+          ...(route.module === undefined ? {} : { module: route.module }),
         },
         ...(route.params ? { params: route.params } : {}),
         ...(route.query ? { querystring: route.query } : {}),

@@ -703,6 +703,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/connections/{accountId}/disconnect': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Disconnect an account */
+    post: operations['disconnectAccount'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/connections/{accountId}/kill-switch': {
     parameters: {
       query?: never;
@@ -714,6 +731,58 @@ export interface paths {
     /** Pause or resume an account's automated writes */
     put: operations['setKillSwitch'];
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/{accountId}/website': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** A website account's settings */
+    get: operations['getWebsiteSettings'];
+    /** Change a website account's base URL or key */
+    put: operations['updateWebsiteSettings'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/{accountId}/website/keys': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Issue a new key and signing secret */
+    post: operations['reissueWebsiteKeys'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/website': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Connect a website */
+    post: operations['createWebsiteConnection'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1798,6 +1867,74 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/website/{connectionId}/orders': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Website: create or update an order */
+    post: operations['websitePushOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/website/{connectionId}/orders/{externalOrderId}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Website: cancel an order */
+    post: operations['websiteCancelOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/website/{connectionId}/orders/{externalOrderId}/refunds': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Website: record a refund */
+    post: operations['websiteRefundOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/website/{connectionId}/products': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Website: send its products for mapping */
+    post: operations['websitePushProducts'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/webhooks/ebay/account-deletion': {
     parameters: {
       query?: never;
@@ -1837,6 +1974,14 @@ export interface components {
       dueAt: string;
       /** Format: uuid */
       id: string;
+    };
+    AccountDisconnected: {
+      connection: components['schemas']['Connection'];
+      listings_ended: number;
+    };
+    AccountDisconnectedInput: {
+      connection: components['schemas']['ConnectionInput'];
+      listings_ended: number;
     };
     Address: {
       city: string;
@@ -3981,6 +4126,240 @@ export interface components {
     VatType: 'standard' | 'reduced' | 'zero' | 'no_vat';
     /** @enum {string} */
     VatTypeInput: 'standard' | 'reduced' | 'zero' | 'no_vat';
+    WebsiteAddress: {
+      city: string;
+      country: string;
+      county?: string | null;
+      instructions?: string | null;
+      line1: string;
+      line2?: string | null;
+      line3?: string | null;
+      line4?: string | null;
+      name: string;
+      postcode?: string | null;
+    };
+    WebsiteAddressInput: {
+      city: string;
+      country: string;
+      county?: string | null;
+      instructions?: string | null;
+      line1: string;
+      line2?: string | null;
+      line3?: string | null;
+      line4?: string | null;
+      name: string;
+      postcode?: string | null;
+    };
+    WebsiteBuyer: {
+      customerId?: string | null;
+      email?: string | null;
+      name: string;
+      phone?: string | null;
+    };
+    WebsiteBuyerInput: {
+      customerId?: string | null;
+      email?: string | null;
+      name: string;
+      phone?: string | null;
+    };
+    WebsiteCancel: {
+      /** Format: date-time */
+      cancelledAt: string;
+      reason?: string | null;
+    };
+    WebsiteCancelInput: {
+      /** Format: date-time */
+      cancelledAt: string;
+      reason?: string | null;
+    };
+    WebsiteConnectionCreated: {
+      connection: components['schemas']['Connection'];
+      keys: components['schemas']['WebsiteKeys'];
+      settings: components['schemas']['WebsiteSettings'];
+    };
+    WebsiteConnectionCreatedInput: {
+      connection: components['schemas']['ConnectionInput'];
+      keys: components['schemas']['WebsiteKeysInput'];
+      settings: components['schemas']['WebsiteSettingsInput'];
+    };
+    WebsiteKeys: {
+      inbound_api_key: string;
+      signing_secret: string;
+    };
+    WebsiteKeysInput: {
+      inbound_api_key: string;
+      signing_secret: string;
+    };
+    WebsiteOrder: {
+      buyer: components['schemas']['WebsiteBuyer'];
+      cancelledAt?: string | null;
+      /** @constant */
+      currency: 'GBP';
+      deliveredAt?: string | null;
+      discountGross: number;
+      externalOrderId: string;
+      lines: components['schemas']['WebsiteOrderLine'][];
+      paidAt?: string | null;
+      /** Format: date-time */
+      placedAt: string;
+      shipBy?: string | null;
+      shippedAt?: string | null;
+      shippingAddress: components['schemas']['WebsiteAddress'];
+      shippingGross: number;
+      status: components['schemas']['WebsiteOrderStatus'];
+      totalGross?: number | null;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    WebsiteOrderInput: {
+      buyer: components['schemas']['WebsiteBuyerInput'];
+      cancelledAt?: string | null;
+      /** @constant */
+      currency: 'GBP';
+      deliveredAt?: string | null;
+      discountGross: number;
+      externalOrderId: string;
+      lines: components['schemas']['WebsiteOrderLineInput'][];
+      paidAt?: string | null;
+      /** Format: date-time */
+      placedAt: string;
+      shipBy?: string | null;
+      shippedAt?: string | null;
+      shippingAddress: components['schemas']['WebsiteAddressInput'];
+      shippingGross: number;
+      status: components['schemas']['WebsiteOrderStatusInput'];
+      totalGross?: number | null;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    WebsiteOrderLine: {
+      externalLineId: string;
+      externalSku: string;
+      quantity: number;
+      title: string | null;
+      unitPriceGross: number;
+    };
+    WebsiteOrderLineInput: {
+      externalLineId: string;
+      externalSku: string;
+      quantity: number;
+      title: string | null;
+      unitPriceGross: number;
+    };
+    WebsiteOrdersPage: {
+      nextCursor: string | null;
+      orders: components['schemas']['WebsiteOrder'][];
+    };
+    WebsiteOrdersPageInput: {
+      nextCursor: string | null;
+      orders: components['schemas']['WebsiteOrderInput'][];
+    };
+    /** @enum {string} */
+    WebsiteOrderStatus: 'pending' | 'paid' | 'shipped' | 'delivered' | 'cancelled';
+    /** @enum {string} */
+    WebsiteOrderStatusInput: 'pending' | 'paid' | 'shipped' | 'delivered' | 'cancelled';
+    WebsiteProducts: {
+      products: {
+        externalSku: string;
+        quantity?: number | null;
+        title?: string | null;
+      }[];
+    };
+    WebsiteProductsInput: {
+      products: {
+        externalSku: string;
+        quantity?: number | null;
+        title?: string | null;
+      }[];
+    };
+    WebsiteProductsReceived: {
+      received: number;
+    };
+    WebsiteProductsReceivedInput: {
+      received: number;
+    };
+    WebsiteRefund: {
+      amountGross: number;
+      lines?:
+        | {
+            amountGross: number;
+            externalLineId: string;
+            quantity: number;
+          }[]
+        | null;
+      reason?: string | null;
+      /** Format: date-time */
+      refundedAt: string;
+      refundId: string;
+    };
+    WebsiteRefundInput: {
+      amountGross: number;
+      lines?:
+        | {
+            amountGross: number;
+            externalLineId: string;
+            quantity: number;
+          }[]
+        | null;
+      reason?: string | null;
+      /** Format: date-time */
+      refundedAt: string;
+      refundId: string;
+    };
+    WebsiteSettings: {
+      /** Format: uri */
+      base_url: string;
+      /** Format: uuid */
+      connection_id: string;
+      inbound_key_hint: string;
+      /** Format: uri */
+      inbound_url: string;
+      /** Format: date-time */
+      keys_issued_at: string;
+      outbound_key_set: boolean;
+    };
+    WebsiteSettingsInput: {
+      /** Format: uri */
+      base_url: string;
+      /** Format: uuid */
+      connection_id: string;
+      inbound_key_hint: string;
+      /** Format: uri */
+      inbound_url: string;
+      /** Format: date-time */
+      keys_issued_at: string;
+      outbound_key_set: boolean;
+    };
+    WebsiteShipment: {
+      carrier: string;
+      service: string;
+      /** Format: date-time */
+      shippedAt: string;
+      trackingNumbers: string[];
+    };
+    WebsiteShipmentInput: {
+      carrier: string;
+      service: string;
+      /** Format: date-time */
+      shippedAt: string;
+      trackingNumbers: string[];
+    };
+    WebsiteStockBatch: {
+      externalSku: string;
+      quantity: number;
+    }[];
+    WebsiteStockBatchInput: {
+      externalSku: string;
+      quantity: number;
+    }[];
+    WebsiteStored: {
+      /** Format: uuid */
+      omnibridgeOrderId: string;
+    };
+    WebsiteStoredInput: {
+      /** Format: uuid */
+      omnibridgeOrderId: string;
+    };
     WorkspaceChoice: {
       companies: number;
       /** Format: uuid */
@@ -6179,6 +6558,46 @@ export interface operations {
       };
     };
   };
+  disconnectAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AccountDisconnected'];
+        };
+      };
+    };
+  };
   setKillSwitch: {
     parameters: {
       query?: never;
@@ -6221,6 +6640,183 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['Connection'];
+        };
+      };
+    };
+  };
+  getWebsiteSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteSettings'];
+        };
+      };
+    };
+  };
+  updateWebsiteSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uri */
+          base_url?: string;
+          outbound_api_key?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteSettings'];
+        };
+      };
+    };
+  };
+  reissueWebsiteKeys: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteKeys'];
+        };
+      };
+    };
+  };
+  createWebsiteConnection: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uri */
+          base_url: string;
+          /** Format: uuid */
+          company_id: string;
+          display_name: string;
+          outbound_api_key: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteConnectionCreated'];
         };
       };
     };
@@ -9320,6 +9916,202 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  websitePushOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connectionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WebsiteOrderInput'];
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteStored'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteStored'];
+        };
+      };
+    };
+  };
+  websiteCancelOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connectionId: string;
+        externalOrderId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WebsiteCancelInput'];
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteStored'];
+        };
+      };
+    };
+  };
+  websiteRefundOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connectionId: string;
+        externalOrderId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WebsiteRefundInput'];
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteStored'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteStored'];
+        };
+      };
+    };
+  };
+  websitePushProducts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connectionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WebsiteProductsInput'];
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebsiteProductsReceived'];
+        };
       };
     };
   };

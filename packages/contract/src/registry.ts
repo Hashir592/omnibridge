@@ -14,6 +14,7 @@ import { stockRoutes } from './routes/stock.ts';
 import { createCompany, createWorkspace, listCompanies } from './routes/tenancy.ts';
 import { userRoutes } from './routes/users.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
+import { websiteRoutes } from './routes/website.ts';
 
 /**
  * Every route the web app serves. The server registers routes only from this list, and the
@@ -39,6 +40,7 @@ export const contractRoutes = [
   ...catalogueRoutes,
   ...stockRoutes,
   ...ordersRoutes,
+  ...websiteRoutes,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;
