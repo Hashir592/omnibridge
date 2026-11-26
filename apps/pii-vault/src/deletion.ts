@@ -85,12 +85,10 @@ export class DeletionService {
     const ws = req.workspace_id;
     const at = this.#now();
     const expiry = req.scope.type === 'expiry';
-    let targets: Target[] = [];
-    const pick = async (c: PoolClient) => {
-      targets = await this.#targets(c, req, at);
-      // Journal first: if the delete then fails, re-applying these tombstones is harmless.
-      await this.#journal.append(
-        targets.map((t) => ({
+    // Journal first: if the delete then fails, re-applying these tombstones is harmless.
+    const journal = (picked: readonly Target[]) =>
+      this.#journal.append(
+        picked.map((t) => ({
           at: at.toISOString(),
           workspace_id: ws,
           run_id: req.run_id,
@@ -99,8 +97,12 @@ export class DeletionService {
           channel_account_id: t.channel_account_id,
         })),
       );
-    };
-    if (!expiry) await this.#tx(ws, pick);
+    let targets: Target[] = [];
+    if (!expiry) {
+      // Picked in a short transaction of its own, journalled after it, as before F-M10-end-24.
+      targets = await this.#tx(ws, (c) => this.#targets(c, req, at));
+      await journal(targets);
+    }
     if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
       // The closure itself is journalled too, so a restore closes the workspace again (T-0405).
       await this.#journal.append([
@@ -114,7 +116,10 @@ export class DeletionService {
       ]);
     }
     const result = await this.#tx(ws, async (c) => {
-      if (expiry) await pick(c);
+      if (expiry) {
+        targets = await this.#targets(c, req, at);
+        await journal(targets);
+      }
       const refs = targets.map((t) => t.pii_ref);
       // Closure's last batch: hold off any ingest for this workspace until it commits (ADR-065).
       if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
