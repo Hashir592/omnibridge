@@ -271,7 +271,7 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
       const w = await world();
       const { classes, ids } = await sameBuyer(w, 3);
       await reads.applyGroups(w.ctx, w.account, classes);
-      const [groupId = ''] = await groupIds(w);
+      const groupId = (await groupIds(w))[0] ?? '';
       // Another buyer's order of the same account: none of the three changes it.
       const stranger = order(9);
       await ingest.apply(w.ctx, w.account, [stranger]);
