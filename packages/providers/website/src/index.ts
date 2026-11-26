@@ -5,7 +5,10 @@
  */
 import { Secret } from '@omnibridge/crypto';
 import {
+  cleanId,
   defineParser,
+  freeText,
+  parseEach,
   PenceAmount,
   PenceDiscount,
   readJson,
@@ -25,88 +28,95 @@ export const PACKAGE_NAME = '@omnibridge/provider-website';
 /** An API key does not expire; the cache renews it daily anyway. */
 const KEY_TTL_MS = 86_400_000;
 
-const Text = z.string().max(4000).nullable().optional();
+/** Free text a buyer typed: NUL removed, cut to the vault's 4,000 characters (S5-20261124-07). */
+const Text = freeText(4000).nullable().optional();
 const When = z.iso.datetime({ offset: true });
-/** IDs and SKUs: db-main keeps at most 200 characters, so a longer one is a parser failure. */
-const Id = z.string().min(1).max(200);
+/** IDs and SKUs: db-main keeps at most 200 characters, so a longer one sets the order aside. */
+const Id = cleanId(200);
+/** db-main keys a buyer by `<account id>:<order id>` in 200 characters (F-M10-end-14). */
+const ORDER_ID_MAX = 163;
 /** ISO 3166 alpha-2, upper-cased (db-main checks ^[A-Z]{2}$). */
 const Country = z
   .string()
   .regex(/^[A-Za-z]{2}$/)
   .transform((c) => c.toUpperCase());
 
-/** Version 2 (M10): money, dates, refunds and the buyer block. Provisional until M11. */
+/**
+ * Version 3: each order is read on its own, so one that cannot be stored is set aside and never
+ * fails its page (F-M10-end-14, -17, S5-20261124-07). Provisional until M11's protocol replaces it.
+ */
 const OrdersV1 = defineParser(
   'website',
   'orders',
-  2,
+  3,
+  z.object({ orders: z.array(z.unknown()), next_cursor: z.string().nullable() }),
+);
+
+const OrderV1 = defineParser(
+  'website',
+  'order',
+  3,
   z.object({
-    orders: z.array(
-      z.object({
-        id: Id,
-        created_at: When,
-        updated_at: When,
-        paid_at: When.nullable().optional(),
-        shipped_at: When.nullable().optional(),
-        delivered_at: When.nullable().optional(),
-        cancelled_at: When.nullable().optional(),
-        ship_by: When.nullable().optional(),
-        status: z.string().min(1),
-        currency: z.literal('GBP'),
-        shipping_total: PenceAmount,
-        discount_total: PenceDiscount.optional(),
-        customer: z
-          .object({ id: Text, email: Text, phone: Text, name: Text })
-          .nullable()
-          .optional(),
-        shipping_address: z
-          .object({
-            name: Text,
-            line1: Text,
-            line2: Text,
-            city: Text,
-            county: Text,
-            postcode: Text,
-            country: Country.nullable().optional(),
-            instructions: Text,
-          })
-          .nullable()
-          .optional(),
-        lines: z.array(
-          z.object({
-            id: Id,
-            sku: Id.nullable(),
-            quantity: z.number().int().min(1),
-            name: z.string().max(500).nullable().optional(),
-            total: PenceAmount,
-          }),
-        ),
-        refunds: z
-          .array(
-            z.object({
-              id: Id,
-              created_at: When,
-              amount: PenceAmount,
-              lines: z
-                .array(
-                  z.object({
-                    line_id: Id,
-                    quantity: z.number().int().min(0),
-                    amount: PenceAmount,
-                  }),
-                )
-                .nullable()
-                .optional(),
-            }),
-          )
-          .optional(),
-      }),
-    ),
-    next_cursor: z.string().nullable(),
+    id: cleanId(ORDER_ID_MAX),
+    created_at: When,
+    updated_at: When,
+    paid_at: When.nullable().optional(),
+    shipped_at: When.nullable().optional(),
+    delivered_at: When.nullable().optional(),
+    cancelled_at: When.nullable().optional(),
+    ship_by: When.nullable().optional(),
+    status: z.string().min(1),
+    currency: z.literal('GBP'),
+    shipping_total: PenceAmount,
+    discount_total: PenceDiscount.optional(),
+    customer: z.object({ id: Text, email: Text, phone: Text, name: Text }).nullable().optional(),
+    shipping_address: z
+      .object({
+        name: Text,
+        line1: Text,
+        line2: Text,
+        city: Text,
+        county: Text,
+        postcode: Text,
+        country: Country.nullable().optional(),
+        instructions: Text,
+      })
+      .nullable()
+      .optional(),
+    lines: z
+      .array(
+        z.object({
+          id: Id,
+          sku: Id.nullable(),
+          quantity: z.number().int().min(1),
+          name: freeText(500).nullable().optional(),
+          total: PenceAmount,
+        }),
+      )
+      .min(1),
+    refunds: z
+      .array(
+        z.object({
+          id: Id,
+          created_at: When,
+          amount: PenceAmount,
+          lines: z
+            .array(
+              z.object({
+                line_id: Id,
+                quantity: z.number().int().min(0),
+                amount: PenceAmount,
+              }),
+            )
+            .nullable()
+            .optional(),
+        }),
+      )
+      .optional(),
   }),
 );
 
-type WebsiteOrder = ReturnType<typeof OrdersV1.parse>['orders'][number];
+type WebsiteOrder = ReturnType<typeof OrderV1.parse>;
 
 /** FA-10: the website's status onto the channel lifecycle (provisional until M11). */
 function websiteState(o: WebsiteOrder): ChannelOrderState {
@@ -140,17 +150,26 @@ function websiteBuyer(o: WebsiteOrder): BuyerDetails | null {
 
 const at = (v: string | null | undefined) => (v === null || v === undefined ? null : new Date(v));
 
-/** One orders page as whole channel orders (M10); the buyer block is PII. */
-export function parseWebsiteOrders(body: unknown): ChannelOrder[] {
-  return OrdersV1.parse(body).orders.map(websiteOrder);
-}
-
-/** One orders page: its orders, and the ones set aside (shape only; T-1101 fills it). */
+/**
+ * One orders page: its orders as whole channel orders (the buyer block is PII), and the ones set
+ * aside. A page the parser cannot read at all throws, with its parser notice (INT-5).
+ */
 export function parseWebsiteOrderPage(body: unknown): {
   orders: ChannelOrder[];
   setAside: SetAside[];
+  next: string | undefined;
 } {
-  return { orders: parseWebsiteOrders(body), setAside: [] };
+  const page = OrdersV1.parse(body);
+  const { items, setAside } = parseEach(OrderV1, page.orders, {
+    id: { field: 'id', max: ORDER_ID_MAX },
+    linesField: 'lines',
+  });
+  return { orders: items.map(websiteOrder), setAside, next: page.next_cursor ?? undefined };
+}
+
+/** The orders of one page that can be stored. */
+export function parseWebsiteOrders(body: unknown): ChannelOrder[] {
+  return parseWebsiteOrderPage(body).orders;
 }
 
 function websiteOrder(o: WebsiteOrder): ChannelOrder {
@@ -239,8 +258,8 @@ export function createWebsiteAdapter(options: {
         url,
         headers: { 'x-api-key': token.token.reveal() },
       });
-      const body = OrdersV1.parse(await readJson('website', res));
-      return { items: body.orders.map(websiteOrder), next: body.next_cursor ?? undefined };
+      const { orders, setAside, next } = parseWebsiteOrderPage(await readJson('website', res));
+      return { items: orders, next, setAside };
     },
 
     async listListings(token, page) {

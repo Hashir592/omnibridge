@@ -76,7 +76,11 @@ interface Keys {
 /** A lock could not be had in time: 503, and the caller asks again. */
 export class VaultBusy extends Error {}
 
-/** The address block of a buyer, replaced whole by a correction (ORD-4). */
+/**
+ * The address block of a buyer, replaced whole by a correction (ORD-4). Delivery instructions are
+ * free text, not identity (ADR-086 2): like email and phone, a masked one is left out and the
+ * stored one kept, so a star in them never refuses the address.
+ */
 const DELIVERY_FIELDS: ReadonlySet<string> = new Set([
   'name',
   'address_line1',
@@ -86,7 +90,6 @@ const DELIVERY_FIELDS: ReadonlySet<string> = new Set([
   'county',
   'postcode',
   'country',
-  'delivery_instructions',
 ]);
 
 /** A channel masks old buyers' details with stars or dots. */

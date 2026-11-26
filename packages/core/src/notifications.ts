@@ -172,6 +172,16 @@ export const NOTIFICATION_TYPES: readonly NotificationType[] = [
     'orders',
     'ORD-7',
   ),
+  // F-M10-end-14, -17, S5-20261124-07: the counts of the orders a poll could not store; the rest
+  // of the account's orders were stored and its sync went on.
+  t(
+    'orders.set_aside',
+    'Orders set aside: they could not be stored',
+    ['warning'],
+    ['derived'],
+    'orders',
+    'INT-5',
+  ),
   t(
     'finance.bill_due',
     'Unpaid bill due or overdue',

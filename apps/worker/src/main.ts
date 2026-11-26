@@ -1,4 +1,10 @@
-import { Notifier, providerModeFrom, readSecretFile, requireEnv } from '@omnibridge/core';
+import {
+  Notifier,
+  providerModeFrom,
+  readSecretFile,
+  requireEnv,
+  type TenantContext,
+} from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
@@ -179,6 +185,9 @@ const deletionDeps = {
   log: new DeletionLog(handlerDb.db),
   erasures: new ErasureRequestRepository(handlerDb.db),
   notifier,
+  // ADR-086 (3): an erased buyer leaves its same-buyer group at once, with F-M10-end-08's key.
+  regroup: (ctx: TenantContext, input: { channelAccountId: string }) =>
+    orderIngestPorts(queue, { notifier, logger: log }).regroup(ctx, input),
   logger: log,
 };
 // The platform console's jobs (T-0504): workspace closure, notification retention, the digest.

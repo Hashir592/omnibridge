@@ -39,7 +39,7 @@ export class DeletionLog {
   /**
    * Records a run and its tombstones in one transaction. A retried job writes the same run id
    * again: nothing is duplicated, and tombstones the earlier attempt missed are added. Answers the
-   * channel accounts whose same-buyer groups held a tombstoned order (shape only; T-1101 fills it).
+   * channel accounts whose open same-buyer groups held a tombstoned order (ADR-086 3).
    */
   async record(
     ctx: TenantContext,
@@ -77,7 +77,15 @@ export class DeletionLog {
         )
         .onConflict((oc) => oc.columns(['workspace_id', 'pii_ref']).doNothing())
         .execute();
-      return { regroup: [] };
+      // ADR-086 (3): the accounts whose open same-buyer groups held one of these orders. Their
+      // recompute leaves a tombstoned order out (applyGroups), so the buyer leaves at once.
+      const { rows } = await sql<{ channel_account_id: string }>`
+        SELECT DISTINCT o.channel_account_id FROM app.orders o
+          JOIN app.order_groups g ON g.workspace_id = o.workspace_id AND g.id = o.order_group_id
+         WHERE o.workspace_id = ${ctx.workspaceId}::uuid AND g.state = 'open'
+           AND o.pii_ref = ANY (${sql.val(tombstones.map((t) => t.piiRef))}::uuid[])
+         ORDER BY 1`.execute(trx);
+      return { regroup: rows.map((r) => r.channel_account_id) };
     });
   }
 

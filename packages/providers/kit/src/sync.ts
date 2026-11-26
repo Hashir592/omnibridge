@@ -1,6 +1,6 @@
 import type { Notifier, Provider, TenantContext, TenantRunner } from '@omnibridge/core';
 import type { Secret } from '@omnibridge/crypto';
-import type { AccessToken, Page } from './adapters.ts';
+import type { AccessToken, Page, SetAside, SetAsideReason } from './adapters.ts';
 import { applyPart, applyRun, pollSince, type CursorState, type SyncItem } from './cursor.ts';
 import {
   AuthFailed,
@@ -192,6 +192,8 @@ export async function runIncrementalSync<T extends SyncItem>(
 
   const items: T[] = [];
   const stored: T[] = [];
+  // F-M10-end-14, -17, S5-20261124-07: what the pages could not take, counted, never fatal.
+  const setAside: SetAside[] = [];
   const recordSuccess = async (ctx: TenantContext, next: CursorState) => {
     await ports.cursors.save(ctx, accountId, stream.stream, next, now());
     const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
@@ -204,6 +206,34 @@ export async function runIncrementalSync<T extends SyncItem>(
       });
     }
     await recordCalls(ctx);
+    await noticeSetAside(ctx);
+  };
+  /**
+   * One notice per account, updated in place (NTF-5), with the counts by reason: IDs and counts
+   * only. An unreadable one is also the platform's parser problem (INT-5).
+   */
+  const noticeSetAside = async (ctx: TenantContext) => {
+    if (setAside.length === 0) return;
+    const count = (reason: SetAsideReason) => setAside.filter((x) => x.reason === reason).length;
+    await ports.notifier.raise(ctx, {
+      type: 'orders.set_aside',
+      record: { kind: 'channel_account', id: accountId },
+      companyId: account.companyId,
+      channelAccountId: accountId,
+      params: {
+        count: setAside.length,
+        notGbp: count('not_gbp'),
+        noLines: count('no_lines'),
+        idTooLong: count('id_too_long'),
+        unreadable: count('unreadable'),
+      },
+    });
+    if (count('unreadable') > 0) {
+      await ports.notifier.raisePlatform(ctx, {
+        type: 'platform.report_failure',
+        record: { kind: 'order_unreadable', id: accountId },
+      });
+    }
   };
 
   // A run that stopped at the page cap, or part way, goes on from where it stopped, with the same since.
@@ -227,6 +257,7 @@ export async function runIncrementalSync<T extends SyncItem>(
         result = await fetchPage(access, since, page);
       }
       items.push(...result.items);
+      setAside.push(...(result.setAside ?? []));
       page = result.next;
       if (page === undefined || elapsed() >= MAX_READ_MS) break;
     }

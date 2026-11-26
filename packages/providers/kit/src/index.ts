@@ -64,7 +64,14 @@ export {
   type ProviderHttpOptions,
   type ProviderRequest,
 } from './http.ts';
-export { defineParser, parserRecordKind, type VersionedParser } from './parser.ts';
+export {
+  cleanId,
+  defineParser,
+  freeText,
+  parseEach,
+  parserRecordKind,
+  type VersionedParser,
+} from './parser.ts';
 export { readJson, retryAfterMs } from './respond.ts';
 export { runIncrementalSync, type SyncPorts, type SyncResult, type SyncStream } from './sync.ts';
 export { runListingScan, type ListingScan, type ScanResult } from './scan.ts';

@@ -75,7 +75,7 @@ function deletionRun<T>(
     },
     commit: async (job, run) => {
       const { trigger, scope } = what(job.payload);
-      await deps.log.record(
+      const { regroup } = await deps.log.record(
         job.ctx,
         {
           id: run.runId,
@@ -88,6 +88,10 @@ function deletionRun<T>(
         },
         run.deleted.map((d) => ({ piiRef: d.pii_ref, channelAccountId: d.channel_account_id })),
       );
+      // ADR-086 (3): IDs only, in the same transaction as the tombstones.
+      for (const channelAccountId of regroup) {
+        await deps.regroup?.(job.ctx, { channelAccountId });
+      }
       // A-006: in the same transaction as the run log, so the request says completed only when
       // the run is recorded.
       if (trigger === 'erasure') {
