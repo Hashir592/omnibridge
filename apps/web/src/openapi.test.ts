@@ -1,4 +1,4 @@
-import { contractRoutes, isRootPath } from '@omnibridge/contract';
+import { contractRoutes, isRootPath, type AnyRoute } from '@omnibridge/contract';
 import { createLogger } from '@omnibridge/logger';
 import { describe, expect, it } from 'vitest';
 import { buildWebApp } from './app.ts';
@@ -37,6 +37,8 @@ describe('OpenAPI document', () => {
         tab: route.tab,
         adminOnly: route.adminOnly,
         companyScoped: route.companyScoped,
+        // ADR-059: a route behind a module toggle says so.
+        ...((route as AnyRoute).module === undefined ? {} : { module: (route as AnyRoute).module }),
       });
     }
   });

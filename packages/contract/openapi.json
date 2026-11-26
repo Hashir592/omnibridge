@@ -3092,6 +3092,446 @@
         "required": ["metadata", "notification"],
         "additionalProperties": {}
       },
+      "WebsiteKeysInput": {
+        "type": "object",
+        "properties": {
+          "inbound_api_key": { "type": "string" },
+          "signing_secret": { "type": "string" }
+        },
+        "required": ["inbound_api_key", "signing_secret"]
+      },
+      "WebsiteSettingsInput": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "inbound_url": { "type": "string", "format": "uri" },
+          "base_url": { "type": "string", "format": "uri" },
+          "inbound_key_hint": { "type": "string", "minLength": 4, "maxLength": 4 },
+          "keys_issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "outbound_key_set": { "type": "boolean" }
+        },
+        "required": [
+          "connection_id",
+          "inbound_url",
+          "base_url",
+          "inbound_key_hint",
+          "keys_issued_at",
+          "outbound_key_set"
+        ]
+      },
+      "WebsiteConnectionCreatedInput": {
+        "type": "object",
+        "properties": {
+          "connection": { "$ref": "#/components/schemas/ConnectionInput" },
+          "settings": { "$ref": "#/components/schemas/WebsiteSettingsInput" },
+          "keys": { "$ref": "#/components/schemas/WebsiteKeysInput" }
+        },
+        "required": ["connection", "settings", "keys"]
+      },
+      "AccountDisconnectedInput": {
+        "type": "object",
+        "properties": {
+          "connection": { "$ref": "#/components/schemas/ConnectionInput" },
+          "listings_ended": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["connection", "listings_ended"]
+      },
+      "WebsiteOrderStatusInput": {
+        "type": "string",
+        "enum": ["pending", "paid", "shipped", "delivered", "cancelled"]
+      },
+      "WebsiteOrderLineInput": {
+        "type": "object",
+        "properties": {
+          "externalLineId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "externalSku": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "title": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "quantity": { "type": "integer", "minimum": 1, "maximum": 100000 },
+          "unitPriceGross": { "type": "integer", "minimum": 0, "maximum": 1000000000 }
+        },
+        "required": ["externalLineId", "externalSku", "title", "quantity", "unitPriceGross"]
+      },
+      "WebsiteBuyerInput": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "anyOf": [
+              { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "name": { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+          "email": {
+            "anyOf": [
+              { "type": "string", "maxLength": 320, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "phone": {
+            "anyOf": [
+              { "type": "string", "maxLength": 50, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["name"]
+      },
+      "WebsiteAddressInput": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+          "line1": { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+          "line2": {
+            "anyOf": [
+              { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "line3": {
+            "anyOf": [
+              { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "line4": {
+            "anyOf": [
+              { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "city": { "type": "string", "maxLength": 100, "pattern": "^[^\\u0000]*$" },
+          "county": {
+            "anyOf": [
+              { "type": "string", "maxLength": 100, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "postcode": {
+            "anyOf": [
+              { "type": "string", "maxLength": 20, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+          "instructions": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["name", "line1", "city", "country"]
+      },
+      "WebsiteOrderInput": {
+        "type": "object",
+        "properties": {
+          "externalOrderId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 163,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "status": { "$ref": "#/components/schemas/WebsiteOrderStatusInput" },
+          "currency": { "type": "string", "const": "GBP" },
+          "placedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "paidAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "shipBy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "shippedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "deliveredAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "cancelledAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "lines": {
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WebsiteOrderLineInput" }
+          },
+          "shippingGross": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "discountGross": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "totalGross": {
+            "anyOf": [
+              { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              { "type": "null" }
+            ]
+          },
+          "buyer": { "$ref": "#/components/schemas/WebsiteBuyerInput" },
+          "shippingAddress": { "$ref": "#/components/schemas/WebsiteAddressInput" }
+        },
+        "required": [
+          "externalOrderId",
+          "status",
+          "currency",
+          "placedAt",
+          "updatedAt",
+          "lines",
+          "shippingGross",
+          "discountGross",
+          "buyer",
+          "shippingAddress"
+        ]
+      },
+      "WebsiteRefundInput": {
+        "type": "object",
+        "properties": {
+          "refundId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "amountGross": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
+          "lines": {
+            "anyOf": [
+              {
+                "maxItems": 500,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "externalLineId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    "quantity": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                    "amountGross": { "type": "integer", "minimum": 0, "maximum": 1000000000 }
+                  },
+                  "required": ["externalLineId", "quantity", "amountGross"]
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "refundedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": ["refundId", "amountGross", "refundedAt"]
+      },
+      "WebsiteStockBatchInput": {
+        "minItems": 1,
+        "maxItems": 100,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "externalSku": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "quantity": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+          },
+          "required": ["externalSku", "quantity"]
+        }
+      },
+      "WebsiteShipmentInput": {
+        "type": "object",
+        "properties": {
+          "carrier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "service": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "trackingNumbers": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[^\\u0000]*$"
+            }
+          },
+          "shippedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": ["carrier", "service", "trackingNumbers", "shippedAt"]
+      },
+      "WebsiteOrdersPageInput": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "maxItems": 200,
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WebsiteOrderInput" }
+          },
+          "nextCursor": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["orders", "nextCursor"]
+      },
+      "WebsiteStoredInput": {
+        "type": "object",
+        "properties": {
+          "omnibridgeOrderId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["omnibridgeOrderId"]
+      },
+      "WebsiteCancelInput": {
+        "type": "object",
+        "properties": {
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "reason": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["cancelledAt"]
+      },
+      "WebsiteProductsInput": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "externalSku": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                "title": {
+                  "anyOf": [
+                    { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+                    { "type": "null" }
+                  ]
+                },
+                "quantity": {
+                  "anyOf": [
+                    { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["externalSku"]
+            }
+          }
+        },
+        "required": ["products"]
+      },
+      "WebsiteProductsReceivedInput": {
+        "type": "object",
+        "properties": {
+          "received": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["received"]
+      },
       "Problem": {
         "type": "object",
         "properties": {
@@ -6289,6 +6729,464 @@
         },
         "required": ["metadata", "notification"],
         "additionalProperties": {}
+      },
+      "WebsiteKeys": {
+        "type": "object",
+        "properties": {
+          "inbound_api_key": { "type": "string" },
+          "signing_secret": { "type": "string" }
+        },
+        "required": ["inbound_api_key", "signing_secret"],
+        "additionalProperties": false
+      },
+      "WebsiteSettings": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "inbound_url": { "type": "string", "format": "uri" },
+          "base_url": { "type": "string", "format": "uri" },
+          "inbound_key_hint": { "type": "string", "minLength": 4, "maxLength": 4 },
+          "keys_issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "outbound_key_set": { "type": "boolean" }
+        },
+        "required": [
+          "connection_id",
+          "inbound_url",
+          "base_url",
+          "inbound_key_hint",
+          "keys_issued_at",
+          "outbound_key_set"
+        ],
+        "additionalProperties": false
+      },
+      "WebsiteConnectionCreated": {
+        "type": "object",
+        "properties": {
+          "connection": { "$ref": "#/components/schemas/Connection" },
+          "settings": { "$ref": "#/components/schemas/WebsiteSettings" },
+          "keys": { "$ref": "#/components/schemas/WebsiteKeys" }
+        },
+        "required": ["connection", "settings", "keys"],
+        "additionalProperties": false
+      },
+      "AccountDisconnected": {
+        "type": "object",
+        "properties": {
+          "connection": { "$ref": "#/components/schemas/Connection" },
+          "listings_ended": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["connection", "listings_ended"],
+        "additionalProperties": false
+      },
+      "WebsiteOrderStatus": {
+        "type": "string",
+        "enum": ["pending", "paid", "shipped", "delivered", "cancelled"]
+      },
+      "WebsiteOrderLine": {
+        "type": "object",
+        "properties": {
+          "externalLineId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "externalSku": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "title": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "quantity": { "type": "integer", "minimum": 1, "maximum": 100000 },
+          "unitPriceGross": { "type": "integer", "minimum": 0, "maximum": 1000000000 }
+        },
+        "required": ["externalLineId", "externalSku", "title", "quantity", "unitPriceGross"],
+        "additionalProperties": false
+      },
+      "WebsiteBuyer": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "anyOf": [
+              { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "name": { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+          "email": {
+            "anyOf": [
+              { "type": "string", "maxLength": 320, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "phone": {
+            "anyOf": [
+              { "type": "string", "maxLength": 50, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      },
+      "WebsiteAddress": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+          "line1": { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+          "line2": {
+            "anyOf": [
+              { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "line3": {
+            "anyOf": [
+              { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "line4": {
+            "anyOf": [
+              { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "city": { "type": "string", "maxLength": 100, "pattern": "^[^\\u0000]*$" },
+          "county": {
+            "anyOf": [
+              { "type": "string", "maxLength": 100, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "postcode": {
+            "anyOf": [
+              { "type": "string", "maxLength": 20, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+          "instructions": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["name", "line1", "city", "country"],
+        "additionalProperties": false
+      },
+      "WebsiteOrder": {
+        "type": "object",
+        "properties": {
+          "externalOrderId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 163,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "status": { "$ref": "#/components/schemas/WebsiteOrderStatus" },
+          "currency": { "type": "string", "const": "GBP" },
+          "placedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "paidAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "shipBy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "shippedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "deliveredAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "cancelledAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "lines": {
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WebsiteOrderLine" }
+          },
+          "shippingGross": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "discountGross": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "totalGross": {
+            "anyOf": [
+              { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              { "type": "null" }
+            ]
+          },
+          "buyer": { "$ref": "#/components/schemas/WebsiteBuyer" },
+          "shippingAddress": { "$ref": "#/components/schemas/WebsiteAddress" }
+        },
+        "required": [
+          "externalOrderId",
+          "status",
+          "currency",
+          "placedAt",
+          "updatedAt",
+          "lines",
+          "shippingGross",
+          "discountGross",
+          "buyer",
+          "shippingAddress"
+        ],
+        "additionalProperties": false
+      },
+      "WebsiteRefund": {
+        "type": "object",
+        "properties": {
+          "refundId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "amountGross": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
+          "lines": {
+            "anyOf": [
+              {
+                "maxItems": 500,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "externalLineId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    "quantity": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                    "amountGross": { "type": "integer", "minimum": 0, "maximum": 1000000000 }
+                  },
+                  "required": ["externalLineId", "quantity", "amountGross"],
+                  "additionalProperties": false
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          },
+          "refundedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": ["refundId", "amountGross", "refundedAt"],
+        "additionalProperties": false
+      },
+      "WebsiteStockBatch": {
+        "minItems": 1,
+        "maxItems": 100,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "externalSku": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "quantity": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+          },
+          "required": ["externalSku", "quantity"],
+          "additionalProperties": false
+        }
+      },
+      "WebsiteShipment": {
+        "type": "object",
+        "properties": {
+          "carrier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "service": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "trackingNumbers": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[^\\u0000]*$"
+            }
+          },
+          "shippedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": ["carrier", "service", "trackingNumbers", "shippedAt"],
+        "additionalProperties": false
+      },
+      "WebsiteOrdersPage": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "maxItems": 200,
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WebsiteOrder" }
+          },
+          "nextCursor": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["orders", "nextCursor"],
+        "additionalProperties": false
+      },
+      "WebsiteStored": {
+        "type": "object",
+        "properties": {
+          "omnibridgeOrderId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["omnibridgeOrderId"],
+        "additionalProperties": false
+      },
+      "WebsiteCancel": {
+        "type": "object",
+        "properties": {
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "reason": {
+            "anyOf": [
+              { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["cancelledAt"],
+        "additionalProperties": false
+      },
+      "WebsiteProducts": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "externalSku": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                "title": {
+                  "anyOf": [
+                    { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000]*$" },
+                    { "type": "null" }
+                  ]
+                },
+                "quantity": {
+                  "anyOf": [
+                    { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["externalSku"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["products"],
+        "additionalProperties": false
+      },
+      "WebsiteProductsReceived": {
+        "type": "object",
+        "properties": {
+          "received": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["received"],
+        "additionalProperties": false
       }
     }
   },
@@ -12724,6 +13622,499 @@
             "description": "Default Response",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/OrderGroup" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/website": {
+      "post": {
+        "operationId": "createWebsiteConnection",
+        "summary": "Connect a website",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "company_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "display_name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "base_url": { "type": "string", "maxLength": 500, "format": "uri" },
+                  "outbound_api_key": { "type": "string", "minLength": 16, "maxLength": 512 }
+                },
+                "required": ["company_id", "display_name", "base_url", "outbound_api_key"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true,
+          "module": "website_connector"
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WebsiteConnectionCreated" }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{accountId}/website": {
+      "get": {
+        "operationId": "getWebsiteSettings",
+        "summary": "A website account's settings",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true,
+          "module": "website_connector"
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteSettings" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateWebsiteSettings",
+        "summary": "Change a website account's base URL or key",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "base_url": { "type": "string", "maxLength": 500, "format": "uri" },
+                  "outbound_api_key": { "type": "string", "minLength": 16, "maxLength": 512 }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true,
+          "module": "website_connector"
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteSettings" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{accountId}/website/keys": {
+      "post": {
+        "operationId": "reissueWebsiteKeys",
+        "summary": "Issue a new key and signing secret",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true,
+          "module": "website_connector"
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteKeys" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{accountId}/disconnect": {
+      "post": {
+        "operationId": "disconnectAccount",
+        "summary": "Disconnect an account",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountDisconnected" }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/v1/website/{connectionId}/orders": {
+      "post": {
+        "operationId": "websitePushOrder",
+        "summary": "Website: create or update an order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteOrderInput" } }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "connectionId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "signed-webhook",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false,
+          "module": "website_connector"
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteStored" } }
+            }
+          },
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteStored" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/v1/website/{connectionId}/orders/{externalOrderId}/cancel": {
+      "post": {
+        "operationId": "websiteCancelOrder",
+        "summary": "Website: cancel an order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteCancelInput" } }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "connectionId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 163,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "in": "path",
+            "name": "externalOrderId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "signed-webhook",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false,
+          "module": "website_connector"
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteStored" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/v1/website/{connectionId}/orders/{externalOrderId}/refunds": {
+      "post": {
+        "operationId": "websiteRefundOrder",
+        "summary": "Website: record a refund",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteRefundInput" } }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "connectionId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 163,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "in": "path",
+            "name": "externalOrderId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "signed-webhook",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false,
+          "module": "website_connector"
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteStored" } }
+            }
+          },
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/WebsiteStored" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/v1/website/{connectionId}/products": {
+      "post": {
+        "operationId": "websitePushProducts",
+        "summary": "Website: send its products for mapping",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/WebsiteProductsInput" }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "connectionId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "signed-webhook",
+          "tab": "none",
+          "adminOnly": false,
+          "companyScoped": false,
+          "module": "website_connector"
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WebsiteProductsReceived" }
+              }
             }
           },
           "4XX": {

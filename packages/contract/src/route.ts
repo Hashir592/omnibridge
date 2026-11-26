@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { ADMIN_ONLY_TABS, AUTH_KINDS, TABS, type RouteMetadata } from './metadata.ts';
+import {
+  ADMIN_ONLY_TABS,
+  AUTH_KINDS,
+  MODULE_TOGGLES,
+  TABS,
+  type RouteMetadata,
+} from './metadata.ts';
 
 export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
@@ -30,6 +36,7 @@ const Shape = z.object({
   tab: z.enum(TABS),
   adminOnly: z.boolean(),
   companyScoped: z.boolean(),
+  module: z.enum(MODULE_TOGGLES).optional(),
 });
 
 const adminOnlyTabs: ReadonlySet<string> = new Set(ADMIN_ONLY_TABS);

@@ -49,6 +49,10 @@ export const ADMIN_ONLY_TABS = ['connections', 'users', 'settings', 'audit-log']
 export const TABS = [...TICKABLE_TABS, ...ADMIN_ONLY_TABS, 'none'] as const;
 export type Tab = (typeof TABS)[number];
 
+/** Per-workspace module toggles (PLAT-2, ADR-059). */
+export const MODULE_TOGGLES = ['website_connector'] as const;
+export type ModuleToggle = (typeof MODULE_TOGGLES)[number];
+
 export interface RouteMetadata {
   auth: AuthKind;
   tab: Tab;
@@ -56,4 +60,9 @@ export interface RouteMetadata {
   adminOnly: boolean;
   /** The route reads or writes company data, so the user's permitted companies apply (PERM-3). */
   companyScoped: boolean;
+  /**
+   * The route exists only for a workspace with this module on: off, it answers 404 as if it were
+   * not there (ADR-059). Enforced by the server, never only hidden in the UI.
+   */
+  module?: ModuleToggle;
 }
