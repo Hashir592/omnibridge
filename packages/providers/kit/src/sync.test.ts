@@ -332,6 +332,42 @@ describe('incremental sync: job, governor, parser and cursor (INT-1, INT-5, INT-
     expect(h.cursor().cursorAt).toEqual(new Date('2026-11-21T11:00:00.119Z'));
   });
 
+  it('[INT-8][CAP-6] a first poll that stops or fails part way reads from the same start next time, however late', async () => {
+    for (const how of ['stops', 'fails'] as const) {
+      let at = Date.parse('2026-11-21T12:00:00.000Z');
+      const h = harness(new Date(at));
+      h.ports.now = () => new Date(at);
+      const since: string[] = [];
+      let broken = how === 'fails';
+      const s: SyncStream<Item> = {
+        ...stream(() => [], []),
+        fetchPage: (_token, from) => {
+          since.push(from.toISOString());
+          return Promise.resolve({ items: many(120), next: undefined });
+        },
+        sink: (_ctx, _account, items) => {
+          if (broken && items.some((i) => i.externalId === 'N00100')) {
+            return Promise.reject(new Error('a bad order'));
+          }
+          if (how === 'stops') at += 200_000;
+          return Promise.resolve();
+        },
+      };
+      const first = runIncrementalSync(h.ports, s, job);
+      if (how === 'stops') expect(await first).toMatchObject({ more: true });
+      else await expect(first).rejects.toThrow('a bad order');
+      expect(h.cursor().cursorAt, how).toBeNull();
+      // The next run comes an hour later: the lookback must not move with it.
+      at += 3_600_000;
+      broken = false;
+      for (let i = 0; i < 5 && h.cursor().cursorAt === null; i += 1) {
+        await runIncrementalSync(h.ports, s, job);
+      }
+      expect(h.cursor().cursorAt, how).toEqual(new Date('2026-11-21T11:00:00.119Z'));
+      expect(new Set(since), how).toEqual(new Set(['2026-11-20T12:00:00.000Z']));
+    }
+  });
+
   it('[INT-8][CAP-6] slow pages stop the reading in time to store them, and the next run reads on', async () => {
     let at = Date.parse('2026-11-21T12:00:00.000Z');
     const h = harness(new Date(at));
