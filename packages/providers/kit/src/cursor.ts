@@ -6,8 +6,9 @@ const MAX_OVERLAP = 10_000;
 type Pair = { readonly id: string; readonly at: string };
 
 /**
- * Where a poll that stopped at the page cap goes on from: the same `since`, the next page, and
- * the newest change read so far (the cursor moves there only once every page has been read).
+ * Where a poll that stopped at the page cap goes on from: the same `since`, the next page (`''` for
+ * the first), and the newest change read so far (the cursor moves there only once every page has
+ * been read).
  */
 export interface CursorResume {
   readonly since: string;
@@ -83,12 +84,15 @@ export function applyPoll<T extends SyncItem>(
 /**
  * A run that stopped before all it had read was stored: the cursor and its page stay where they
  * were, so the same pages are read again, and what was stored is remembered, so none of it is
- * stored twice. Those pairs come last: the bound drops others first.
+ * stored twice. Those pairs come last: the bound drops others first. A run that resumed nothing
+ * keeps its own `since`, from the first page (`page: ''`): a first poll's start is worked out from
+ * the clock, and the next run must not move it on.
  */
 export function applyPart<T extends SyncItem>(
   state: CursorState,
   items: readonly T[],
   handled: readonly T[],
+  since: Date,
 ): CursorState {
   const done = new Set(state.overlap.map((o) => key(o.id, o.at)));
   for (const i of handled) done.add(key(i.externalId, i.updatedAt.toISOString()));
@@ -98,7 +102,7 @@ export function applyPart<T extends SyncItem>(
   return {
     cursorAt: state.cursorAt,
     overlap: [...others, ...ofRun].slice(-MAX_OVERLAP),
-    resume: state.resume ?? null,
+    resume: state.resume ?? { since: since.toISOString(), page: '', maxAt: null },
   };
 }
 

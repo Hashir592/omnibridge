@@ -206,12 +206,12 @@ export async function runIncrementalSync<T extends SyncItem>(
     await recordCalls(ctx);
   };
 
+  // A run that stopped at the page cap, or part way, goes on from where it stopped, with the same since.
+  const resume = cursor.resume ?? null;
+  const since =
+    resume === null ? pollSince(cursor, now(), stream.lookbackMs) : new Date(resume.since);
   try {
-    // A run that stopped at the page cap goes on from where it stopped, with the same since.
-    const resume = cursor.resume ?? null;
-    const since =
-      resume === null ? pollSince(cursor, now(), stream.lookbackMs) : new Date(resume.since);
-    let page: string | undefined = resume?.page;
+    let page: string | undefined = resume === null || resume.page === '' ? undefined : resume.page;
     for (let n = 0; n < MAX_PAGES; n += 1) {
       let result: Page<T>;
       try {
@@ -235,7 +235,7 @@ export async function runIncrementalSync<T extends SyncItem>(
       const part = fresh.slice(stored.length, stored.length + CHUNK);
       if (stored.length > 0 && elapsed() >= MAX_RUN_MS) {
         await ports.tenancy.runWorkspace(actor, (ctx) =>
-          recordSuccess(ctx, applyPart(cursor, items, stored)),
+          recordSuccess(ctx, applyPart(cursor, items, stored, since)),
         );
         return {
           fetched: items.length,
@@ -264,7 +264,7 @@ export async function runIncrementalSync<T extends SyncItem>(
   } catch (err) {
     await ports.tenancy.runWorkspace(actor, async (ctx) => {
       if (stored.length > 0) {
-        const part = applyPart(cursor, items, stored);
+        const part = applyPart(cursor, items, stored, since);
         await ports.cursors.save(ctx, accountId, stream.stream, part, now(), { failed: true });
       }
       if (err instanceof AuthFailed) {
