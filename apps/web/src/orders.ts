@@ -19,7 +19,7 @@ import {
   type OrderListRow,
   type OrderReads,
 } from '@omnibridge/db';
-import type { VaultClient } from '@omnibridge/vault-client';
+import { VaultError, type VaultClient } from '@omnibridge/vault-client';
 import { UTF8_BOM } from './audit-csv.ts';
 import type { Handlers } from './contract.ts';
 
@@ -131,6 +131,7 @@ function detailBody(d: OrderDetailView, masked: ReadonlyMap<string, Record<strin
     ...rowBody(d, masked),
     paid_at: iso(d.paidAt),
     dispatched_at: iso(d.dispatchedAt),
+    dispatch_estimated: d.dispatchEstimated,
     delivered_at: iso(d.deliveredAt),
     cancelled_at: iso(d.cancelledAt),
     tax_point_date: d.taxPointDate,
@@ -171,6 +172,7 @@ function detailBody(d: OrderDetailView, masked: ReadonlyMap<string, Record<strin
         net_pence: n(g.net),
         provisional: g.provisional,
       })),
+      amounts_differ: d.money.amountsDiffer,
     },
     history: d.history.map((h) => ({
       at: h.at.toISOString(),
@@ -372,12 +374,20 @@ export function ordersHandlers(options?: OrdersOptions): Handlers<typeof ordersR
       }
       // ORD-5: the vault logs the read with the user (DP-7); the audit log records user, order
       // and time, never a value.
-      const full = await o.vault.readFull({
-        workspaceId: tenant.workspaceId,
-        piiRef: ref.piiRef,
-        purpose: 'order_detail',
-        actorUserId: session.userId,
-      });
+      const full = await o.vault
+        .readFull({
+          workspaceId: tenant.workspaceId,
+          piiRef: ref.piiRef,
+          purpose: 'order_detail',
+          actorUserId: session.userId,
+        })
+        .catch((err: unknown) => {
+          // Deleted a moment ago: db-main has no tombstone yet, but there is nothing left to show.
+          if (err instanceof VaultError && err.status === 404) {
+            throw new ApiError({ status: 404, code: 'not_found' });
+          }
+          throw err;
+        });
       await o.audit.record(tenant, {
         action: 'order.customer_viewed',
         actor: { kind: 'user', userId: session.userId },

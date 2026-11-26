@@ -260,6 +260,89 @@ describe('deletion service in the vault [DEL-1][DEL-2][DEL-3][AT-8]', () => {
     await appPool.end();
   });
 
+  /** A journal that stops after a run's lines are written, until released. */
+  const pausedJournal = () => {
+    let reached: () => void = () => undefined;
+    const written = new Promise<void>((r) => (reached = r));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    class Paused extends DeletionJournal {
+      override async append(lines: readonly Record<string, string | null>[]): Promise<void> {
+        await super.append(lines);
+        reached();
+        await gate;
+      }
+    }
+    return {
+      journal: new Paused(journalDir),
+      written,
+      release: () => {
+        release();
+      },
+    };
+  };
+  const journalled = () =>
+    readdirSync(journalDir)
+      .flatMap((f) => readFileSync(join(journalDir, f), 'utf8').split('\n'))
+      .filter((l) => l !== '')
+      .map((l) => JSON.parse(l) as Record<string, string>);
+
+  it('[DEL-1][ORD-4] an expiry run never deletes a record that its order has just stored again', async () => {
+    const W = randomUUID();
+    const past = new Date(clock.getTime() - 60_000);
+    const live = new Date(clock.getTime() + 30 * DAY);
+    const old = await ingest('o-again-live', { workspace: W, deleteAfter: past });
+    const appPool = new pg.Pool({ ...cluster.connection('vault_app'), max: 2 });
+    const p = pausedJournal();
+    const service = new DeletionService({ pool: appPool, journal: p.journal, now: () => clock });
+    const run = service.delete({
+      workspace_id: W,
+      run_id: randomUUID(),
+      trigger: 'expiry',
+      scope: { type: 'expiry' },
+    });
+    await p.written;
+    // Its order is stored again while the run stands between its journal and its delete.
+    const again = ingest('o-again-live', { workspace: W, deleteAfter: live });
+    await new Promise((r) => setTimeout(r, 400));
+    p.release();
+    const [ref] = await Promise.all([again, run]);
+    expect((await ownerRows('records', W)).filter((r) => r.canary === false)).toMatchObject([
+      { pii_ref: ref, delete_after: live },
+    ]);
+    // The journal never names the record that is kept.
+    expect(journalled().filter((l) => l.pii_ref === ref && l.type === undefined)).toEqual([]);
+    expect(journalled().filter((l) => l.pii_ref === old && l.type === undefined)).toHaveLength(1);
+    await appPool.end();
+  });
+
+  it('[DEL-1][ORD-4] an expiry run that meets a record being re-dated leaves it alone, and does not journal it', async () => {
+    const W = randomUUID();
+    const ref = await ingest('o-redated', {
+      workspace: W,
+      deleteAfter: new Date(clock.getTime() - 60_000),
+    });
+    const c = await owner.connect();
+    let run;
+    try {
+      await c.query('BEGIN');
+      await c.query(`SELECT set_config('app.workspace_id', $1, true)`, [W]);
+      await c.query('UPDATE vault.records SET delete_after = $2 WHERE pii_ref = $1', [
+        ref,
+        new Date(clock.getTime() + DAY),
+      ]);
+      run = del({ type: 'expiry' }, 'expiry', randomUUID(), W);
+      await new Promise((r) => setTimeout(r, 300));
+      await c.query('COMMIT');
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
+    expect((await run).counts.records).toBe(0);
+    expect((await ownerRows('records', W)).filter((r) => r.pii_ref === ref)).toHaveLength(1);
+    expect(journalled().filter((l) => l.pii_ref === ref && l.type === undefined)).toEqual([]);
+  });
+
   it('[DEL-2] a retry of the same run VACUUMs even though it finds nothing left to delete (F-M04h-03)', async () => {
     const appPool = new pg.Pool({ ...cluster.connection('vault_app'), max: 2 });
     const vacuums: string[] = [];

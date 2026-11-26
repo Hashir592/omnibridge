@@ -5,7 +5,6 @@ import {
   type TenantContext,
   type TenantRunner,
 } from '@omnibridge/core';
-import { randomUUID } from 'node:crypto';
 import {
   effectiveDispatch,
   type Connection,
@@ -30,7 +29,7 @@ import {
   type SyncStreamName,
 } from '@omnibridge/queue';
 import { VaultError, type VaultClient } from '@omnibridge/vault-client';
-import { hasDeliveryAddress } from '@omnibridge/vault-client/schemas';
+import { hasDeliveryAddress, MATCH_MAX } from '@omnibridge/vault-client/schemas';
 import { sendMappingChanged } from './catalogue.ts';
 
 /*
@@ -49,6 +48,10 @@ export const PII_HARD_LIMIT_MS = 90 * DAY_MS;
  * sync job still retrying (its retries end well inside a day). Older ones with no order go.
  */
 const ORPHAN_GRACE_MS = DAY_MS;
+/** ORD-9: group recomputes asked for in one minute are one job. */
+const REGROUP_SLOT_MS = 60_000;
+/** Longer than a transaction that stores orders takes (one chunk of a poll). */
+const REGROUP_SETTLE_MS = 30_000;
 
 /**
  * DEL-1, PRD 7.3: when an order's buyer record must be gone, used at ingest and by the expiry job.
@@ -136,7 +139,7 @@ export function orderIngestStream(
         const deleteAfter = piiDeleteAfter(
           {
             ...order,
-            dispatchedAt: stored?.dispatchedAt ?? order.dispatchedAt,
+            dispatchedAt: knownDispatch(order, stored),
             deliveredAt: stored?.deliveredAt ?? order.deliveredAt,
           },
           retentionDays,
@@ -219,6 +222,19 @@ export function orderIngestStream(
   };
 }
 
+/**
+ * When the order left, for a record not stored yet. The stored date stands: a later update never
+ * restarts a window that has passed. A real date earlier than a stored stand-in counts instead.
+ */
+function knownDispatch(
+  order: Pick<ChannelOrder, 'dispatchedAt'>,
+  stored: StoredOrderPii | undefined,
+): Date | null {
+  if (stored === undefined || stored.dispatchedAt === null) return order.dispatchedAt;
+  const real = stored.dispatchEstimated ? order.dispatchedAt : null;
+  return real !== null && real < stored.dispatchedAt ? real : stored.dispatchedAt;
+}
+
 /** The buyer block with its blank values left out. */
 function givenFields(buyer: BuyerDetails): Record<string, string> {
   return Object.fromEntries(
@@ -246,6 +262,7 @@ export function toIncoming(o: ChannelOrder): IncomingOrder {
     channelTotal: o.totalPence === null ? null : pence(BigInt(o.totalPence)),
     shipToCountry: o.shipToCountry,
     fba: o.fba,
+    cancelRequested: o.cancelRequested,
     lines: o.lines.map((l) => ({
       lineId: l.lineId,
       sku: l.sku,
@@ -275,6 +292,7 @@ export function toIncoming(o: ChannelOrder): IncomingOrder {
 export function orderIngestPorts(
   queue: Pick<JobQueue, 'send'>,
   notices: { notifier: Pick<Notifier, 'raisePlatform'>; logger: Logger },
+  now: () => Date = () => new Date(),
 ): OrderIngestPorts {
   return {
     totalMismatch: async (ctx, input) => {
@@ -311,16 +329,20 @@ export function orderIngestPorts(
     shortenPii: async (ctx, input) => {
       await queue.send(ordersPiiExpiryJob, {
         ctx,
-        idempotencyKey: `orders.pii_expiry:${input.orderId}:${input.reason}`,
+        // The first real dispatch date is a job of its own: the stand-in's key is taken.
+        idempotencyKey: `orders.pii_expiry:${input.orderId}:${input.reason}${input.real === true ? ':real' : ''}`,
         payload: { order_id: input.orderId, reason: input.reason },
       });
     },
     regroup: async (ctx, input) => {
-      // One per sync page that stored orders; the job runs one account at a time.
+      // One per account and minute, run after that minute has ended and every transaction that
+      // shares its key has committed, so no change under the key is missed.
+      const slot = Math.floor(now().getTime() / REGROUP_SLOT_MS);
       await queue.send(ordersGroupRecomputeJob, {
         ctx,
         channelAccountId: input.channelAccountId,
-        idempotencyKey: `orders.group_recompute:${input.channelAccountId}:${randomUUID()}`,
+        idempotencyKey: `orders.group_recompute:${input.channelAccountId}:${String(slot)}`,
+        startAfter: new Date((slot + 1) * REGROUP_SLOT_MS + REGROUP_SETTLE_MS),
         payload: {},
       });
     },
@@ -345,15 +367,17 @@ export function ordersGroupRecomputeHandler(deps: {
       const candidates = await deps.tenancy.runWorkspace({ workspaceId }, (ctx) =>
         deps.reads.groupCandidates(ctx, accountId),
       );
-      // Match keys are exact, so "shares a key with" is a class: one vault call per buyer.
-      const classes = new Map<string, string>();
-      for (const c of candidates) {
-        if (classes.has(c.piiSubject)) continue;
-        classes.set(c.piiSubject, c.piiSubject);
-        const { subject_ids } = await deps.vault.match(workspaceId, c.piiRef);
-        for (const s of subject_ids) if (!classes.has(s)) classes.set(s, c.piiSubject);
-      }
-      return [...classes.entries()];
+      // Match keys are exact, so "shares a key with" is a class. One vault call for them all.
+      const newest = candidates.slice(-MATCH_MAX);
+      if (newest.length === 0) return [];
+      const { groups } = await deps.vault.match({
+        workspace_id: workspaceId,
+        channel_account_id: accountId,
+        pii_refs: newest.map((c) => c.piiRef),
+      });
+      return groups.flatMap((subjects) =>
+        subjects.map((s): [string, string] => [s, subjects[0] ?? s]),
+      );
     },
     commit: async (job, classes) => {
       const accountId = job.envelope.channel_account_id;

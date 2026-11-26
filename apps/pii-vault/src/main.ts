@@ -37,6 +37,9 @@ const vault = new Vault({
       'canary record read',
     );
   },
+  onVacuumFailed: (errorName) => {
+    logger.warn({ event: 'vault.vacuum_failed', errorName }, 'VACUUM after a correction failed');
+  },
 });
 // PS-035: the vault-wide key exists before anything is served, so every backup holds it. A vault
 // that cannot make or open it does not start.
@@ -58,6 +61,17 @@ try {
       error: err instanceof Error ? err.name : 'unknown',
     },
     'exact buyer index backfill failed',
+  );
+}
+// F-M10-end-15 (T-1004): records from before the names lost their punctuation are indexed again,
+// under the same rules as above (a failure is logged and retried at the next start; M22 removes it).
+try {
+  const reindexed = await vault.reindexNames();
+  logger.info({ event: 'vault.name_reindex', count: reindexed }, 'name and match keys ready');
+} catch (err) {
+  logger.error(
+    { event: 'vault.name_reindex_failed', error: err instanceof Error ? err.name : 'unknown' },
+    'name and match re-index failed',
   );
 }
 const deletion = new DeletionService({

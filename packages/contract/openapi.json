@@ -1522,6 +1522,10 @@
         },
         "required": ["id", "channel_account_id", "state", "members", "warnings", "earliest_ship_by"]
       },
+      "AmountsDifferInput": {
+        "type": "string",
+        "enum": ["channel_total", "late_change", "refund_above"]
+      },
       "OrderDetailInput": {
         "type": "object",
         "properties": {
@@ -1599,6 +1603,7 @@
               { "type": "null" }
             ]
           },
+          "dispatch_estimated": { "type": "boolean" },
           "delivered_at": {
             "anyOf": [
               {
@@ -1642,6 +1647,10 @@
               "vat_groups": {
                 "type": "array",
                 "items": { "$ref": "#/components/schemas/VatGroupInput" }
+              },
+              "amounts_differ": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/AmountsDifferInput" }
               }
             },
             "required": [
@@ -1653,7 +1662,8 @@
               "net_pence",
               "refunded_pence",
               "refunded_vat_pence",
-              "vat_groups"
+              "vat_groups",
+              "amounts_differ"
             ]
           },
           "history": {
@@ -1709,6 +1719,7 @@
           "group",
           "paid_at",
           "dispatched_at",
+          "dispatch_estimated",
           "delivered_at",
           "cancelled_at",
           "tax_point_date",
@@ -4652,6 +4663,10 @@
         ],
         "additionalProperties": false
       },
+      "AmountsDiffer": {
+        "type": "string",
+        "enum": ["channel_total", "late_change", "refund_above"]
+      },
       "OrderDetail": {
         "type": "object",
         "properties": {
@@ -4729,6 +4744,7 @@
               { "type": "null" }
             ]
           },
+          "dispatch_estimated": { "type": "boolean" },
           "delivered_at": {
             "anyOf": [
               {
@@ -4772,6 +4788,10 @@
               "vat_groups": {
                 "type": "array",
                 "items": { "$ref": "#/components/schemas/VatGroup" }
+              },
+              "amounts_differ": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/AmountsDiffer" }
               }
             },
             "required": [
@@ -4783,7 +4803,8 @@
               "net_pence",
               "refunded_pence",
               "refunded_vat_pence",
-              "vat_groups"
+              "vat_groups",
+              "amounts_differ"
             ],
             "additionalProperties": false
           },
@@ -4840,6 +4861,7 @@
           "group",
           "paid_at",
           "dispatched_at",
+          "dispatch_estimated",
           "delivered_at",
           "cancelled_at",
           "tax_point_date",

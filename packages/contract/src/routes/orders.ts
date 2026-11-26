@@ -118,7 +118,7 @@ const orderFilter = {
   to: Day.optional(),
   ship_by: z.enum(['today', 'overdue']).optional(),
   flag: OrderFlagSchema.optional(),
-  /** Order reference or SKU (Master or channel), case-insensitive. Never buyer details. */
+  /** How an order reference or SKU (Master or channel) starts, any case. Never buyer details. */
   q: z.string().trim().min(1).max(100).optional(),
 };
 
@@ -215,9 +215,21 @@ export const OrderGroupSchema = z
   })
   .meta({ id: 'OrderGroup' });
 
+/**
+ * Why an order's pence differ from the channel's (shown in plain words in the money breakdown):
+ * `channel_total`: they do not add up to the total the channel states. `late_change`: the channel
+ * changed amounts or lines after they were fixed, and nothing here was changed. `refund_above`:
+ * the refunds come to more than the order.
+ */
+export const AmountsDifferSchema = z
+  .enum(['channel_total', 'late_change', 'refund_above'])
+  .meta({ id: 'AmountsDiffer' });
+
 export const OrderDetailSchema = OrderRowSchema.extend({
   paid_at: At.nullable(),
   dispatched_at: At.nullable(),
+  /** True while `dispatched_at` is a stand-in: the channel gave no dispatch time. Show "estimated". */
+  dispatch_estimated: z.boolean(),
   delivered_at: At.nullable(),
   cancelled_at: At.nullable(),
   /** VAT-1: the London date the order was placed; it decides the VAT quarter. */
@@ -234,6 +246,8 @@ export const OrderDetailSchema = OrderRowSchema.extend({
     refunded_pence: Pence,
     refunded_vat_pence: Pence,
     vat_groups: z.array(VatGroupSchema),
+    /** Why the pence here differ from the channel's; empty when they do not (ORD-6). */
+    amounts_differ: z.array(AmountsDifferSchema),
   }),
   history: z.array(OrderHistoryEntrySchema),
   refunds: z.array(RefundSchema),

@@ -175,7 +175,7 @@ export function buildVaultApp({
   app.post('/v1/match', async (request) => {
     const caller = authorise(request, 'match');
     const body = parse(MatchRequest, request.body);
-    return vault.match(body.workspace_id, body.pii_ref, { caller });
+    return vault.match(body, { caller });
   });
 
   // AT-10: an eBay deletion notice, matched across workspaces; web's token only (FA-14).

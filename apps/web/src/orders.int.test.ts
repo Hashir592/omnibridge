@@ -117,6 +117,7 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
         channelTotal: null,
         shipToCountry: 'GB',
         fba: false,
+        cancelRequested: false,
         lines: [
           { lineId: 'L1', sku: `SKU-${ref}`, quantity: 1, title: 'Item', linePrice: pence(1200n) },
         ],
@@ -132,13 +133,12 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
   /** What the worker's orders.group_recompute job does: vault match, then db-main links. */
   const regroup = async (account: string) => {
     const candidates = await reads.groupCandidates(all(), account);
-    const classes = new Map<string, string>();
-    for (const c of candidates) {
-      if (classes.has(c.piiSubject)) continue;
-      classes.set(c.piiSubject, c.piiSubject);
-      const { subject_ids } = await clients.worker.match(A, c.piiRef);
-      for (const s of subject_ids) if (!classes.has(s)) classes.set(s, c.piiSubject);
-    }
+    const { groups } = await clients.worker.match({
+      workspace_id: A,
+      channel_account_id: account,
+      pii_refs: candidates.map((c) => c.piiRef),
+    });
+    const classes = new Map(groups.flatMap((g) => g.map((s) => [s, g[0] ?? s] as const)));
     await reads.applyGroups(all(), account, classes);
   };
 
@@ -421,6 +421,29 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
     expect((await rows(admin)).find((r) => r.id === none)?.customer_state).toBe('none');
   });
 
+  it('[ORD-6] a customer whose record has just gone is not found, and no view is recorded', async () => {
+    const id = await place(accX, 'GONE-1', '2026-11-19T09:00:00Z', buyer('Gil Gone'));
+    const [row] = (
+      await mainRoot.query<{ pii_ref: string }>('SELECT pii_ref FROM app.orders WHERE id = $1', [
+        id,
+      ])
+    ).rows;
+    // The vault has deleted it; db-main has no tombstone yet.
+    await clients.deletion.delete({
+      workspace_id: A,
+      run_id: randomUUID(),
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [row?.pii_ref ?? ''] },
+    });
+    const res = await app().inject({
+      method: 'POST',
+      url: `/api/orders/${id}/customer`,
+      headers: headers(admin),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(await auditRows('order.customer_viewed', id)).toEqual([]);
+  });
+
   it('[ORD-8][AT-9] the CSV export holds no PII, not even masked values', async () => {
     await place(accX, 'E-1', '2026-11-18T09:00:00Z', buyer('Eve Export'));
     const res = await get(admin, '/api/orders/export');
@@ -460,6 +483,20 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
     expect((await rows(child)).map((r) => r.id)).not.toContain(yOrder);
     expect((await get(child, `/api/orders/${yOrder}`)).status).toBe(404);
     expect((await get(child, `/api/orders?channel_account_id=${accY}`)).status).toBe(404);
+    // A company filter is a 404 too, on every route that takes one, and the admin's is fine.
+    for (const route of ['/api/orders', '/api/returns', '/api/orders/export']) {
+      expect((await get(child, `${route}?company_id=${companyY}`)).status, route).toBe(404);
+      expect((await get(child, `${route}?channel_account_id=${accY}`)).status, route).toBe(404);
+      expect((await get(admin, `${route}?company_id=${companyY}`)).status, route).toBe(200);
+      expect((await get(child, `${route}?company_id=${companyX}`)).status, route).toBe(200);
+    }
+    const search = await app().inject({
+      method: 'POST',
+      url: `/api/orders/search?company_id=${companyY}`,
+      headers: headers(child),
+      payload: { buyer_name: 'Yan Hidden' },
+    });
+    expect(search.statusCode).toBe(404);
     expect(
       (
         await app().inject({
@@ -490,6 +527,7 @@ describe('orders: list, detail, export, returns and same-buyer groups (T-1002)',
         channelTotal: null,
         shipToCountry: 'GB',
         fba: false,
+        cancelRequested: false,
         lines: [
           { lineId: 'L1', sku: 'SKU-RF-1', quantity: 1, title: 'Item', linePrice: pence(1200n) },
         ],

@@ -107,6 +107,8 @@ export interface ChannelOrder extends OrderSummary {
   readonly totalPence: number | null;
   readonly shipToCountry: string | null;
   readonly fba: boolean;
+  /** The buyer has asked to cancel and the channel has not decided yet. */
+  readonly cancelRequested: boolean;
   readonly lines: readonly ChannelOrderLine[];
   readonly refunds: readonly ChannelRefund[];
   /** PII: for the vault only (see BuyerDetails). Null when the channel sent none. */

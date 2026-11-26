@@ -361,11 +361,24 @@ function Items({ d }: { d: OrderDetail }) {
           </div>
           <Row label="Includes VAT" value={formatPence(m.vatPence)} muted />
           {m.refundPence > 0 && <Row label="Refunded" value={formatPence(-m.refundPence)} muted />}
+          {m.amountsDiffer.map((why) => (
+            <p key={why} className="mt-1 flex items-start gap-1.5 text-xs text-warning">
+              <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
+              {AMOUNTS_DIFFER[why]}
+            </p>
+          ))}
         </div>
       </div>
     </Card>
   );
 }
+
+/** Why the pence here differ from the channel's, in plain words (ORD-6). */
+const AMOUNTS_DIFFER: Record<OrderDetail['money']['amountsDiffer'][number], string> = {
+  channel_total: 'The channel states a different total for this order.',
+  late_change: 'The channel later sent different amounts or items. Nothing here was changed.',
+  refund_above: 'Refunds come to more than the order. VAT was given back up to what was left.',
+};
 
 /** VAT at 20% on an ex VAT amount, rounded half-up once per row (PRF-6). */
 const vat20 = (exPence: number) => Math.round(exPence * 0.2);
@@ -574,6 +587,15 @@ function Shipping({ d }: { d: OrderDetail }) {
           <dt className="text-ink-muted">Ship by</dt>
           <dd className="num text-right">{formatDateTime(o.shipBy)}</dd>
         </div>
+        {d.dispatchedAt && (
+          <div className="flex justify-between gap-4 py-1.5">
+            <dt className="text-ink-muted">Dispatched</dt>
+            <dd className="num text-right">
+              {formatDateTime(d.dispatchedAt)}
+              {d.dispatchEstimated && <span className="text-ink-muted"> (estimated)</span>}
+            </dd>
+          </div>
+        )}
         <div className="flex justify-between gap-4 py-1.5">
           <dt className="text-ink-muted">Service</dt>
           <dd className="text-right">

@@ -5,14 +5,14 @@
 
 const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-/** Lower case, no accents, letters, digits and single spaces only. */
+/** Lower case, no accents, letters, digits and single spaces only: punctuation is removed (C3.1). */
 export function normaliseName(value: string): string {
   return collapse(
     value
       .normalize('NFKD')
       .replace(/\p{M}/gu, '')
       .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, ' '),
+      .replace(/[^\p{L}\p{N}\s]/gu, ''),
   );
 }
 

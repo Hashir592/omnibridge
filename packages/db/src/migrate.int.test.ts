@@ -111,6 +111,13 @@ describe('db-main roles and migrations', () => {
       '0051_order_group_index',
       '0052_orders_fixed_amounts',
       '0053_provisional_lines_by_sku',
+      '0054_order_marks',
+      '0055_validate_order_marks',
+      '0056_amounts_fixed_at_payment',
+      '0057_live_line_index',
+      '0058_line_uniqueness',
+      '0059_search_columns',
+      '0060_search_indexes',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

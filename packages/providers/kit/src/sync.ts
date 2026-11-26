@@ -1,7 +1,7 @@
 import type { Notifier, Provider, TenantContext, TenantRunner } from '@omnibridge/core';
 import type { Secret } from '@omnibridge/crypto';
 import type { AccessToken, Page } from './adapters.ts';
-import { applyRun, pollSince, type CursorState, type SyncItem } from './cursor.ts';
+import { applyPart, applyRun, pollSince, type CursorState, type SyncItem } from './cursor.ts';
 import {
   AuthFailed,
   isProviderError,
@@ -15,6 +15,12 @@ import type { AccessTokenCache } from './tokens.ts';
 
 /** The most pages one run reads; the rest wait for the next run (the cursor has moved on). */
 const MAX_PAGES = 50;
+/** Changes stored in one transaction: another user of the same rows waits for this many at most. */
+const CHUNK = 25;
+/** A run reads pages for this long at most, so that there is time to store them. */
+const MAX_READ_MS = 4 * 60_000;
+/** A run starts no further transaction after this; sync.poll expires after 10 minutes. */
+const MAX_RUN_MS = 8 * 60_000;
 
 /** The db repositories the sync uses, each taking the tenant context of a short transaction. */
 export interface SyncPorts {
@@ -41,6 +47,8 @@ export interface SyncPorts {
       stream: string,
       cursor: CursorState,
       at: Date,
+      /** The run failed after storing a part: remembered, but no success of the stream. */
+      options?: { failed: true },
     ): Promise<void>;
   };
   health: {
@@ -83,7 +91,7 @@ export interface SyncStream<T extends SyncItem> {
   authenticate(credential: Secret): Promise<AccessToken>;
   fetchPage(token: AccessToken, since: Date, page?: string): Promise<Page<T>>;
   /**
-   * Runs after the pages are read and before the sink's transaction, with no transaction open
+   * Runs before each of the sink's transactions, for its items, with no transaction open
    * (invariant 3): M10's vault-first step (FA-10) stores buyer details in pii-vault here and
    * returns the items with their `pii_ref` and without the details. Left out, items pass through.
    */
@@ -91,7 +99,7 @@ export interface SyncStream<T extends SyncItem> {
     job: { workspaceId: string; channelAccountId: string },
     items: readonly T[],
   ): Promise<readonly T[]>;
-  /** Stores the new changes in the cursor's transaction. Must upsert by external ID. */
+  /** Stores a few new changes in a short transaction. Must upsert by external ID. */
   sink(ctx: TenantContext, channelAccountId: string, items: readonly T[]): Promise<void>;
 }
 
@@ -103,8 +111,10 @@ export type SyncResult =
  * One incremental poll of one account (INT-1, INT-2, INT-5, INT-8): short transactions only, never
  * one open across a provider call (invariant 3). Reads the cursor and the stored credential; gets
  * an access token; reads every page from the cursor minus the overlap, each call through the
- * governor; drops the changes already handled; then stores the new ones, the cursor, the health
- * and the usage together. Failures are recorded as health and notices, then rethrown for the job.
+ * governor; drops the changes already handled; then stores the new ones a few at a time, the last
+ * of them with the cursor, the health and the usage (F-M10-end-10). A run that comes near its job's
+ * expiry stops, and one that fails part way keeps what it stored; the next reads the same pages and
+ * goes on. Failures are recorded as health and notices, then rethrown for the job.
  */
 export async function runIncrementalSync<T extends SyncItem>(
   ports: SyncPorts,
@@ -112,6 +122,8 @@ export async function runIncrementalSync<T extends SyncItem>(
   job: { workspaceId: string; channelAccountId: string },
 ): Promise<SyncResult> {
   const now = ports.now ?? (() => new Date());
+  const startedAt = now().getTime();
+  const elapsed = () => now().getTime() - startedAt;
   const actor = { workspaceId: job.workspaceId };
   const accountId = job.channelAccountId;
   const start = await ports.tenancy.runWorkspace(actor, async (ctx) => {
@@ -178,13 +190,28 @@ export async function runIncrementalSync<T extends SyncItem>(
     }
   };
 
+  const items: T[] = [];
+  const stored: T[] = [];
+  const recordSuccess = async (ctx: TenantContext, next: CursorState) => {
+    await ports.cursors.save(ctx, accountId, stream.stream, next, now());
+    const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
+      tokenRefreshed: auth.refreshed,
+    });
+    if (reauthCleared) {
+      await ports.notifier.resolve(ctx, 'channel.auth_lost', {
+        kind: 'channel_account',
+        id: accountId,
+      });
+    }
+    await recordCalls(ctx);
+  };
+
+  // A run that stopped at the page cap, or part way, goes on from where it stopped, with the same since.
+  const resume = cursor.resume ?? null;
+  const since =
+    resume === null ? pollSince(cursor, now(), stream.lookbackMs) : new Date(resume.since);
   try {
-    // A run that stopped at the page cap goes on from where it stopped, with the same since.
-    const resume = cursor.resume ?? null;
-    const since =
-      resume === null ? pollSince(cursor, now(), stream.lookbackMs) : new Date(resume.since);
-    const items: T[] = [];
-    let page: string | undefined = resume?.page;
+    let page: string | undefined = resume === null || resume.page === '' ? undefined : resume.page;
     for (let n = 0; n < MAX_PAGES; n += 1) {
       let result: Page<T>;
       try {
@@ -201,24 +228,33 @@ export async function runIncrementalSync<T extends SyncItem>(
       }
       items.push(...result.items);
       page = result.next;
-      if (page === undefined) break;
+      if (page === undefined || elapsed() >= MAX_READ_MS) break;
     }
     const { fresh, next } = applyRun(cursor, items, { since, nextPage: page });
-    const ready = stream.prepare === undefined ? fresh : await stream.prepare(job, fresh);
-    await ports.tenancy.runWorkspace(actor, async (ctx) => {
-      await stream.sink(ctx, accountId, ready);
-      await ports.cursors.save(ctx, accountId, stream.stream, next, now());
-      const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
-        tokenRefreshed: auth.refreshed,
-      });
-      if (reauthCleared) {
-        await ports.notifier.resolve(ctx, 'channel.auth_lost', {
-          kind: 'channel_account',
-          id: accountId,
-        });
+    while (stored.length < fresh.length) {
+      const part = fresh.slice(stored.length, stored.length + CHUNK);
+      if (stored.length > 0 && elapsed() >= MAX_RUN_MS) {
+        await ports.tenancy.runWorkspace(actor, (ctx) =>
+          recordSuccess(ctx, applyPart(cursor, items, stored, since)),
+        );
+        return {
+          fetched: items.length,
+          fresh: stored.length,
+          cursorAt: cursor.cursorAt?.toISOString() ?? null,
+          more: true as const,
+        };
       }
-      await recordCalls(ctx);
-    });
+      const ready = stream.prepare === undefined ? part : await stream.prepare(job, part);
+      const last = stored.length + part.length === fresh.length;
+      await ports.tenancy.runWorkspace(actor, async (ctx) => {
+        await stream.sink(ctx, accountId, ready);
+        if (last) await recordSuccess(ctx, next);
+      });
+      stored.push(...part);
+    }
+    if (fresh.length === 0) {
+      await ports.tenancy.runWorkspace(actor, (ctx) => recordSuccess(ctx, next));
+    }
     return {
       fetched: items.length,
       fresh: fresh.length,
@@ -227,6 +263,10 @@ export async function runIncrementalSync<T extends SyncItem>(
     };
   } catch (err) {
     await ports.tenancy.runWorkspace(actor, async (ctx) => {
+      if (stored.length > 0) {
+        const part = applyPart(cursor, items, stored, since);
+        await ports.cursors.save(ctx, accountId, stream.stream, part, now(), { failed: true });
+      }
       if (err instanceof AuthFailed) {
         ports.tokens.invalidate(accountId);
         const { marked } = await ports.health.recordAuthFailure(ctx, accountId, now(), {

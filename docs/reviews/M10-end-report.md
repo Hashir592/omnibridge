@@ -18,7 +18,8 @@ The ADR-080 halfway pause was taken after the T-1001 PR was opened (not after it
 | T-1002 Order list, detail, returns, export, groups | high | #159 | merged (CI green on the third push) |
 | T-1001 fixes (S5's critical check) | critical | #160 | merged |
 | F-M10-end-01, S4's Blocker | critical | #164 | merged, confirmed by S4 |
-| T-1003 buyer data and retention, F-M10-end-22 | critical | branch `task/T-1003-m10-fixes-1` | auto-merge on |
+| T-1003 buyer data and retention, F-M10-end-22 | critical | #167 | merged, confirmed by S4 and S5 |
+| T-1004 amounts, grouping, speed and test gaps | critical | branch `task/T-1004-m10-fixes-2` | auto-merge on |
 
 ## How it was built
 
@@ -74,6 +75,17 @@ S2 builds T-0318 on it.
 - Web handlers mask list values, log every full view in the vault and the audit log, and export a PII-free CSV. The access export now lists `linkedOrders`.
 - **Review:** the high review raised 7 findings; 5 are fixed and 2 are follow-ups.
 
+**T-1004 (S4's Majors F-05, F-07 to F-11, S5's three later Minors; ADR-081, ADR-083, ADR-084).** Failing tests came first, each as its own commit, then the fix.
+- **Vault:** one private method applies a newer buyer block, for a correction and for an ingest that finds the record already there. A mask in any delivery field refuses the block; a masked email, phone or ID is left out. VACUUM (SKIP_LOCKED) runs after a change, and a failure is logged. An expiry run locks and journals its records in the transaction that deletes them. The eBay notice date is strict ISO with a zone, else now.
+- **Dispatch dates:** `orders.dispatch_estimated` marks a stand-in. The first real date replaces it once, and the deletion date is worked out again.
+- **Money before payment** (db-main 0054 to 0058): amounts and lines follow the channel until payment and never after. A changed line is closed and a new one added. The amounts-differ mark (channel total, late change, refund above the order) has one plain line on the order page.
+- **Groups:** dismiss, remove and recompute share one account lock. A recompute asks the vault once, with one log row, and is queued only when an order joins or leaves the ones that can group. Open cancellation requests never group.
+- **The list** (0059, 0060): it pages through `orders_placed`, and search is by prefix on lower-case columns. At 100,000 orders the p95 is under 0.7 s for every case tested.
+- **Sync:** a poll is stored 25 orders per transaction, in one lock order (orders, then stock rows, then the rest). It stops before its job expires, and the next run goes on.
+- **F-11:** all 39 required tests and the other survivors are written. They are guards. S1 stopped S3's fault run after 49 faults (ADR-085), which reached only V04, W11 and W12 of the 39, so S4's review plants faults for the rest.
+- **`vault.deleted_buyers` is retired, not dropped** (ADR-085 2): db-pii 0012 takes every right on it from every role, the owner included. A test checks that no role can use it and no code names it. M22's first db-pii migration drops it with ADR-045's ban-drop-table waiver.
+- **Review:** the high review raised 5 findings. One is fixed: a first poll that stopped moved its start. Four are for S1 or later tasks. The fault run found two more test gaps before it was stopped: a group action's order lock, and an unpaid order's update that carries no lines. A guard was added for each.
+
 ## Decisions made (full lists in the PR descriptions)
 
 - The vault subject is `<channel_account_id>:<external_order_id>`.
@@ -89,8 +101,9 @@ S2 builds T-0318 on it.
   - the 21st-member notice (C3.1) needs a notification type (M12);
   - a settings route for `group_midnight_grace_hours` (TEN-6 screen);
   - the Amazon returns report and Amazon orders (M18).
-- **Before M22:** vault records from before T-1002 keep the old match key (dev data only); re-index them.
-- **Reviews:** S4's milestone review is BLOCKED until T-1003 and T-1004 are confirmed (`docs/reviews/M10-end.md`). S5's check found no Blocker; its Majors are fixed in #160 and T-1003, and its report is committed with T-1003.
+- **Before M22:** vault records from before T-1002 kept the old match key; since T-1004 the vault re-indexes names and match keys once at start.
+- **Reviews:** S4's milestone review is BLOCKED until T-1004 is confirmed (`docs/reviews/M10-end.md`; T-1003 is confirmed). S5's check found no Blocker; its Majors are fixed in #160 and T-1003, and its three later Minors in T-1004.
+- **For S1 (PS-037, accepted in ADR-085 for the table):** a star in delivery instructions; an erased buyer left in its group; the lines of an unpaid order that has shipped; eBay's total after a refund.
 - **Next for S3:** the T-1101 Connect route should create accounts with `holdStockPush: true` (FA-16).
 
 ## Process: where S3 fell short (for S4 and S1)

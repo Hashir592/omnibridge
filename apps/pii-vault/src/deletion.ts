@@ -53,7 +53,9 @@ export class DeletionJournal {
  * The one deletion service (DEL-1, DEL-2, invariant 10). Every trigger comes here with a scope of
  * IDs. A run: picks the records, journals their refs off-site, then in one transaction hard-deletes
  * fields, blind indexes and records and writes the db-pii tombstones and the run log; after the
- * commit it VACUUMs the tables, so no deleted value stays in a dead tuple. Idempotent: a repeat
+ * commit it VACUUMs the tables, so no deleted value stays in a dead tuple. An expiry run picks and
+ * journals inside that transaction, with the records locked: one that its order has just stored
+ * again, with a new date, is neither deleted nor journalled. Idempotent: a repeat
  * finds nothing left, deletes nothing and logs zero, still reports what its run id deleted, and
  * VACUUMs again (in case the first VACUUM failed).
  */
@@ -82,18 +84,25 @@ export class DeletionService {
   async delete(req: DeleteRequest): Promise<DeleteResponse> {
     const ws = req.workspace_id;
     const at = this.#now();
-    const targets = await this.#tx(ws, (c) => this.#targets(c, req, at));
+    const expiry = req.scope.type === 'expiry';
     // Journal first: if the delete then fails, re-applying these tombstones is harmless.
-    await this.#journal.append(
-      targets.map((t) => ({
-        at: at.toISOString(),
-        workspace_id: ws,
-        run_id: req.run_id,
-        trigger: req.trigger,
-        pii_ref: t.pii_ref,
-        channel_account_id: t.channel_account_id,
-      })),
-    );
+    const journal = (picked: readonly Target[]) =>
+      this.#journal.append(
+        picked.map((t) => ({
+          at: at.toISOString(),
+          workspace_id: ws,
+          run_id: req.run_id,
+          trigger: req.trigger,
+          pii_ref: t.pii_ref,
+          channel_account_id: t.channel_account_id,
+        })),
+      );
+    let targets: Target[] = [];
+    if (!expiry) {
+      // Picked in a short transaction of its own, journalled after it, as before F-M10-end-24.
+      targets = await this.#tx(ws, (c) => this.#targets(c, req, at));
+      await journal(targets);
+    }
     if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
       // The closure itself is journalled too, so a restore closes the workspace again (T-0405).
       await this.#journal.append([
@@ -106,8 +115,12 @@ export class DeletionService {
         },
       ]);
     }
-    const refs = targets.map((t) => t.pii_ref);
     const result = await this.#tx(ws, async (c) => {
+      if (expiry) {
+        targets = await this.#targets(c, req, at);
+        await journal(targets);
+      }
+      const refs = targets.map((t) => t.pii_ref);
       // Closure's last batch: hold off any ingest for this workspace until it commits (ADR-065).
       if (req.scope.type === 'workspace' && targets.length < DELETE_BATCH) {
         await c.query('SELECT pg_advisory_xact_lock($1::bigint)', [workspaceLock(ws)]);
@@ -211,7 +224,10 @@ export class DeletionService {
     const limit = `ORDER BY pii_ref LIMIT ${String(DELETE_BATCH)}`;
     switch (scope.type) {
       case 'expiry':
-        return (await c.query<Target>(`${base} AND delete_after <= $2 ${limit}`, [ws, at])).rows;
+        // Locked until they are deleted: a record whose date moves meanwhile is left alone.
+        return (
+          await c.query<Target>(`${base} AND delete_after <= $2 ${limit} FOR UPDATE`, [ws, at])
+        ).rows;
       case 'subjects':
         return (
           await c.query<Target>(

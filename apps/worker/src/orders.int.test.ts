@@ -11,13 +11,16 @@ import {
   NotificationRepository,
   OrderIngest,
   OrderReads,
+  OutboundWriteRepository,
+  StockEngine,
   Tenancy,
   type MainDbHandle,
 } from '@omnibridge/db';
-import { Notifier } from '@omnibridge/core';
+import { Notifier, type TenantContext } from '@omnibridge/core';
+import { Secret } from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
 import { parseEbayOrders } from '@omnibridge/provider-ebay';
-import type { ChannelOrder } from '@omnibridge/provider-kit';
+import { AccessTokenCache, runIncrementalSync, type ChannelOrder } from '@omnibridge/provider-kit';
 import { parseWebsiteOrders } from '@omnibridge/provider-website';
 import { JobQueue, JOBS, type PreparingJob } from '@omnibridge/queue';
 import {
@@ -87,6 +90,7 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     shippingPence: 300,
     shipToCountry: 'GB',
     fba: false,
+    cancelRequested: false,
     totalPence: null,
     lines: [{ lineId: 'L1', sku: 'MOCK-SKU-1', quantity: 1, title: 'Mock', linePricePence: 1200 }],
     refunds: [],
@@ -474,6 +478,99 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await expiryJob(o.externalId))?.getTime()).toBe(cap);
   });
 
+  /** A website order first stored waiting, then shown shipped with no ship date. */
+  const shownShipped = async (placed: Date, shown: Date) => {
+    const base = { created_at: placed.toISOString(), paid_at: placed.toISOString() };
+    const [waiting] = websiteOrders({ ...base, updated_at: placed.toISOString() });
+    if (waiting === undefined) throw new Error('no order');
+    await poll([waiting]);
+    const update = async (over: Record<string, unknown>) => {
+      const [next] = websiteOrders({ ...base, id: waiting.externalId, status: 'shipped', ...over });
+      if (next === undefined) throw new Error('no order');
+      sent.length = 0;
+      await poll([next]);
+      const id = (await orderRow(waiting.externalId))?.id;
+      return sent
+        .filter((s) => s.type === 'orders.pii_expiry')
+        .filter((s) => (s.payload as { order_id: string }).order_id === id)
+        .map((s) => s.key);
+    };
+    const keys = await update({ updated_at: shown.toISOString() });
+    return { id: waiting.externalId, update, keys };
+  };
+
+  it('[DEL-1][AT-8] a real dispatch date after a stand-in works the deletion date out again', async () => {
+    const placed = daysAgo(20);
+    const { id, update, keys } = await shownShipped(placed, daysAgo(1));
+    expect((await expiryJob(id))?.getTime()).toBeGreaterThan(Date.now() + 23 * DAY);
+    const shipped = daysAgo(18);
+    const again = await update({
+      updated_at: daysAgo(0).toISOString(),
+      shipped_at: shipped.toISOString(),
+    });
+    // Its own job: the first one's key is taken.
+    expect(again).toHaveLength(1);
+    expect(keys).toHaveLength(1);
+    expect(again).not.toEqual(keys);
+    expect((await expiryJob(id))?.getTime()).toBe(shipped.getTime() + 25 * DAY);
+    // A second real date queues nothing and changes nothing.
+    const second = await update({
+      updated_at: new Date(Date.now() + 1000).toISOString(),
+      shipped_at: daysAgo(2).toISOString(),
+    });
+    expect(second).toEqual([]);
+    expect((await expiryJob(id))?.getTime()).toBe(shipped.getTime() + 25 * DAY);
+  });
+
+  it('[DEL-1][AT-8] a later real dispatch date follows the window, never past placement + 90 days', async () => {
+    const placed = daysAgo(80);
+    const near = await shownShipped(daysAgo(30), daysAgo(20));
+    expect((await expiryJob(near.id))?.getTime()).toBeLessThan(Date.now() + 6 * DAY);
+    const late = daysAgo(10);
+    await near.update({ updated_at: daysAgo(0).toISOString(), shipped_at: late.toISOString() });
+    expect((await expiryJob(near.id))?.getTime()).toBe(late.getTime() + 25 * DAY);
+    const far = await shownShipped(placed, daysAgo(60));
+    await far.update({
+      updated_at: daysAgo(0).toISOString(),
+      shipped_at: daysAgo(1).toISOString(),
+    });
+    expect((await expiryJob(far.id))?.getTime()).toBe(placed.getTime() + 90 * DAY);
+  });
+
+  it('[DEL-1] a real dispatch date never brings back a deleted record, or one never kept', async () => {
+    const { id, update } = await shownShipped(daysAgo(20), daysAgo(1));
+    const ref = (await orderRow(id))?.pii_ref ?? '';
+    await deletion.delete({
+      workspace_id: ws,
+      run_id: randomUUID(),
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [ref] },
+    });
+    await root.query('UPDATE app.orders SET pii_deleted_at = now() WHERE pii_ref = $1', [ref]);
+    await update({ updated_at: daysAgo(0).toISOString(), shipped_at: daysAgo(3).toISOString() });
+    expect(await vaultRows(`${account}:${id}`)).toEqual([]);
+    expect(await expiryJob(id)).toBeUndefined();
+    // First seen shipped, past its window by the stand-in: a later real date does not restart it.
+    const created = daysAgo(60).toISOString();
+    const [old] = websiteOrders({
+      status: 'shipped',
+      created_at: created,
+      updated_at: daysAgo(50).toISOString(),
+    });
+    if (old === undefined) throw new Error('no order');
+    await poll([old]);
+    const [real] = websiteOrders({
+      id: old.externalId,
+      status: 'shipped',
+      created_at: created,
+      updated_at: daysAgo(0).toISOString(),
+      shipped_at: daysAgo(2).toISOString(),
+    });
+    if (real === undefined) throw new Error('no order');
+    await poll([real]);
+    expect(await vaultRows(`${account}:${old.externalId}`)).toEqual([]);
+  });
+
   const fullRead = async (externalId: string) =>
     (
       await web.readFull({
@@ -594,6 +691,75 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await fullRead(stale.externalId)).address_line1).toBe(kept);
   });
 
+  it('[ORD-4] a correction that comes after a failed first store is not lost', async () => {
+    const username = () => `${PII_MARKER}lost-${randomUUID().slice(0, 8)}`;
+    for (const swept of [false, true]) {
+      const buyer = { username: username() };
+      const [first] = ebayOrders({ ...shipTo(fullAddress), buyer });
+      if (first === undefined) throw new Error('no order');
+      // The vault write happened, the db-main write did not.
+      const [ready] = (await stream().prepare?.(job, [first])) ?? [];
+      const piiRef = ready?.pii?.kind === 'stored' ? ready.pii.piiRef : '';
+      if (swept) {
+        await worker.setExpiry({
+          workspace_id: ws,
+          pii_refs: [piiRef],
+          delete_after: new Date(Date.now() - 1000).toISOString(),
+          reason: 'orphan',
+        });
+      }
+      const [fixed] = ebayOrders({
+        orderId: first.externalId,
+        creationDate: first.placedAt.toISOString(),
+        lastModifiedDate: new Date().toISOString(),
+        buyer,
+        ...shipTo({ ...fullAddress, addressLine1: `${PII_MARKER}4 Corrected Way` }),
+      });
+      if (fixed === undefined) throw new Error('no order');
+      await poll([fixed]);
+      expect((await orderRow(first.externalId))?.pii_ref).toBe(piiRef);
+      expect((await fullRead(first.externalId)).address_line1).toBe(`${PII_MARKER}4 Corrected Way`);
+      const [record] = await vaultRows(`${account}:${first.externalId}`);
+      expect(record?.delete_after.getTime()).toBe(first.placedAt.getTime() + 90 * DAY);
+    }
+  });
+
+  it('[ORD-4] a masked email, phone or second address line never overwrites the real one', async () => {
+    const real = {
+      email: `${PII_MARKER}eve@example.test`,
+      primaryPhone: { phoneNumber: '+447700900321' },
+    };
+    const to = (contactAddress: Record<string, unknown>, rest: Record<string, unknown>) => ({
+      fulfillmentStartInstructions: [
+        {
+          shippingStep: { shipTo: { fullName: `${PII_MARKER}Eve Bay`, contactAddress, ...rest } },
+        },
+      ],
+    });
+    const [first] = ebayOrders({ ...to({ ...fullAddress, addressLine2: 'Flat 9' }, real) });
+    if (first === undefined) throw new Error('no order');
+    await poll([first]);
+    const again = async (o: Record<string, unknown>, at: number) => {
+      const [next] = ebayOrders({
+        orderId: first.externalId,
+        lastModifiedDate: new Date(Date.now() - at).toISOString(),
+        ...o,
+      });
+      if (next === undefined) throw new Error('no order');
+      return (await poll([next]))[0]?.pii?.kind;
+    };
+    const masked = { email: 'j***@e***', primaryPhone: { phoneNumber: '*****123' } };
+    expect(await again(to({ ...fullAddress, addressLine2: 'F***' }, real), 3000)).toBe('unchanged');
+    expect((await fullRead(first.externalId)).address_line2).toBe('Flat 9');
+    const moved = { ...fullAddress, addressLine1: `${PII_MARKER}5 Next Way` };
+    expect(await again(to(moved, masked), 1000)).toBe('replaced');
+    expect(await fullRead(first.externalId)).toMatchObject({
+      address_line1: `${PII_MARKER}5 Next Way`,
+      email: real.email,
+      phone: real.primaryPhone.phoneNumber,
+    });
+  });
+
   it('[AT-10][ORD-4] an eBay deletion never refuses a website buyer with the same ID', async () => {
     const customer = `${PII_MARKER}shared-${randomUUID().slice(0, 8)}`;
     await web.ebayUserMatch({ user_id: customer });
@@ -610,6 +776,58 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     await tenancy.runWorkspace({ workspaceId: ws }, (c) => stream().sink(c, site, ready ?? []));
     const same = await stream().prepare?.(job, [{ ...o, externalId: `${o.externalId}-e` }]);
     expect(same?.[0]?.pii).toEqual({ kind: 'refused' });
+  });
+
+  it('[AT-10][ORD-4] a correction refused for a deleted buyer leaves the order as it is, and the poll goes on', async () => {
+    const username = `${PII_MARKER}refused-${randomUUID().slice(0, 8)}`;
+    const [first, other] = ebayOrders(
+      { ...shipTo(fullAddress), buyer: { username } },
+      { ...shipTo(fullAddress) },
+    );
+    if (first === undefined || other === undefined) throw new Error('no orders');
+    await poll([first]);
+    await web.ebayUserMatch({ user_id: username });
+    const [fixed] = ebayOrders({
+      orderId: first.externalId,
+      lastModifiedDate: new Date().toISOString(),
+      buyer: { username },
+      ...shipTo({ ...fullAddress, addressLine1: `${PII_MARKER}9 Not Kept` }),
+    });
+    if (fixed === undefined) throw new Error('no order');
+    const ready = await poll([fixed, other]);
+    expect(ready.map((o) => o.pii?.kind)).toEqual(['unchanged', 'stored']);
+    expect((await fullRead(first.externalId)).address_line1).toBe(`${PII_MARKER}3 Auction Way`);
+  });
+
+  it('[AT-10][ORD-4] a website buyer with a deleted eBay ID has a corrected address applied', async () => {
+    const customer = `${PII_MARKER}site-${randomUUID().slice(0, 8)}`;
+    await web.ebayUserMatch({ user_id: customer });
+    const site = randomUUID();
+    await root.query(
+      `INSERT INTO app.channel_accounts (id, workspace_id, company_id, provider, display_name)
+       VALUES ($1, $2, $3, 'website', 'Site 2')`,
+      [site, ws, company],
+    );
+    const siteJob = { workspaceId: ws, channelAccountId: site };
+    const [first] = websiteOrders({ customer: { id: customer } });
+    if (first === undefined) throw new Error('no order');
+    const ready = (await stream().prepare?.(siteJob, [first])) ?? [];
+    await tenancy.runWorkspace({ workspaceId: ws }, (c) => stream().sink(c, site, ready));
+    const [fixed] = websiteOrders({
+      id: first.externalId,
+      updated_at: new Date().toISOString(),
+      customer: { id: customer },
+      shipping_address: {
+        name: `${PII_MARKER}Web Buyer`,
+        line1: `${PII_MARKER}10 Moved Road`,
+        city: 'Testville',
+        postcode: 'TE2 2ND',
+        country: 'GB',
+      },
+    });
+    if (fixed === undefined) throw new Error('no order');
+    expect((await stream().prepare?.(siteJob, [fixed]))?.[0]?.pii).toEqual({ kind: 'replaced' });
+    expect((await fullRead(first.externalId)).address_line1).toBe(`${PII_MARKER}10 Moved Road`);
   });
 
   it('[DEL-1] a record written before the order shipped is corrected when the order is first stored shipped', async () => {
@@ -893,6 +1111,203 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await sweep.prepare(preparing('orders.orphan_sweep', {}))).orphans).toBe(0);
   });
 
+  it('[INV-4][CAP-5][NFR-3] a stock movement waits for one small transaction of a long poll, not for the poll', async () => {
+    const sku = `POLL-${randomUUID().slice(0, 8)}`;
+    const catalogue = new CatalogueRepository(db.db);
+    const inWs = <T>(fn: (c: TenantContext) => Promise<T>) =>
+      tenancy.runWorkspace({ workspaceId: ws }, fn);
+    const at = new Date();
+    const skuId = await inWs((c) =>
+      catalogue.createSku(
+        c,
+        { sku, title: 'Poll', shortDescription: 'p', weightG: 1, vatType: 'standard' },
+        null,
+        at,
+      ),
+    );
+    const listing = {
+      externalSku: sku,
+      externalId: `${sku}-id`,
+      title: null,
+      fulfilment: null,
+      inventoryApi: null,
+      quantity: null,
+    };
+    await inWs((c) => catalogue.upsertDiscovered(c, account, 'ebay', [listing], at));
+    const engine = new StockEngine(db.db, {
+      pushes: { enqueue: (c, input) => new OutboundWriteRepository(db.db).insert(c, input, at) },
+      notifier,
+    });
+    const withStock = new OrderIngest(db.db, {
+      catalogue,
+      stock: engine,
+      ports: orderIngestPorts(
+        { send: () => Promise.resolve({ id: randomUUID(), created: true }) },
+        { notifier, logger },
+      ),
+    });
+    const line = { lineId: 'L1', sku, quantity: 1, title: 'Poll', linePricePence: 100 };
+    const items = Array.from({ length: 75 }, () =>
+      channelOrder({ placedAt: new Date(), lines: [line], buyer: null }),
+    );
+    const base = orderIngestStream({ tenancy, ingest: withStock, vault: worker, logger });
+    const storedThen: number[] = [];
+    let moved: Promise<unknown> | undefined;
+    const unused = () => Promise.reject(new Error('not reached'));
+    const done = await runIncrementalSync<ChannelOrder>(
+      {
+        tenancy,
+        accounts: {
+          get: () => Promise.resolve({ provider: 'ebay', companyId: company, status: 'active' }),
+        },
+        credentials: { read: () => Promise.resolve(new Secret('synthetic')) },
+        cursors: {
+          get: () => Promise.resolve({ cursorAt: null, overlap: [] }),
+          save: () => Promise.resolve(),
+        },
+        health: {
+          recordSuccess: () => Promise.resolve({ reauthCleared: false }),
+          recordAuthFailure: unused,
+          recordError: unused,
+          recordCalls: () => Promise.resolve(),
+        },
+        notifier: { raise: unused, resolve: unused, raisePlatform: unused },
+        tokens: new AccessTokenCache(),
+      },
+      {
+        ...base,
+        stream: 'ebay.orders',
+        provider: 'ebay',
+        api: 'sell.fulfillment',
+        lookbackMs: DAY,
+        authenticate: () =>
+          Promise.resolve({ token: new Secret('t'), expiresAt: new Date(Date.now() + 60_000) }),
+        fetchPage: () => Promise.resolve({ items, next: undefined }),
+        // While the first part is open, someone books stock in on the same SKU.
+        sink: async (ctx, accountId, part) => {
+          await base.sink(ctx, accountId, part);
+          moved ??= inWs(async (c) => {
+            await engine.stockIn(c, skuId, { quantity: 5, clientRef: randomUUID(), userId: null });
+            const { rows } = await root.query<{ n: string }>(
+              'SELECT count(*) AS n FROM app.orders WHERE external_order_id = ANY ($1)',
+              [items.map((o) => o.externalId)],
+            );
+            storedThen.push(Number(rows[0]?.n));
+          });
+        },
+      },
+      job,
+    );
+    expect(done).toMatchObject({ fetched: 75, fresh: 75 });
+    await moved;
+    // It went in between two of them, well before the poll had stored everything.
+    expect(storedThen[0]).toBeGreaterThanOrEqual(25);
+    expect(storedThen[0]).toBeLessThan(75);
+    const { rows } = await root.query<{ on_hand: string; reserved: string }>(
+      'SELECT on_hand, reserved FROM app.stock_levels WHERE master_sku_id = $1',
+      [skuId],
+    );
+    expect(rows).toEqual([{ on_hand: '5', reserved: '75' }]);
+  });
+
+  it('[DEL-1][AT-8] at ingest delivery wins over dispatch, with the workspace window of 25 days', async () => {
+    const dates = { placedAt: daysAgo(20), paidAt: daysAgo(20), updatedAt: daysAgo(1) };
+    const both = channelOrder({
+      ...dates,
+      state: 'delivered',
+      dispatchedAt: daysAgo(18),
+      deliveredAt: daysAgo(10),
+    });
+    const shipped = channelOrder({ ...dates, state: 'dispatched', dispatchedAt: daysAgo(18) });
+    await poll([both, shipped]);
+    const gone = async (o: ChannelOrder) =>
+      (await vaultRows(`${account}:${o.externalId}`))[0]?.delete_after.getTime();
+    expect(await gone(both)).toBe((both.deliveredAt?.getTime() ?? 0) + 25 * DAY);
+    expect(await gone(shipped)).toBe((shipped.dispatchedAt?.getTime() ?? 0) + 25 * DAY);
+    expect((await expiryJob(both.externalId))?.getTime()).toBe(
+      (both.deliveredAt?.getTime() ?? 0) + 25 * DAY,
+    );
+  });
+
+  it('[ORD-4][DEL-1] a record that was stored and then erased is never made again by a later poll', async () => {
+    const o = channelOrder();
+    await poll([o]);
+    const subject = `${account}:${o.externalId}`;
+    const [record] = await vaultRows(subject);
+    await deletion.delete({
+      workspace_id: ws,
+      run_id: randomUUID(),
+      trigger: 'erasure',
+      scope: { type: 'refs', pii_refs: [record?.pii_ref ?? ''] },
+    });
+    // Before db-main knows, and after.
+    expect((await poll([{ ...o, updatedAt: new Date() }]))[0]?.pii).toEqual({ kind: 'unchanged' });
+    expect(await vaultRows(subject)).toEqual([]);
+    await root.query('UPDATE app.orders SET pii_deleted_at = now() WHERE pii_ref = $1', [
+      record?.pii_ref,
+    ]);
+    const later = { ...o, updatedAt: new Date(Date.now() + 1000) };
+    expect((await poll([later]))[0]?.pii).toEqual({ kind: 'unchanged' });
+    expect(await vaultRows(subject)).toEqual([]);
+  });
+
+  it('[ORD-9] an open eBay cancellation request reaches the order as one, and a decided one does not', async () => {
+    const asked = async (cancelState: string | undefined, over: Record<string, unknown> = {}) => {
+      const [o] = ebayOrders({
+        ...shipTo(fullAddress),
+        ...(cancelState === undefined ? {} : { cancelStatus: { cancelState } }),
+        ...over,
+      });
+      if (o === undefined) throw new Error('no order');
+      await poll([o]);
+      const { rows } = await root.query<{ cancel_requested: boolean; status: string }>(
+        'SELECT cancel_requested, status FROM app.orders WHERE external_order_id = $1',
+        [o.externalId],
+      );
+      return [rows[0]?.cancel_requested, rows[0]?.status];
+    };
+    for (const state of ['CANCEL_REQUESTED', 'IN_PROGRESS', 'CANCEL_PENDING']) {
+      expect(await asked(state), state).toEqual([true, 'awaiting_dispatch']);
+    }
+    for (const state of [
+      undefined,
+      'NONE_REQUESTED',
+      'CANCEL_REJECTED',
+      'CANCEL_CLOSED_NO_REFUND',
+    ]) {
+      expect(await asked(state), state).toEqual([false, 'awaiting_dispatch']);
+    }
+    expect(await asked('CANCELED')).toEqual([false, 'cancelled']);
+  });
+
+  it('[ORD-9] repeats of a group recompute collapse into one job that starts after they end', async () => {
+    const queued: { key: string; startAfter: Date | undefined }[] = [];
+    let at = new Date('2026-11-20T10:00:12Z');
+    const ports = orderIngestPorts(
+      {
+        send: (_def, input) => {
+          queued.push({ key: input.idempotencyKey, startAfter: input.startAfter });
+          return Promise.resolve({ id: randomUUID(), created: true });
+        },
+      },
+      { notifier, logger },
+      () => at,
+    );
+    const ctx = { workspaceId: ws, companyIds: [company] };
+    await ports.regroup(ctx, { channelAccountId: account });
+    at = new Date('2026-11-20T10:00:59.999Z');
+    await ports.regroup(ctx, { channelAccountId: account });
+    at = new Date('2026-11-20T10:01:00Z');
+    await ports.regroup(ctx, { channelAccountId: account });
+    await ports.regroup(ctx, { channelAccountId: randomUUID() });
+    const [a, b, c, d] = queued;
+    expect(b).toEqual(a);
+    expect(new Set([a?.key, c?.key, d?.key]).size).toBe(3);
+    // After every change that could share its key has committed.
+    expect(a?.startAfter?.getTime()).toBeGreaterThanOrEqual(Date.parse('2026-11-20T10:01:20Z'));
+    expect(a?.startAfter?.getTime()).toBeLessThanOrEqual(Date.parse('2026-11-20T10:03:00Z'));
+  });
+
   it('[ORD-9][AT-26] the regroup job asks the vault which orders share a buyer and links them (C3.2)', async () => {
     const same = {
       name: `${PII_MARKER}Gus Group`,
@@ -908,7 +1323,25 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     await poll([a, b, other]);
     expect(sent.some((s) => s.type === 'orders.group_recompute')).toBe(true);
     const reads = new OrderReads(db.db);
-    const handler = ordersGroupRecomputeHandler({ tenancy, reads, vault: worker });
+    let calls = 0;
+    const counted = {
+      match: (req: Parameters<VaultClient['match']>[0]) => {
+        calls += 1;
+        return worker.match(req);
+      },
+    };
+    const logRows = async () =>
+      Number(
+        (
+          await piiRoot.query<{ n: string }>(
+            `SELECT count(*) AS n FROM vault.access_log
+              WHERE workspace_id = $1 AND capability = 'match'`,
+            [ws],
+          )
+        ).rows[0]?.n,
+      );
+    const logged = await logRows();
+    const handler = ordersGroupRecomputeHandler({ tenancy, reads, vault: counted });
     const recompute = {
       ...preparing('orders.group_recompute', {}),
       envelope: {
@@ -921,6 +1354,13 @@ describe('order ingest across the PII boundary (T-1001)', () => {
       },
     };
     const classes = await handler.prepare(recompute);
+    // However many orders wait (dozens by now), one call and one access-log row.
+    expect(
+      (await tenancy.runWorkspace({ workspaceId: ws }, (c) => reads.groupCandidates(c, account)))
+        .length,
+    ).toBeGreaterThan(5);
+    expect(calls).toBe(1);
+    expect(await logRows()).toBe(logged + 1);
     // Order subjects only: the vault never hands back a key or a value.
     expect(JSON.stringify(classes)).not.toContain(PII_MARKER);
     await tenancy.runWorkspace({ workspaceId: ws }, (ctx) =>

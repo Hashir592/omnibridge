@@ -43,6 +43,7 @@ import {
   type PublicKeySource,
 } from '@omnibridge/provider-ebay';
 import type { FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import type { RouteHandler } from '../contract.ts';
 
 export interface EbayWebhookOptions {
@@ -80,9 +81,10 @@ export function noticeUser(notification: Record<string, unknown>): {
   noticedAt: string | undefined;
 } {
   const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  // Strict ISO with a zone; anything else counts as now (the vault's default).
   const instant = (v: string | undefined) => {
-    const at = v === undefined ? Number.NaN : Date.parse(v);
-    return Number.isNaN(at) ? undefined : new Date(at).toISOString();
+    const at = z.iso.datetime({ offset: true }).safeParse(v);
+    return at.success ? new Date(at.data).toISOString() : undefined;
   };
   const data = (notification.data ?? {}) as Record<string, unknown>;
   return {

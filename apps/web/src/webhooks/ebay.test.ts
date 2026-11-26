@@ -186,7 +186,19 @@ describe('eBay account deletion endpoint (EBAY-2)', () => {
       { user_id: data.userId, username: data.username, noticed_at: eventDate },
     ]);
     await app.close();
-    for (const bad of [undefined, '', 'soon', 5, '2026-13-45T00:00:00Z']) {
+    // Strict ISO with a zone, or it counts as now: "1" is no year 2000, and year 20000 is refused
+    // by the vault, so that notice could never be accepted.
+    const unreadable = [
+      '1',
+      '20000',
+      '+020000-01-01T00:00:00Z',
+      '2026-11-20',
+      '2026-11-20T10:00:00',
+      '2026-11-20 10:00:00Z',
+      'Fri, 20 Nov 2026 10:00:00 GMT',
+      '2026-02-30T10:00:00Z',
+    ];
+    for (const bad of [undefined, '', 'soon', 5, '2026-13-45T00:00:00Z', ...unreadable]) {
       expect(noticeUser({ ...SAMPLE.message.notification, eventDate: bad }).noticedAt).toBe(
         undefined,
       );

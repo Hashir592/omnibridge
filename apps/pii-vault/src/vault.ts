@@ -16,6 +16,7 @@ import {
   type ExpiryRequest,
   type IngestRequest,
   type MaskResponse,
+  type MatchRequest,
   type MatchResponse,
   type ReadFullResponse,
   type RecordKind,
@@ -88,13 +89,20 @@ const DELIVERY_FIELDS: ReadonlySet<string> = new Set([
   'delivery_instructions',
 ]);
 
-/** A named, unmasked delivery address. A channel masks old buyers' details with stars or dots. */
-function isWholeAddress(fields: ReplaceRequest['fields']): boolean {
+/** A channel masks old buyers' details with stars or dots. */
+const isMasked = (value: string): boolean => /[*\u2022]/.test(value);
+
+/**
+ * What a newer buyer block may write to an order's record (ORD-4): a named delivery address with
+ * no masked part, or nothing at all. A masked email, phone or channel ID is left out, so the one
+ * stored is kept.
+ */
+function usableBlock(fields: Readonly<Record<string, string>>): Record<string, string> | undefined {
+  const given = Object.entries(fields);
   const named = fields.name !== undefined && fields.name.trim() !== '';
-  const masked = [fields.name, fields.address_line1, fields.city, fields.postcode].some(
-    (v) => v !== undefined && /[*\u2022]/.test(v),
-  );
-  return named && !masked && hasDeliveryAddress(fields);
+  const masked = given.some(([field, value]) => DELIVERY_FIELDS.has(field) && isMasked(value));
+  if (!named || masked || !hasDeliveryAddress(fields)) return undefined;
+  return Object.fromEntries(given.filter(([, value]) => !isMasked(value)));
 }
 
 /**
@@ -165,6 +173,7 @@ export class Vault {
 
   readonly #onCanary: (event: CanaryEvent) => void;
   readonly #journal: Journal | undefined;
+  readonly #onVacuumFailed: (errorName: string) => void;
 
   constructor(options: {
     pool: Pool;
@@ -174,12 +183,15 @@ export class Vault {
     onCanary?: (event: CanaryEvent) => void;
     /** Expiry changes are journalled here (ADR-068): the deletion journal's directory. */
     journal?: Journal;
+    /** A VACUUM after a correction failed: the error's name, never its text. The app logs it. */
+    onVacuumFailed?: (errorName: string) => void;
   }) {
     this.#pool = options.pool;
     this.#keyring = options.keyring;
     this.#now = options.now ?? (() => new Date());
     this.#onCanary = options.onCanary ?? (() => undefined);
     this.#journal = options.journal;
+    this.#onVacuumFailed = options.onVacuumFailed ?? (() => undefined);
   }
 
   /** A closed workspace's keys are deleted with it; the cached copies go too. */
@@ -235,13 +247,12 @@ export class Vault {
    * address.
    */
   async replace(req: ReplaceRequest): Promise<{ changed: boolean }> {
-    if (!isWholeAddress(req.fields)) return { changed: false };
     const changed = await this.#tx(req.workspace_id, async (c, tx) => {
       await this.#ingestLocks(c, req.workspace_id, true);
       const keys = await this.#loadKeys(tx, req.workspace_id, false);
       if (keys === undefined) return false;
-      const found = await c.query<{ source_updated_at: Date | null }>(
-        `SELECT source_updated_at FROM vault.records
+      const found = await c.query<{ pii_ref: string; source_updated_at: Date | null }>(
+        `SELECT pii_ref, source_updated_at FROM vault.records
           WHERE workspace_id = $1 AND pii_ref = $2 AND kind = 'buyer_contact'
             AND subject_type = 'order' AND subject_id = $3 AND NOT canary
             AND (delete_after IS NULL OR delete_after > $4)
@@ -249,46 +260,69 @@ export class Vault {
         [req.workspace_id, req.pii_ref, req.subject_id, this.#now()],
       );
       const record = found.rows[0];
-      const at = new Date(req.source_updated_at);
       if (record === undefined) return false;
-      if (record.source_updated_at !== null && record.source_updated_at >= at) return false;
-      await c.query(
-        'UPDATE vault.records SET source_updated_at = $3 WHERE workspace_id = $1 AND pii_ref = $2',
-        [req.workspace_id, req.pii_ref, at],
-      );
-      const old = await this.#decryptFields(c, keys.data, req.workspace_id, req.pii_ref);
-      const next: Record<string, string> = {};
-      for (const [field, value] of Object.entries(old)) {
-        if (!DELIVERY_FIELDS.has(field)) next[field] = value;
-      }
-      for (const [field, value] of Object.entries(req.fields)) next[field] = value;
-      // The buyer as the record would hold it: an ID the channel did not send again still counts.
-      await this.#refuseDeletedBuyer(c, { ...req, fields: next });
-      const names = new Set([...Object.keys(old), ...Object.keys(next)]);
-      const differing = [...names].filter((n) => old[n] !== next[n]);
-      if (differing.length === 0) return false;
-      await c.query(
-        `DELETE FROM vault.record_fields
-          WHERE workspace_id = $1 AND pii_ref = $2 AND field = ANY($3::text[])`,
-        [req.workspace_id, req.pii_ref, differing],
-      );
-      await c.query('DELETE FROM vault.blind_index WHERE workspace_id = $1 AND pii_ref = $2', [
-        req.workspace_id,
-        req.pii_ref,
-      ]);
-      const write = Object.fromEntries(Object.entries(next).filter(([n]) => differing.includes(n)));
-      await this.#writeFields(c, keys, req.workspace_id, req.pii_ref, write);
-      await this.#writeIndex(c, keys, req.workspace_id, req.pii_ref, indexValues(next));
-      return true;
+      return this.#applyNewer(c, keys, req, record);
     });
-    // Invariant 10: the replaced values leave no dead tuple behind. Best effort: the hourly
-    // deletion run and autovacuum clear the same tables, and the values are ciphertext.
-    if (changed) {
-      await this.#pool
-        .query('VACUUM vault.record_fields, vault.blind_index')
-        .catch(() => undefined);
-    }
+    if (changed) await this.#vacuumReplaced();
     return { changed };
+  }
+
+  /**
+   * The one way a newer buyer block reaches a record: for a correction, and for an ingest that
+   * finds the record already there. The caller holds the record's row. Returns whether a value
+   * was written.
+   */
+  async #applyNewer(
+    c: PoolClient,
+    keys: Keys,
+    req: Pick<IngestRequest, 'workspace_id' | 'channel' | 'placed_at' | 'fields'> & {
+      source_updated_at: string;
+    },
+    record: { pii_ref: string; source_updated_at: Date | null },
+  ): Promise<boolean> {
+    const fields = usableBlock(req.fields);
+    if (fields === undefined) return false;
+    const at = new Date(req.source_updated_at);
+    if (record.source_updated_at !== null && record.source_updated_at >= at) return false;
+    const ref = [req.workspace_id, record.pii_ref];
+    await c.query(
+      'UPDATE vault.records SET source_updated_at = $3 WHERE workspace_id = $1 AND pii_ref = $2',
+      [...ref, at],
+    );
+    const old = await this.#decryptFields(c, keys.data, req.workspace_id, record.pii_ref);
+    const next: Record<string, string> = {};
+    for (const [field, value] of Object.entries(old)) {
+      if (!DELIVERY_FIELDS.has(field)) next[field] = value;
+    }
+    Object.assign(next, fields);
+    // The buyer as the record would hold it: an ID the channel did not send again still counts.
+    await this.#refuseDeletedBuyer(c, { ...req, fields: next });
+    const names = new Set([...Object.keys(old), ...Object.keys(next)]);
+    const differing = [...names].filter((n) => old[n] !== next[n]);
+    if (differing.length === 0) return false;
+    await c.query(
+      `DELETE FROM vault.record_fields
+        WHERE workspace_id = $1 AND pii_ref = $2 AND field = ANY($3::text[])`,
+      [...ref, differing],
+    );
+    await c.query('DELETE FROM vault.blind_index WHERE workspace_id = $1 AND pii_ref = $2', ref);
+    const write = Object.fromEntries(Object.entries(next).filter(([n]) => differing.includes(n)));
+    await this.#writeFields(c, keys, req.workspace_id, record.pii_ref, write);
+    await this.#writeIndex(c, keys, req.workspace_id, record.pii_ref, indexValues(next));
+    return true;
+  }
+
+  /**
+   * Invariant 10: replaced values leave no dead tuple behind. A table another VACUUM holds is
+   * skipped, so the caller never waits; a failure is reported by its name. Either way autovacuum
+   * clears the tables later, and the values are ciphertext and MACs.
+   */
+  async #vacuumReplaced(): Promise<void> {
+    try {
+      await this.#pool.query('VACUUM (SKIP_LOCKED) vault.record_fields, vault.blind_index');
+    } catch (err) {
+      this.#onVacuumFailed(err instanceof Error ? err.name : 'unknown');
+    }
   }
 
   /** Deleted-buyer entries past their 180 days go (0011). Run daily; returns how many went. */
@@ -348,7 +382,7 @@ export class Vault {
   async ingest(req: IngestRequest): Promise<{ pii_ref: string }> {
     this.#checkExpiry(req.delete_after);
     const index = indexValues(req.fields);
-    return this.#tx(req.workspace_id, async (c, tx) => {
+    const { pii_ref, changed } = await this.#tx(req.workspace_id, async (c, tx) => {
       const buyer = req.kind === 'buyer_contact';
       await this.#ingestLocks(c, req.workspace_id, buyer);
       if (buyer) await this.#refuseDeletedBuyer(c, req);
@@ -358,63 +392,87 @@ export class Vault {
       if (tx.created === true) await this.#insertCanary(c, req.workspace_id, keys);
       // pii_ref defaults to uuidv7() (PostgreSQL 18): time-ordered, so the key index stays compact.
       // ORD-4 (ADR-079 3): one buyer record per order. A retried or repeated ingest of the same
-      // order finds the record already there and gets its ref back; nothing is added or changed.
+      // order finds the record already there and gets its ref back; nothing is added. A newer
+      // block than the record's is applied to it, as a correction is: if the first store failed
+      // in db-main, the order is new again and nobody would ask for the correction.
       const deleteAfter =
         req.delete_after === undefined
           ? // A backstop until the caller sets the real expiry at dispatch or delivery (DEL-1).
             new Date(this.#now().getTime() + HARD_LIMIT_MS)
           : new Date(req.delete_after);
-      const inserted = await c.query<{ pii_ref: string }>(
-        `INSERT INTO vault.records (workspace_id, kind, channel_account_id, subject_type,
-                                    subject_id, data_key_version, delete_after, created_at,
-                                    source_updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (workspace_id, kind, subject_type, subject_id)
-           WHERE subject_type = 'order' AND NOT canary DO NOTHING
-         RETURNING pii_ref`,
-        [
-          req.workspace_id,
-          req.kind,
-          req.channel_account_id ?? null,
-          req.subject_type,
-          req.subject_id,
-          keys.data.version,
-          deleteAfter,
-          this.#now(),
-          req.source_updated_at ?? null,
-        ],
-      );
-      if (inserted.rows.length === 0) {
-        const existing = await c.query<{ pii_ref: string; delete_after: Date | null }>(
-          `SELECT pii_ref, delete_after FROM vault.records
+      const insert = async () => {
+        const { rows } = await c.query<{ pii_ref: string }>(
+          `INSERT INTO vault.records (workspace_id, kind, channel_account_id, subject_type,
+                                      subject_id, data_key_version, delete_after, created_at,
+                                      source_updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (workspace_id, kind, subject_type, subject_id)
+             WHERE subject_type = 'order' AND NOT canary DO NOTHING
+           RETURNING pii_ref`,
+          [
+            req.workspace_id,
+            req.kind,
+            req.channel_account_id ?? null,
+            req.subject_type,
+            req.subject_id,
+            keys.data.version,
+            deleteAfter,
+            this.#now(),
+            req.source_updated_at ?? null,
+          ],
+        );
+        return rows[0]?.pii_ref;
+      };
+      let piiRef = await insert();
+      if (piiRef === undefined) {
+        const existing = await c.query<{
+          pii_ref: string;
+          delete_after: Date | null;
+          source_updated_at: Date | null;
+        }>(
+          `SELECT pii_ref, delete_after, source_updated_at FROM vault.records
             WHERE workspace_id = $1 AND kind = $2 AND subject_type = $3 AND subject_id = $4
               AND NOT canary
             FOR UPDATE`,
           [req.workspace_id, req.kind, req.subject_type, req.subject_id],
         );
         const record = existing.rows[0];
-        if (record === undefined) throw new Error('order record conflict without a record');
-        // FA-10: the sweep expired it as an orphan, and its order is being stored after all. A live
-        // order never gets a record the next hourly run deletes.
-        if (record.delete_after !== null && record.delete_after <= this.#now()) {
-          await this.#journalExpiry(
-            req.workspace_id,
-            [record.pii_ref],
-            deleteAfter,
-            'stored_again',
-          );
-          await c.query(
-            'UPDATE vault.records SET delete_after = $3 WHERE workspace_id = $1 AND pii_ref = $2',
-            [req.workspace_id, record.pii_ref, deleteAfter],
-          );
+        if (record !== undefined) {
+          // FA-10: the sweep expired it as an orphan, and its order is being stored after all. A
+          // live order never gets a record the next hourly run deletes.
+          if (record.delete_after !== null && record.delete_after <= this.#now()) {
+            await this.#journalExpiry(
+              req.workspace_id,
+              [record.pii_ref],
+              deleteAfter,
+              'stored_again',
+            );
+            await c.query(
+              'UPDATE vault.records SET delete_after = $3 WHERE workspace_id = $1 AND pii_ref = $2',
+              [req.workspace_id, record.pii_ref, deleteAfter],
+            );
+          }
+          const changed =
+            buyer &&
+            req.source_updated_at !== undefined &&
+            (await this.#applyNewer(
+              c,
+              keys,
+              { ...req, source_updated_at: req.source_updated_at },
+              record,
+            ));
+          return { pii_ref: record.pii_ref, changed };
         }
-        return { pii_ref: record.pii_ref };
+        // A deletion run held it and has deleted it since: this is a new record.
+        piiRef = await insert();
       }
-      const piiRef = inserted.rows[0]?.pii_ref ?? '';
+      if (piiRef === undefined) throw new Error('order record conflict without a record');
       await this.#writeFields(c, keys, req.workspace_id, piiRef, req.fields);
       await this.#writeIndex(c, keys, req.workspace_id, piiRef, index);
-      return { pii_ref: piiRef };
+      return { pii_ref: piiRef, changed: false };
     });
+    if (changed) await this.#vacuumReplaced();
+    return { pii_ref };
   }
 
   /**
@@ -691,29 +749,29 @@ export class Vault {
   }
 
   /**
-   * ORD-9, ADR-055: the subject IDs of other records with the same buyer and delivery address on
-   * the same channel account. Never a value, never another channel account's record.
+   * ORD-9, ADR-055: which of these records share a buyer and delivery address, on one channel
+   * account. Subject IDs only, never a value, and never another channel account's record.
    */
-  async match(workspaceId: string, piiRef: string, actor: Actor): Promise<MatchResponse> {
-    return this.#tx(workspaceId, async (c) => {
-      await this.#record(c, workspaceId, piiRef);
-      const res = await c.query<{ subject_id: string }>(
-        `SELECT DISTINCT o.subject_id
+  async match(req: MatchRequest, actor: Actor): Promise<MatchResponse> {
+    return this.#tx(req.workspace_id, async (c, tx) => {
+      // A workspace with no keys holds no records: answer empty and write nothing (F-M04h-04).
+      if ((await this.#loadKeys(tx, req.workspace_id, false)) === undefined) return { groups: [] };
+      const res = await c.query<{ subjects: string[] }>(
+        `SELECT array_agg(DISTINCT r.subject_id ORDER BY r.subject_id) AS subjects
            FROM vault.records r
-           JOIN vault.blind_index rb ON rb.workspace_id = r.workspace_id AND rb.pii_ref = r.pii_ref
-                                    AND rb.field = 'match'
-           JOIN vault.blind_index ob ON ob.workspace_id = r.workspace_id AND ob.field = 'match'
-                                    AND ob.mac = rb.mac AND ob.pii_ref <> r.pii_ref
-           JOIN vault.records o ON o.workspace_id = ob.workspace_id AND o.pii_ref = ob.pii_ref
-          WHERE r.workspace_id = $1 AND r.pii_ref = $2
-            AND o.kind = r.kind AND o.subject_type = r.subject_type
-            AND o.channel_account_id IS NOT DISTINCT FROM r.channel_account_id
-            AND r.channel_account_id IS NOT NULL
-          ORDER BY o.subject_id`,
-        [workspaceId, piiRef],
+           JOIN vault.blind_index b ON b.workspace_id = r.workspace_id AND b.pii_ref = r.pii_ref
+                                   AND b.field = 'match'
+          WHERE r.workspace_id = $1 AND r.channel_account_id = $2
+            AND r.pii_ref = ANY($3::uuid[]) AND NOT r.canary
+          GROUP BY b.mac, r.kind, r.subject_type
+         HAVING count(DISTINCT r.subject_id) > 1
+          ORDER BY 1`,
+        [req.workspace_id, req.channel_account_id, req.pii_refs],
       );
-      await this.#log(c, workspaceId, actor, 'match', 'same_buyer', piiRef, res.rowCount ?? 0);
-      return { subject_ids: res.rows.map((r) => r.subject_id) };
+      const groups = res.rows.map((r) => r.subjects);
+      const count = groups.reduce((n, g) => n + g.length, 0);
+      await this.#log(c, req.workspace_id, actor, 'match', 'same_buyer', null, count);
+      return { groups };
     });
   }
 
@@ -842,6 +900,64 @@ export class Vault {
   async purgeSecurityLogs(): Promise<number> {
     const res = await this.#pool.query<{ n: string }>('SELECT vault.purge_security_logs() AS n');
     return Number(res.rows[0]?.n ?? '0');
+  }
+
+  /**
+   * F-M10-end-15: names and addresses are indexed without their punctuation now, and records from
+   * before T-1002 have no such match key at all. Each record whose name or match key is not the one
+   * its fields give today gets it. Idempotent; one short transaction per workspace. Returns how many
+   * records changed (a count, never a value).
+   */
+  async reindexNames(): Promise<number> {
+    const directory = await this.#pool.query<{ workspace_id: string }>(
+      'SELECT workspace_id FROM vault.workspace_directory ORDER BY workspace_id',
+    );
+    let changed = 0;
+    for (const { workspace_id: workspaceId } of directory.rows) {
+      changed += await this.#tx(workspaceId, async (c, tx) => {
+        const keys = await this.#loadKeys(tx, workspaceId, false);
+        if (keys === undefined) return 0;
+        const records = await c.query<{ pii_ref: string }>(
+          `SELECT pii_ref FROM vault.records
+            WHERE workspace_id = $1 AND kind = 'buyer_contact' AND NOT canary
+            ORDER BY pii_ref FOR UPDATE`,
+          [workspaceId],
+        );
+        let count = 0;
+        for (const { pii_ref: ref } of records.rows) {
+          const { name, match } = indexValues(
+            await this.#decryptFields(c, keys.data, workspaceId, ref),
+          );
+          const want = Object.fromEntries(
+            Object.entries({ name, match }).filter(
+              (e): e is [string, string] => e[1] !== undefined,
+            ),
+          );
+          const had = await c.query<{ field: string; mac: Buffer }>(
+            `SELECT field, mac FROM vault.blind_index
+              WHERE workspace_id = $1 AND pii_ref = $2 AND field IN ('name', 'match')`,
+            [workspaceId, ref],
+          );
+          const same =
+            had.rows.length === Object.keys(want).length &&
+            had.rows.every((r) => {
+              const value = want[r.field];
+              return value !== undefined && keys.index.mac(r.field, value).equals(r.mac);
+            });
+          if (same) continue;
+          await c.query(
+            `DELETE FROM vault.blind_index
+              WHERE workspace_id = $1 AND pii_ref = $2 AND field IN ('name', 'match')`,
+            [workspaceId, ref],
+          );
+          await this.#writeIndex(c, keys, workspaceId, ref, want);
+          count += 1;
+        }
+        return count;
+      });
+    }
+    if (changed > 0) await this.#vacuumReplaced();
+    return changed;
   }
 
   /**

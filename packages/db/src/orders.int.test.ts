@@ -6,6 +6,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CatalogueRepository } from './catalogue.ts';
 import { migrateMain } from './migrate.ts';
+import { OrderReads, type OrderFilter } from './order-reads.ts';
 import { OrderIngest, type IncomingOrder, type OrderIngestPorts } from './orders.ts';
 import { OutboundWriteRepository } from './outbound.ts';
 import type { MainDb } from './schema.ts';
@@ -33,7 +34,8 @@ describe('order ingest (T-1001)', () => {
       return Promise.resolve();
     },
     shortenPii: (_ctx, input) => {
-      calls.push({ op: 'shorten', orderId: input.orderId, detail: input.reason });
+      const detail = input.real === true ? `${input.reason} real` : input.reason;
+      calls.push({ op: 'shorten', orderId: input.orderId, detail });
       return Promise.resolve();
     },
     totalMismatch: (_ctx, input) => {
@@ -44,8 +46,12 @@ describe('order ingest (T-1001)', () => {
       late.push({ listingId: input.listingId, masterSkuId: input.masterSkuId, key: input.key });
       return Promise.resolve();
     },
-    regroup: () => Promise.resolve(),
+    regroup: (_ctx, input) => {
+      regroups.push(input.channelAccountId);
+      return Promise.resolve();
+    },
   };
+  const regroups: string[] = [];
   const late: { listingId: string; masterSkuId: string; key: string }[] = [];
   const oversold: string[] = [];
   let ingest: OrderIngest;
@@ -175,6 +181,7 @@ describe('order ingest (T-1001)', () => {
     channelTotal: null,
     shipToCountry: 'GB',
     fba: false,
+    cancelRequested: false,
     lines: [
       { lineId: 'L1', sku: 'STD-1', quantity: 1, title: 'Standard', linePrice: p(1200) },
       { lineId: 'L2', sku: 'ZERO-1', quantity: 1, title: 'Zero', linePrice: p(600) },
@@ -1038,6 +1045,203 @@ describe('order ingest (T-1001)', () => {
     expect(await level(w, w.zero)).toEqual({ on_hand: '8', reserved: '0' });
   });
 
+  // ---- F-M10-end-10 and -20: one lock order ------------------------------------------------------
+
+  /** The mapping event as the worker runs it: both listeners in one transaction. */
+  const eventTx = (w: World, change: { listingId: string; masterSkuId: string }) =>
+    new Tenancy(db).runWorkspace({ workspaceId: w.ctx.workspaceId }, async (ctx) => {
+      await stock.onListingMapped(ctx, { ...change, previousMasterSkuId: null });
+      return ingest.fillSnapshots(ctx, change.listingId);
+    });
+  /** One page, in a transaction of its own, as the worker stores it. */
+  const pageTx = (w: World, account: string, orders: IncomingOrder[]) =>
+    new Tenancy(db).runWorkspace({ workspaceId: w.ctx.workspaceId }, (ctx) =>
+      ingest.apply(ctx, account, orders),
+    );
+  const failures = async (runs: Promise<unknown>[]) =>
+    (await Promise.allSettled(runs)).flatMap((r) =>
+      r.status === 'rejected' ? [(r.reason as { code?: string }).code ?? String(r.reason)] : [],
+    );
+  const newItem = (over: Partial<IncomingOrder> = {}) =>
+    order({
+      lines: [{ lineId: 'L1', sku: 'NEW-ITEM', quantity: 1, title: null, linePrice: p(1200) }],
+      shipping: p(0),
+      ...over,
+    });
+  /** `orders`, stored, sorted by the id db-main gave them. */
+  const byId = async (w: World, orders: IncomingOrder[]) => {
+    await ingest.apply(w.ctx, w.account, orders);
+    const ids = new Map<string, string>();
+    for (const o of orders) ids.set(o.externalId, String((await orderRow(w, o.externalId))?.id));
+    return [...orders].sort((a, b) =>
+      (ids.get(a.externalId) ?? '') < (ids.get(b.externalId) ?? '') ? -1 : 1,
+    );
+  };
+
+  it('[INV-4][CAT-6] a mapping event and a page never deadlock: four open orders in falling id order', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 8; run += 1) {
+      const w = await world();
+      const open = await byId(
+        w,
+        Array.from({ length: 4 }, () => newItem()),
+      );
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+      const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+      seen.push(
+        ...(await failures([
+          pageTx(w, w.account, [...open].reverse().map(shippedOn)),
+          eventTx(w, change),
+        ])),
+      );
+      expect(await level(w, w.zero)).toEqual({ on_hand: '6', reserved: '0' });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAT-6] a mapping event and a page never deadlock: a new sale, then four open orders in rising id order', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 8; run += 1) {
+      const w = await world();
+      const open = await byId(
+        w,
+        Array.from({ length: 4 }, () => newItem()),
+      );
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+      const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+      seen.push(
+        ...(await failures([
+          pageTx(w, w.account, [newItem(), ...open.map(shippedOn)]),
+          eventTx(w, change),
+        ])),
+      );
+      expect(await level(w, w.zero)).toEqual({ on_hand: '6', reserved: '1' });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAT-6] a mapping event and a page never deadlock: five new sales', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 12; run += 1) {
+      const w = await world();
+      await ingest.apply(w.ctx, w.account, [newItem()]);
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+      const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+      seen.push(
+        ...(await failures([
+          pageTx(
+            w,
+            w.account,
+            Array.from({ length: 5 }, () => newItem()),
+          ),
+          eventTx(w, change),
+        ])),
+      );
+      // A line stored while the event ran is reported by the next page, and then moves too.
+      await eventTx(w, change);
+      expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '6' });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAT-6] a mapping event and a page never deadlock: shipped orders that were never priced', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 8; run += 1) {
+      const w = await world();
+      const all = await byId(
+        w,
+        Array.from({ length: 6 }, () => newItem()),
+      );
+      // Every other one shipped before the mapping; a page touches them all again, falling.
+      await ingest.apply(w.ctx, w.account, all.filter((_, i) => i % 2 === 0).map(shippedOn));
+      await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+      const change = { listingId: w.listings.unmapped, masterSkuId: w.zero };
+      const later = (o: IncomingOrder): IncomingOrder => ({
+        ...o,
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+      });
+      seen.push(
+        ...(await failures([
+          pageTx(
+            w,
+            w.account,
+            [...all].reverse().map((o) => later(shippedOn(o))),
+          ),
+          eventTx(w, change),
+        ])),
+      );
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAP-5] two accounts that sell the same SKUs in opposite order never deadlock', async () => {
+    const seen: string[] = [];
+    for (let run = 0; run < 8; run += 1) {
+      const w = await world();
+      const other = randomUUID();
+      await withTenantTransaction(db, w.ctx, async (trx) => {
+        await trx
+          .insertInto('app.channel_accounts')
+          .values({
+            id: other,
+            workspace_id: w.ctx.workspaceId,
+            company_id: w.company,
+            provider: 'website',
+            display_name: 'site',
+          })
+          .execute();
+        await sql`UPDATE app.channel_accounts SET created_at = '2026-11-01T00:00:00Z'
+                   WHERE id = ${other}::uuid`.execute(trx);
+      });
+      await catalogue.upsertDiscovered(
+        w.ctx,
+        other,
+        'website',
+        ['STD-1', 'ZERO-1'].map((code) => ({
+          externalSku: code,
+          externalId: `${code}-w`,
+          title: null,
+          fulfilment: null,
+          inventoryApi: null,
+          quantity: null,
+        })),
+        clock,
+      );
+      const sale = (sku: string) =>
+        order({
+          lines: [{ lineId: 'L1', sku, quantity: 1, title: null, linePrice: p(1200) }],
+        });
+      seen.push(
+        ...(await failures([
+          pageTx(w, w.account, [sale('STD-1'), sale('STD-1'), sale('ZERO-1')]),
+          pageTx(w, other, [sale('ZERO-1'), sale('ZERO-1'), sale('STD-1')]),
+        ])),
+      );
+      expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '3' });
+      expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '3' });
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('[INV-4][CAP-5] a page that moves no stock never makes a stock movement wait', async () => {
+    const w = await world();
+    const old = {
+      placedAt: new Date('2026-10-20T08:00:00Z'),
+      updatedAt: new Date('2026-10-20T09:00:00Z'),
+    };
+    // History from before the account, and a repeat of an order that is stored already.
+    const known = order();
+    await ingest.apply(w.ctx, w.account, [known]);
+    await new Tenancy(db).runWorkspace({ workspaceId: w.ctx.workspaceId }, async (ctx) => {
+      await ingest.apply(ctx, w.account, [order(old), order(old), known]);
+      const moved = stock
+        .stockIn(w.ctx, w.std, { quantity: 1, clientRef: randomUUID(), userId: null })
+        .then(() => 'moved');
+      const late = new Promise<string>((r) => setTimeout(r, 3000, 'waited'));
+      expect(await Promise.race([moved, late])).toBe('moved');
+    });
+  });
+
   it('[CAT-6] a listing matched while an order was being stored is reported by the next page, once per set of lines', async () => {
     const w = await world();
     const sku = await lateItem(w);
@@ -1130,6 +1334,93 @@ describe('order ingest (T-1001)', () => {
     expect((await orderRow(w, waiting.externalId))?.dispatched_at).toEqual(shown);
   });
 
+  it('[DEL-1][ORD-6][INV-3] the first real dispatch date replaces a stand-in once, and moves nothing else', async () => {
+    const w = await world();
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    const at = (day: number) => new Date(Date.UTC(2026, 10, day, 9));
+    const send = (over: Partial<IncomingOrder>) =>
+      ingest.apply(w.ctx, w.account, [{ ...o, pii: { kind: 'unchanged' }, ...over }]);
+    const state = async () => {
+      const row = await orderRow(w, o.externalId);
+      return {
+        at: row?.dispatched_at,
+        estimated: row?.dispatch_estimated,
+        shortened: calls
+          .filter((c) => c.op === 'shorten' && c.orderId === row?.id)
+          .map((c) => c.detail),
+      };
+    };
+    expect(await state()).toEqual({ at: null, estimated: false, shortened: [] });
+    await send({ state: 'dispatched', updatedAt: at(14) });
+    expect(await state()).toEqual({ at: at(14), estimated: true, shortened: ['dispatch'] });
+    const row = await orderRow(w, o.externalId);
+    const before = { moves: await movements(w, row?.id), vat: await ledger(w, row?.id) };
+    const levels = [await level(w, w.std), await level(w, w.zero)];
+    // Another update with no real date changes nothing.
+    await send({ state: 'dispatched', updatedAt: at(15) });
+    expect(await state()).toEqual({ at: at(14), estimated: true, shortened: ['dispatch'] });
+    await send({ state: 'dispatched', updatedAt: at(16), dispatchedAt: at(12) });
+    const real = { at: at(12), estimated: false, shortened: ['dispatch', 'dispatch real'] };
+    expect(await state()).toEqual(real);
+    // A second real date, earlier or later, changes nothing, and neither does a repeat.
+    for (const day of [12, 11, 13]) {
+      await send({ state: 'dispatched', updatedAt: at(17 + day), dispatchedAt: at(day) });
+    }
+    expect(await state()).toEqual(real);
+    expect(await movements(w, row?.id)).toEqual(before.moves);
+    expect(await ledger(w, row?.id)).toEqual(before.vat);
+    expect([await level(w, w.std), await level(w, w.zero)]).toEqual(levels);
+  });
+
+  it('[DEL-1][ORD-6] a stand-in is marked as one, however it was found; a real date never is', async () => {
+    const w = await world();
+    const day = new Date('2026-11-12T09:00:00Z');
+    const marked = async (o: IncomingOrder) => {
+      await ingest.apply(w.ctx, w.account, [o]);
+      return (await orderRow(w, o.externalId))?.dispatch_estimated;
+    };
+    expect(await marked(order())).toBe(false);
+    expect(await marked(order({ state: 'dispatched' }))).toBe(true);
+    expect(await marked(order({ state: 'dispatched', dispatchedAt: day }))).toBe(false);
+    // A delivery time says when it arrived, not when it left.
+    expect(await marked(order({ state: 'delivered', deliveredAt: day }))).toBe(true);
+    expect(await marked(order({ state: 'delivered', deliveredAt: day, dispatchedAt: day }))).toBe(
+      false,
+    );
+    // Seen waiting, then shipped with a real date at once.
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    expect(await marked({ ...o, state: 'dispatched', dispatchedAt: day, updatedAt: day })).toBe(
+      false,
+    );
+  });
+
+  it('[DEL-1] a real dispatch date moves no expiry of a record that is gone, or once delivery is known', async () => {
+    const w = await world();
+    const day = new Date('2026-11-12T09:00:00Z');
+    const later = new Date('2026-11-13T09:00:00Z');
+    const shown = { state: 'dispatched' as const, updatedAt: day };
+    const gone = order({ state: 'dispatched', pii: { kind: 'refused' } });
+    const none = order({ state: 'dispatched', pii: { kind: 'none' } });
+    const delivered = order({ state: 'delivered', deliveredAt: day });
+    await ingest.apply(w.ctx, w.account, [gone, none, delivered]);
+    calls.length = 0;
+    await ingest.apply(
+      w.ctx,
+      w.account,
+      [gone, none, delivered].map((o) => ({
+        ...o,
+        ...shown,
+        pii: { kind: 'unchanged' as const },
+        updatedAt: later,
+        dispatchedAt: day,
+      })),
+    );
+    expect(calls.filter((c) => c.op === 'shorten')).toEqual([]);
+    expect((await orderRow(w, gone.externalId))?.dispatched_at).toEqual(day);
+  });
+
   it('[DEL-1] a record that arrives after the order shipped has its expiry moved too', async () => {
     const w = await world();
     const o = order({ state: 'dispatched', pii: { kind: 'none' } });
@@ -1157,6 +1448,878 @@ describe('order ingest (T-1001)', () => {
         column,
       ).rejects.toThrow(/never change/);
     }
+  });
+
+  // ---- F-M10-end-05 (ADR-081 1 to 3): amounts follow the channel until payment, never after ------
+
+  const pending = (over: Partial<IncomingOrder> = {}): IncomingOrder =>
+    order({
+      state: 'pending_payment',
+      rawStatus: 'NOT_STARTED/PENDING',
+      paidAt: null,
+      pii: { kind: 'none' },
+      lines: [{ lineId: 'L1', sku: 'STD-1', quantity: 1, title: 'Standard', linePrice: p(1200) }],
+      shipping: p(600),
+      ...over,
+    });
+  /** The same order, `n` hours later. */
+  const next = (o: IncomingOrder, n: number, over: Partial<IncomingOrder> = {}): IncomingOrder => ({
+    ...o,
+    updatedAt: new Date(o.updatedAt.getTime() + n * 3_600_000),
+    ...over,
+  });
+  const paid = {
+    state: 'awaiting_dispatch' as const,
+    rawStatus: 'NOT_STARTED/PAID',
+    paidAt: new Date('2026-11-10T11:00:00.000Z'),
+  };
+  const lineRows = (w: World, orderId: unknown, live = true) =>
+    q<{
+      id: string;
+      line_no: string;
+      external_line_id: string;
+      external_sku: string;
+      quantity: string;
+      unit_gross_pence: string;
+      line_gross_pence: string;
+      discount_pence: string;
+      shipping_pence: string;
+      vat_pence: string;
+      vat_type: string | null;
+      cogs_pence: string | null;
+    }>(
+      w,
+      sql`SELECT id, line_no, external_line_id, external_sku, quantity, unit_gross_pence,
+                 line_gross_pence, discount_pence, shipping_pence, vat_pence, vat_type, cogs_pence
+            FROM app.order_lines
+           WHERE order_id = ${String(orderId)}::uuid AND (removed_at IS NULL) = ${live}
+           ORDER BY line_no`,
+    );
+  const notices = (orderId: unknown) =>
+    calls.filter((c) => c.op === 'total' && c.orderId === orderId).length;
+  const line = (
+    lineId: string,
+    sku: string,
+    quantity: number,
+    price: bigint,
+  ): IncomingOrder['lines'][number] => ({
+    lineId,
+    sku,
+    quantity,
+    title: null,
+    linePrice: pence(price),
+  });
+
+  it('[VAT-3][VAT-6] the update that captures payment sets discount, shipping and gross, then books the VAT', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1800',
+      vat_pence: '300',
+    });
+    const first = await lineRows(w, (await orderRow(w, o.externalId))?.id);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 1, { ...paid, shipping: p(300), discount: p(120) }),
+    ]);
+    const row = await orderRow(w, o.externalId);
+    expect(row).toMatchObject({
+      goods_pence: '1200',
+      discount_pence: '120',
+      shipping_pence: '300',
+      gross_pence: '1380',
+      vat_pence: '230',
+      amounts_differ: [],
+    });
+    expect(await lineRows(w, row?.id)).toEqual([
+      { ...first[0], discount_pence: '120', shipping_pence: '300', vat_pence: '230' },
+    ]);
+    expect(await totals(w, row?.id)).toEqual([
+      { group_key: 'rate:2000', gross: '1380', vat: '230' },
+    ]);
+  });
+
+  it('[VAT-3][FIN-1] before payment a new price replaces the line price in place; an older or repeated update changes nothing', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 2, 2400n), line('L2', 'ZERO-1', 1, 600n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    const before = await lineRows(w, id);
+    const cheaper = next(o, 2, {
+      lines: [line('L1', 'STD-1', 2, 1800n), line('L2', 'ZERO-1', 1, 600n)],
+    });
+    await ingest.apply(w.ctx, w.account, [cheaper]);
+    const after = await lineRows(w, id);
+    expect(after.map((l) => l.id)).toEqual(before.map((l) => l.id));
+    expect(after.map((l) => [l.unit_gross_pence, l.line_gross_pence])).toEqual([
+      ['900', '1800'],
+      ['600', '600'],
+    ]);
+    const stored = await orderRow(w, o.externalId);
+    // 1800 + 450 of the shipping at 20%; 600 + 150 at 0%.
+    expect(stored).toMatchObject({ goods_pence: '2400', gross_pence: '3000', vat_pence: '375' });
+    expect(after.map((l) => [l.shipping_pence, l.vat_pence])).toEqual([
+      ['450', '375'],
+      ['150', '0'],
+    ]);
+    // Older, and the same time with other amounts.
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { shipping: p(0) })]);
+    await ingest.apply(w.ctx, w.account, [{ ...cheaper, shipping: p(0) }]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({ gross_pence: '3000' });
+    expect(await lineRows(w, id)).toEqual(after);
+    expect(notices(id)).toBe(0);
+    expect(await ledger(w, id)).toEqual([]);
+  });
+
+  it('[INV-3][FIN-1] before payment an update that carries no lines keeps the stored lines, their stock and the amounts', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 2, 2400n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const stored = await orderRow(w, o.externalId);
+    const before = await lineRows(w, stored?.id);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '2' });
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [] })]);
+    expect(await lineRows(w, stored?.id)).toEqual(before);
+    expect(await lineRows(w, stored?.id, false)).toEqual([]);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '2' });
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      goods_pence: stored?.goods_pence,
+      gross_pence: stored?.gross_pence,
+    });
+  });
+
+  it('[INV-3][VAT-3][FIN-1] before payment a changed, dropped or added line closes the old one and takes its own stock', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 2, 1200n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    const [first, second] = await lineRows(w, id);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '2' });
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 1, { lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 5, 3000n)] }),
+    ]);
+    let live = await lineRows(w, id);
+    expect(live.map((l) => [l.external_line_id, l.quantity, l.line_no, l.vat_type])).toEqual([
+      ['L1', '1', '1', 'standard'],
+      ['L2', '5', '3', 'zero'],
+    ]);
+    expect(live[0]?.id).toBe(first?.id);
+    expect((await lineRows(w, id, false)).map((l) => [l.id, l.quantity])).toEqual([
+      [second?.id, '2'],
+    ]);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '5' });
+    // Another SKU under the same line ID, the second line dropped, a third added.
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { lines: [line('L1', 'ZERO-1', 1, 600n), line('L3', 'STD-1', 3, 3600n)] }),
+    ]);
+    live = await lineRows(w, id);
+    expect(live.map((l) => [l.external_line_id, l.external_sku, l.quantity])).toEqual([
+      ['L1', 'ZERO-1', '1'],
+      ['L3', 'STD-1', '3'],
+    ]);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '1' });
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '3' });
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      goods_pence: '4200',
+      gross_pence: '4800',
+    });
+    // A dropped line that comes back is a new line; then everything ships once.
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 3, {
+        ...paid,
+        lines: [line('L1', 'ZERO-1', 1, 600n), line('L2', 'ZERO-1', 2, 1200n)],
+      }),
+    ]);
+    expect((await lineRows(w, id)).map((l) => l.external_line_id)).toEqual(['L1', 'L2']);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '3' });
+    expect(await totals(w, id)).toEqual([{ group_key: 'zero:zero', gross: '2400', vat: '0' }]);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 4, { ...paid, state: 'dispatched', lines: [], dispatchedAt: clock }),
+    ]);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '7', reserved: '0' });
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+  });
+
+  it('[VAT-7][AT-6] a line added before payment takes the snapshot of the placed date', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await catalogue.setCogs(w.ctx, w.zero, p(999), '2026-11-11', null, clock);
+    const was = clock;
+    clock = new Date('2026-11-13T12:00:00.000Z');
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 30, {
+        lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 1, 600n)],
+      }),
+    ]);
+    clock = was;
+    const rows = await lineRows(w, (await orderRow(w, o.externalId))?.id);
+    expect(rows.map((l) => l.cogs_pence)).toEqual(['400', '200']);
+  });
+
+  it('[ORD-1][ORD-2][ORD-6] a closed line is in no total, list, search or detail', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 2, 1200n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [line('L1', 'STD-1', 1, 1200n)] })]);
+    const reads = new OrderReads(db, { now: () => clock });
+    const page = (f: OrderFilter) => reads.list(w.ctx, f, { offset: 0, limit: 10 }, 100);
+    const { items } = await page({});
+    expect(items.map((r) => [r.skus, r.itemCount, r.grossPence])).toEqual([[['STD-1'], 1, 1800n]]);
+    expect((await page({ q: 'ZERO-1' })).items).toEqual([]);
+    expect((await page({ q: 'STD-1' })).items).toHaveLength(1);
+    const detail = await reads.detail(w.ctx, items[0]?.id ?? '');
+    expect(detail?.lines.map((l) => l.sku)).toEqual(['STD-1']);
+    expect(detail?.money).toMatchObject({ goodsPence: 1200n, grossPence: 1800n, vatPence: 300n });
+    expect(detail?.money.vatGroups.map((g) => g.key)).toEqual(['rate:2000']);
+  });
+
+  it('[CAT-6][VAT-2] a closed line is never linked, reported, back-filled or filled', async () => {
+    const w = await world();
+    const o = pending({
+      lines: [line('L1', 'NEW-ITEM', 1, 1200n), line('L2', 'LATER-ITEM', 1, 600n)],
+      shipping: p(0),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    expect((await orderRow(w, o.externalId))?.unmapped).toBe(true);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [line('L3', 'STD-1', 1, 1200n)] })]);
+    expect((await orderRow(w, o.externalId))?.unmapped).toBe(false);
+    const closed = await lineRows(w, id, false);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    late.length = 0;
+    expect(await ingest.reportLateMapped(w.ctx, w.account)).toBe(0);
+    expect(await mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero })).toEqual({
+      filled: 0,
+    });
+    expect(await lineRows(w, id, false)).toEqual(closed);
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '0' });
+    expect(await ingest.openLines(w.ctx, w.listings.unmapped)).toEqual([]);
+  });
+
+  it('[INV-6][ORD-1] the Oversold flag goes when its line is closed, and comes with the new one', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 50, 60000n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    expect((await orderRow(w, o.externalId))?.oversold).toBe(true);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [line('L1', 'STD-1', 5, 6000n)] })]);
+    expect((await orderRow(w, o.externalId))?.oversold).toBe(false);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { lines: [line('L1', 'STD-1', 40, 48000n)] }),
+    ]);
+    expect((await orderRow(w, o.externalId))?.oversold).toBe(true);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '40' });
+  });
+
+  it('[FIN-1][VAT-6][ORD-6] after payment a different total or line set changes nothing: one mark and one notice', async () => {
+    const w = await world();
+    const o = pending({ ...paid });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const frozen = async () => {
+      const row = await orderRow(w, o.externalId);
+      const moving = ['amounts_differ', 'source_updated_at', 'updated_at'];
+      const rest = Object.fromEntries(
+        Object.entries(row ?? {}).filter(([k]) => !moving.includes(k)),
+      );
+      const differ = row?.amounts_differ;
+      return {
+        differ,
+        rest,
+        lines: await lineRows(w, row?.id),
+        closed: await lineRows(w, row?.id, false),
+        vat: await ledger(w, row?.id),
+        stock: await level(w, w.std),
+      };
+    };
+    const id = (await orderRow(w, o.externalId))?.id;
+    const was = await frozen();
+    expect(was.differ).toEqual([]);
+    const changes: Partial<IncomingOrder>[] = [
+      { shipping: p(500) },
+      { discount: p(10) },
+      { lines: [line('L1', 'STD-1', 1, 1100n)] },
+      { lines: [line('L1', 'STD-1', 2, 1200n)] },
+      { lines: [line('L1', 'ZERO-1', 1, 1200n)] },
+      { lines: [line('L9', 'STD-1', 1, 1200n)] },
+      { lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 1, 0n)] },
+      { lines: [] },
+    ];
+    for (const [i, change] of changes.entries()) {
+      await ingest.apply(w.ctx, w.account, [next(o, 2 * i + 1, change)]);
+      expect(await frozen(), JSON.stringify(Object.keys(change))).toEqual({
+        ...was,
+        differ: ['late_change'],
+      });
+      expect(notices(id)).toBe(i + 1);
+      // A repeat of the difference is not a second notice; the stored amounts again clear the mark.
+      await ingest.apply(w.ctx, w.account, [next(o, 2 * i + 1.5, change)]);
+      expect(notices(id)).toBe(i + 1);
+      await ingest.apply(w.ctx, w.account, [next(o, 2 * i + 2)]);
+      expect((await frozen()).differ).toEqual([]);
+    }
+    // An older update says nothing about the order now.
+    await ingest.apply(w.ctx, w.account, [next(o, 0.5, { shipping: p(1) })]);
+    expect((await frozen()).differ).toEqual([]);
+  });
+
+  it('[FIN-1][VAT-6] an order cancelled unpaid is frozen too', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { state: 'cancelled', cancelledAt: clock })]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { state: 'cancelled', lines: [line('L1', 'STD-1', 3, 3600n)] }),
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1800',
+      amounts_differ: ['late_change'],
+      status: 'cancelled',
+    });
+    expect((await lineRows(w, id)).map((l) => l.quantity)).toEqual(['1']);
+    expect(notices(id)).toBe(1);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+    expect(await ledger(w, id)).toEqual([]);
+  });
+
+  it('[INV-3] an update that cancels an unpaid order with other lines leaves no stock reserved', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 1, {
+        state: 'cancelled',
+        cancelledAt: clock,
+        lines: [line('L1', 'STD-1', 4, 4800n), line('L2', 'ZERO-1', 1, 600n)],
+      }),
+    ]);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '0' });
+  });
+
+  it('[INV-3][FIN-1] an unpaid order that has shipped keeps its lines: other lines are only marked', async () => {
+    const w = await world();
+    const o = pending();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 1, { state: 'dispatched', dispatchedAt: clock, shipping: p(100) }),
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({ gross_pence: '1300' });
+    const id = (await orderRow(w, o.externalId))?.id;
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { state: 'dispatched', lines: [line('L1', 'STD-1', 4, 4800n)] }),
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1300',
+      amounts_differ: ['late_change'],
+    });
+    expect((await lineRows(w, id)).map((l) => l.quantity)).toEqual(['1']);
+    expect(await level(w, w.std)).toEqual({ on_hand: '9', reserved: '0' });
+    // A new price is still taken, and the mark goes with it.
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 3, { state: 'dispatched', lines: [line('L1', 'STD-1', 1, 900n)], shipping: p(100) }),
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1000',
+      amounts_differ: [],
+    });
+  });
+
+  it('[FIN-1][ORD-6] pence that differ from the channel total are marked until a newer update adds up', async () => {
+    const w = await world();
+    const o = pending({ channelTotal: p(1700) });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    const differ = async () => (await orderRow(w, o.externalId))?.amounts_differ;
+    expect(await differ()).toEqual(['channel_total']);
+    expect(notices(id)).toBe(1);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { channelTotal: p(1750) })]);
+    expect(await differ()).toEqual(['channel_total']);
+    expect(notices(id)).toBe(1);
+    await ingest.apply(w.ctx, w.account, [next(o, 2, { channelTotal: p(1800) })]);
+    expect(await differ()).toEqual([]);
+    await ingest.apply(w.ctx, w.account, [next(o, 3, { ...paid, channelTotal: p(1790) })]);
+    expect(await differ()).toEqual(['channel_total']);
+    expect(notices(id)).toBe(2);
+    // Fixed now: a channel total that differs from the stored gross is a late change.
+    const fixed = order({ channelTotal: p(2100) });
+    await ingest.apply(w.ctx, w.account, [fixed]);
+    expect((await orderRow(w, fixed.externalId))?.amounts_differ).toEqual([]);
+    await ingest.apply(w.ctx, w.account, [next(fixed, 1, { channelTotal: p(2000) })]);
+    expect((await orderRow(w, fixed.externalId))?.amounts_differ).toEqual(['late_change']);
+    const reads = new OrderReads(db, { now: () => clock });
+    expect((await reads.detail(w.ctx, String(id)))?.money.amountsDiffer).toEqual(['channel_total']);
+  });
+
+  it('[VAT-5][FIN-1] a refund above what is left keeps its amount, books VAT up to what is left, and marks the order', async () => {
+    const w = await world();
+    const o = order({
+      lines: [line('L1', 'STD-1', 1, 1200n)],
+      shipping: p(0),
+      state: 'dispatched',
+      dispatchedAt: new Date('2026-11-10T10:00:00Z'),
+    });
+    const refund = (refundId: string, amount: bigint) => ({
+      refundId,
+      refundedAt: new Date('2026-11-12T09:00:00Z'),
+      amount: pence(amount),
+      lines: null,
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { refunds: [refund('R1', 1200n)] })]);
+    expect((await orderRow(w, o.externalId))?.amounts_differ).toEqual([]);
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2, { refunds: [refund('R1', 1200n), refund('R2', 300n)] }),
+    ]);
+    const row = await orderRow(w, o.externalId);
+    expect(row?.amounts_differ).toEqual(['refund_above']);
+    expect(await totals(w, row?.id)).toEqual([{ group_key: 'rate:2000', gross: '0', vat: '0' }]);
+    expect(
+      await q(
+        w,
+        sql<object>`SELECT amount_pence, vat_pence FROM app.refunds
+                     WHERE order_id = ${String(row?.id)}::uuid ORDER BY amount_pence`,
+      ),
+    ).toEqual([
+      { amount_pence: '300', vat_pence: '0' },
+      { amount_pence: '1200', vat_pence: '200' },
+    ]);
+    // The mark stays with the refund, whatever later updates say.
+    await ingest.apply(w.ctx, w.account, [next(o, 3, { refunds: [] })]);
+    expect((await orderRow(w, o.externalId))?.amounts_differ).toEqual(['refund_above']);
+    expect(notices(row?.id)).toBe(0);
+  });
+
+  it('[FIN-1][VAT-6] the database fixes amounts and lines at payment or an unpaid cancellation, and not before', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 1, 600n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = String((await orderRow(w, o.externalId))?.id);
+    const run = (query: ReturnType<typeof sql<object>>) => q(w, query);
+    const one = sql`WHERE order_id = ${id}::uuid AND external_line_id = 'L1'`;
+    // Open: amounts, prices and closing are free; identity, SKU and quantity never are.
+    await run(sql`UPDATE app.orders SET gross_pence = gross_pence + 1 WHERE id = ${id}::uuid`);
+    await run(
+      sql`UPDATE app.order_lines SET line_gross_pence = 1201, unit_gross_pence = 1201 ${one}`,
+    );
+    const never = [
+      sql<object>`UPDATE app.order_lines SET quantity = 2 ${one}`,
+      sql<object>`UPDATE app.order_lines SET external_sku = 'OTHER' ${one}`,
+      sql<object>`UPDATE app.order_lines SET external_line_id = 'L7' ${one}`,
+      sql<object>`UPDATE app.order_lines SET line_no = 7 ${one}`,
+    ];
+    for (const query of never) await expect(run(query)).rejects.toThrow(/write-once/);
+    await run(sql`UPDATE app.order_lines SET removed_at = now()
+                   WHERE order_id = ${id}::uuid AND external_line_id = 'L2'`);
+    const closed = [
+      sql<object>`UPDATE app.order_lines SET removed_at = NULL WHERE external_line_id = 'L2'`,
+      sql<object>`UPDATE app.order_lines SET removed_at = now() + interval '1 day' WHERE external_line_id = 'L2'`,
+      sql<object>`UPDATE app.order_lines SET line_gross_pence = 1 WHERE external_line_id = 'L2'`,
+      sql<object>`UPDATE app.order_lines SET vat_pence = 1 WHERE external_line_id = 'L2'`,
+    ];
+    for (const query of closed) await expect(run(query)).rejects.toThrow(/write-once/);
+    const insert = sql<object>`
+      INSERT INTO app.order_lines (workspace_id, id, company_id, order_id, line_no, external_line_id,
+        quantity, unit_gross_pence, line_gross_pence, provisional_rate_bp, stored_unmapped, created_at)
+      SELECT workspace_id, gen_random_uuid(), company_id, id, 9, 'L9', 1, 1, 1, 2000, true, now()
+        FROM app.orders WHERE id = ${id}::uuid`;
+    const frozen = async () => {
+      for (const column of ['goods_pence', 'discount_pence', 'shipping_pence', 'gross_pence']) {
+        await expect(
+          run(sql<object>`UPDATE app.orders SET ${sql.ref(column)} = 1 WHERE id = ${id}::uuid`),
+          column,
+        ).rejects.toThrow(/never change/);
+      }
+      for (const change of ['line_gross_pence = 1', 'unit_gross_pence = 1', 'removed_at = now()']) {
+        await expect(
+          run(sql<object>`UPDATE app.order_lines SET ${sql.raw(change)} ${one}`),
+          change,
+        ).rejects.toThrow(/write-once/);
+      }
+      await expect(run(insert), 'insert').rejects.toThrow(/write-once/);
+    };
+    // Payment recorded: fixed for good, and it can never be unrecorded.
+    await run(sql`UPDATE app.orders SET vat_recorded_at = now() WHERE id = ${id}::uuid`);
+    await frozen();
+    await expect(
+      run(sql<object>`UPDATE app.orders SET vat_recorded_at = NULL WHERE id = ${id}::uuid`),
+    ).rejects.toThrow(/never change/);
+    const c = pending();
+    await ingest.apply(w.ctx, w.account, [c, next(c, 1, { state: 'cancelled' })]);
+    const cancelled = String((await orderRow(w, c.externalId))?.id);
+    await expect(
+      run(sql<object>`UPDATE app.orders SET gross_pence = 1 WHERE id = ${cancelled}::uuid`),
+    ).rejects.toThrow(/never change/);
+    await expect(
+      run(
+        sql<object>`UPDATE app.order_lines SET line_gross_pence = 1 WHERE order_id = ${cancelled}::uuid`,
+      ),
+    ).rejects.toThrow(/write-once/);
+  });
+
+  it('[ORD-9] a group recompute is asked for only when an order enters or leaves the ones that can group', async () => {
+    const w = await world();
+    const asked = async (...orders: IncomingOrder[]) => {
+      regroups.length = 0;
+      await ingest.apply(w.ctx, w.account, orders);
+      return regroups.length;
+    };
+    const ref = { kind: 'stored' as const, piiRef: randomUUID() };
+    const o = order();
+    // One per call, however many new orders it stores.
+    expect(await asked(o, order())).toBe(1);
+    expect(await asked(next(o, 1, { pii: { kind: 'unchanged' } }))).toBe(0);
+    expect(await asked(next(o, 2, { pii: { kind: 'unchanged' }, rawStatus: 'OTHER' }))).toBe(0);
+    // The buyer's record was corrected.
+    expect(await asked(next(o, 3, { pii: { kind: 'replaced' } }))).toBe(1);
+    const gone = { state: 'dispatched' as const, dispatchedAt: clock };
+    expect(await asked(next(o, 4, { ...gone, pii: { kind: 'unchanged' } }))).toBe(1);
+    expect(await asked(next(o, 5, { ...gone, pii: { kind: 'replaced' } }))).toBe(0);
+    // First seen shipped, unpaid or without a buyer record: in no group, now or before.
+    expect(await asked(order(gone), pending(), order({ pii: { kind: 'none' } }))).toBe(0);
+    // Paid, then its record comes, then cancelled.
+    const late = pending();
+    await ingest.apply(w.ctx, w.account, [late]);
+    expect(await asked(next(late, 1, paid))).toBe(0);
+    expect(await asked(next(late, 2, { ...paid, pii: ref }))).toBe(1);
+    expect(await asked(next(late, 3, { ...paid, state: 'cancelled' }))).toBe(1);
+    // An FBA order is never grouped.
+    expect(await asked(order({ fba: true }))).toBe(0);
+  });
+
+  // ---- F-M10-end-11: what the ingest must keep doing ---------------------------------------------
+
+  it('[VAT-1][VAT-5] the tax point of a sale and of a refund is the London day, not the UTC one', async () => {
+    const w = await world();
+    const placedAt = new Date('2026-06-30T23:30:00Z');
+    const o = order({
+      placedAt,
+      paidAt: placedAt,
+      updatedAt: placedAt,
+      lines: [line('L1', 'STD-1', 1, 1200n)],
+      shipping: p(0),
+      state: 'dispatched',
+      dispatchedAt: placedAt,
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        updatedAt: new Date('2026-08-01T00:00:00Z'),
+        refunds: [
+          {
+            refundId: 'R1',
+            refundedAt: new Date('2026-07-31T23:30:00Z'),
+            amount: p(600),
+            lines: null,
+          },
+        ],
+      },
+    ]);
+    const row = await orderRow(w, o.externalId);
+    expect(
+      (await ledger(w, row?.id)).map((r) => [r.kind, r.tax_point_date, r.period_date]),
+    ).toEqual([
+      ['sale', '2026-07-01', '2026-07-01'],
+      ['refund', '2026-08-01', '2026-08-01'],
+    ]);
+    const days = await q<{ o: string; r: string }>(
+      w,
+      sql`SELECT to_char(o.tax_point_date, 'YYYY-MM-DD') AS o, to_char(r.tax_point_date, 'YYYY-MM-DD') AS r
+            FROM app.orders o JOIN app.refunds r ON r.order_id = o.id
+           WHERE o.id = ${String(row?.id)}::uuid`,
+    );
+    expect(days).toEqual([{ o: '2026-07-01', r: '2026-08-01' }]);
+  });
+
+  it('[VAT-7][AT-6] an order stored after a COGS or VAT-type change takes the values of its own day, mapped now or later', async () => {
+    const w = await world();
+    const early = order({
+      lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'NEW-ITEM', 1, 600n)],
+      shipping: p(0),
+    });
+    for (const sku of [w.std, w.zero]) {
+      await catalogue.setCogs(w.ctx, sku, p(999), '2026-11-12', null, clock);
+      await catalogue.updateSku(
+        w.ctx,
+        sku,
+        { vat: { vatType: 'reduced', effectiveFrom: '2026-11-12' } },
+        null,
+        clock,
+      );
+    }
+    // Stored, and mapped, after the change.
+    const was = clock;
+    clock = new Date('2026-11-13T12:00:00.000Z');
+    await ingest.apply(w.ctx, w.account, [early]);
+    const id = (await orderRow(w, early.externalId))?.id;
+    const snaps = async () =>
+      (await lineRows(w, id)).map((l) => [l.external_sku, l.vat_type, l.cogs_pence]);
+    expect(await snaps()).toEqual([
+      ['STD-1', 'standard', '400'],
+      ['NEW-ITEM', null, null],
+    ]);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    expect(await mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero })).toEqual({
+      filled: 1,
+    });
+    expect(await snaps()).toEqual([
+      ['STD-1', 'standard', '400'],
+      ['NEW-ITEM', 'zero', '200'],
+    ]);
+    clock = was;
+  });
+
+  it('[VAT-3][CAT-6] a late mapping shares discount, shipping and VAT between the lines again', async () => {
+    const w = await world();
+    const o = order({
+      lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'NEW-ITEM', 1, 600n)],
+      shipping: p(300),
+      discount: p(90),
+    });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = (await orderRow(w, o.externalId))?.id;
+    const shares = async () =>
+      (await lineRows(w, id)).map((l) => [l.discount_pence, l.shipping_pence, l.vat_pence]);
+    // One group at 20%: 2010 gross, 335 VAT.
+    expect(await shares()).toEqual([
+      ['60', '200', '223'],
+      ['30', '100', '112'],
+    ]);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    await mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero });
+    expect(await shares()).toEqual([
+      ['60', '200', '223'],
+      ['30', '100', '0'],
+    ]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      vat_pence: '223',
+      gross_pence: '2010',
+    });
+    expect(await totals(w, id)).toEqual([
+      { group_key: 'rate:2000', gross: '1340', vat: '223' },
+      { group_key: 'zero:zero', gross: '670', vat: '0' },
+    ]);
+  });
+
+  it('[VAT-2] an unmapped line counts at the workspace own default rate', async () => {
+    const w = await world();
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      sql`UPDATE app.workspaces SET default_vat_rate_bp = 500`.execute(trx),
+    );
+    const o = order({ lines: [line('L1', 'NEW-ITEM', 1, 1050n)], shipping: p(0) });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const row = await orderRow(w, o.externalId);
+    expect(row).toMatchObject({ vat_pence: '50' });
+    expect(await totals(w, row?.id)).toEqual([{ group_key: 'rate:500', gross: '1050', vat: '50' }]);
+  });
+
+  it('[VAT-1][VAT-6] the first payment date seen is kept', async () => {
+    const w = await world();
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+        paidAt: new Date('2026-11-12T08:00:00Z'),
+      },
+    ]);
+    await ingest.apply(w.ctx, w.account, [
+      { ...o, updatedAt: new Date('2026-11-13T09:00:00Z'), paidAt: null },
+    ]);
+    expect((await orderRow(w, o.externalId))?.paid_at).toEqual(o.paidAt);
+  });
+
+  it('[VAT-3] a discount above the goods comes off the shipping, and never makes the order negative', async () => {
+    const w = await world();
+    const one = { lines: [line('L1', 'STD-1', 1, 1200n)], shipping: p(600) };
+    const some = order({ ...one, discount: p(1500) });
+    const all = order({ ...one, discount: p(5000) });
+    await ingest.apply(w.ctx, w.account, [some, all]);
+    expect(await orderRow(w, some.externalId)).toMatchObject({
+      goods_pence: '1200',
+      discount_pence: '1200',
+      shipping_pence: '300',
+      gross_pence: '300',
+      vat_pence: '50',
+    });
+    expect(await orderRow(w, all.externalId)).toMatchObject({
+      discount_pence: '1200',
+      shipping_pence: '0',
+      gross_pence: '0',
+      vat_pence: '0',
+    });
+  });
+
+  it('[VAT-7][FIN-1] every snapshot and fixed value of a paid order refuses a second write', async () => {
+    const w = await world();
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = String((await orderRow(w, o.externalId))?.id);
+    const refuse = async (table: string, set: string, where: string, why: RegExp) =>
+      expect(
+        q(w, sql<object>`UPDATE ${sql.raw(table)} SET ${sql.raw(set)} WHERE ${sql.raw(where)}`),
+        set,
+      ).rejects.toThrow(why);
+    const ofLine = `order_id = '${id}' AND external_line_id = 'L1'`;
+    for (const set of [
+      `vat_type = 'reduced'`,
+      'vat_rate_bp = 500',
+      'cogs_pence = 999',
+      `master_sku_id = '${w.zero}'`,
+      'master_sku_id = NULL',
+      `snapshot_at = snapshot_at + interval '1 day'`,
+      'provisional_rate_bp = 500',
+      'quantity = 2',
+      'unit_gross_pence = 1',
+      'line_gross_pence = 1',
+      'stored_unmapped = NOT stored_unmapped',
+      `company_id = '${randomUUID()}'`,
+      `order_id = '${randomUUID()}'`,
+    ]) {
+      await refuse('app.order_lines', set, ofLine, /write-once/);
+    }
+    for (const set of [
+      `tax_point_date = '2026-12-01'`,
+      `placed_at = placed_at + interval '1 day'`,
+      `company_id = '${randomUUID()}'`,
+      `channel_account_id = '${randomUUID()}'`,
+      `external_order_id = 'OTHER'`,
+      `pii_subject = 'OTHER'`,
+    ]) {
+      await refuse('app.orders', set, `id = '${id}'`, /never change/);
+    }
+  });
+
+  it('[VAT-5][FIN-1] the VAT ledger, refunds and history are only ever added to', async () => {
+    const w = await world();
+    const o = order({ state: 'dispatched', dispatchedAt: clock });
+    await ingest.apply(w.ctx, w.account, [o]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+        refunds: [
+          {
+            refundId: 'R1',
+            refundedAt: new Date('2026-11-12T09:00:00Z'),
+            amount: p(600),
+            lines: [{ lineId: 'L1', quantity: 1, amount: p(600) }],
+          },
+        ],
+      },
+    ]);
+    const tables: [string, string][] = [
+      ['app.vat_ledger', 'vat_pence = vat_pence'],
+      ['app.refunds', 'amount_pence = amount_pence'],
+      ['app.refund_lines', 'amount_pence = amount_pence'],
+      ['app.order_status_events', 'raw_status = raw_status'],
+    ];
+    for (const [table, set] of tables) {
+      const rows = await q(w, sql<object>`SELECT 1 FROM ${sql.raw(table)}`);
+      expect(rows.length, table).toBeGreaterThan(0);
+      await expect(
+        q(w, sql<object>`UPDATE ${sql.raw(table)} SET ${sql.raw(set)}`),
+        table,
+      ).rejects.toThrow(/permission denied/);
+      await expect(q(w, sql<object>`DELETE FROM ${sql.raw(table)}`), table).rejects.toThrow(
+        /permission denied/,
+      );
+    }
+    for (const table of ['app.orders', 'app.order_lines']) {
+      await expect(q(w, sql<object>`DELETE FROM ${sql.raw(table)}`), table).rejects.toThrow(
+        /permission denied/,
+      );
+    }
+  });
+
+  it('[INV-3] an order first seen cancelled reserves nothing', async () => {
+    const w = await world();
+    const o = order({ state: 'cancelled', cancelledAt: clock });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const row = await orderRow(w, o.externalId);
+    expect(row).toMatchObject({ status: 'cancelled', stock_moves: true });
+    expect(await movements(w, row?.id)).toEqual([]);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '0' });
+  });
+
+  it('[INV-6][ORD-1] a sale that takes available below 0 flags its own line and its order, and no other', async () => {
+    const w = await world();
+    const o = order({ lines: [line('L1', 'STD-1', 11, 13200n), line('L2', 'ZERO-1', 10, 6000n)] });
+    const other = order({ lines: [line('L1', 'ZERO-1', 1, 600n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const flags = async (x: IncomingOrder) => {
+      const row = await orderRow(w, x.externalId);
+      const lines = await q<{ oversold: boolean }>(
+        w,
+        sql`SELECT oversold FROM app.order_lines WHERE order_id = ${String(row?.id)}::uuid ORDER BY line_no`,
+      );
+      return [row?.oversold, lines.map((l) => l.oversold)];
+    };
+    expect(await flags(o)).toEqual([true, [true, false]]);
+    await ingest.apply(w.ctx, w.account, [other]);
+    expect(await flags(other)).toEqual([true, [true]]);
+    expect(await flags(o)).toEqual([true, [true, false]]);
+    const fine = order({ lines: [line('L1', 'NEW-ITEM', 99, 600n)] });
+    await ingest.apply(w.ctx, w.account, [fine]);
+    expect(await flags(fine)).toEqual([false, [false]]);
+  });
+
+  it('[CAT-6][INV-3] a back-fill moves nothing for a cancelled order or for history', async () => {
+    const w = await world();
+    const item = { lines: [line('L1', 'NEW-ITEM', 2, 1200n)], shipping: p(0) };
+    const gone = order(item);
+    const old = order({
+      ...item,
+      placedAt: new Date('2026-10-20T08:00:00Z'),
+      updatedAt: new Date('2026-10-20T09:00:00Z'),
+    });
+    const oldShipped = order({
+      ...item,
+      placedAt: new Date('2026-10-20T08:00:00Z'),
+      updatedAt: new Date('2026-10-20T09:00:00Z'),
+      state: 'dispatched',
+      dispatchedAt: new Date('2026-10-21T09:00:00Z'),
+    });
+    const live = order(item);
+    await ingest.apply(w.ctx, w.account, [gone, old, oldShipped, live]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...gone,
+        state: 'cancelled',
+        cancelledAt: clock,
+        updatedAt: new Date('2026-11-11T09:00:00Z'),
+      },
+    ]);
+    await catalogue.mapListing(w.ctx, w.listings.unmapped, w.zero, 'manual', null, clock);
+    await mapped(w, { listingId: w.listings.unmapped, masterSkuId: w.zero });
+    expect(await level(w, w.zero)).toEqual({ on_hand: '10', reserved: '2' });
+    for (const o of [gone, old, oldShipped]) {
+      expect(await movements(w, (await orderRow(w, o.externalId))?.id)).toEqual([]);
+    }
+  });
+
+  it('[DEL-1] the expiry job is given no cancelled order, no deleted record and no order without one', async () => {
+    const w = await world();
+    const shipped = { state: 'dispatched' as const, dispatchedAt: clock };
+    const orders = [
+      order(shipped),
+      order({ state: 'cancelled', cancelledAt: clock }),
+      order({ ...shipped, pii: { kind: 'none' } }),
+      order({ ...shipped, pii: { kind: 'refused' } }),
+      order(shipped),
+    ];
+    await ingest.apply(w.ctx, w.account, orders);
+    const ids: string[] = [];
+    for (const o of orders) ids.push(String((await orderRow(w, o.externalId))?.id));
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      sql`UPDATE app.orders SET pii_deleted_at = now() WHERE id = ${ids[4] ?? ''}::uuid`.execute(
+        trx,
+      ),
+    );
+    expect((await ingest.piiExpiryOf(w.ctx, ids)).map((r) => r.orderId)).toEqual([ids[0]]);
   });
 
   it('[ORD-3][INV-3] a channel that reports delivery without a dispatch time still dispatches the stock', async () => {
@@ -1274,5 +2437,75 @@ describe('order ingest (T-1001)', () => {
     );
     expect(seen.rows[0]?.n).toBe('0');
     clock = new Date(clock.getTime());
+  });
+
+  it('[TEN-5][PERM-3] refunds, refund lines, groups and the pairs kept apart show and take only the user’s companies', async () => {
+    const w = await world();
+    const o = order({ state: 'dispatched', dispatchedAt: clock });
+    const o2 = order();
+    await ingest.apply(w.ctx, w.account, [o, o2]);
+    await ingest.apply(w.ctx, w.account, [
+      {
+        ...o,
+        updatedAt: new Date('2026-11-12T09:00:00Z'),
+        refunds: [
+          {
+            refundId: 'R1',
+            refundedAt: new Date('2026-11-12T09:00:00Z'),
+            amount: p(600),
+            lines: [{ lineId: 'L1', quantity: 1, amount: p(600) }],
+          },
+        ],
+      },
+    ]);
+    const ids = [
+      String((await orderRow(w, o.externalId))?.id),
+      String((await orderRow(w, o2.externalId))?.id),
+    ].sort();
+    const [refund] = await q<{ id: string; line: string }>(
+      w,
+      sql`SELECT r.id, l.id AS line FROM app.refunds r
+            JOIN app.order_lines l ON l.order_id = r.order_id AND l.external_line_id = 'L2'`,
+    );
+    const inserts: Record<string, (company: string) => ReturnType<typeof sql<object>>> = {
+      order_groups: (company) => sql<object>`
+        INSERT INTO app.order_groups (workspace_id, id, company_id, channel_account_id, state, created_at)
+        VALUES (${w.ctx.workspaceId}::uuid, gen_random_uuid(), ${company}::uuid, ${w.account}::uuid, 'open', now())`,
+      order_group_exclusions: (company) => sql<object>`
+        INSERT INTO app.order_group_exclusions (workspace_id, order_a, order_b, company_id, kind, created_at)
+        VALUES (${w.ctx.workspaceId}::uuid, ${ids[0] ?? ''}::uuid, ${ids[1] ?? ''}::uuid, ${company}::uuid, 'removed', now())
+        ON CONFLICT DO NOTHING`,
+      refunds: (company) => sql<object>`
+        INSERT INTO app.refunds (workspace_id, id, company_id, order_id, external_refund_id, refunded_at,
+                                 tax_point_date, amount_pence, vat_pence, created_at)
+        VALUES (${w.ctx.workspaceId}::uuid, gen_random_uuid(), ${company}::uuid, ${ids[0] ?? ''}::uuid,
+                'X' || gen_random_uuid(), now(), '2026-11-12', 1, 0, now())`,
+      refund_lines: (company) => sql<object>`
+        INSERT INTO app.refund_lines (workspace_id, id, company_id, refund_id, order_line_id, quantity, amount_pence)
+        VALUES (${w.ctx.workspaceId}::uuid, gen_random_uuid(), ${company}::uuid, ${refund?.id ?? ''}::uuid,
+                ${refund?.line ?? ''}::uuid, 1, 1) ON CONFLICT DO NOTHING`,
+    };
+    await q(w, inserts.order_groups?.(w.company) ?? sql<object>`SELECT 1`);
+    await q(w, inserts.order_group_exclusions?.(w.company) ?? sql<object>`SELECT 1`);
+    const other: World = {
+      ...w,
+      ctx: { workspaceId: w.ctx.workspaceId, companyIds: [randomUUID()] },
+    };
+    const both = {
+      ...w,
+      ctx: { ...w.ctx, companyIds: [...w.ctx.companyIds, ...other.ctx.companyIds] },
+    };
+    for (const [table, insert] of Object.entries(inserts)) {
+      const count = async (x: World) =>
+        (await q(x, sql<object>`SELECT 1 FROM app.${sql.raw(table)}`)).length;
+      expect(await count(w), table).toBeGreaterThan(0);
+      expect(await count(both), table).toBe(await count(w));
+      expect(await count(other), table).toBe(0);
+      // Nor may a user write a row into a company they do not have.
+      await expect(q(w, insert(other.ctx.companyIds[0] ?? '')), table).rejects.toThrow(
+        /row-level security|foreign key/,
+      );
+      await expect(q(other, insert(w.company)), table).rejects.toThrow(/row-level security/);
+    }
   });
 });

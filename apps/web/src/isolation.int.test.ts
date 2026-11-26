@@ -319,6 +319,7 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         channelTotal: null,
         shipToCountry: 'GB',
         fba: false,
+        cancelRequested: false,
         lines: [
           {
             lineId: 'L1',

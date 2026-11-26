@@ -1876,6 +1876,10 @@ export interface components {
       pushes: components['schemas']['AllocationPushInput'][];
       stock: components['schemas']['StockDetailInput'];
     };
+    /** @enum {string} */
+    AmountsDiffer: 'channel_total' | 'late_change' | 'refund_above';
+    /** @enum {string} */
+    AmountsDifferInput: 'channel_total' | 'late_change' | 'refund_above';
     ApiUsage: {
       api: string;
       calls: number;
@@ -3071,6 +3075,7 @@ export interface components {
       customer_deleted_at: string | null;
       customer_state: components['schemas']['CustomerState'];
       delivered_at: string | null;
+      dispatch_estimated: boolean;
       dispatched_at: string | null;
       first_sku: string | null;
       flags: components['schemas']['OrderFlag'][];
@@ -3081,6 +3086,7 @@ export interface components {
       item_count: number;
       lines: components['schemas']['OrderLine'][];
       money: {
+        amounts_differ: components['schemas']['AmountsDiffer'][];
         discount_pence: number;
         goods_pence: number;
         gross_pence: number;
@@ -3122,6 +3128,7 @@ export interface components {
       customer_deleted_at: string | null;
       customer_state: components['schemas']['CustomerStateInput'];
       delivered_at: string | null;
+      dispatch_estimated: boolean;
       dispatched_at: string | null;
       first_sku: string | null;
       flags: components['schemas']['OrderFlagInput'][];
@@ -3132,6 +3139,7 @@ export interface components {
       item_count: number;
       lines: components['schemas']['OrderLineInput'][];
       money: {
+        amounts_differ: components['schemas']['AmountsDifferInput'][];
         discount_pence: number;
         goods_pence: number;
         gross_pence: number;
