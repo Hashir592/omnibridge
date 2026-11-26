@@ -1571,6 +1571,23 @@ describe('order ingest (T-1001)', () => {
     expect(await ledger(w, id)).toEqual([]);
   });
 
+  it('[INV-3][FIN-1] before payment an update that carries no lines keeps the stored lines, their stock and the amounts', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 2, 2400n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const stored = await orderRow(w, o.externalId);
+    const before = await lineRows(w, stored?.id);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '2' });
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [] })]);
+    expect(await lineRows(w, stored?.id)).toEqual(before);
+    expect(await lineRows(w, stored?.id, false)).toEqual([]);
+    expect(await level(w, w.std)).toEqual({ on_hand: '10', reserved: '2' });
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      goods_pence: stored?.goods_pence,
+      gross_pence: stored?.gross_pence,
+    });
+  });
+
   it('[INV-3][VAT-3][FIN-1] before payment a changed, dropped or added line closes the old one and takes its own stock', async () => {
     const w = await world();
     const o = pending({ lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 2, 1200n)] });
