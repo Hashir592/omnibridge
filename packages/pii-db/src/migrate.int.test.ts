@@ -1,6 +1,7 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
@@ -55,8 +56,52 @@ describe('db-pii roles and migrations', () => {
       '0009_order_subject_index',
       '0010_deleted_buyer_date',
       '0011_vault_wide_deleted_buyers',
+      '0012_retire_deleted_buyers',
     ]);
     expect((await migratePii(owner)).applied).toEqual([]);
+  });
+
+  // ADR-085 (2): retired, not dropped. The drop comes with M22's first db-pii migration.
+  it('[NFR-2][DEL-1] no role can use the retired vault.deleted_buyers, and no code names it', async () => {
+    await migratePii(cluster.connection(OWNER));
+    const { rows } = await pool(OWNER).query<{ rolname: string; priv: string }>(
+      `SELECT r.rolname, p.priv
+         FROM pg_roles r
+        CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
+                                'REFERENCES', 'TRIGGER']) AS p(priv)
+        WHERE r.rolname NOT LIKE 'pg\\_%' AND NOT r.rolsuper
+          AND (has_table_privilege(r.oid, 'vault.deleted_buyers', p.priv)
+               OR (p.priv IN ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
+                   AND has_any_column_privilege(r.oid, 'vault.deleted_buyers', p.priv)))
+        ORDER BY 1, 2`,
+    );
+    expect(rows).toEqual([]);
+    await expect(pool('vault_app').query('SELECT 1 FROM vault.deleted_buyers')).rejects.toThrow(
+      /permission denied/,
+    );
+    // Only the migrations that made and retire it may name it.
+    const root = fileURLToPath(new URL('../../../', import.meta.url));
+    const self = fileURLToPath(import.meta.url);
+    const skip = new Set(['node_modules', 'dist', 'coverage', '.git', '.turbo']);
+    const named: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!skip.has(entry.name) && path !== join(root, 'packages', 'pii-db', 'migrations')) {
+            await walk(path);
+          }
+        } else if (/\.(ts|tsx|js|mjs|cjs|sql|sh|json|ya?ml)$/.test(entry.name) && path !== self) {
+          if (/\bvault\.deleted_buyers\b/.test(await readFile(path, 'utf8'))) named.push(path);
+        }
+      }
+    };
+    for (const top of ['apps', 'packages', 'infra', 'scripts', 'mocks', 'tests']) {
+      await walk(join(root, top)).catch((err: unknown) => {
+        if ((err as { code?: string }).code !== 'ENOENT') throw err;
+      });
+    }
+    expect(named).toEqual([]);
   });
 
   it('[NFR-2] vault_app uses vault tables but cannot create its own', async () => {
