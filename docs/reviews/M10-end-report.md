@@ -82,9 +82,9 @@ S2 builds T-0318 on it.
 - **Groups:** dismiss, remove and recompute share one account lock. A recompute asks the vault once, with one log row, and is queued only when an order joins or leaves the ones that can group. Open cancellation requests never group.
 - **The list** (0059, 0060): it pages through `orders_placed`, and search is by prefix on lower-case columns. At 100,000 orders the p95 is under 0.7 s for every case tested.
 - **Sync:** a poll is stored 25 orders per transaction, in one lock order (orders, then stock rows, then the rest). It stops before its job expires, and the next run goes on.
-- **F-11:** all 39 required tests and the other survivors are written. Each was shown failing against a planted fault.
-- **Not done:** the drop of `vault.deleted_buyers`. squawk refuses `DROP TABLE` and ADR-045 has no waiver for it, so it is PS-037 for S1.
-- **Review:** the high review raised 5 findings. One is fixed: a first poll that stopped moved its start. Four are for S1 or later tasks. The deliberate-break run found one more test gap: a group action's order lock. A guard was added for it.
+- **F-11:** all 39 required tests and the other survivors are written. They are guards. S1 stopped S3's fault run after 49 faults (ADR-085), which reached only V04, W11 and W12 of the 39, so S4's review plants faults for the rest.
+- **`vault.deleted_buyers` is retired, not dropped** (ADR-085 2): db-pii 0012 takes every right on it from every role, the owner included. A test checks that no role can use it and no code names it. M22's first db-pii migration drops it with ADR-045's ban-drop-table waiver.
+- **Review:** the high review raised 5 findings. One is fixed: a first poll that stopped moved its start. Four are for S1 or later tasks. The fault run found two more test gaps before it was stopped: a group action's order lock, and an unpaid order's update that carries no lines. A guard was added for each.
 
 ## Decisions made (full lists in the PR descriptions)
 
@@ -103,7 +103,7 @@ S2 builds T-0318 on it.
   - the Amazon returns report and Amazon orders (M18).
 - **Before M22:** vault records from before T-1002 kept the old match key; since T-1004 the vault re-indexes names and match keys once at start.
 - **Reviews:** S4's milestone review is BLOCKED until T-1004 is confirmed (`docs/reviews/M10-end.md`; T-1003 is confirmed). S5's check found no Blocker; its Majors are fixed in #160 and T-1003, and its three later Minors in T-1004.
-- **For S1 (PS-037):** the drop of `vault.deleted_buyers` waits for a squawk rule; a star in delivery instructions; an erased buyer left in its group; the lines of an unpaid order that has shipped; eBay's total after a refund.
+- **For S1 (PS-037, accepted in ADR-085 for the table):** a star in delivery instructions; an erased buyer left in its group; the lines of an unpaid order that has shipped; eBay's total after a refund.
 - **Next for S3:** the T-1101 Connect route should create accounts with `holdStockPush: true` (FA-16).
 
 ## Process: where S3 fell short (for S4 and S1)

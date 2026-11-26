@@ -16,7 +16,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Waiting on reviews:**
   - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`) until S4 confirms T-1004 (T-1003 is confirmed);
   - S5 confirmed T-1003 (#169). For T-1004 there is no S5 session now: S4 also confirms its first commits (S5's -11, -12 and the hardening) and PS-036 (a) (S1, 25 Nov).
-- **Open for S1:** PS-037 (`docs/DECISIONS.md`): dropping `vault.deleted_buyers` needs a squawk waiver ADR-045 does not allow, so it is not dropped; four smaller points.
+- **PS-037 accepted (ADR-085):** `vault.deleted_buyers` is retired by db-pii 0012 (no role keeps any right; a test checks it); M22's first db-pii migration drops it. PS-037's four smaller points wait for S1.
+- **Fault runs (ADR-085):** S3 proves tests by red-first commits, plants a fault by hand only for a guard, on that test alone; task-wide runs are S4's.
 - **Next (S3):** M11 on S1's M11 paste. Not before.
 - **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
 
