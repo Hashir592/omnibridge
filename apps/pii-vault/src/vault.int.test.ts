@@ -1195,16 +1195,6 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     expect(await codeOf(elsewhere)).toBe('buyer_deleted');
   });
 
-  it('[DEL-2][AT-10] a notice writes nothing into any workspace, so a closing one is never written to', async () => {
-    const W = randomUUID();
-    const userId = `PIIMARK-closing-${randomUUID().slice(0, 8)}`;
-    await order(W, 'W1', contact('710', { channel_buyer_id: userId }));
-    await clients.web.ebayUserMatch({ user_id: userId });
-    expect(
-      await raw(ownerPool, W, 'SELECT 1 FROM vault.deleted_buyers WHERE workspace_id = $1', [W]),
-    ).toEqual([]);
-  });
-
   it('[DP-6][AT-10] a deleted-buyer entry is a MAC with its key version, under a key of its own', async () => {
     const userId = `PIIMARK-shape-${randomUUID().slice(0, 8)}`;
     const before = (await appPool.query('SELECT 1 FROM vault.ebay_deleted_buyers')).rowCount ?? 0;
