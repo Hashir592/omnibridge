@@ -1,6 +1,6 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 25 Nov 2026 by S3 (T-1003).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 26 Nov 2026 by S3 (T-1004).
 
 ## Now
 
@@ -11,13 +11,13 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - #156 T-1000, #157 contract, #158 T-1001 (critical), #159 T-1002: merged;
   - #160 T-1001 fixes (S5's critical check): merged;
   - #164 F-M10-end-01, S4's Blocker: merged and confirmed by S4;
-  - T-1003 buyer data and F-M10-end-22 (critical, branch `task/T-1003-m10-fixes-1`): auto-merge on, CI running.
+  - #167 T-1003 buyer data and F-M10-end-22: merged, confirmed by S4 and S5 (#169);
+  - T-1004 amounts, grouping, speed and test gaps (critical, branch `task/T-1004-m10-fixes-2`): auto-merge on. Closes F-05, F-07 to F-11, F-12, F-13, F-15, F-20, F-21, F-24 and S5-20261124-11 to -13.
 - **Waiting on reviews:**
   - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`) until S4 confirms T-1004 (T-1003 is confirmed);
-  - S5 check of #158: no Blocker, every Major fixed in #160 and T-1003; its report is committed with T-1003. S5 confirms T-1003;
-  - **Review (S4, 25 Nov 2026): T-1003 (#167) CONTINUE; M09 + M10 still BLOCKED**, open on main cb348b9: 0 Blockers, 6 Majors (F-05, F-07 to F-11, all in T-1004), 9 Minors (`docs/reviews/M10-end.md`, Update: #167). F-11 gains 3 required tests; new Minor F-24;
-  - Fix rule: Blockers at once; Majors in the first commit of S3's next task.
-- **Next (S3):** the halfway pause (ADR-080) after T-1003's PR, then T-1004 (critical) on Hashir's "continue"; M11 after it. T-1004 drops the unused `vault.deleted_buyers` and keeps F-22's race test.
+  - S5 confirmed T-1003 (#169). For T-1004 there is no S5 session now: S4 also confirms its first commits (S5's -11, -12 and the hardening) and PS-036 (a) (S1, 25 Nov).
+- **Open for S1:** PS-037 (`docs/DECISIONS.md`): dropping `vault.deleted_buyers` needs a squawk waiver ADR-045 does not allow, so it is not dropped; four smaller points.
+- **Next (S3):** M11 on S1's M11 paste. Not before.
 - **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
 
 ## M10 in short (what later modules use)
@@ -29,7 +29,8 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - one vault record per order, subject `<channel_account_id>:<external_order_id>` (`orders.pii_subject`);
   - a record is written only once the order is paid and has a delivery address;
   - expiry: dispatch or delivery + 25 days, never past placement + 90 (`piiExpiryDate`, at ingest and in `orders.pii_expiry`, journalled); `effectiveDispatch()` is the one dispatch date;
-  - an address the channel corrects before dispatch replaces the record in place (`/v1/replace`, worker only);
+  - an address the channel corrects before dispatch replaces the record in place (`/v1/replace`, worker only), and so does a newer block met by a repeat ingest; masks never overwrite;
+  - a stand-in dispatch date is marked `dispatch_estimated`; the first real date replaces it once and the deletion date is worked out again;
   - cancellation calls `requestDeletion`;
   - the nightly `orders.orphan-sweep` expires orphan records older than a day;
   - eBay deletion entries are in `vault.ebay_deleted_buyers` (vault-wide, 180 days).
@@ -38,11 +39,14 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - `computeOrderVat` / `computeRefundVat` (`packages/core/src/vat.ts`);
   - append-only `app.vat_ledger` rows (sale, refund, adjustment) with `group_key`, `tax_point_date` and `period_date` (`vatPeriodDate()`, the hook for filed periods in the VAT quarters module).
 - **Snapshots:** `order_lines` vat_type, vat_rate_bp, cogs_pence and master_sku_id are write-once (trigger). A provisional line counts at `provisional_rate_bp`.
+- **Amounts (ADR-081 1 to 3):** until payment, a newer update replaces amounts and line prices, and a changed line is closed (`removed_at`) and a new one added; after payment nothing changes (0056 triggers) and `orders.amounts_differ` marks a late change, a channel total that differs or a refund above the order. Every read leaves closed lines out.
+- **Sync:** `runIncrementalSync` stores 25 orders a transaction. Lock order everywhere: orders by id, then stock rows by component id (`StockEngine.lockFor`), then the rest; listings `FOR NO KEY UPDATE`.
 - **Stock:** reserve, release and dispatch run with the order line id.
   - `stock_moves` is false for orders placed before the account was connected.
   - `stock_push_held_since` holds a new account's writes until a clean reconciliation; T-1101's Connect route passes `holdStockPush: true`.
 - **Reads and groups:** `OrderReads` (`packages/db/src/order-reads.ts`) handles the list, detail, returns, export and groups.
-  - `orders.group_recompute` asks `vault.match`, then calls `applyGroups`.
+  - `orders.group_recompute` makes one batched `vault.match` call, then calls `applyGroups`; it is queued once a minute per account at most, and only when an order joins or leaves the ones that can group;
+  - the list pages through `orders_placed`; search is by prefix on the `search_*` columns (0059, 0060);
   - M12's Ship together locks the members of `order_groups` and re-checks them.
 
 ## M09 and M08 in short
@@ -73,7 +77,6 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - a settings route for `group_midnight_grace_hours` (TEN-6);
   - a return-to-stock flag on refunds;
   - Amazon orders and the returns report (M18);
-  - re-index vault match keys before M22 (dev records from before T-1002);
   - a visible order flag for a channel total that does not add up (today a platform notice).
 - **M12:** the vault's `LabelFiles` hook deletes label files with their records.
 - **M15:** the eBay endpoint's token and keyset move into app secrets. **M18:** LWA rotation reminders. **M21:** platform-audit read route.
