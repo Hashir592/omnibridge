@@ -2427,12 +2427,13 @@
         "INV-4",
         "TRK-1",
         "DEL-1",
-        "PLAT-2"
+        "PLAT-2",
+        "ORD-9"
       ],
       "scope": [
         "Contract PR first: website setup, inbound and outbound shapes, Disconnect; then the PASTE INTO SESSION 2 block for T-0319",
-        "First commit: one order that cannot be stored never stops an account's sync (F-M10-end-14, F-M10-end-17 and S5's related T-1001 point): cap order IDs in the parsers, cut free text to its limit, strip NUL, set one bad order (non-GBP, no lines, unparsable) aside with one notice, store the rest and move the cursor",
-        "Setup (WEB-1): connection ID, inbound key shown once, signing secret, base URL and outbound key; module toggle website_connector off means every website route answers 404 (ADR-059)",
+        "First commit: one order that cannot be stored never stops an account's sync (F-M10-end-14, F-M10-end-17 and S5's related T-1001 point): cap order IDs in the parsers, cut free text to its limit, strip NUL, set one bad order (non-GBP, no lines, unparsable) aside with one notice, store the rest and move the cursor; and PS-037 (2) and (3) as ADR-086 rules them (masked delivery instructions left out; a deletion of a grouped order queues the account's group recompute)",
+        "Setup (WEB-1): connection ID, inbound key shown once, signing secret, base URL and outbound key; module toggle website_connector off means every website route answers 404 (ADR-059); a new account is created with holdStockPush: true (M10 note)",
         "Signing both ways (WEB-2) with timestamp window and idempotency keys; inbound processed in the request, vault first, nothing with PII in any inbox (ADR-054, FA-04)",
         "Outbound (WEB-4, WEB-5) through the M07 outbound path: retries back off from 1 minute to 24 hours, then the dead-letter queue and an alert; no eBay data ever sent to the website (WEB-6)",
         "Generic Disconnect route for any channel account: ends its listings (C7.3), stops writes, keeps history; Amazon and eBay deletion triggers stay with their modules",
