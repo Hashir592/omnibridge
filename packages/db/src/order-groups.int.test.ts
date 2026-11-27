@@ -341,6 +341,20 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
     expect(await groups(w, 'closed')).toEqual([groupId]);
   });
 
+  // F-M10-end-27 (G14): through removeMember itself, not a recompute that has emptied the group.
+  it('[ORD-9] removing one of two members leaves a group of one, which closes', async () => {
+    const w = await world();
+    const { classes, ids } = await sameBuyer(w, 2);
+    await reads.applyGroups(w.ctx, w.account, classes);
+    const groupId = (await groupIds(w)).find((g) => g !== null) ?? '';
+    expect(await reads.removeMember(w.ctx, groupId, ids[1] ?? '')).toMatchObject({
+      memberCount: 1,
+    });
+    expect(await groupIds(w)).toEqual([null]);
+    expect(await groups(w, 'open')).toEqual([]);
+    expect(await groups(w, 'closed')).toEqual([groupId]);
+  });
+
   it('[ORD-9] an order that is dispatched or cancelled leaves its group, and a group of one closes', async () => {
     for (const leaving of [
       { state: 'dispatched' as const, dispatchedAt: now },
