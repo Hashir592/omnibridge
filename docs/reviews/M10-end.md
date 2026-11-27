@@ -6,7 +6,7 @@ Local: `verify.sh --quick` PASS (333 s; a first run had one 5 s unit timeout, `w
 Probes: about 20 ad-hoc tests on bd1741d; the later commit 0f3c393 changes only the testkit and the end report. Tests-can-fail check: 123 planted faults on 0f3c393. None of it is committed.
 Acceptance re-run: 22/24 PASS (table at the end).
 
-Verdict: **BLOCKED**. Found: Blockers 3, Majors 9, Minors 11. **Open on main cb348b9: Blockers 0, Majors 6 (F-05, F-07 to F-11), Minors 9.** Fixed by #160: F-02, F-03, F-04, F-16. Fixed by #164: F-01. Fixed by #167: F-06, F-18, F-19, F-22. Every earlier Major is resolved and verified. M09 has no open finding of its own; the one M09 gap (Oversold on back-fill) is inside F-M10-end-01.
+Verdict: **APPROVED** (27 Nov 2026, on main cba5199; see Update: #173). Found: Blockers 3, Majors 9, Minors 15. **Open: Blockers 0, Majors 0, Minors 7 (F-14, F-16, F-17, F-23, F-25 to F-27 as follow-ups).** Fixed by #173: F-05, F-07 to F-13, F-15, F-20, F-21, F-24. Fixed by #160: F-02, F-03, F-04, F-16. Fixed by #164: F-01. Fixed by #167: F-06, F-18, F-19, F-22. Every earlier Major is resolved and verified. M09 has no open finding of its own; the one M09 gap (Oversold on back-fill) is inside F-M10-end-01.
 
 As S3 asked on 24 Nov, its halfway check and its two `/code-review` runs are not counted as independent looks at T-1001.
 
@@ -89,6 +89,54 @@ Local: `verify.sh --quick` PASS (232 s). Integration on a6b43fa: 8 files, 162/16
 **S5-20261124-11:** my probe found the same before I read S5's report. After a failed first store the corrected address is dropped, and the sync never brings that update again. I agree with Minor and with "before T-1201", because no label exists yet. By reading, it lasts longer than it looks: polls run every 5 minutes and the deletion run every hour, so a stale record the sweep has expired is nearly always stored again (T-1003's new rule) instead of being deleted and rebuilt. T-1004's first commit is the right place.
 
 **New Minor: F-M10-end-24** (below, with the Minors).
+
+## Update: #173, T-1004 (head 2e833d6, merged as cba5199, CI green)
+
+**Verdict for #173: CONTINUE.** No new Blocker or Major. F-05, F-07, F-08, F-09, F-10 and F-11 are resolved, with F-20, F-21, F-24 and the Minors F-12, F-13 and F-15. S1's two extra checks (no S5 session) pass: S5-20261124-11 to -13, S5's T-1003 hardening 1 and 2, and PS-036 (a). Three new Minors: F-25 to F-27.
+
+Local: `verify.sh --quick` PASS (342 s). Integration on cba5199: db orders and groups 87/87. Every red commit below was run at its own commit. Own probes and planted faults ran in a separate worktree. None of it is committed.
+
+| Red commit (ADR-084) | S3's count | Mine |
+|---|---|---|
+| 224a661: S5 -11 and -12, F-24, VACUUM, notice date | 9 | 9 (vault, deletion, worker 8; ebay webhook 1) |
+| 24228a3: PS-036 (a), S5 -13 | 5 | 5 |
+| 83f480d: F-05 | 13 | 13 |
+| 651210f: F-10, F-20 | 13 | 12. "A mapping event and a page never deadlock: shipped orders that were never priced" passed at its red commit: a guard, not red first (F-27). |
+
+| Acceptance (T-1004) | Result |
+|---|---|
+| ADR-084 (1): the S5 part red first | PASS (9 of 9) |
+| Tests first for F-05, F-07, F-08, F-09, F-10 | PASS, with the one F-10 test above |
+| F-10: S4's three deadlock rows through the real `apply`, no 40P01 | PASS. They fail at 651210f and pass on cba5199. Removing `#lockStock` is caught. |
+| [DEL-1] an estimated order that gets its real date | PASS (5 red first; the planted faults on it are caught) |
+| F-09 p95 under 1 s at 100,000 orders | PASS: `order-list.int.test.ts` 6/6, twice on a quiet machine. A first run, while other suites loaded the machine, measured the wide search at 1,105 ms p95. That margin is thin: watch it in AT-25 on the server. |
+| S4 reviews right after merge | This update |
+| CI full gate green at merge, Semgrep included | PASS |
+
+**Planted faults: 76 on cba5199** (68, then 8 follow-ups on the survivors), and one probe. Covered: the 36 required F-11 guards that S3's run did not reach, F-05 (15), F-07 and F-08 (6) and F-10 (11).
+- **The 36 unreached F-11 guards:** 35 caught. G14 needs a test (F-27). T04's master SKU is caught; its `external_sku` part is not (F-27).
+- **F-05: 14 of 15 caught.** These cover the stale and repeated update, the stock of closed and added lines, the order-date snapshot, repricing, the three marks and the notice, and the three 0056 triggers. F05k (`late_change` cleared in the open branch) survives: F-27.
+- **F-07 and F-08: caught.** Dismiss and remove without the account lock fail 3 tests; so do a regroup on every page, a regroup without the correction, and a key without the slot. Two survive and prove nothing: the advisory lock (G7c) and the open-group re-check (G7b). In both cases the account's order rows, locked `FOR NO KEY UPDATE`, already make the actions wait for each other. Keep them as belt and braces.
+- **F-10: caught.** These cover `#lockStock` gone, `FOR UPDATE` on the listings of a stock movement, the 25-order chunk (worker and kit), the 4-minute read, the 8-minute stop and the failed part. Two survive:
+  - L2, `lockFor` in falling order, proves nothing: both sides of every case go through `lockFor`, so the order is still the same on both.
+  - `FOR UPDATE` at `stock.ts:1492` alone is not caught: F-27.
+- **Other survivors that prove nothing:** O13a, O13b and O13c (the `pii_ref` term of `settled` guards it; removing that is caught, O13d).
+
+| Focus point (S3's list) | Result |
+|---|---|
+| F-05: amounts and lines follow the channel until `vat_recorded_at`, then freeze | PASS. My probe of F-05 (£13.80 / £2.30) and the 0056 triggers hold. 0057 is built concurrently. 0058 drops the old constraint with ADR-045's waiver, in its exact form. Safe with the previous app version, which never closes a line. An update with no lines: F-25. |
+| F-10 lock order, listings `FOR NO KEY UPDATE` | PASS. The F-22 race test still passes. |
+| F-09 at 100,000 orders | PASS (see acceptance). Plans: no sequential scan of orders. 0059's backfill turns off FORCE RLS on three tables inside one transaction. Those tables are under an ACCESS EXCLUSIVE lock, so no other session sees them without it, and there is no deployed data (ADR-029). Accepted. `master_skus.sku` never changes (0042), so an insert trigger is enough. |
+| Sync: 25 a transaction, reading stops at 4 minutes and storing at 8; a first poll keeps its start | PASS. Each run stores at least one chunk, so it always makes progress. |
+| `vault.deleted_buyers` retired | PASS. 0012 revokes everything from PUBLIC, `vault_app` and `vault_owner`. The test checks every role and every file outside the migrations. |
+| Changed older tests | Right. `normalise.test.ts` follows C3.1 (F-15). The retired vault test read the retired table as its owner; the pii-db test covers more. |
+| S5 -11 (`#applyNewer`, one method for both) | PASS. One method with the same checks, in the caller's transaction, under the record's row lock. A record that a deletion run held and deleted meanwhile is stored new. |
+| S5 -12 (masks) | PASS. A mask in a delivery field refuses the block. A masked email, phone or ID is left out. ADR-086 (2) now treats masked instructions like email and phone (T-1101). |
+| F-24 (expiry `FOR UPDATE`, journal inside) | PASS (red first). |
+| VACUUM (SKIP_LOCKED), failure logged by name, caller never fails | PASS (V34 red under its fault). |
+| Notice date: strict ISO with a zone, else now | PASS (red first). |
+| PS-036 (a) | PASS. The first real date replaces the stand-in once and clears the flag. The deletion date is worked out again through `piiExpiryDate` (`:real` job key). Stock and VAT move once. A deleted record stays deleted. The order page says "(estimated)", in plain text. |
+| UI | Marks are plain inline icon and text, with no tinted box. |
 
 ## Earlier fixes
 
@@ -183,7 +231,7 @@ Evidence: `#update` never reads `o.discount` or `o.shipping`, and `#settle` uses
 
 Required fix: until `vat_recorded_at` is set, an update newer than the stored one refreshes discount, shipping, gross, VAT and the line shares. Line prices are trigger-fixed, so a pending order whose lines or prices change needs a rule: S3 proposes one to S1 (for example, lines are written when payment is captured). After payment, a changed total raises a notice and is never silently ignored.
 
-Resolution: fixed in T-1004 (ADR-081 1 to 3). Until `vat_recorded_at` is set and while the order is not cancelled, a newer update that has lines replaces discount, shipping, gross, the channel total and the line prices in place. A line whose SKU or quantity changed, or that was dropped, is closed (`order_lines.removed_at`, its stock released) and a new one is added with its own reservation and a snapshot of the order date; closed lines leave totals, VAT, open lines, late mapping, the list and the detail. Line uniqueness is a partial index over open lines (0057, built concurrently; the old constraint dropped in 0058 with ADR-045's waiver). The capturing update applies, books VAT, then freezes: the triggers of 0056 refuse amounts, prices and new or closed lines after payment or cancellation. After that a changed total or line sets the `late_change` mark (cleared when a newer update agrees again), a channel total that differs sets `channel_total`, and a refund above what is left keeps its full amount, books VAT up to what is left and sets `refund_above`. The marks are `money.amounts_differ` in the contract and one plain line each on the order page. My rule, for S1 (PS-037): the lines of an unpaid order that has already shipped are not replaced, only marked. Tests: 13 red first and 2 guards (the cancelling update with other lines; an update that carries no lines, added when the fault run found that gap) in `orders.int.test.ts` (db), S4's probe among them (£13.80 / £2.30).
+Resolution: fixed in T-1004 (ADR-081 1 to 3). Until `vat_recorded_at` is set and while the order is not cancelled, a newer update that has lines replaces discount, shipping, gross, the channel total and the line prices in place. A line whose SKU or quantity changed, or that was dropped, is closed (`order_lines.removed_at`, its stock released) and a new one is added with its own reservation and a snapshot of the order date; closed lines leave totals, VAT, open lines, late mapping, the list and the detail. Line uniqueness is a partial index over open lines (0057, built concurrently; the old constraint dropped in 0058 with ADR-045's waiver). The capturing update applies, books VAT, then freezes: the triggers of 0056 refuse amounts, prices and new or closed lines after payment or cancellation. After that a changed total or line sets the `late_change` mark (cleared when a newer update agrees again), a channel total that differs sets `channel_total`, and a refund above what is left keeps its full amount, books VAT up to what is left and sets `refund_above`. The marks are `money.amounts_differ` in the contract and one plain line each on the order page. My rule, for S1 (PS-037): the lines of an unpaid order that has already shipped are not replaced, only marked. Tests: 13 red first and 2 guards (the cancelling update with other lines; an update that carries no lines, added when the fault run found that gap) in `orders.int.test.ts` (db), S4's probe among them (£13.80 / £2.30). **Confirmed by S4 on #173.**
 
 ## F-M10-end-06 — Major — A backfilled shipped order can keep customer details far past the retention window
 Area: PII  IDs: DEL-1, ORD-4, FA-16
@@ -205,7 +253,7 @@ It stays so until the next page that stores an order for that account, and Ship 
 
 Required fix: dismiss and remove take the same advisory lock first, then lock the group and read its members. `applyGroups` links only to a group it has re-checked as open under that lock. Test with two connections, both actions.
 
-Resolution: fixed in T-1004. `dismissGroup` and `removeMember` take the account's advisory lock first (`#lockAccount`), then lock the group and read its members; `applyGroups` links only to a group it has re-checked as open (`FOR UPDATE`) under that lock. Tests in `order-groups.int.test.ts` on two connections, red first (3): dismiss and remove against a recompute held after it read the exclusions, and a recompute against an open dismissal. G02, G09 and G10 ride along.
+Resolution: fixed in T-1004. `dismissGroup` and `removeMember` take the account's advisory lock first (`#lockAccount`), then lock the group and read its members; `applyGroups` links only to a group it has re-checked as open (`FOR UPDATE`) under that lock. Tests in `order-groups.int.test.ts` on two connections, red first (3): dismiss and remove against a recompute held after it read the exclusions, and a recompute against an open dismissal. G02, G09 and G10 ride along. **Confirmed by S4 on #173.**
 
 ## F-M10-end-08 — Major — A group recompute makes one vault call and one 6-year log row per waiting order
 Area: Performance, PII  IDs: ORD-9, CAP-2
@@ -215,7 +263,7 @@ At 300 waiting orders and a recompute each poll, that is about 86,000 rows (23 M
 
 Required fix: one `match` call per recompute (batched refs in, subject groups out, one access-log row with the count). Queue a recompute only when an order is new or enters or leaves Awaiting dispatch, with a key that collapses repeats. Test the call count.
 
-Resolution: fixed in T-1004. One batched `match` per recompute (`POST /v1/match`: refs in, groups of refs out, same workspace, kind and channel-account conditions, at most 5,000 newest refs), with one access-log row that holds the count. A recompute is queued only when an order enters or leaves the ones that can group (Awaiting dispatch, not FBA, no cancel request, record held), or its buyer was corrected; its key is the account and a one-minute slot, and it starts 30 s after the slot ends, so a change inside the slot is never missed. Tests red first (4): the call count and one log row (vault), the collapsing key and when one is asked for (worker and db).
+Resolution: fixed in T-1004. One batched `match` per recompute (`POST /v1/match`: refs in, groups of refs out, same workspace, kind and channel-account conditions, at most 5,000 newest refs), with one access-log row that holds the count. A recompute is queued only when an order enters or leaves the ones that can group (Awaiting dispatch, not FBA, no cancel request, record held), or its buyer was corrected; its key is the account and a one-minute slot, and it starts 30 s after the slot ends, so a change inside the slot is never missed. Tests red first (4): the call count and one log row (vault), the collapsing key and when one is asked for (worker and db). **Confirmed by S4 on #173.**
 
 ## F-M10-end-09 — Major — The orders list reads the whole workspace on every page
 Area: Performance  IDs: CAP-7, ORD-1, ORD-2
@@ -232,7 +280,7 @@ CAP-7 is p95 under 1 s. Plan at 500,000: Parallel Seq Scan on orders, external m
 
 Required fix: page on the index first (newest units through `orders_placed`, then bring in the group members of that page only), count hidden members for the page's groups only, and make the count stop at its cap. Give the reference and SKU search an index (prefix or trigram; a trigram extension needs an ADR line). Prove it with a plan-shape test at 100,000 rows.
 
-Resolution: fixed in T-1004 (ADR-081 6). The list finds its page through `orders_placed` first, brings in the group members of that page only, counts hidden members for the page's groups only, and stops the count at its cap; one statement gives the page and the total, with JIT off. Search is by prefix on lower-case columns (0059: filled by insert triggers and a backfill; 0060: indexes built concurrently, COLLATE "C" so the range is an index condition under RLS), by order reference, channel SKU or master SKU; no extension. `order-list.int.test.ts` loads 100,000 orders and checks the plans (no sequential scan of orders) and p95 on this machine: first page 48 ms, a deep page 277 ms, a wide search 659 ms, a reference search 16 ms (it was about 1 s and 5.3 s). Red first: prefix search, and the plans and times; the list's own rules are a guard.
+Resolution: fixed in T-1004 (ADR-081 6). The list finds its page through `orders_placed` first, brings in the group members of that page only, counts hidden members for the page's groups only, and stops the count at its cap; one statement gives the page and the total, with JIT off. Search is by prefix on lower-case columns (0059: filled by insert triggers and a backfill; 0060: indexes built concurrently, COLLATE "C" so the range is an index condition under RLS), by order reference, channel SKU or master SKU; no extension. `order-list.int.test.ts` loads 100,000 orders and checks the plans (no sequential scan of orders) and p95 on this machine: first page 48 ms, a deep page 277 ms, a wide search 659 ms, a reference search 16 ms (it was about 1 s and 5.3 s). Red first: prefix search, and the plans and times; the list's own rules are a guard. **Confirmed by S4 on #173.**
 
 ## F-M10-end-10 — Major — One poll run is stored in one transaction, which deadlocks and blocks stock
 Area: Correctness, Performance  IDs: INV-4, CAP-5, NFR-3, invariant 3
@@ -267,7 +315,7 @@ Added 25 Nov 2026 (#164, main 32c8f7a). `lockOrders` takes all of a listing's op
 
 Required as well: in each chunk, lock the existing orders in id order, then the stock rows in component id order, then store. Listings `FOR NO KEY UPDATE`. Tests: the three rows above through the real `apply`, with no 40P01. F-20 closes with this.
 
-Resolution: fixed in T-1004, with F-20. `runIncrementalSync` stores 25 orders a transaction, each prepared just before it; the cursor, health and usage go with the last. Reading stops at 4 minutes and storing at 8, before `sync.poll` expires at 10; a run that stops, or fails part way, saves what it stored (and, on a first poll, its start), and the next run goes on without storing anything twice. A failed part is no success of the stream. In each transaction: the stored orders in id order (`FOR UPDATE`), then the stock rows in component id order (`StockEngine.lockFor`), then the rest. Mapping locks the same way (its orders first, `lockOrders` also takes orders with lines not yet priced), listings are locked `FOR NO KEY UPDATE` on both sides, and group actions lock the account's open orders in id order after their advisory lock. Tests red first (13, and 1 more found by T-1004's own review): S4's three deadlock rows through the real `apply` against a mapping event, with no 40P01 (the sale inserts its line first); two accounts in opposite order; a page that moves no stock never blocks one; a stock-in waits for one small transaction of a long poll (`orders.int.test.ts`, worker); the parts, stop, failure and slow pages (`sync.test.ts`). The F-22 race test still passes. One guard was added after the deliberate-break run: a group action locks the account's open orders before it changes any.
+Resolution: fixed in T-1004, with F-20. `runIncrementalSync` stores 25 orders a transaction, each prepared just before it; the cursor, health and usage go with the last. Reading stops at 4 minutes and storing at 8, before `sync.poll` expires at 10; a run that stops, or fails part way, saves what it stored (and, on a first poll, its start), and the next run goes on without storing anything twice. A failed part is no success of the stream. In each transaction: the stored orders in id order (`FOR UPDATE`), then the stock rows in component id order (`StockEngine.lockFor`), then the rest. Mapping locks the same way (its orders first, `lockOrders` also takes orders with lines not yet priced), listings are locked `FOR NO KEY UPDATE` on both sides, and group actions lock the account's open orders in id order after their advisory lock. Tests red first (13, and 1 more found by T-1004's own review): S4's three deadlock rows through the real `apply` against a mapping event, with no 40P01 (the sale inserts its line first); two accounts in opposite order; a page that moves no stock never blocks one; a stock-in waits for one small transaction of a long poll (`orders.int.test.ts`, worker); the parts, stop, failure and slow pages (`sync.test.ts`). The F-22 race test still passes. One guard was added after the deliberate-break run: a group action locks the account's open orders before it changes any. **Confirmed by S4 on #173.**
 
 ## F-M10-end-11 — Major — Tests for money, snapshots, deletion and scoping that do not fail when the code is broken
 Area: Requirement coverage, Invariants  IDs: VAT-1, VAT-2, VAT-5, VAT-6, VAT-7, ORD-4, ORD-9, DEL-1, TEN-5, PERM-3
@@ -299,7 +347,7 @@ Required fix: a failing test for each of the following, shown red against the fa
 
 The other 19 (R03, R04, R06 to R11, R15, R17, G02, G09, G10, G17 to G19, G21, G22, G24) ride along as Minors; G02, G09 and G10 belong with F-07.
 
-Resolution: fixed in T-1004. All 39 required tests are written (the 37, with V04, W11 and W12; V10 withdrawn), and so are the other 19 survivors, G02, G09 and G10 with F-07. The code was right in each place, so each is a guard that could not be red first. S3's fault run on the final code was stopped by S1 after 49 faults (ADR-085); of these 39 it reached V04, W11 and W12, all caught. The other 36 wait for S4's planted faults in its review, as ADR-085 places task-wide fault runs. Tests are in `orders.int.test.ts` (db and worker), `order-groups.int.test.ts`, `vault.int.test.ts`, `deletion.int.test.ts`, `restore.int.test.ts` and `orders.int.test.ts` (web). F-21 closes with this, as S1 placed it.
+Resolution: fixed in T-1004. All 39 required tests are written (the 37, with V04, W11 and W12; V10 withdrawn), and so are the other 19 survivors, G02, G09 and G10 with F-07. The code was right in each place, so each is a guard that could not be red first. S3's fault run on the final code was stopped by S1 after 49 faults (ADR-085); of these 39 it reached V04, W11 and W12, all caught. The other 36 wait for S4's planted faults in its review, as ADR-085 places task-wide fault runs. Tests are in `orders.int.test.ts` (db and worker), `order-groups.int.test.ts`, `vault.int.test.ts`, `deletion.int.test.ts`, `restore.int.test.ts` and `orders.int.test.ts` (web). F-21 closes with this, as S1 placed it. **Confirmed by S4 on #173.**
 
 ## F-M10-end-22 — Major — A dispatch between a mapping and its event leaves stock reserved for ever
 Area: Correctness, Invariants  IDs: INV-3, INV-1, CAT-6
@@ -330,10 +378,28 @@ Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispa
 - **F-M10-end-17** (INT-5): one non-GBP order fails the parser for its whole page, so no later order of that account is stored. Quarantine the one order with a notice. S1 to place, before eBay goes live.
 - **F-M10-end-18** (DEL-1, invariant 10): `vault.deleted_buyers` is not journalled, so a restore forgets notices that arrived after the backup. For S5 to judge. **Fixed in T-1003** (S5-20261124-08).
 - **F-M10-end-19** (FA-10): a repeat ingest of an orphan returns the old record with its old (perhaps already expired) `delete_after`. By reading only. **Fixed in T-1003** (S5-20261124-06).
-- **F-M10-end-20** (INV-4): lock order differs between mapping (stock row, then order) and an order update (order, then stock row). By reading only; a deadlock there is retried. **Fixed in T-1004** with F-10 (one lock order on both sides).
-- **F-M10-end-21** (ADR-080, CLAUDE.md): tests-first was not followed for most of T-1001 and T-1002, as S3 reported itself. For S1. Closes with F-11 (T-1004), as S1 placed it.
+- **F-M10-end-20** (INV-4): lock order differs between mapping (stock row, then order) and an order update (order, then stock row). By reading only; a deadlock there is retried. **Fixed in T-1004** with F-10 (one lock order on both sides). **Confirmed by S4 on #173.**
+- **F-M10-end-21** (ADR-080, CLAUDE.md): tests-first was not followed for most of T-1001 and T-1002, as S3 reported itself. For S1. Closes with F-11 (T-1004), as S1 placed it. **Closed with F-11 on #173.**
 - **F-M10-end-23** (INV-9): a line on an FBA listing moves the seller's own stock, at ingest and on back-fill (S3's note in #164; by reading only). Not reachable before M18. S1 to place there.
-- **F-M10-end-24** (DEL-1, ORD-4; found on #167): an expiry deletion already past its read deletes a record that has just been stored again. `DeletionService.delete` reads the expired refs, journals them, then locks and deletes by ref without looking at `delete_after` again. Probe: the run paused after its journal write, the order ingested (same ref, new date, committed), the run released: 1 record deleted. The order then holds a dead ref and counts as settled, so its customer details never come back. The window is short and opens once an hour, hence Minor. Fix: for the expiry scope, read the targets `FOR UPDATE` in the transaction that deletes, and journal inside it before the delete, so the journal never names a record that is kept. A red test as the probe. Best with S5-20261124-11, before T-1201. **Fixed in T-1004**: an expiry run picks its records `FOR UPDATE` in the transaction that deletes them and journals inside it, before the delete; other scopes are unchanged. Red first: S4's paused run, and a record re-dated while the run waits.
+- **F-M10-end-24** (DEL-1, ORD-4; found on #167): an expiry deletion already past its read deletes a record that has just been stored again. `DeletionService.delete` reads the expired refs, journals them, then locks and deletes by ref without looking at `delete_after` again. Probe: the run paused after its journal write, the order ingested (same ref, new date, committed), the run released: 1 record deleted. The order then holds a dead ref and counts as settled, so its customer details never come back. The window is short and opens once an hour, hence Minor. Fix: for the expiry scope, read the targets `FOR UPDATE` in the transaction that deletes, and journal inside it before the delete, so the journal never names a record that is kept. A red test as the probe. Best with S5-20261124-11, before T-1201. **Fixed in T-1004**: an expiry run picks its records `FOR UPDATE` in the transaction that deletes them and journals inside it, before the delete; other scopes are unchanged. Red first: S4's paused run, and a record re-dated while the run waits. **Confirmed by S4 on #173.**
+- **F-M10-end-25** (FIN-1, ORD-6; found on #173): an update with no lines sets `late_change` and raises the platform notice, paid or not.
+  - In `#amounts` (`packages/db/src/orders.ts`), an empty `o.lines` makes `open` false, and every stored line counts as closed. So `sameLines` is false and the mark is added.
+  - Probe on cba5199: an unpaid order, then a newer update with `lines: []`. The order carries `late_change` (expected none), and its page says the channel sent different items.
+  - The method's own comment says "An update with no lines says nothing about them". The paid-order test (`orders.int.test.ts`, "after payment a different total…") expects the mark for `{ lines: [] }`.
+  - Both parsers accept an empty line array (`website/src/index.ts`, `ebay/src/adapter.ts`).
+  - **Fix:** an update with no lines compares only discount, shipping and the channel total, never the lines, whether paid or not. Change the paid-order test to match, and add the unpaid case as a red test. For S1 to rule if S3 reads it otherwise.
+  - Place in T-1101's first commits, with the website connector (ADR-086).
+- **F-M10-end-26** (Performance, ORD-9 C3.1; found on #173): the vault decrypts every buyer record of every workspace at each start, before it serves.
+  - `reindexNames` (`apps/pii-vault/src/vault.ts`, called in `main.ts` before `app.listen`) takes one transaction per workspace. In it, it locks all the workspace's records `FOR UPDATE` and makes two queries and one decryption per record. Records that are already right are skipped only after they are decrypted.
+  - With nothing deployed this costs little. In production it grows with the 90-day stock of records, on every restart, until M22 removes it.
+  - **Fix:** run it once (a done marker in the vault, or a db-pii migration that flags the records still to do), and in batches, before go-live.
+- **F-M10-end-27** (test gaps found by planted faults on #173; the code is right in each place today):
+  - G14: `removeMember` that leaves one member must close the group. `#closeSmall` with `< 1` passes every group and web test. The required test closes a group only through `applyGroups`, where unlinking already leaves the group empty.
+  - T04: no test changes `order_lines.external_sku` after insert. The 0056 check can go unnoticed, yet F-05's line matching and `search_sku` rely on it.
+  - `stock.ts:1492`: `FOR UPDATE` there instead of `FOR NO KEY UPDATE` is not caught.
+  - F05k: `late_change` is not shown to clear in the open branch. That case is an unpaid order that shipped, was marked, then agreed again (ADR-086: it clears).
+  - 651210f: "shipped orders that were never priced" was not red at its test commit. Say so in the PR as a guard, or give it a fault.
+  - One test each, a guard red against its fault. They ride with T-1101 like the other Minors.
 
 ## Acceptance
 
