@@ -828,10 +828,11 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
         `SELECT * FROM vault.blind_index WHERE field NOT IN ('name', 'match') ORDER BY pii_ref, field`,
       );
     const before = await rest();
-    expect(await vault.reindexNames()).toBeGreaterThanOrEqual(2);
+    // F-M10-end-26: in batches of short transactions; one record a batch still reaches them all.
+    expect(await vault.reindexNames({ batch: 1 })).toBeGreaterThanOrEqual(2);
     expect(await match()).toEqual(both);
     expect(await found()).toEqual([...refs].sort());
-    // Nothing else is touched, the canary gets no key, and a second run finds nothing to do.
+    // Nothing else is touched, and the canary gets no key.
     expect(await rest()).toEqual(before);
     expect(
       await raw(
@@ -840,7 +841,15 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
         `SELECT 1 FROM vault.blind_index b JOIN vault.records r ON r.pii_ref = b.pii_ref WHERE r.canary`,
       ),
     ).toEqual([]);
+    // Once: a later start reads no record at all, even one left as an older vault left it.
+    await raw(
+      ownerPool,
+      W,
+      `DELETE FROM vault.blind_index WHERE pii_ref = $1 AND field IN ('name', 'match')`,
+      [refs[1]],
+    );
     expect(await vault.reindexNames()).toBe(0);
+    expect(await match()).toEqual([]);
   });
 
   it('[ORD-4] one buyer record per order: a repeated ingest returns the same ref and adds nothing', async () => {

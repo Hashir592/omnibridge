@@ -1743,7 +1743,8 @@ describe('order ingest (T-1001)', () => {
       { lines: [line('L1', 'ZERO-1', 1, 1200n)] },
       { lines: [line('L9', 'STD-1', 1, 1200n)] },
       { lines: [line('L1', 'STD-1', 1, 1200n), line('L2', 'ZERO-1', 1, 0n)] },
-      { lines: [] },
+      // F-M10-end-25: an update with no lines says nothing about them; its own amounts still count.
+      { lines: [], shipping: p(500) },
     ];
     for (const [i, change] of changes.entries()) {
       await ingest.apply(w.ctx, w.account, [next(o, 2 * i + 1, change)]);
@@ -1761,6 +1762,35 @@ describe('order ingest (T-1001)', () => {
     // An older update says nothing about the order now.
     await ingest.apply(w.ctx, w.account, [next(o, 0.5, { shipping: p(1) })]);
     expect((await frozen()).differ).toEqual([]);
+    // F-M10-end-25: no lines, and the same amounts: no mark and no notice.
+    await ingest.apply(w.ctx, w.account, [next(o, 40, { lines: [] })]);
+    expect(await frozen()).toEqual(was);
+    expect(notices(id)).toBe(changes.length);
+  });
+
+  it('[FIN-1][ORD-6] before payment an update that carries no lines marks nothing; its own amounts apply over the stored lines', async () => {
+    const w = await world();
+    const o = pending({ lines: [line('L1', 'STD-1', 2, 2400n)] });
+    await ingest.apply(w.ctx, w.account, [o]);
+    const stored = await orderRow(w, o.externalId);
+    const before = await lineRows(w, stored?.id);
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { lines: [] })]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      amounts_differ: [],
+      goods_pence: stored?.goods_pence,
+      gross_pence: stored?.gross_pence,
+    });
+    expect(notices(stored?.id)).toBe(0);
+    // Before payment its shipping still follows the channel, over the lines already stored.
+    await ingest.apply(w.ctx, w.account, [next(o, 2, { lines: [], shipping: p(500) })]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      amounts_differ: [],
+      goods_pence: '2400',
+      shipping_pence: '500',
+      gross_pence: '2900',
+    });
+    expect((await lineRows(w, stored?.id)).map((l) => l.id)).toEqual(before.map((l) => l.id));
+    expect(notices(stored?.id)).toBe(0);
   });
 
   it('[FIN-1][VAT-6] an order cancelled unpaid is frozen too', async () => {
@@ -1816,6 +1846,17 @@ describe('order ingest (T-1001)', () => {
     });
     expect((await lineRows(w, id)).map((l) => l.quantity)).toEqual(['1']);
     expect(await level(w, w.std)).toEqual({ on_hand: '9', reserved: '0' });
+    // F-M10-end-27 (F05k): the channel agrees with what is stored again, with nothing to change:
+    // the mark clears all the same (ADR-086 4).
+    await ingest.apply(w.ctx, w.account, [next(o, 2.5, { state: 'dispatched', shipping: p(100) })]);
+    expect(await orderRow(w, o.externalId)).toMatchObject({
+      gross_pence: '1300',
+      amounts_differ: [],
+    });
+    await ingest.apply(w.ctx, w.account, [
+      next(o, 2.7, { state: 'dispatched', lines: [line('L1', 'STD-1', 4, 4800n)] }),
+    ]);
+    expect((await orderRow(w, o.externalId))?.amounts_differ).toEqual(['late_change']);
     // A new price is still taken, and the mark goes with it.
     await ingest.apply(w.ctx, w.account, [
       next(o, 3, { state: 'dispatched', lines: [line('L1', 'STD-1', 1, 900n)], shipping: p(100) }),
