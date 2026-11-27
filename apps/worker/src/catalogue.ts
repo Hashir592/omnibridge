@@ -1,6 +1,7 @@
 import { londonDate, type TenantContext } from '@omnibridge/core';
 import type { CatalogueRepository, Connection, MappingChange } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
+import { sendMappingChanged } from '@omnibridge/order-ingest';
 import {
   AuthFailed,
   EgressRefused,
@@ -11,7 +12,6 @@ import {
   type SyncPorts,
 } from '@omnibridge/provider-kit';
 import {
-  listingMappedJob,
   listingsDiscoverAccountsJob,
   listingsDiscoverJob,
   PermanentJobError,
@@ -56,23 +56,8 @@ export function listingMappedHandler(deps: {
   };
 }
 
-/** The mapped event of one change, sent in the caller's transaction (CAT-6). */
-export function sendMappingChanged(
-  queue: Pick<JobQueue, 'send'>,
-  ctx: TenantContext,
-  change: MappingChange,
-  key: string,
-) {
-  return queue.send(listingMappedJob, {
-    ctx,
-    idempotencyKey: `listing_mapped:${change.listingId}:${key}`,
-    payload: {
-      listing_id: change.listingId,
-      master_sku_id: change.masterSkuId,
-      previous_master_sku_id: change.previousMasterSkuId,
-    },
-  });
-}
+/** The mapped event of one change (CAT-6): shared with the order ingest step. */
+export { sendMappingChanged };
 
 /**
  * A scan stops reading this long after it starts, well inside listings.discover's 30-minute job

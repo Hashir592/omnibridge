@@ -455,6 +455,9 @@ importers:
       '@omnibridge/mail':
         specifier: workspace:*
         version: link:../../packages/mail
+      '@omnibridge/order-ingest':
+        specifier: workspace:*
+        version: link:../../packages/order-ingest
       '@omnibridge/provider-ebay':
         specifier: workspace:*
         version: link:../../packages/providers/ebay
@@ -635,6 +638,27 @@ importers:
       testcontainers:
         specifier: 12.2.1
         version: 12.2.1(supports-color@10.2.2)
+
+  packages/order-ingest:
+    dependencies:
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../core
+      '@omnibridge/db':
+        specifier: workspace:*
+        version: link:../db
+      '@omnibridge/logger':
+        specifier: workspace:*
+        version: link:../logger
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../providers/kit
+      '@omnibridge/queue':
+        specifier: workspace:*
+        version: link:../queue
+      '@omnibridge/vault-client':
+        specifier: workspace:*
+        version: link:../vault-client
 
   packages/pii-db:
     dependencies:

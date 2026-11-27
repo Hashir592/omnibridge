@@ -25,6 +25,7 @@
     "@omnibridge/governor-ebay": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/mail": "workspace:*",
+    "@omnibridge/order-ingest": "workspace:*",
     "@omnibridge/provider-ebay": "workspace:*",
     "@omnibridge/provider-kit": "workspace:*",
     "@omnibridge/provider-website": "workspace:*",
