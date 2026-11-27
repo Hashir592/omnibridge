@@ -922,7 +922,9 @@ export class Vault {
    * its fields give today gets it. Idempotent; one short transaction per workspace. Returns how many
    * records changed (a count, never a value).
    */
-  async reindexNames(): Promise<number> {
+  async reindexNames(options: { batch?: number } = {}): Promise<number> {
+    // Shape only: the batch size bounds one read; F-M10-end-26's fix loops over batches.
+    const batch = options.batch ?? Number.MAX_SAFE_INTEGER;
     const directory = await this.#pool.query<{ workspace_id: string }>(
       'SELECT workspace_id FROM vault.workspace_directory ORDER BY workspace_id',
     );
@@ -934,8 +936,8 @@ export class Vault {
         const records = await c.query<{ pii_ref: string }>(
           `SELECT pii_ref FROM vault.records
             WHERE workspace_id = $1 AND kind = 'buyer_contact' AND NOT canary
-            ORDER BY pii_ref FOR UPDATE`,
-          [workspaceId],
+            ORDER BY pii_ref LIMIT $2 FOR UPDATE`,
+          [workspaceId, batch],
         );
         let count = 0;
         for (const { pii_ref: ref } of records.rows) {
