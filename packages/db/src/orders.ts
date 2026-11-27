@@ -673,7 +673,8 @@ export class OrderIngest implements UnmappedDemand {
    * is inserted with its own reservation and the snapshot of the placed date. After that, a
    * different total or line set changes nothing: it marks the order and raises the notice, until a
    * newer update agrees again. The lines of an unpaid order that has shipped stay too: what left
-   * cannot be released. An update with no lines says nothing about them.
+   * cannot be released. An update with no lines says nothing about them: it is read with the
+   * stored lines, so only its discount, shipping and total count, paid or not (F-M10-end-25).
    */
   async #amounts(
     trx: Transaction<MainDb>,
@@ -686,9 +687,19 @@ export class OrderIngest implements UnmappedDemand {
     if (o.updatedAt <= existing.source_updated_at) return existing;
     const now = this.#now();
     const stored = await this.#lines(trx, ctx, existing.id);
+    const lines: readonly IncomingLine[] =
+      o.lines.length > 0
+        ? o.lines
+        : stored.map((l) => ({
+            lineId: l.external_line_id,
+            sku: l.external_sku,
+            quantity: Number(l.quantity),
+            title: null,
+            linePrice: pence(big(l.line_gross_pence)),
+          }));
     const kept: { row: LineRow; line: IncomingLine }[] = [];
     const added: IncomingLine[] = [];
-    for (const line of o.lines) {
+    for (const line of lines) {
       const row = stored.find((l) => l.external_line_id === line.lineId);
       const same =
         row !== undefined &&
@@ -700,7 +711,7 @@ export class OrderIngest implements UnmappedDemand {
     const closed = stored.filter((l) => !kept.some((k) => k.row.id === l.id));
     const sameLines = closed.length === 0 && added.length === 0;
     const repriced = kept.filter((k) => big(k.row.line_gross_pence) !== k.line.linePrice);
-    const want = amountsOf(o);
+    const want = amountsOf({ ...o, lines });
     const sameTotals =
       want.discount === big(existing.discount_pence) &&
       want.shipping === big(existing.shipping_pence);
@@ -708,7 +719,6 @@ export class OrderIngest implements UnmappedDemand {
     const open =
       existing.vat_recorded_at === null &&
       existing.status !== 'cancelled' &&
-      o.lines.length > 0 &&
       (sameLines || existing.dispatched_at === null);
 
     let gross = big(existing.gross_pence);
