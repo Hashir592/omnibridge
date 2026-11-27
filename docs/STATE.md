@@ -13,6 +13,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
   - #164 F-M10-end-01, S4's Blocker: merged and confirmed by S4;
   - #167 T-1003 buyer data and F-M10-end-22: merged, confirmed by S4 and S5 (#169);
   - T-1004 amounts, grouping, speed and test gaps (critical, branch `task/T-1004-m10-fixes-2`): auto-merge on. Closes F-05, F-07 to F-11, F-12, F-13, F-15, F-20, F-21, F-24 and S5-20261124-11 to -13.
+- **Review (S4, 27 Nov 2026):** #173 (T-1004) CONTINUE, no Blocker or Major; S5's part and PS-036 (a) confirmed. **M09 + M10 milestone APPROVED** (`docs/reviews/M10-end.md`). New Minors F-25 to F-27 go to T-1101's first commits.
 - **Waiting on reviews:**
   - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`) until S4 confirms T-1004 (T-1003 is confirmed);
   - S5 confirmed T-1003 (#169). For T-1004 there is no S5 session now: S4 also confirms its first commits (S5's -11, -12 and the hardening) and PS-036 (a) (S1, 25 Nov).
