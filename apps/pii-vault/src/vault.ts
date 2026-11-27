@@ -76,11 +76,7 @@ interface Keys {
 /** A lock could not be had in time: 503, and the caller asks again. */
 export class VaultBusy extends Error {}
 
-/**
- * The address block of a buyer, replaced whole by a correction (ORD-4). Delivery instructions are
- * free text, not identity (ADR-086 2): like email and phone, a masked one is left out and the
- * stored one kept, so a star in them never refuses the address.
- */
+/** The address block of a buyer, replaced whole by a correction (ORD-4, ADR-083 2). */
 const DELIVERY_FIELDS: ReadonlySet<string> = new Set([
   'name',
   'address_line1',
@@ -90,7 +86,14 @@ const DELIVERY_FIELDS: ReadonlySet<string> = new Set([
   'county',
   'postcode',
   'country',
+  'delivery_instructions',
 ]);
+
+/**
+ * Delivery instructions are free text, not identity (ADR-086 2): a masked one never refuses the
+ * address; like a masked email or phone it is left out and the stored one kept.
+ */
+const FREE_TEXT_FIELDS: ReadonlySet<string> = new Set(['delivery_instructions']);
 
 /** A channel masks old buyers' details with stars or dots. */
 const isMasked = (value: string): boolean => /[*\u2022]/.test(value);
@@ -103,7 +106,10 @@ const isMasked = (value: string): boolean => /[*\u2022]/.test(value);
 function usableBlock(fields: Readonly<Record<string, string>>): Record<string, string> | undefined {
   const given = Object.entries(fields);
   const named = fields.name !== undefined && fields.name.trim() !== '';
-  const masked = given.some(([field, value]) => DELIVERY_FIELDS.has(field) && isMasked(value));
+  const masked = given.some(
+    ([field, value]) =>
+      DELIVERY_FIELDS.has(field) && !FREE_TEXT_FIELDS.has(field) && isMasked(value),
+  );
   if (!named || masked || !hasDeliveryAddress(fields)) return undefined;
   return Object.fromEntries(given.filter(([, value]) => !isMasked(value)));
 }
@@ -295,7 +301,12 @@ export class Vault {
     const old = await this.#decryptFields(c, keys.data, req.workspace_id, record.pii_ref);
     const next: Record<string, string> = {};
     for (const [field, value] of Object.entries(old)) {
-      if (!DELIVERY_FIELDS.has(field)) next[field] = value;
+      // Replaced whole, except free text sent masked, which keeps the stored value (ADR-086 2).
+      const sent = req.fields[field];
+      const maskedNow = sent !== undefined && isMasked(sent);
+      if (!DELIVERY_FIELDS.has(field) || (FREE_TEXT_FIELDS.has(field) && maskedNow)) {
+        next[field] = value;
+      }
     }
     Object.assign(next, fields);
     // The buyer as the record would hold it: an ID the channel did not send again still counts.

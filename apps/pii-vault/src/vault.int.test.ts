@@ -1620,7 +1620,8 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
     });
     expect(matches.map((m) => m.pii_ref)).toEqual([pii_ref]);
     expect(await ask({ ...address('23'), ...masked })).toBe(false);
-    // A real instruction replaces the stored one; one left out keeps it, as for email and phone.
+    // A real instruction replaces the stored one. One not sent at all goes with the rest of the
+    // delivery block, which is replaced whole (ADR-083 2); only a masked one keeps the stored one.
     expect(await ask({ ...address('24'), delivery_instructions: 'Ring twice' })).toBe(true);
     expect(await read(W, pii_ref)).toEqual({
       ...stored,
@@ -1628,7 +1629,7 @@ describe('pii-vault core [DP-4][DP-5][DP-6][DP-7]', () => {
       delivery_instructions: 'Ring twice',
     });
     expect(await ask(address('25'))).toBe(true);
-    expect((await read(W, pii_ref)).delivery_instructions).toBe('Ring twice');
+    expect((await read(W, pii_ref)).delivery_instructions).toBeUndefined();
   });
 
   it('[ORD-4][DEL-1] an ingest that finds an older record applies its newer block, and only then', async () => {
