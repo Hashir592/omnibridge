@@ -300,7 +300,7 @@ FBA listings and FBA orders are shown read-only. OmniBridge never writes FBA sto
 - **SHIP-1** A carrier account belongs to one company (usually the fulfilment provider) and can ship orders of any company in the same workspace. Admins enter carrier accounts themselves (Connections → Carriers).
 - **SHIP-2** All carrier calls go out from the production server's one fixed IPv4 address, which carriers allowlist. Developer machines never call carriers directly; testing goes through the staging server or a tunnel.
 - **SHIP-3** `ShippingProvider` interface: `listServices(from, to, parcels)`, `createShipment(order, parcels, service, options)` returning `{trackingNumbers[], carrierShipmentRef, labels[]}`, `getLabel(ref, format)`, and capability flags `canVoid`, `canTrack`, `needsManifest`.
-- **SHIP-4** Carrier error responses are shown to the user in plain words, together with the raw code. Carrier PII sent is limited to what the label needs.
+- **SHIP-4** Carrier error responses are shown to the user in plain words, together with the raw code. Carrier PII sent is limited to what the label and the carrier's delivery messages need: name, address, delivery instructions, and the buyer's email and phone (v1.4 addendum, Hashir 28 Nov 2026, ADR-089).
 
 ### 3.5 Evri
 
@@ -1376,3 +1376,5 @@ Nothing below blocks coding. Open items are built as settings, or behind adapter
 **v1.4 addendum, 17 Nov 2026:** WEB-1: the website connector is a per-workspace module toggle, off by default and on only for the client's workspace at launch; the public site does not advertise it (ADR-059).
 
 **v1.4 addendum, 28 Nov 2026:** WEB-5 inbound is processed in the request, vault first; CAT-5 and INV-7: a website's listings arrive and are reconciled by `POST /products` (ADR-088). No scope change.
+
+**v1.4 addendum, 28 Nov 2026 (2):** SHIP-4: the buyer's email and phone go to the carrier for delivery messages (Hashir, ADR-089).

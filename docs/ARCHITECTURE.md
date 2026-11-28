@@ -260,12 +260,12 @@ All carrier and website egress leaves through a netcup failover IPv4 using an nf
 | JeezMart (assumption) | ≤3.0 GB / 2 cores | ≤3.0 GB / 2 cores |
 | OmniBridge web | 1×384 MB / 1.0 | 2×448 MB / 2×1.0 |
 | worker | 1×512 MB / 1.0 | 2×640 MB / 2×1.0 |
-| pii-vault | 96 MB / 0.25 | 160 MB / 0.5 |
+| pii-vault | 256 MB / 0.25 | 256 MB / 0.5 |
 | db-main | 1,536 MB / 1.5 | 2,560 MB / 2.0 |
 | db-pii | 256 MB / 0.5 | 384 MB / 0.5 |
 | site | 24 MB / 0.1 | 24 MB / 0.1 |
 | observability (9 containers) | 488 MB / 0.75 | 500 MB / 0.75 |
-| **OmniBridge sum** | **3,296 MB ≈ 3.3 GB** | **5,804 MB ≈ 5.7 GB** |
+| **OmniBridge sum** | **3,456 MB ≈ 3.4 GB** | **5,900 MB ≈ 5.8 GB** |
 | Transient (backup 384 + deploy overlap ≈450 + migration 192) | ≈1.0 GB | ≈1.0 GB |
 | **Combined worst-case peak** | **≈9.7 GB** | **≈12.1 GB** |
 
