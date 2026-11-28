@@ -10,9 +10,11 @@ import { Secret } from '@omnibridge/crypto';
 import type {
   AccountCredentials,
   AuditLog,
+  CatalogueRepository,
   ChannelAccountRepository,
   ConnectionRepository,
   OrderIngest,
+  StockEngine,
   WebsiteConnectionRepository,
 } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
@@ -49,6 +51,14 @@ export interface WebsiteOptions {
   ingest?: {
     steps: OrderIngestSteps;
     orders: Pick<OrderIngest, 'orderIds'>;
+  };
+  /**
+   * Disconnect (any channel account): ends its listings and clears their manual stock settings
+   * (C7.3). Without it the route answers 404.
+   */
+  disconnect?: {
+    listings: Pick<CatalogueRepository, 'endAll'>;
+    stock: Pick<StockEngine, 'onListingsEnded'>;
   };
   logger: Logger;
   now?: () => Date;
