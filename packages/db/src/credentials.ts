@@ -28,6 +28,8 @@ export const CREDENTIAL_KINDS = [
   'evri.api_key',
   'dpd.api_key',
   'website.api_key',
+  // T-1101 (WEB-2): the HMAC secret a website and OmniBridge sign their calls with.
+  'website.signing_secret',
 ] as const;
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
@@ -448,14 +450,75 @@ export class AccountCredentials {
     this.#repo = repo;
   }
 
+  /**
+   * The account's credential for its provider calls. A website's (WEB-2, WEB-4) is the three
+   * things its calls need, as one JSON secret: `{ apiKey, signingSecret, baseUrl }`, the website's
+   * key, the signing secret both sides share and its base URL. Undefined when one is missing.
+   */
   read(
     ctx: TenantContext,
     channelAccountId: string,
     provider: keyof typeof CREDENTIAL_KIND_BY_PROVIDER,
   ): Promise<Secret | undefined> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const kind = CREDENTIAL_KIND_BY_PROVIDER[provider];
+      const key = await this.#repo.get(trx, ctx, { kind, channelAccountId });
+      if (provider !== 'website' || key === undefined) return key;
+      const secret = await this.#repo.get(trx, ctx, {
+        kind: 'website.signing_secret',
+        channelAccountId,
+      });
+      const { rows } = await sql<{ base_url: string }>`
+        SELECT base_url FROM app.website_connections
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid`.execute(trx);
+      const baseUrl = rows[0]?.base_url;
+      if (secret === undefined || baseUrl === undefined) return undefined;
+      return new Secret(
+        JSON.stringify({ apiKey: key.reveal(), signingSecret: secret.reveal(), baseUrl }),
+      );
+    });
+  }
+
+  /** Another credential of the account than its provider token (the website signing secret). */
+  readKind(
+    ctx: TenantContext,
+    channelAccountId: string,
+    kind: CredentialKind,
+  ): Promise<Secret | undefined> {
     return withTenantTransaction(this.#db, ctx, (trx) =>
-      this.#repo.get(trx, ctx, { kind: CREDENTIAL_KIND_BY_PROVIDER[provider], channelAccountId }),
+      this.#repo.get(trx, ctx, { kind, channelAccountId }),
     );
+  }
+
+  /**
+   * Stores a new value of that credential as current; the old one stops at once (kept inactive
+   * until the purge, never read again).
+   */
+  replaceKind(
+    ctx: TenantContext,
+    channelAccountId: string,
+    kind: CredentialKind,
+    value: Secret,
+  ): Promise<string> {
+    return withTenantTransaction(this.#db, ctx, (trx) =>
+      this.#repo.replaceCurrent(trx, ctx, { kind, channelAccountId }, value, { retainOldForMs: 0 }),
+    );
+  }
+
+  /**
+   * Disconnect (T-1101): every credential of the account, of every kind and environment, current
+   * or retired, is deleted. Returns how many rows went.
+   */
+  async removeAll(ctx: TenantContext, channelAccountId: string): Promise<number> {
+    const result = await withTenantTransaction(this.#db, ctx, (trx) =>
+      trx
+        .deleteFrom('app.credentials')
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('channel_account_id', '=', channelAccountId)
+        .executeTakeFirst(),
+    );
+    return Number(result.numDeletedRows);
   }
 
   /** Stores a new token as current (a connect or re-authorisation); the old one is retired. */

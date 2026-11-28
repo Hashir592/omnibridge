@@ -20,6 +20,7 @@ export {
   EBAY_APIS,
   EBAY_USER_SCOPES,
   EbayOrdersV1,
+  parseEbayOrderPage,
   parseEbayOrders,
   ebayOrderStream,
   type EbayAdapterOptions,

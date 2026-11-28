@@ -14,11 +14,17 @@ const ctx = { workspaceId: ID, companyIds: [] };
 
 describe('notification types', () => {
   it('[NTF-1] every PRD section 6 type (and the SEC-12 security types) is registered once, with a severity and a tab or platform scope', () => {
-    // 31 until T-0901 added the two INV-10 notices (allocation used up, mode reset on remap).
-    expect(NOTIFICATION_TYPES).toHaveLength(33);
-    expect(new Set(NOTIFICATION_TYPES.map((t) => t.code)).size).toBe(33);
+    // 31 until T-0901 added the two INV-10 notices (allocation used up, mode reset on remap);
+    // 34 with T-1101's orders set aside (F-M10-end-14, -17, S5-20261124-07); 35 with its
+    // website delivery alert (WEB-5).
+    expect(NOTIFICATION_TYPES).toHaveLength(35);
+    expect(new Set(NOTIFICATION_TYPES.map((t) => t.code)).size).toBe(35);
     expect(NOTIFICATION_TYPES.map((t) => t.code)).toEqual(
-      expect.arrayContaining(['inventory.allocation_used_up', 'inventory.mode_reset']),
+      expect.arrayContaining([
+        'inventory.allocation_used_up',
+        'inventory.mode_reset',
+        'orders.set_aside',
+      ]),
     );
     for (const t of NOTIFICATION_TYPES) {
       expect(t.severities.length).toBeGreaterThan(0);

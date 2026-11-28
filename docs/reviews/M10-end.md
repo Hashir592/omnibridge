@@ -373,9 +373,11 @@ Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispa
 - **F-M10-end-12** (ORD-9, C3.1 point 3): an order with an open cancellation request (`CANCEL_REQUESTED`, `IN_PROGRESS`, `CANCEL_PENDING`) maps to Awaiting dispatch and groups. Keep the flag and exclude it; fix before M12's Ship together. **Fixed in T-1004**: `orders.cancel_requested` (eBay's open states; websites send none) is kept from the newest update, and such an order is in no group until the channel refuses.
 - **F-M10-end-13** (ORD-6): `viewOrderCustomer` answers 500 when the vault record has just gone and db-main has no tombstone yet. Map the vault's not-found to 404. **Fixed in T-1004.**
 - **F-M10-end-14** (ORD-4): `pii_subject` allows 200 characters, but an accepted external ID of up to 200 makes 237. One such order fails its whole page on every poll. Widen the check, or cap the ID at 163 in the parsers.
+  - Resolution: fixed in T-1101 (red 824e3d0, fix 5fa8bad). Both parsers cap the order ID at 163 and read each order on its own; one that cannot be stored is set aside with one `orders.set_aside` notice per account (counts by reason, IDs only), the rest are stored and the cursor moves. Tests: `sync.test.ts`, the eBay parser tests, the website protocol tests (`provider-website/src/index.test.ts`, which replace the provisional parser tests when M11 replaces that protocol) and the worker end-to-end set-aside test.
 - **F-M10-end-15** (ORD-9, C3.1): the spec says punctuation is removed; `normaliseName` turns it into a space, so "St John's" and "St Johns" do not match. **Fixed in T-1004**: punctuation is removed, and the vault re-indexes names and match keys of older records once at start.
 - **F-M10-end-16** (VAT-3, INT-5): eBay's `pricingSummary.total` is parsed but never compared. A `deliveryDiscount` gave a gross of £15.00 against eBay's £13.00. Compare and raise a notice on a mismatch. Place in T-1501 with the spec check.
 - **F-M10-end-17** (INT-5): one non-GBP order fails the parser for its whole page, so no later order of that account is stored. Quarantine the one order with a notice. S1 to place, before eBay goes live.
+  - Resolution: fixed in T-1101 with F-14 (red 824e3d0, fix 5fa8bad). A non-GBP, empty or unreadable order is set aside with the notice; an unreadable one also raises the platform report. Same tests as F-14.
 - **F-M10-end-18** (DEL-1, invariant 10): `vault.deleted_buyers` is not journalled, so a restore forgets notices that arrived after the backup. For S5 to judge. **Fixed in T-1003** (S5-20261124-08).
 - **F-M10-end-19** (FA-10): a repeat ingest of an orphan returns the old record with its old (perhaps already expired) `delete_after`. By reading only. **Fixed in T-1003** (S5-20261124-06).
 - **F-M10-end-20** (INV-4): lock order differs between mapping (stock row, then order) and an order update (order, then stock row). By reading only; a deadlock there is retried. **Fixed in T-1004** with F-10 (one lock order on both sides). **Confirmed by S4 on #173.**
@@ -389,10 +391,12 @@ Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispa
   - Both parsers accept an empty line array (`website/src/index.ts`, `ebay/src/adapter.ts`).
   - **Fix:** an update with no lines compares only discount, shipping and the channel total, never the lines, whether paid or not. Change the paid-order test to match, and add the unpaid case as a red test. For S1 to rule if S3 reads it otherwise.
   - Place in T-1101's first commits, with the website connector (ADR-086).
+  - Resolution: fixed in T-1101 as ADR-087 rules (red 1f6fa31, fix faa37fe). An update with no lines uses the stored lines, so it never touches or marks them, paid or not. The paid-order test now expects no mark for `{ lines: [] }`; the unpaid case was red first (`orders.int.test.ts`, db).
 - **F-M10-end-26** (Performance, ORD-9 C3.1; found on #173): the vault decrypts every buyer record of every workspace at each start, before it serves.
   - `reindexNames` (`apps/pii-vault/src/vault.ts`, called in `main.ts` before `app.listen`) takes one transaction per workspace. In it, it locks all the workspace's records `FOR UPDATE` and makes two queries and one decryption per record. Records that are already right are skipped only after they are decrypted.
   - With nothing deployed this costs little. In production it grows with the 90-day stock of records, on every restart, until M22 removes it.
   - **Fix:** run it once (a done marker in the vault, or a db-pii migration that flags the records still to do), and in batches, before go-live.
+  - Resolution: fixed in T-1101 as ADR-087 rules (shape 788847e, red 1f6fa31, fix faa37fe). `reindexNames` runs once (done marker `reindex_names` in `vault.maintenance_done`, db-pii 0013, no UPDATE or DELETE for `vault_app`), in batches of 200 with a short transaction each. Tests in `vault.int.test.ts`: once, and in batches, red first.
 - **F-M10-end-27** (test gaps found by planted faults on #173; the code is right in each place today):
   - G14: `removeMember` that leaves one member must close the group. `#closeSmall` with `< 1` passes every group and web test. The required test closes a group only through `applyGroups`, where unlinking already leaves the group empty.
   - T04: no test changes `order_lines.external_sku` after insert. The 0056 check can go unnoticed, yet F-05's line matching and `search_sku` rely on it.
@@ -401,6 +405,7 @@ Resolution: fixed in T-1003: on back-fill a line already shipped takes its dispa
   - 651210f: "shipped orders that were never priced" was not red at its test commit. Say so in the PR as a guard, or give it a fault.
   - One test each, a guard red against its fault. They ride with T-1101 like the other Minors.
 
+  - Resolution: T-1101 3fa0610. Each guard was planted with its fault by hand on that test alone (ADR-085) and caught it: G14 (`#closeSmall` with `< 1`, `order-groups.int.test.ts`), `stock.ts:1492` (`FOR UPDATE`, a key-share probe in `stock.int.test.ts`), F05k (the mark clears in the open branch, `orders.int.test.ts`). T04: the existing test already fails when the 0056 check on `external_sku` is removed, so no new test. 651210f's test is recorded as a guard.
 ## Acceptance
 
 | Task | Item | Result |

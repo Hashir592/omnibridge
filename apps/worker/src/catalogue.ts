@@ -1,6 +1,7 @@
 import { londonDate, type TenantContext } from '@omnibridge/core';
 import type { CatalogueRepository, Connection, MappingChange } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
+import { sendMappingChanged } from '@omnibridge/order-ingest';
 import {
   AuthFailed,
   EgressRefused,
@@ -11,7 +12,6 @@ import {
   type SyncPorts,
 } from '@omnibridge/provider-kit';
 import {
-  listingMappedJob,
   listingsDiscoverAccountsJob,
   listingsDiscoverJob,
   PermanentJobError,
@@ -56,23 +56,8 @@ export function listingMappedHandler(deps: {
   };
 }
 
-/** The mapped event of one change, sent in the caller's transaction (CAT-6). */
-export function sendMappingChanged(
-  queue: Pick<JobQueue, 'send'>,
-  ctx: TenantContext,
-  change: MappingChange,
-  key: string,
-) {
-  return queue.send(listingMappedJob, {
-    ctx,
-    idempotencyKey: `listing_mapped:${change.listingId}:${key}`,
-    payload: {
-      listing_id: change.listingId,
-      master_sku_id: change.masterSkuId,
-      previous_master_sku_id: change.previousMasterSkuId,
-    },
-  });
-}
+/** The mapped event of one change (CAT-6): shared with the order ingest step. */
+export { sendMappingChanged };
 
 /**
  * A scan stops reading this long after it starts, well inside listings.discover's 30-minute job
@@ -82,12 +67,15 @@ export const DISCOVERY_MAX_RUN_MS = 25 * 60_000;
 
 /** Builds an adapter when a job needs it: app secrets are read then, not at boot. */
 export type DiscoveryAdapters = Partial<
-  Record<'ebay' | 'website', () => Promise<Pick<ChannelAdapter, 'authenticate' | 'listListings'>>>
+  Record<'ebay', () => Promise<Pick<ChannelAdapter, 'authenticate' | 'listListings'>>>
 >;
 
-const SCAN_APIS: Record<'ebay' | 'website', { api: string; authApi?: string }> = {
+/**
+ * The channels with a listing read. A website has none (WEB-4): it sends its products itself
+ * (WEB-3 `POST /products`), and that call reconciles them.
+ */
+const SCAN_APIS: Record<'ebay', { api: string; authApi?: string }> = {
   ebay: { api: 'sell.inventory', authApi: 'identity.user_token' },
-  website: { api: 'api.products' },
 };
 
 /**
@@ -121,7 +109,7 @@ export function listingsDiscoverHandler(deps: {
       );
       if (account === undefined) return { skipped: 'disconnected' };
       const provider = account.provider;
-      if (provider !== 'ebay' && provider !== 'website') return { skipped: 'disconnected' };
+      if (provider !== 'ebay') return { skipped: 'disconnected' };
       const factory = deps.adapters[provider];
       if (factory === undefined) return { skipped: 'disconnected' };
       const adapter = await factory();
@@ -206,10 +194,10 @@ export function listingsDiscoverHandler(deps: {
 }
 
 /** The sales channels discovery reads (Amazon joins with its seller id in M18). */
-const DISCOVERED: readonly Connection['provider'][] = ['ebay', 'website'];
+const DISCOVERED: readonly Connection['provider'][] = ['ebay'];
 
 /**
- * listings.discover_accounts: one listings.discover job per connected eBay and website account of
+ * listings.discover_accounts: one listings.discover job per connected eBay account of
  * the workspace, once per London day (CAT-5 "daily").
  */
 export function listingsDiscoverAccountsHandler(deps: {

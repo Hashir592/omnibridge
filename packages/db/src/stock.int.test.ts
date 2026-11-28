@@ -588,6 +588,32 @@ describe('stock engine (T-0901)', () => {
     expect(rows[0]).toEqual({ stock_mode: 'auto', manual_qty: null });
   });
 
+  // F-M10-end-27: a page that has just stored a line holds a key-share lock on its listing (the
+  // foreign key). Ending the listing locks it FOR NO KEY UPDATE, so it never waits (F-M10-end-10).
+  it('[INV-4][INV-10] ending a listing never waits for a page that holds its listing key', async () => {
+    const w = await world();
+    let held: () => void = () => undefined;
+    const isHeld = new Promise<void>((r) => (held = r));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const page = withTenantTransaction(db, w.ctx, async (trx) => {
+      await sql`SELECT 1 FROM app.listings WHERE id = ${w.listings.ebay2}::uuid FOR KEY SHARE`.execute(
+        trx,
+      );
+      held();
+      await gate;
+    });
+    await isHeld;
+    const ended = engine()
+      .onListingsEnded(w.ctx, [w.listings.ebay2])
+      .then(() => 'done');
+    const late = new Promise<string>((r) => setTimeout(r, 3000, 'waited'));
+    const first = await Promise.race([ended, late]);
+    release();
+    await Promise.all([page, ended]);
+    expect(first).toBe('done');
+  });
+
   it('[AT-27] C7.3 a buffer change: the manual cap uses the new buffer', async () => {
     const w = await world(20);
     await engine().saveAllocation(w.ctx, w.sku, {

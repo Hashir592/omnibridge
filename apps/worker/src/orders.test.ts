@@ -3,7 +3,12 @@ import type { StoredOrderPii } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
 import type { ChannelOrder } from '@omnibridge/provider-kit';
 import { describe, expect, it } from 'vitest';
-import { orderIngestStream, ordersOrphanSweepHandler, ordersPiiExpiryHandler } from './orders.ts';
+import {
+  orderIngestStream,
+  ordersOrphanSweepHandler,
+  ordersPiiExpiryHandler,
+  ordersSyncAccountsHandler,
+} from './orders.ts';
 
 const job = { workspaceId: 'w', channelAccountId: 'a' };
 const at = new Date('2026-11-20T09:00:00Z');
@@ -241,5 +246,41 @@ describe('the vault-first step for a stored order (ORD-4)', () => {
       ['no address', order({ buyer: { name: 'PIIMARK-A', postcode: 'TE1 1ST' } }), stored()],
     ];
     for (const [name, o, known] of cases) expect(await asked(o, known), name).toEqual(nothing);
+  });
+});
+
+describe('the order polls of each account (CAP-6, WEB-4)', () => {
+  it('[WEB-4][CAP-6] eBay is read every 5 minutes; a website once a night, from 02:00 London time', async () => {
+    const keys: string[] = [];
+    const run = (now: string) =>
+      ordersSyncAccountsHandler({
+        connections: {
+          list: () =>
+            Promise.resolve([
+              { id: 'E', provider: 'ebay', status: 'active' },
+              { id: 'W', provider: 'website', status: 'active' },
+              { id: 'X', provider: 'website', status: 'disconnected' },
+            ] as never),
+        },
+        queue: {
+          send: (_job, input) => {
+            keys.push(input.idempotencyKey);
+            return Promise.resolve({ id: 'j', created: true });
+          },
+        },
+        now: () => new Date(now),
+      })({ ctx: { workspaceId: 'w', companyIds: [] } } as never);
+    // 01:55 London (GMT in November): eBay only.
+    await run('2026-11-28T01:55:00Z');
+    // 02:05 and 23:50: the website once, keyed by the London day, so the second is a repeat.
+    await run('2026-11-28T02:05:00Z');
+    await run('2026-11-28T23:50:00Z');
+    expect(keys).toEqual([
+      'sync.poll:ebay.orders:E:2026-11-28T01:55',
+      'sync.poll:ebay.orders:E:2026-11-28T02:05',
+      'sync.poll:website.orders:W:2026-11-28',
+      'sync.poll:ebay.orders:E:2026-11-28T23:50',
+      'sync.poll:website.orders:W:2026-11-28',
+    ]);
   });
 });

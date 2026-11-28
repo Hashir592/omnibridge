@@ -57,6 +57,7 @@ describe('db-pii roles and migrations', () => {
       '0010_deleted_buyer_date',
       '0011_vault_wide_deleted_buyers',
       '0012_retire_deleted_buyers',
+      '0013_maintenance_done',
     ]);
     expect((await migratePii(owner)).applied).toEqual([]);
   });

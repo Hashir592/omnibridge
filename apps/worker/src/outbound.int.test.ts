@@ -31,6 +31,7 @@ import {
 } from '@omnibridge/provider-kit';
 import { buildMockServer } from '@omnibridge/provider-mocks';
 import { createWebsiteAdapter } from '@omnibridge/provider-website';
+import { websiteChannelOrder } from './orders.ts';
 import { OutboundQueue, type PreparingJob } from '@omnibridge/queue';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import pg from 'pg';
@@ -125,7 +126,8 @@ describe('outbound writes, switches and governors against the eBay mock (SAFE-2,
       ports,
       operations: outboundOperations({
         ebay,
-        website: () => Promise.resolve(createWebsiteAdapter({ http })),
+        website: () =>
+          Promise.resolve(createWebsiteAdapter({ http, toChannelOrder: websiteChannelOrder })),
       }),
       logger,
     }).prepare({

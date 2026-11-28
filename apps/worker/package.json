@@ -17,6 +17,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@omnibridge/contract": "workspace:*",
     "@omnibridge/core": "workspace:*",
     "@omnibridge/crypto": "workspace:*",
     "@omnibridge/db": "workspace:*",
@@ -25,6 +26,7 @@
     "@omnibridge/governor-ebay": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/mail": "workspace:*",
+    "@omnibridge/order-ingest": "workspace:*",
     "@omnibridge/provider-ebay": "workspace:*",
     "@omnibridge/provider-kit": "workspace:*",
     "@omnibridge/provider-website": "workspace:*",

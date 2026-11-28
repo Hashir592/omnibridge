@@ -7,7 +7,10 @@
 import { Secret } from '@omnibridge/crypto';
 import {
   AuthFailed,
+  cleanId,
   defineParser,
+  freeText,
+  parseEach,
   ProviderRejected,
   RateLimited,
   readJson,
@@ -22,6 +25,7 @@ import {
   type ListingInfo,
   type OrderSource,
   type Page,
+  type SetAside,
   type ProviderHttp,
   type StockLevel,
   type SyncStream,
@@ -55,10 +59,13 @@ const TokenV1 = defineParser(
   }),
 );
 
-const Text = z.string().max(4000).optional();
+/** Free text a buyer typed: NUL removed, cut to the vault's 4,000 characters (S5-20261124-07). */
+const Text = freeText(4000).optional();
 const When = z.iso.datetime({ offset: true });
-/** IDs and SKUs: db-main keeps at most 200 characters, so a longer one is a parser failure. */
-const Id = z.string().min(1).max(200);
+/** IDs and SKUs: db-main keeps at most 200 characters, so a longer one sets the order aside. */
+const Id = cleanId(200);
+/** db-main keys a buyer by `<account id>:<order id>` in 200 characters (F-M10-end-14). */
+const ORDER_ID_MAX = 163;
 /** ISO 3166 alpha-2, upper-cased (db-main checks ^[A-Z]{2}$). */
 const Country = z
   .string()
@@ -66,91 +73,100 @@ const Country = z
   .transform((c) => c.toUpperCase());
 
 /**
- * The Fulfillment API's getOrders (M10: money, dates, refunds and the ship-to block). Version 2:
- * version 1 read IDs and quantities only. Provisional until T-1501 checks it against eBay's spec.
+ * The Fulfillment API's getOrders page (M10: money, dates, refunds and the ship-to block). Version 3
+ * reads each order on its own, so one that cannot be stored is set aside and never fails its page
+ * (F-M10-end-14, -17, S5-20261124-07). Provisional until T-1501 checks it against eBay's spec.
  */
 export const EbayOrdersV1 = defineParser(
   'ebay',
   'orders',
-  2,
+  3,
   z.object({
     next: z.string().optional(),
     offset: z.number().int().min(0),
     limit: z.number().int().min(1),
-    orders: z.array(
-      z.object({
-        orderId: Id,
-        creationDate: When,
-        lastModifiedDate: When,
-        orderFulfillmentStatus: z.string().min(1),
-        orderPaymentStatus: z.string().min(1),
-        cancelStatus: z.object({ cancelState: z.string().optional() }).optional(),
-        buyer: z.object({ username: Text }).optional(),
-        pricingSummary: z.object({
-          deliveryCost: GbpAmount.optional(),
-          priceDiscount: GbpDiscount.optional(),
-          deliveryDiscount: GbpDiscount.optional(),
-          adjustment: GbpSignedAmount.optional(),
-          total: GbpAmount,
-        }),
-        paymentSummary: z
-          .object({
-            payments: z.array(z.object({ paymentDate: When.optional() })).optional(),
-            refunds: z
-              .array(
-                z.object({
-                  refundId: Id,
-                  refundDate: When,
-                  refundStatus: z.string().optional(),
-                  amount: GbpAmount,
-                }),
-              )
-              .optional(),
-          })
-          .optional(),
-        fulfillmentStartInstructions: z
+    orders: z.array(z.unknown()),
+  }),
+);
+
+/** One order of a getOrders page. */
+const EbayOrderV1 = defineParser(
+  'ebay',
+  'order',
+  3,
+  z.object({
+    orderId: cleanId(ORDER_ID_MAX),
+    creationDate: When,
+    lastModifiedDate: When,
+    orderFulfillmentStatus: z.string().min(1),
+    orderPaymentStatus: z.string().min(1),
+    cancelStatus: z.object({ cancelState: z.string().optional() }).optional(),
+    buyer: z.object({ username: Text }).optional(),
+    pricingSummary: z.object({
+      deliveryCost: GbpAmount.optional(),
+      priceDiscount: GbpDiscount.optional(),
+      deliveryDiscount: GbpDiscount.optional(),
+      adjustment: GbpSignedAmount.optional(),
+      total: GbpAmount,
+    }),
+    paymentSummary: z
+      .object({
+        payments: z.array(z.object({ paymentDate: When.optional() })).optional(),
+        refunds: z
           .array(
             z.object({
-              shippingStep: z
+              refundId: Id,
+              refundDate: When,
+              refundStatus: z.string().optional(),
+              amount: GbpAmount,
+            }),
+          )
+          .optional(),
+      })
+      .optional(),
+    fulfillmentStartInstructions: z
+      .array(
+        z.object({
+          shippingStep: z
+            .object({
+              shipTo: z
                 .object({
-                  shipTo: z
+                  fullName: Text,
+                  email: Text,
+                  primaryPhone: z.object({ phoneNumber: Text }).optional(),
+                  contactAddress: z
                     .object({
-                      fullName: Text,
-                      email: Text,
-                      primaryPhone: z.object({ phoneNumber: Text }).optional(),
-                      contactAddress: z
-                        .object({
-                          addressLine1: Text,
-                          addressLine2: Text,
-                          city: Text,
-                          stateOrProvince: Text,
-                          postalCode: Text,
-                          countryCode: Country.optional(),
-                        })
-                        .optional(),
+                      addressLine1: Text,
+                      addressLine2: Text,
+                      city: Text,
+                      stateOrProvince: Text,
+                      postalCode: Text,
+                      countryCode: Country.optional(),
                     })
                     .optional(),
                 })
                 .optional(),
-            }),
-          )
-          .optional(),
-        lineItems: z.array(
-          z.object({
-            lineItemId: Id,
-            sku: Id.optional(),
-            title: z.string().max(500).optional(),
-            quantity: z.number().int().min(1),
-            lineItemCost: GbpAmount,
-            lineItemFulfillmentInstructions: z.object({ shipByDate: When.optional() }).optional(),
-          }),
-        ),
-      }),
-    ),
+            })
+            .optional(),
+        }),
+      )
+      .optional(),
+    lineItems: z
+      .array(
+        z.object({
+          lineItemId: Id,
+          sku: Id.optional(),
+          title: freeText(500).optional(),
+          quantity: z.number().int().min(1),
+          lineItemCost: GbpAmount,
+          lineItemFulfillmentInstructions: z.object({ shipByDate: When.optional() }).optional(),
+        }),
+      )
+      .min(1),
   }),
 );
 
-type EbayOrder = ReturnType<typeof EbayOrdersV1.parse>['orders'][number];
+type EbayOrder = ReturnType<typeof EbayOrderV1.parse>;
 
 /** eBay payment statuses that mean the buyer's payment was captured. */
 const PAID_STATUSES: readonly string[] = ['PAID', 'PARTIALLY_REFUNDED', 'FULLY_REFUNDED'];
@@ -189,9 +205,30 @@ function ebayBuyer(o: EbayOrder): BuyerDetails | null {
   return entries.length === 0 ? null : Object.fromEntries(entries);
 }
 
-/** One getOrders page's orders as whole channel orders (M10); the buyer block is PII. */
+/**
+ * One getOrders page: its orders as whole channel orders (the buyer block is PII), and the ones set
+ * aside. A page the parser cannot read at all throws, with its parser notice (INT-5).
+ */
+export function parseEbayOrderPage(body: unknown): {
+  orders: ChannelOrder[];
+  setAside: SetAside[];
+  next: string | undefined;
+} {
+  const page = EbayOrdersV1.parse(body);
+  const { items, setAside } = parseEach(EbayOrderV1, page.orders, {
+    id: { field: 'orderId', max: ORDER_ID_MAX },
+    linesField: 'lineItems',
+  });
+  return {
+    orders: items.map(ebayOrder),
+    setAside,
+    next: page.next === undefined ? undefined : String(page.offset + page.limit),
+  };
+}
+
+/** The orders of one getOrders page that can be stored. */
 export function parseEbayOrders(body: unknown): ChannelOrder[] {
-  return EbayOrdersV1.parse(body).orders.map(ebayOrder);
+  return parseEbayOrderPage(body).orders;
 }
 
 /**
@@ -393,11 +430,8 @@ export function createEbayAdapter(options: EbayAdapterOptions): Omit<
       url.searchParams.set('limit', String(options.pageSize ?? 200));
       url.searchParams.set('offset', page ?? '0');
       const res = await options.http.request('ebay', { url, headers: bearer(access) });
-      const body = EbayOrdersV1.parse(await ebayJson(res));
-      return {
-        items: body.orders.map(ebayOrder),
-        next: body.next === undefined ? undefined : String(body.offset + body.limit),
-      };
+      const { orders, setAside, next } = parseEbayOrderPage(await ebayJson(res));
+      return { items: orders, next, setAside };
     },
 
     async listListings(access, page): Promise<Page<ListingInfo>> {

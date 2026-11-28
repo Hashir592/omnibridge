@@ -5,6 +5,7 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CatalogueRepository } from './catalogue.ts';
+import { DeletionLog } from './deletion.ts';
 import { migrateMain } from './migrate.ts';
 import { OrderGroupRefused, OrderReads } from './order-reads.ts';
 import { OrderIngest, piiSubject, type IncomingOrder } from './orders.ts';
@@ -301,6 +302,57 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
       await Promise.all([page, run]);
       expect(finished, act).toBe(true);
     }
+  });
+
+  // ADR-086 (3): an erased buyer leaves the group at once, not at the account's next change.
+  it('[ORD-9][DEL-1] a deletion that tombstones a grouped order names its account for a recompute, which takes it out', async () => {
+    const w = await world();
+    const { classes, orders } = await sameBuyer(w, 2);
+    const loner = order(5, { pii: { kind: 'stored', piiRef: randomUUID() } });
+    await ingest.apply(w.ctx, w.account, [loner]);
+    await reads.applyGroups(w.ctx, w.account, classes);
+    const [groupId = null] = (await groupIds(w)).filter((g) => g !== null);
+    expect(groupId).not.toBeNull();
+    const log = new DeletionLog(db);
+    const run = (piiRef: string) =>
+      log.record(
+        w.ctx,
+        {
+          id: randomUUID(),
+          trigger: 'erasure',
+          scopeType: 'refs',
+          scope: { type: 'refs', pii_refs: [piiRef] },
+          channelAccountId: null,
+          startedAt: now,
+          finishedAt: now,
+        },
+        [{ piiRef, channelAccountId: w.account }],
+      );
+    // An order in no group names nothing.
+    expect(await run(loner.pii.kind === 'stored' ? loner.pii.piiRef : '')).toEqual({
+      regroup: [],
+    });
+    const first = orders[0]?.pii;
+    expect(await run(first?.kind === 'stored' ? first.piiRef : '')).toEqual({
+      regroup: [w.account],
+    });
+    await reads.applyGroups(w.ctx, w.account, classes);
+    expect(await groupIds(w)).toEqual([null]);
+    expect(await groups(w, 'closed')).toEqual([groupId]);
+  });
+
+  // F-M10-end-27 (G14): through removeMember itself, not a recompute that has emptied the group.
+  it('[ORD-9] removing one of two members leaves a group of one, which closes', async () => {
+    const w = await world();
+    const { classes, ids } = await sameBuyer(w, 2);
+    await reads.applyGroups(w.ctx, w.account, classes);
+    const groupId = (await groupIds(w)).find((g) => g !== null) ?? '';
+    expect(await reads.removeMember(w.ctx, groupId, ids[1] ?? '')).toMatchObject({
+      memberCount: 1,
+    });
+    expect(await groupIds(w)).toEqual([null]);
+    expect(await groups(w, 'open')).toEqual([]);
+    expect(await groups(w, 'closed')).toEqual([groupId]);
   });
 
   it('[ORD-9] an order that is dispatched or cancelled leaves its group, and a group of one closes', async () => {

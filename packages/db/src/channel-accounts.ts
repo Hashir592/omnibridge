@@ -104,17 +104,23 @@ export class ChannelAccountRepository {
     );
   }
 
-  /** Archiving is how an account with orders leaves its company (TEN-3). */
-  async archive(ctx: TenantContext, id: string): Promise<void> {
-    await this.#write(ctx, (db) =>
-      db
-        .updateTable('app.channel_accounts')
-        .set({ archived_at: new Date() })
-        .where('workspace_id', '=', ctx.workspaceId)
-        .where('id', '=', id)
-        .where('archived_at', 'is', null)
-        .execute(),
+  /**
+   * Archiving is how an account with orders leaves its company (TEN-3), and what Disconnect does.
+   * True when this call archived it; false when it was archived already.
+   */
+  async archive(ctx: TenantContext, id: string): Promise<boolean> {
+    const result = await mapTenancyErrors(() =>
+      withTenantTransaction(this.#db, ctx, (db) =>
+        db
+          .updateTable('app.channel_accounts')
+          .set({ archived_at: new Date() })
+          .where('workspace_id', '=', ctx.workspaceId)
+          .where('id', '=', id)
+          .where('archived_at', 'is', null)
+          .executeTakeFirst(),
+      ),
     );
+    return result.numUpdatedRows > 0n;
   }
 
   async #write(ctx: TenantContext, fn: (db: Kysely<MainDb>) => Promise<unknown>): Promise<void> {

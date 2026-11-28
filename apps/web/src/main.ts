@@ -30,7 +30,9 @@ import {
   WorkspaceRepository,
   CatalogueRepository,
   StockEngine,
+  OrderIngest,
   OrderReads,
+  WebsiteConnectionRepository,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
@@ -56,6 +58,7 @@ import { AuthService } from './auth/service.ts';
 import { createOAuthFlows } from './oauth-exchange.ts';
 import { loadSpa } from './spa.ts';
 import { ebayWebhookFromEnv } from './webhooks/ebay.ts';
+import { websiteIngest, websiteMapped } from './website.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
 const logger = createLogger({ service: 'web', version });
@@ -238,6 +241,46 @@ const app = buildWebApp({
           });
         },
       },
+      logger,
+    };
+  })(),
+  // Module toggles (PLAT-2, ADR-059): a route behind one answers 404 while it is off.
+  modules: new WorkspaceRepository(main.db),
+  // The website connector (T-1101: WEB-1 to WEB-3) and Disconnect for any channel account.
+  website: (() => {
+    const mode = providerModeFrom(process.env.PROVIDER_MODE);
+    const catalogue = new CatalogueRepository(main.db);
+    return {
+      connections: new WebsiteConnectionRepository(main.db),
+      accounts: new ChannelAccountRepository(main.db),
+      view: new ConnectionRepository(main.db, { environment: mode }),
+      credentials: new AccountCredentials(
+        main.db,
+        new CredentialRepository({ keyring: secretsKeyring, logger, environment: mode }),
+      ),
+      audit: new AuditLog(main.db),
+      tenancy,
+      appOrigin: process.env.APP_ORIGIN ?? origins[0] ?? '',
+      ingest: websiteIngest({
+        ingest: (ports) => new OrderIngest(main.db, { catalogue, stock: stockEngine, ports }),
+        queue,
+        notifier: new Notifier({ store: new NotificationRepository(main.db) }),
+        tenancy,
+        vault,
+        logger,
+      }),
+      products: {
+        listings: catalogue,
+        mapped: websiteMapped(queue),
+        // After the call's transaction, in short transactions of its own (one per SKU).
+        reconcile: (workspaceId, accountId, seenAt) =>
+          stockEngine.reconcile(
+            (fn) => tenancy.runWorkspace({ workspaceId }, fn),
+            accountId,
+            seenAt,
+          ),
+      },
+      disconnect: { listings: catalogue, stock: stockEngine },
       logger,
     };
   })(),

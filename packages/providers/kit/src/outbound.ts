@@ -25,8 +25,8 @@ const DAILY_LIMIT_WAIT_MS = 60 * 60_000;
 /** The longest a write waits before its next attempt, whatever the provider asks (RL-4). */
 export const MAX_DEFER_MS = 60 * 60_000;
 
-export function retryDelayMs(attempts: number): number {
-  return Math.min(MAX_DEFER_MS, 60_000 * 2 ** Math.max(0, attempts - 1));
+export function retryDelayMs(attempts: number, maxDelayMs = MAX_DEFER_MS): number {
+  return Math.min(maxDelayMs, 60_000 * 2 ** Math.max(0, attempts - 1));
 }
 
 /** One kind of provider write: its payload schema (IDs and numbers only) and how to send it. */
@@ -38,8 +38,21 @@ export interface OutboundOperation<P> {
   /** The API name of the token call (eBay counts it against identity). */
   readonly authApi?: string;
   readonly payload: z.ZodType<P>;
+  /**
+   * WEB-5: how long a write that may pass is retried: the n-th wait is 2^(n-1) minutes, at most
+   * `maxDelayMs`, and it is given up after `maxAttempts`. Left out, MAX_SEND_ATTEMPTS and
+   * MAX_DEFER_MS.
+   */
+  readonly retry?: { readonly maxAttempts: number; readonly maxDelayMs: number };
+  /**
+   * WEB-5: a write given up after a provider failure raises this notice on its account (one per
+   * account, updated in place), and the next write sent clears it. The given-up write stays in
+   * app.outbound_writes as failed, with its code: the dead letter.
+   */
+  readonly deadLetterAlert?: string;
   authenticate(credential: Secret): Promise<AccessToken>;
-  send(token: AccessToken, payload: P): Promise<Record<string, unknown>>;
+  /** `write.id` is the same on every attempt of one write: the receiver's idempotency key. */
+  send(token: AccessToken, payload: P, write?: { id: string }): Promise<Record<string, unknown>>;
 }
 
 export interface OutboundWriteView {
@@ -114,6 +127,14 @@ class Wait extends Error {
   }
 }
 
+/** An operation's retry limits (WEB-5), or the defaults. */
+function limitsOf(op: OutboundOperation<unknown>) {
+  return {
+    maxAttempts: op.retry?.maxAttempts ?? MAX_SEND_ATTEMPTS,
+    maxDelayMs: op.retry?.maxDelayMs ?? MAX_DEFER_MS,
+  };
+}
+
 /** Kept on retry: the provider may well take it later (or Amazon kept answering 429). */
 const retryable = (err: unknown) =>
   err instanceof RateLimited ||
@@ -133,7 +154,11 @@ const retryable = (err: unknown) =>
  *    pending until then, again with no attempt spent.
  * 4. Sends it through the governor's `run` (Amazon 429 backoff, the carrier cap).
  * 5. Stores the result, the health and the usage; or the failure: retried with backoff when it
- *    may pass, given up after MAX_SEND_ATTEMPTS or at once when the provider refused it.
+ *    may pass, given up after the operation's attempt limit (MAX_SEND_ATTEMPTS unless it sets its
+ *    own, WEB-5) or at once when the provider refused it. A write given up after a provider
+ *    failure raises the operation's alert, if it has one; the next write sent clears it.
+ *
+ * A write is sent only for an account of the operation's own provider (WEB-6).
  */
 export async function runOutboundSend(
   ports: OutboundPorts,
@@ -142,6 +167,27 @@ export async function runOutboundSend(
 ): Promise<OutboundResult> {
   const now = ports.now ?? (() => new Date());
   const actor = { workspaceId: job.workspaceId };
+  /** WEB-6: refused before anything is read or sent, and never retried. */
+  const wrongProvider = async (ctx: TenantContext, id: string): Promise<OutboundResult> => {
+    const code = 'outbound.wrong_provider';
+    await ports.writes.fail(ctx, id, { code, attempted: false, at: now() });
+    return { failed: code };
+  };
+  /** WEB-5: the given-up write is the dead letter; its account gets the operation's alert. */
+  const deadLettered = async (
+    ctx: TenantContext,
+    op: OutboundOperation<unknown>,
+    write: OutboundWriteView,
+    companyId: string,
+  ) => {
+    if (op.deadLetterAlert === undefined) return;
+    await ports.notifier.raise(ctx, {
+      type: op.deadLetterAlert,
+      record: { kind: 'channel_account', id: write.channelAccountId },
+      companyId,
+      channelAccountId: write.channelAccountId,
+    });
+  };
 
   type Ready = {
     write: OutboundWriteView;
@@ -156,12 +202,6 @@ export async function runOutboundSend(
       const write = await ports.writes.get(ctx, job.writeId);
       if (write === undefined) return { skipped: 'gone' };
       if (write.state !== 'pending') return { skipped: write.state };
-      // Dead workers' claims count too (recovery), so a write that keeps crashing one stops here.
-      if (write.attempts >= MAX_SEND_ATTEMPTS) {
-        const code = 'outbound.attempts_exhausted';
-        await ports.writes.fail(ctx, write.id, { code, attempted: false, at: now() });
-        return { failed: code };
-      }
       const op = operations[write.operation];
       const parsed = op?.payload.safeParse(write.payload);
       if (op === undefined || parsed === undefined || !parsed.success) {
@@ -169,6 +209,16 @@ export async function runOutboundSend(
         await ports.writes.fail(ctx, write.id, { code, attempted: false, at: now() });
         return { failed: code };
       }
+      // Dead workers' claims count too (recovery), so a write that keeps crashing one stops here.
+      if (write.attempts >= limitsOf(op).maxAttempts) {
+        const code = 'outbound.attempts_exhausted';
+        await ports.writes.fail(ctx, write.id, { code, attempted: false, at: now() });
+        const account = await ports.accounts.get(ctx, write.channelAccountId, now());
+        if (account !== undefined) await deadLettered(ctx, op, write, account.companyId);
+        return { failed: code };
+      }
+      // WEB-6: an operation is sent only for an account of its own provider.
+      if (op.provider !== write.provider) return wrongProvider(ctx, write.id);
       // Invariant 20: the switches as they are now, just before the send.
       const gate = await ports.writes.gate(ctx, write.channelAccountId);
       if (gate.maintenance || gate.paused) {
@@ -189,12 +239,14 @@ export async function runOutboundSend(
         });
         return { failed: 'provider.disconnected' };
       }
+      if (account.provider !== write.provider) return wrongProvider(ctx, write.id);
       if (!(await ports.writes.claim(ctx, write.id, now()))) return { skipped: 'claimed' };
       return { write, op, payload: parsed.data, credential, companyId: account.companyId };
     },
   );
   if (!('write' in start)) return start;
   const { write, op, payload, credential, companyId } = start;
+  const limits = limitsOf(op);
   const call = (api: string): CallInput => ({
     workspaceId: job.workspaceId,
     channelAccountId: write.channelAccountId,
@@ -222,7 +274,7 @@ export async function runOutboundSend(
   const send = async () => {
     const access = await token();
     await admit(op.api);
-    return ports.governor.run(call(op.api), () => op.send(access, payload));
+    return ports.governor.run(call(op.api), () => op.send(access, payload, { id: write.id }));
   };
   const recordCalls = async (ctx: TenantContext) => {
     for (const [api, n] of calls) {
@@ -302,16 +354,20 @@ export async function runOutboundSend(
         return { deferred: 'rate_limit' };
       }
       const mayPass = retryable(err) || (err instanceof AuthFailed && !err.revoked);
-      if (!mayPass || write.attempts + 1 >= MAX_SEND_ATTEMPTS) {
+      if (!mayPass || write.attempts + 1 >= limits.maxAttempts) {
         await ports.writes.fail(ctx, write.id, { code, attempted: true, at: now() });
+        await deadLettered(ctx, op, write, companyId);
         return { failed: code };
       }
       // A provider's Retry-After is honoured up to the retry ceiling (60 minutes): a week, or a
       // far date, would hold a stock write silently, as a deferral is not a failure (F-M08-end-03).
       const wait =
         err instanceof RateLimited && err.retryAfterMs !== undefined
-          ? Math.min(MAX_DEFER_MS, Math.max(err.retryAfterMs, retryDelayMs(write.attempts + 1)))
-          : retryDelayMs(write.attempts + 1);
+          ? Math.min(
+              limits.maxDelayMs,
+              Math.max(err.retryAfterMs, retryDelayMs(write.attempts + 1, limits.maxDelayMs)),
+            )
+          : retryDelayMs(write.attempts + 1, limits.maxDelayMs);
       const until = new Date(now().getTime() + wait);
       const { dispatchSeq } = await ports.writes.defer(ctx, write.id, {
         until,
@@ -326,6 +382,12 @@ export async function runOutboundSend(
 
   await ports.tenancy.runWorkspace(actor, async (ctx) => {
     await ports.writes.sent(ctx, write.id, result, now());
+    if (op.deadLetterAlert !== undefined) {
+      await ports.notifier.resolve(ctx, op.deadLetterAlert, {
+        kind: 'channel_account',
+        id: write.channelAccountId,
+      });
+    }
     const { reauthCleared } = await ports.health.recordSuccess(ctx, write.channelAccountId, now(), {
       tokenRefreshed: auth.refreshed,
     });

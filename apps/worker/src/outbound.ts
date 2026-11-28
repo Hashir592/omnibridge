@@ -14,6 +14,8 @@ import {
   type OutboundQueue,
   type PhasedHandler,
 } from '@omnibridge/queue';
+import { WEBSITE_ORDER_ID_MAX, WebsiteShipmentSchema } from '@omnibridge/contract';
+import { WEBSITE_RETRY, type WebsiteAdapter } from '@omnibridge/provider-website';
 import { z } from 'zod';
 
 /** A stock push: SKUs and whole quantities only (invariant 7a), at most 50 per write. */
@@ -27,23 +29,33 @@ const StockPush = z
   .strict();
 type StockPushPayload = z.infer<typeof StockPush>;
 
+/** WEB-4: a shipment for the website: the carrier, service, tracking numbers and when (IDs only). */
+const Shipment = z
+  .object({
+    externalOrderId: z.string().min(1).max(WEBSITE_ORDER_ID_MAX),
+    shipment: WebsiteShipmentSchema,
+  })
+  .strict();
+
+type StockAdapter = Pick<ChannelAdapter, 'authenticate' | 'pushStock'>;
+
 /** A stock push to one channel: the adapter is built when a write needs it (app secrets then). */
 function stockPush(
   operation: string,
   provider: 'ebay' | 'website',
   api: string,
-  adapter: () => Promise<ChannelAdapter>,
-  authApi?: string,
+  adapter: () => Promise<StockAdapter>,
+  more: Pick<OutboundOperation<unknown>, 'authApi' | 'retry' | 'deadLetterAlert'> = {},
 ): OutboundOperation<StockPushPayload> {
   return {
     operation,
     provider,
     api,
-    ...(authApi === undefined ? {} : { authApi }),
+    ...more,
     payload: StockPush,
     authenticate: async (credential) => (await adapter()).authenticate(credential),
-    send: async (token, payload) => {
-      const result = await (await adapter()).pushStock(token, payload.levels);
+    send: async (token, payload, write) => {
+      const result = await (await adapter()).pushStock(token, payload.levels, write?.id);
       // SKUs and stable codes only, never a provider message.
       return { accepted: result.accepted.length, refused: result.refused.map((r) => r.code) };
     },
@@ -56,17 +68,36 @@ function stockPush(
  */
 export function outboundOperations(adapters: {
   ebay: () => Promise<ChannelAdapter>;
-  website: () => Promise<ChannelAdapter>;
+  website: () => Promise<WebsiteAdapter>;
 }): Readonly<Record<string, OutboundOperation<unknown>>> {
+  // WEB-5: website writes retry from 1 minute up to 24 hours, then dead-letter with one alert.
+  const website = { retry: WEBSITE_RETRY, deadLetterAlert: 'website.delivery_failed' };
   return {
-    'ebay.stock_push': stockPush(
-      'ebay.stock_push',
-      'ebay',
-      'sell.inventory',
-      adapters.ebay,
-      'identity.user_token',
+    'ebay.stock_push': stockPush('ebay.stock_push', 'ebay', 'sell.inventory', adapters.ebay, {
+      authApi: 'identity.user_token',
+    }),
+    'website.stock_push': stockPush(
+      'website.stock_push',
+      'website',
+      'omnibridge.stock',
+      adapters.website,
+      website,
     ),
-    'website.stock_push': stockPush('website.stock_push', 'website', 'api.stock', adapters.website),
+    // WEB-4, TRK-1: M12 queues one when a website order ships; nothing of eBay ever goes (WEB-6).
+    'website.shipment': {
+      operation: 'website.shipment',
+      provider: 'website',
+      api: 'omnibridge.shipment',
+      ...website,
+      payload: Shipment,
+      authenticate: async (credential) => (await adapters.website()).authenticate(credential),
+      send: async (token, payload, write) => {
+        await (
+          await adapters.website()
+        ).pushShipment(token, payload.externalOrderId, payload.shipment, write?.id ?? '');
+        return { accepted: 1 };
+      },
+    } satisfies OutboundOperation<z.infer<typeof Shipment>>,
   };
 }
 

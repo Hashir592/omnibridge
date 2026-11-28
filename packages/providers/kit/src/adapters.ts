@@ -18,11 +18,24 @@ export interface TokenGrant extends AccessToken {
   readonly refreshTokenExpiresAt: Date | null;
 }
 
+/** Why one item of a page was set aside instead of stored (F-M10-end-14, -17, S5-20261124-07). */
+export const SET_ASIDE_REASONS = ['not_gbp', 'no_lines', 'id_too_long', 'unreadable'] as const;
+export type SetAsideReason = (typeof SET_ASIDE_REASONS)[number];
+
+/** An item a page could not take: one bad order never stops the rest of its account's sync. */
+export interface SetAside {
+  /** The channel's ID when it could be read: an order number, never buyer data. */
+  readonly externalId: string | null;
+  readonly reason: SetAsideReason;
+}
+
 /** One page of an "updated since" read (INT-8). */
 export interface Page<T> {
   readonly items: readonly T[];
   /** Opaque: the provider's next-page token or offset, undefined on the last page. */
   readonly next: string | undefined;
+  /** The page's items that could not be read or stored; the sync counts them in one notice. */
+  readonly setAside?: readonly SetAside[];
 }
 
 /** An order as the cursor sees it: IDs and quantities only. Buyer data goes to the vault (M10). */
@@ -162,7 +175,8 @@ interface ProviderAdapter {
 export interface ChannelAdapter extends ProviderAdapter {
   readonly provider: 'amazon' | 'ebay' | 'website';
   ordersUpdatedSince(token: AccessToken, since: Date, page?: string): Promise<Page<OrderSummary>>;
-  pushStock(token: AccessToken, levels: readonly StockLevel[]): Promise<WriteResult>;
+  /** `key`: the same for every attempt of one write, where the channel takes one (WEB-2). */
+  pushStock(token: AccessToken, levels: readonly StockLevel[], key?: string): Promise<WriteResult>;
   /** One page of the account's listings (CAT-5); a complete scan reads every page. */
   listListings(token: AccessToken, page?: string): Promise<Page<ListingInfo>>;
 }

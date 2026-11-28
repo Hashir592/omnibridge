@@ -34,7 +34,7 @@ describe('deletion job phases', () => {
       log: {
         record: (_ctx, run, tombstones) => {
           calls.push(`log:${run.id}:${String(tombstones.length)}`);
-          return Promise.resolve();
+          return Promise.resolve({ regroup: [] });
         },
       },
       erasures: {
@@ -68,5 +68,52 @@ describe('deletion job phases', () => {
     // A-006: an erasure's request is completed in the same transaction as the run log.
     expect(calls[3]).toBe('completed:job-1');
     expect(result).toEqual({ records: 1 });
+  });
+
+  // ADR-086 (3): IDs only, with F-M10-end-08's collapsing key (orderIngestPorts.regroup).
+  it('[ORD-9][DEL-1] a run that tombstones a grouped order queues its account group recompute, in the commit', async () => {
+    const workspaceId = randomUUID();
+    const ref = randomUUID();
+    const accounts = [randomUUID(), randomUUID()];
+    const queued: string[] = [];
+    const handler = piiDeleteHandler({
+      vault: {
+        delete: (req) =>
+          Promise.resolve({
+            run_id: req.run_id,
+            counts: { records: 1, fields: 1, index: 1 },
+            deleted: [{ pii_ref: ref, channel_account_id: accounts[0] ?? null }],
+            more: false,
+          }),
+      },
+      log: { record: () => Promise.resolve({ regroup: accounts }) },
+      erasures: {
+        complete: () => Promise.resolve(undefined),
+        fail: () => Promise.resolve(undefined),
+      },
+      regroup: (ctx, input) => {
+        queued.push(`${ctx.workspaceId}:${input.channelAccountId}`);
+        return Promise.resolve();
+      },
+      logger,
+    });
+    const payload: Payload = { trigger: 'expiry', scope: { type: 'refs', pii_refs: [ref] } };
+    const job: PreparingJob<Payload> = {
+      jobId: 'job-2',
+      envelope: {
+        workspace_id: workspaceId,
+        idempotency_key: 'expiry:1',
+        attempt: 1,
+        type: 'pii.delete',
+        payload,
+      },
+      payload,
+      attempt: 1,
+      progress: () => Promise.resolve(),
+    };
+    const prepared = await handler.prepare(job);
+    expect(queued).toEqual([]);
+    await handler.commit({ ...job, ctx: { workspaceId, companyIds: [] } }, prepared);
+    expect(queued).toEqual(accounts.map((a) => `${workspaceId}:${a}`));
   });
 });

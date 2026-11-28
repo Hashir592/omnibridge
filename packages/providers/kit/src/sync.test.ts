@@ -368,6 +368,52 @@ describe('incremental sync: job, governor, parser and cursor (INT-1, INT-5, INT-
     }
   });
 
+  // F-M10-end-14, F-M10-end-17, S5-20261124-07: one order never stops its account's sync.
+  it('[INT-5][CAP-6] orders a page sets aside are counted in one notice; the rest are stored and the cursor moves', async () => {
+    const h = harness(new Date('2026-11-21T12:00:00.000Z'));
+    const sink: Item[] = [];
+    let bad = true;
+    const s: SyncStream<Item> = {
+      ...stream(() => [], sink),
+      fetchPage: (_token, _since, page) =>
+        Promise.resolve(
+          page === undefined
+            ? {
+                items: [item('A', '2026-11-21T11:00:00.000Z')],
+                next: '1',
+                setAside: bad
+                  ? [
+                      { externalId: 'B', reason: 'not_gbp' as const },
+                      { externalId: 'C', reason: 'no_lines' as const },
+                    ]
+                  : [],
+              }
+            : {
+                items: [item('D', '2026-11-21T11:30:00.000Z')],
+                next: undefined,
+                setAside: bad ? [{ externalId: null, reason: 'unreadable' as const }] : [],
+              },
+        ),
+    };
+    expect(await runIncrementalSync(h.ports, s, job)).toMatchObject({ fetched: 2, fresh: 2 });
+    expect(sink.map((i) => i.externalId)).toEqual(['A', 'D']);
+    expect(h.cursor().cursorAt).toEqual(new Date('2026-11-21T11:30:00.000Z'));
+    expect(h.health.successes).toBe(1);
+    expect(h.raised).toEqual([
+      {
+        type: 'orders.set_aside',
+        record: { kind: 'channel_account', id: ACCOUNT },
+        companyId: COMPANY,
+        channelAccountId: ACCOUNT,
+        params: { count: 3, notGbp: 1, noLines: 1, idTooLong: 0, unreadable: 1 },
+      },
+    ]);
+    // A run that sets nothing aside raises nothing.
+    bad = false;
+    await runIncrementalSync(h.ports, s, job);
+    expect(h.raised).toHaveLength(1);
+  });
+
   it('[INT-8][CAP-6] slow pages stop the reading in time to store them, and the next run reads on', async () => {
     let at = Date.parse('2026-11-21T12:00:00.000Z');
     const h = harness(new Date(at));

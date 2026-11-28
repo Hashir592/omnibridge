@@ -76,7 +76,7 @@ interface Keys {
 /** A lock could not be had in time: 503, and the caller asks again. */
 export class VaultBusy extends Error {}
 
-/** The address block of a buyer, replaced whole by a correction (ORD-4). */
+/** The address block of a buyer, replaced whole by a correction (ORD-4, ADR-083 2). */
 const DELIVERY_FIELDS: ReadonlySet<string> = new Set([
   'name',
   'address_line1',
@@ -89,6 +89,16 @@ const DELIVERY_FIELDS: ReadonlySet<string> = new Set([
   'delivery_instructions',
 ]);
 
+/**
+ * Delivery instructions are free text, not identity (ADR-086 2): a masked one never refuses the
+ * address; like a masked email or phone it is left out and the stored one kept.
+ */
+const FREE_TEXT_FIELDS: ReadonlySet<string> = new Set(['delivery_instructions']);
+
+/** F-M10-end-26: the name re-index runs once, in batches of this many records. */
+const REINDEX_DONE = 'reindex_names';
+const REINDEX_BATCH = 200;
+
 /** A channel masks old buyers' details with stars or dots. */
 const isMasked = (value: string): boolean => /[*\u2022]/.test(value);
 
@@ -100,7 +110,10 @@ const isMasked = (value: string): boolean => /[*\u2022]/.test(value);
 function usableBlock(fields: Readonly<Record<string, string>>): Record<string, string> | undefined {
   const given = Object.entries(fields);
   const named = fields.name !== undefined && fields.name.trim() !== '';
-  const masked = given.some(([field, value]) => DELIVERY_FIELDS.has(field) && isMasked(value));
+  const masked = given.some(
+    ([field, value]) =>
+      DELIVERY_FIELDS.has(field) && !FREE_TEXT_FIELDS.has(field) && isMasked(value),
+  );
   if (!named || masked || !hasDeliveryAddress(fields)) return undefined;
   return Object.fromEntries(given.filter(([, value]) => !isMasked(value)));
 }
@@ -292,7 +305,12 @@ export class Vault {
     const old = await this.#decryptFields(c, keys.data, req.workspace_id, record.pii_ref);
     const next: Record<string, string> = {};
     for (const [field, value] of Object.entries(old)) {
-      if (!DELIVERY_FIELDS.has(field)) next[field] = value;
+      // Replaced whole, except free text sent masked, which keeps the stored value (ADR-086 2).
+      const sent = req.fields[field];
+      const maskedNow = sent !== undefined && isMasked(sent);
+      if (!DELIVERY_FIELDS.has(field) || (FREE_TEXT_FIELDS.has(field) && maskedNow)) {
+        next[field] = value;
+      }
     }
     Object.assign(next, fields);
     // The buyer as the record would hold it: an ID the channel did not send again still counts.
@@ -905,59 +923,86 @@ export class Vault {
   /**
    * F-M10-end-15: names and addresses are indexed without their punctuation now, and records from
    * before T-1002 have no such match key at all. Each record whose name or match key is not the one
-   * its fields give today gets it. Idempotent; one short transaction per workspace. Returns how many
-   * records changed (a count, never a value).
+   * its fields give today gets it. It runs once (F-M10-end-26): a done marker in db-pii means a later
+   * start reads no record at all. Records are read in batches, each in a short transaction of its
+   * own, so a write waits for one batch at most. Returns how many records changed (a count).
    */
-  async reindexNames(): Promise<number> {
+  async reindexNames(options: { batch?: number } = {}): Promise<number> {
+    const batch = Math.max(1, options.batch ?? REINDEX_BATCH);
+    const done = await this.#pool.query('SELECT 1 FROM vault.maintenance_done WHERE name = $1', [
+      REINDEX_DONE,
+    ]);
+    if ((done.rowCount ?? 0) > 0) return 0;
     const directory = await this.#pool.query<{ workspace_id: string }>(
       'SELECT workspace_id FROM vault.workspace_directory ORDER BY workspace_id',
     );
     let changed = 0;
     for (const { workspace_id: workspaceId } of directory.rows) {
-      changed += await this.#tx(workspaceId, async (c, tx) => {
-        const keys = await this.#loadKeys(tx, workspaceId, false);
-        if (keys === undefined) return 0;
-        const records = await c.query<{ pii_ref: string }>(
-          `SELECT pii_ref FROM vault.records
-            WHERE workspace_id = $1 AND kind = 'buyer_contact' AND NOT canary
-            ORDER BY pii_ref FOR UPDATE`,
-          [workspaceId],
-        );
-        let count = 0;
-        for (const { pii_ref: ref } of records.rows) {
-          const { name, match } = indexValues(
-            await this.#decryptFields(c, keys.data, workspaceId, ref),
-          );
-          const want = Object.fromEntries(
-            Object.entries({ name, match }).filter(
-              (e): e is [string, string] => e[1] !== undefined,
-            ),
-          );
-          const had = await c.query<{ field: string; mac: Buffer }>(
-            `SELECT field, mac FROM vault.blind_index
-              WHERE workspace_id = $1 AND pii_ref = $2 AND field IN ('name', 'match')`,
-            [workspaceId, ref],
-          );
-          const same =
-            had.rows.length === Object.keys(want).length &&
-            had.rows.every((r) => {
-              const value = want[r.field];
-              return value !== undefined && keys.index.mac(r.field, value).equals(r.mac);
-            });
-          if (same) continue;
-          await c.query(
-            `DELETE FROM vault.blind_index
-              WHERE workspace_id = $1 AND pii_ref = $2 AND field IN ('name', 'match')`,
-            [workspaceId, ref],
-          );
-          await this.#writeIndex(c, keys, workspaceId, ref, want);
-          count += 1;
-        }
-        return count;
-      });
+      let after = '00000000-0000-0000-0000-000000000000';
+      for (;;) {
+        const part = await this.#reindexBatch(workspaceId, after, batch);
+        changed += part.changed;
+        if (part.last === null || part.read < batch) break;
+        after = part.last;
+      }
     }
+    await this.#pool.query(
+      'INSERT INTO vault.maintenance_done (name, done_at) VALUES ($1, now()) ON CONFLICT DO NOTHING',
+      [REINDEX_DONE],
+    );
     if (changed > 0) await this.#vacuumReplaced();
     return changed;
+  }
+
+  /** One batch of the re-index, in a short transaction: the records after `after`, locked. */
+  async #reindexBatch(
+    workspaceId: string,
+    after: string,
+    batch: number,
+  ): Promise<{ changed: number; read: number; last: string | null }> {
+    return this.#tx(workspaceId, async (c, tx) => {
+      const keys = await this.#loadKeys(tx, workspaceId, false);
+      if (keys === undefined) return { changed: 0, read: 0, last: null };
+      const records = await c.query<{ pii_ref: string }>(
+        `SELECT pii_ref FROM vault.records
+            WHERE workspace_id = $1 AND kind = 'buyer_contact' AND NOT canary AND pii_ref > $2::uuid
+            ORDER BY pii_ref LIMIT $3 FOR UPDATE`,
+        [workspaceId, after, batch],
+      );
+      let count = 0;
+      for (const { pii_ref: ref } of records.rows) {
+        const { name, match } = indexValues(
+          await this.#decryptFields(c, keys.data, workspaceId, ref),
+        );
+        const want = Object.fromEntries(
+          Object.entries({ name, match }).filter((e): e is [string, string] => e[1] !== undefined),
+        );
+        const had = await c.query<{ field: string; mac: Buffer }>(
+          `SELECT field, mac FROM vault.blind_index
+              WHERE workspace_id = $1 AND pii_ref = $2 AND field IN ('name', 'match')`,
+          [workspaceId, ref],
+        );
+        const same =
+          had.rows.length === Object.keys(want).length &&
+          had.rows.every((r) => {
+            const value = want[r.field];
+            return value !== undefined && keys.index.mac(r.field, value).equals(r.mac);
+          });
+        if (same) continue;
+        await c.query(
+          `DELETE FROM vault.blind_index
+              WHERE workspace_id = $1 AND pii_ref = $2 AND field IN ('name', 'match')`,
+          [workspaceId, ref],
+        );
+        await this.#writeIndex(c, keys, workspaceId, ref, want);
+        count += 1;
+      }
+      return {
+        changed: count,
+        read: records.rows.length,
+        last: records.rows.at(-1)?.pii_ref ?? null,
+      };
+    });
   }
 
   /**

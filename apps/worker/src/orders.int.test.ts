@@ -19,9 +19,14 @@ import {
 import { Notifier, type TenantContext } from '@omnibridge/core';
 import { Secret } from '@omnibridge/crypto';
 import { createLogger } from '@omnibridge/logger';
-import { parseEbayOrders } from '@omnibridge/provider-ebay';
-import { AccessTokenCache, runIncrementalSync, type ChannelOrder } from '@omnibridge/provider-kit';
-import { parseWebsiteOrders } from '@omnibridge/provider-website';
+import { parseEbayOrderPage, parseEbayOrders } from '@omnibridge/provider-ebay';
+import {
+  AccessTokenCache,
+  runIncrementalSync,
+  type ChannelOrder,
+  type CursorState,
+} from '@omnibridge/provider-kit';
+import { parseWebsiteOrderPage } from '@omnibridge/provider-website';
 import { JobQueue, JOBS, type PreparingJob } from '@omnibridge/queue';
 import {
   PII_MARKER,
@@ -42,6 +47,7 @@ import {
   ordersGroupRecomputeHandler,
   ordersPiiExpiryHandler,
   piiDeleteAfter,
+  websiteChannelOrder,
 } from './orders.ts';
 
 const DAY = 86_400_000;
@@ -224,34 +230,38 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await orderRow(o.externalId))?.pii_ref).toBe(record?.pii_ref);
   });
 
-  /** A website order as its API sends it, with markers on every buyer field. */
+  /**
+   * A website order as the website sends it (WEB-3, WEB-4), with markers on every buyer field. The
+   * cases were written in M10's provisional shape, so `over` still names its fields (created_at,
+   * updated_at, shipped_at, status, customer, shipping_address); `asM11` maps them onto the M11
+   * protocol with the meaning they had, and the order goes through the website's own parser.
+   */
   const websiteOrders = (...over: Record<string, unknown>[]) =>
-    parseWebsiteOrders({
-      orders: over.map((o) => ({
-        id: `WEB-${randomUUID().slice(0, 8)}`,
-        created_at: new Date(Date.now() - 2 * DAY).toISOString(),
-        updated_at: new Date(Date.now() - DAY).toISOString(),
-        paid_at: new Date(Date.now() - 2 * DAY).toISOString(),
-        status: 'processing',
-        currency: 'GBP',
-        shipping_total: '3.00',
-        customer: { id: `${PII_MARKER}cust`, email: `${PII_MARKER}web@example.test` },
-        shipping_address: {
-          name: `${PII_MARKER}Web Buyer`,
-          line1: `${PII_MARKER}2 Road`,
-          city: 'Testville',
-          postcode: 'TE2 2ND',
-          country: 'GB',
-          instructions: `${PII_MARKER}leave by the gate`,
-        },
-        // Fields no parser asked for: they must go nowhere.
-        billing_address: { line1: `${PII_MARKER}billing` },
-        notes: `${PII_MARKER}notes`,
-        lines: [{ id: 'L1', sku: 'MOCK-SKU-1', quantity: 1, total: '12.00' }],
-        ...o,
-      })),
-      next_cursor: null,
-    });
+    parseWebsiteOrderPage(
+      {
+        orders: over.map((o) =>
+          asM11({
+            id: `WEB-${randomUUID().slice(0, 8)}`,
+            created_at: new Date(Date.now() - 2 * DAY).toISOString(),
+            updated_at: new Date(Date.now() - DAY).toISOString(),
+            paid_at: new Date(Date.now() - 2 * DAY).toISOString(),
+            status: 'processing',
+            customer: { id: `${PII_MARKER}cust`, email: `${PII_MARKER}web@example.test` },
+            shipping_address: {
+              name: `${PII_MARKER}Web Buyer`,
+              line1: `${PII_MARKER}2 Road`,
+              city: 'Testville',
+              postcode: 'TE2 2ND',
+              country: 'GB',
+              instructions: `${PII_MARKER}leave by the gate`,
+            },
+            ...o,
+          }),
+        ),
+        nextCursor: null,
+      },
+      websiteChannelOrder,
+    ).orders;
   /** An eBay order as getOrders sends it, with markers on every buyer field. */
   const ebayOrders = (...over: Record<string, unknown>[]) => {
     const gbp = (value: string) => ({ value, currency: 'GBP' });
@@ -1210,6 +1220,114 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect(rows).toEqual([{ on_hand: '5', reserved: '75' }]);
   });
 
+  // F-M10-end-14, F-M10-end-17, S5-20261124-07, through the real parser, vault and ingest.
+  it('[INT-5][ORD-4] one eBay order that cannot be stored never stops its account: the rest are stored and the cursor moves', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const gbp = (value: string) => ({ value, currency: 'GBP' });
+    const raw = (orderId: string, over: Record<string, unknown> = {}) => ({
+      orderId,
+      creationDate: new Date(Date.now() - 3_600_000).toISOString(),
+      lastModifiedDate: new Date(Date.now() - 60_000).toISOString(),
+      orderFulfillmentStatus: 'NOT_STARTED',
+      orderPaymentStatus: 'PAID',
+      pricingSummary: { deliveryCost: gbp('3.00'), total: gbp('15.00') },
+      fulfillmentStartInstructions: [
+        {
+          shippingStep: {
+            shipTo: {
+              fullName: `${PII_MARKER}Set Aside`,
+              contactAddress: {
+                addressLine1: `${PII_MARKER}1 Page Lane`,
+                postalCode: 'TE1 1ST',
+                countryCode: 'GB',
+              },
+            },
+          },
+        },
+      ],
+      lineItems: [{ lineItemId: 'L1', sku: 'SKU-1', quantity: 1, lineItemCost: gbp('12.00') }],
+      ...over,
+    });
+    const ok = `EB-OK-${tag}`;
+    const nul = `EB-NUL-${tag}`;
+    const body = {
+      offset: 0,
+      limit: 50,
+      orders: [
+        raw(ok),
+        raw(`EB-EUR-${tag}`, { pricingSummary: { total: { value: '1.00', currency: 'EUR' } } }),
+        raw(`${tag}-${'z'.repeat(170)}`),
+        raw(nul, {
+          lineItems: [
+            {
+              lineItemId: 'L1',
+              sku: 'SKU-1',
+              title: 'Mug\u0000',
+              quantity: 1,
+              lineItemCost: gbp('12.00'),
+            },
+          ],
+        }),
+      ],
+    };
+    let cursor: CursorState = { cursorAt: null, overlap: [] };
+    const base = orderIngestStream({ tenancy, ingest, vault: worker, logger });
+    const unused = () => Promise.reject(new Error('not reached'));
+    const done = await runIncrementalSync<ChannelOrder>(
+      {
+        tenancy,
+        accounts: {
+          get: () => Promise.resolve({ provider: 'ebay', companyId: company, status: 'active' }),
+        },
+        credentials: { read: () => Promise.resolve(new Secret('synthetic')) },
+        cursors: {
+          get: () => Promise.resolve(cursor),
+          save: (_c, _a, _s, next) => {
+            cursor = next;
+            return Promise.resolve();
+          },
+        },
+        health: {
+          recordSuccess: () => Promise.resolve({ reauthCleared: false }),
+          recordAuthFailure: unused,
+          recordError: unused,
+          recordCalls: () => Promise.resolve(),
+        },
+        notifier,
+        tokens: new AccessTokenCache(),
+      },
+      {
+        ...base,
+        stream: 'ebay.orders',
+        provider: 'ebay',
+        api: 'sell.fulfillment',
+        lookbackMs: DAY,
+        authenticate: () =>
+          Promise.resolve({ token: new Secret('t'), expiresAt: new Date(Date.now() + 60_000) }),
+        fetchPage: () => {
+          const page = parseEbayOrderPage(body);
+          return Promise.resolve({ items: page.orders, next: undefined, setAside: page.setAside });
+        },
+      },
+      job,
+    );
+    expect(done).toMatchObject({ fetched: 2, fresh: 2 });
+    const { rows: stored } = await root.query<{ external_order_id: string }>(
+      'SELECT external_order_id FROM app.orders WHERE external_order_id LIKE $1 ORDER BY 1',
+      [`%${tag}%`],
+    );
+    expect(stored.map((r) => r.external_order_id)).toEqual([ok, nul].sort());
+    expect(cursor.cursorAt).not.toBeNull();
+    const { rows: notices } = await root.query<{ params: Record<string, number> }>(
+      `SELECT params FROM app.notifications
+        WHERE type = 'orders.set_aside' AND record_kind = 'channel_account' AND record_id = $1`,
+      [account],
+    );
+    expect(notices).toEqual([
+      { params: { count: 2, notGbp: 1, noLines: 0, idTooLong: 1, unreadable: 0 } },
+    ]);
+  });
+
   it('[DEL-1][AT-8] at ingest delivery wins over dispatch, with the workspace window of 25 days', async () => {
     const dates = { placedAt: daysAgo(20), paidAt: daysAgo(20), updatedAt: daysAgo(1) };
     const both = channelOrder({
@@ -1378,3 +1496,70 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect(await scanDatabaseForMarkers(main)).toEqual([]);
   });
 });
+
+/** M10's provisional website order, as these cases name its fields. */
+interface M10WebsiteOrder {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  paid_at?: string | null;
+  shipped_at?: string | null;
+  delivered_at?: string | null;
+  status: string;
+  customer?: { id?: string; email?: string; phone?: string; name?: string };
+  shipping_address: {
+    name: string;
+    line1: string;
+    city: string;
+    postcode?: string;
+    country: string;
+    instructions?: string;
+  };
+}
+
+/** The same order in the M11 protocol (WEB-3): its status means what M10's dates and words did. */
+function asM11(raw: Record<string, unknown>) {
+  const o = raw as unknown as M10WebsiteOrder;
+  const paidAt = o.paid_at ?? null;
+  const status =
+    o.status === 'cancelled'
+      ? 'cancelled'
+      : (o.delivered_at ?? null) !== null
+        ? 'delivered'
+        : o.status === 'shipped' || o.status === 'completed' || (o.shipped_at ?? null) !== null
+          ? 'shipped'
+          : o.status === 'pending' && paidAt === null
+            ? 'pending'
+            : 'paid';
+  return {
+    externalOrderId: o.id,
+    status,
+    currency: 'GBP',
+    placedAt: o.created_at,
+    updatedAt: o.updated_at,
+    paidAt,
+    shippedAt: o.shipped_at ?? null,
+    deliveredAt: o.delivered_at ?? null,
+    lines: [
+      {
+        externalLineId: 'L1',
+        externalSku: 'MOCK-SKU-1',
+        title: null,
+        quantity: 1,
+        unitPriceGross: 1200,
+      },
+    ],
+    shippingGross: 300,
+    discountGross: 0,
+    buyer: {
+      customerId: o.customer?.id ?? null,
+      name: o.shipping_address.name,
+      email: o.customer?.email ?? null,
+      phone: o.customer?.phone ?? null,
+    },
+    shippingAddress: o.shipping_address,
+    // Fields no parser asked for: they must go nowhere.
+    billingAddress: { line1: `${PII_MARKER}billing` },
+    notes: `${PII_MARKER}notes`,
+  };
+}

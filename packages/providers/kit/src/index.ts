@@ -3,7 +3,7 @@
  * egress allowlist (invariant 17), versioned parsers (INT-5), incremental cursors and the sync
  * runner (INT-8). No provider-specific code lives here.
  */
-export { BUYER_FIELDS } from './adapters.ts';
+export { BUYER_FIELDS, SET_ASIDE_REASONS } from './adapters.ts';
 export {
   GbpAmount,
   GbpDiscount,
@@ -29,6 +29,8 @@ export type {
   OrderSummary,
   Page,
   Parcel,
+  SetAside,
+  SetAsideReason,
   Shipment,
   ShipmentAddress,
   ShippingProvider,
@@ -62,7 +64,14 @@ export {
   type ProviderHttpOptions,
   type ProviderRequest,
 } from './http.ts';
-export { defineParser, parserRecordKind, type VersionedParser } from './parser.ts';
+export {
+  cleanId,
+  defineParser,
+  freeText,
+  parseEach,
+  parserRecordKind,
+  type VersionedParser,
+} from './parser.ts';
 export { readJson, retryAfterMs } from './respond.ts';
 export { runIncrementalSync, type SyncPorts, type SyncResult, type SyncStream } from './sync.ts';
 export { runListingScan, type ListingScan, type ScanResult } from './scan.ts';

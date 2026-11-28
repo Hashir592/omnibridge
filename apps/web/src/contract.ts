@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { STATUS_CODES, type IncomingMessage, type ServerResponse } from 'node:http';
 import fastifySwagger from '@fastify/swagger';
 import {
@@ -13,6 +14,7 @@ import {
   PROBLEM_CONTENT_TYPE,
   ProblemSchema,
   type AnyRoute,
+  type ModuleToggle,
   type Problem,
   type RouteInput,
   type RouteResult,
@@ -50,9 +52,17 @@ import { sendSpa, type SpaFiles } from './spa.ts';
 declare module 'fastify' {
   interface FastifyContextConfig {
     /** Set only by registerRoutes; the onRoute guard refuses any route without it. */
-    contract?: { routeId: string };
+    contract?: { routeId: string; validationStatus?: 400 | 422 };
   }
 }
+
+/** WEB-2: a signed website call's body as it arrived, the bytes its signature covers. */
+const rawBodies = new WeakMap<FastifyRequest, Buffer>();
+export function rawBodyOf(request: FastifyRequest): Buffer | undefined {
+  return rawBodies.get(request);
+}
+/** A website's order may carry 500 lines (WEB-3); every other notice is small. */
+const WEBSITE_BODY_LIMIT = 512 * 1024;
 
 /**
  * What the route's `auth` kind adds to a handler's input (SEC-3): a session route gets the
@@ -101,6 +111,11 @@ export interface AuthOptions {
    */
   verifyWebhook?: (request: FastifyRequest, route: AnyRoute) => Promise<boolean>;
   /**
+   * ADR-059: whether a module of the caller's workspace is on, read in the request's transaction.
+   * A session route that names a module answers 404 while it is off, and when this is missing.
+   */
+  moduleOn?: (tenant: TenantContext, module: ModuleToggle) => Promise<boolean>;
+  /**
    * Opens the request's one tenant transaction (required with resolveSession). Session routes
    * run through runMember, so the member's role and ticks are checked in that transaction.
    */
@@ -126,6 +141,10 @@ type Actor =
   | { kind: 'webhook' };
 
 const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** A route the website calls, signed (WEB-2, WEB-3). */
+const website = (route: AnyRoute) =>
+  route.auth === 'signed-webhook' && route.module === 'website_connector';
 
 /** May this member call this route? (PERM-3, PERM-4, PERM-5) */
 export function allowed(route: AnyRoute, access: MemberAccess): boolean {
@@ -290,7 +309,9 @@ function handleError(error: FastifyError, request: FastifyRequest, reply: Fastif
       path: issue.instancePath.replace(/^\//, '').replaceAll('/', '.'),
       message: issue.message ?? 'Invalid value',
     }));
-    return sendProblem(reply, 400, 'validation_failed', { errors });
+    // WEB-3: a website's call answers 422 with the same field errors; every other route 400.
+    const status = request.routeOptions.config.contract?.validationStatus ?? 400;
+    return sendProblem(reply, status, 'validation_failed', { errors });
   }
   if (error instanceof ApiError) {
     if (error.retryAfterSeconds !== undefined) {
@@ -406,7 +427,12 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
       // Under /api, except the paths the PRD fixes (ADR-060).
       url: mountedPath(route.path),
       ...(level ? { logLevel: level } : {}),
-      config: { contract: { routeId: route.id } },
+      config: {
+        contract: {
+          routeId: route.id,
+          ...(website(route) ? { validationStatus: 422 as const } : {}),
+        },
+      },
       schema: {
         operationId: route.id,
         // A route outside /api overrides the document's server URL.
@@ -432,7 +458,27 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
       ...(route.auth === 'signed-webhook'
         ? {
             // A provider notice is small; anything bigger is refused before it is read.
-            bodyLimit: WEBHOOK_BODY_LIMIT,
+            bodyLimit: website(route) ? WEBSITE_BODY_LIMIT : WEBHOOK_BODY_LIMIT,
+            // WEB-2: the signature covers the bytes as sent, so they are kept before parsing.
+            ...(website(route)
+              ? {
+                  preParsing: async (
+                    request: FastifyRequest,
+                    _reply: FastifyReply,
+                    payload: Readable,
+                  ) => {
+                    const chunks: Buffer[] = [];
+                    for await (const chunk of payload) {
+                      chunks.push(
+                        typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer),
+                      );
+                    }
+                    const raw = Buffer.concat(chunks);
+                    rawBodies.set(request, raw);
+                    return Readable.from([raw]);
+                  },
+                }
+              : {}),
             preValidation: async (request: FastifyRequest) => {
               if (!(await auth.verifyWebhook?.(request, route))) {
                 throw new ApiError({ status: 412, code: 'precondition_failed' });
@@ -466,6 +512,12 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
                 // admin-only route needs an admin, a tab route needs that tab ticked, and the
                 // companies in scope are already only the permitted ones (invariant 4).
                 if (!allowed(route, access)) throw new ApiError({ status: 403, code: 'forbidden' });
+                if (
+                  route.module !== undefined &&
+                  (await auth.moduleOn?.(tenant, route.module)) !== true
+                ) {
+                  throw new ApiError({ status: 404, code: 'not_found' });
+                }
                 return call({ ...input, session, tenant, access });
               },
             );

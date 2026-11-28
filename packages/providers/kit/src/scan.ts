@@ -1,14 +1,7 @@
 import type { Provider, TenantContext } from '@omnibridge/core';
 import type { Secret } from '@omnibridge/crypto';
 import type { AccessToken, ListingInfo, Page } from './adapters.ts';
-import {
-  AuthFailed,
-  isProviderError,
-  ProviderParserError,
-  providerErrorCode,
-  RateLimited,
-} from './errors.ts';
-import { parserRecordKind } from './parser.ts';
+import { callSession } from './session.ts';
 import type { SyncPorts } from './sync.ts';
 
 /** A scan that reads more pages than this stops without concluding (nothing is marked ended). */
@@ -77,77 +70,29 @@ export async function runListingScan(
   if (start === undefined) return { skipped: 'disconnected' };
   const { account, credential } = start;
 
-  const calls = new Map<string, number>();
-  const input = (api: string) => ({
+  const session = callSession(ports, {
     workspaceId: job.workspaceId,
     channelAccountId: accountId,
+    companyId: account.companyId,
     provider: scan.provider,
-    api,
-    urgent: false,
+    ...(scan.authApi === undefined ? {} : { authApi: scan.authApi }),
+    credential,
+    authenticate: (c) => scan.authenticate(c),
   });
-  let held: RateLimited | undefined;
-  const governed = async (api: string) => {
-    const decision = (await ports.governor?.admit(input(api))) ?? {
-      ok: true,
-      usageRecorded: false,
-    };
-    if (!decision.ok) {
-      held = new RateLimited(scan.provider, {
-        retryAfterMs: Math.max(0, decision.retryAt.getTime() - now().getTime()),
-        daily: scan.provider === 'ebay',
-      });
-      throw held;
-    }
-    if (!decision.usageRecorded) calls.set(api, (calls.get(api) ?? 0) + 1);
-  };
-  const fetchPage = (access: AccessToken, page: string | undefined) =>
-    ports.governor === undefined
-      ? scan.fetchPage(access, page)
-      : ports.governor.run(input(scan.api), () => scan.fetchPage(access, page));
-  const auth = { refreshed: false, issued: false };
-  const token = async () => {
-    const got = await ports.tokens.get(accountId, async () => {
-      auth.issued = true;
-      await governed(scan.authApi ?? 'auth');
-      return scan.authenticate(credential);
-    });
-    auth.refreshed ||= got.refreshed;
-    return got.token;
-  };
-  const recordCalls = async (ctx: TenantContext) => {
-    for (const [api, n] of calls) {
-      await ports.health.recordCalls(
-        ctx,
-        { channelAccountId: accountId, provider: scan.provider, api, calls: n },
-        now(),
-      );
-    }
-    calls.clear();
-  };
 
   try {
     let page: string | undefined;
     let pages = 0;
     let listings = 0;
     do {
-      let result: Page<ListingInfo>;
-      try {
-        const access = await token();
-        await governed(scan.api);
-        result = await fetchPage(access, page);
-      } catch (err) {
-        // One 401 with a cached token may just be an early expiry: renew once and retry.
-        if (!(err instanceof AuthFailed) || err.revoked || auth.issued) throw err;
-        ports.tokens.invalidate(accountId);
-        const access = await token();
-        await governed(scan.api);
-        result = await fetchPage(access, page);
-      }
+      const result: Page<ListingInfo> = await session.call(scan.api, (access) =>
+        scan.fetchPage(access, page),
+      );
       pages += 1;
       listings += result.items.length;
       await ports.tenancy.runWorkspace(actor, async (ctx) => {
         await scan.sinkPage(ctx, accountId, result.items, startedAt);
-        await recordCalls(ctx);
+        await session.recordCalls(ctx, { clear: true });
       });
       page = result.next;
     } while (
@@ -161,48 +106,12 @@ export async function runListingScan(
       // An empty answer is more likely a provider hiccup than every listing ending at once:
       // only a scan that found something concludes (the listings it did not see have ended).
       if (complete && listings > 0) concluded = await scan.complete(ctx, accountId, startedAt);
-      const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
-        tokenRefreshed: auth.refreshed,
-      });
-      if (reauthCleared) {
-        await ports.notifier.resolve(ctx, 'channel.auth_lost', {
-          kind: 'channel_account',
-          id: accountId,
-        });
-      }
-      await recordCalls(ctx);
+      await session.succeeded(ctx);
     });
     return { pages, listings, complete, concluded };
   } catch (err) {
-    await ports.tenancy.runWorkspace(actor, async (ctx) => {
-      if (err instanceof AuthFailed) {
-        ports.tokens.invalidate(accountId);
-        const { marked } = await ports.health.recordAuthFailure(ctx, accountId, now(), {
-          revoked: err.revoked,
-        });
-        if (marked) {
-          await ports.notifier.raise(ctx, {
-            type: 'channel.auth_lost',
-            record: { kind: 'channel_account', id: accountId },
-            signal: err.revoked ? 'native' : 'derived',
-            companyId: account.companyId,
-            channelAccountId: accountId,
-          });
-        }
-      } else if (isProviderError(err) && err !== held) {
-        await ports.health.recordError(ctx, accountId, providerErrorCode(err), now());
-      }
-      await recordCalls(ctx);
-    });
-    if (err instanceof ProviderParserError) {
-      await ports.notifier.raisePlatform(null, {
-        type: 'platform.report_failure',
-        record: {
-          kind: parserRecordKind({ provider: err.provider, name: err.parser }),
-          id: String(err.version),
-        },
-      });
-    }
+    await ports.tenancy.runWorkspace(actor, (ctx) => session.failed(ctx, err));
+    await session.reportParser(err);
     throw err;
   }
 }

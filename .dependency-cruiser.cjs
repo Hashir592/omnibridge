@@ -99,6 +99,25 @@ module.exports = {
       to: { path: '^packages/(providers/(?!kit/)|governors/)' },
     },
     {
+      name: 'order-ingest-calls-no-provider',
+      comment:
+        'T-1101 (ADR-054 FA-04): the order ingest step is shared by the worker and the website ' +
+        'push, so it takes the provider kit for its order types only and imports no provider and ' +
+        'no governor: it calls no provider (invariant 15).',
+      severity: 'error',
+      from: { path: '^packages/order-ingest/' },
+      to: { path: '^packages/(providers/(?!kit/)|governors/)' },
+    },
+    {
+      name: 'order-ingest-only-website-in-web',
+      comment:
+        'T-1101: in the web app only the website push stores orders, vault first; no other ' +
+        'handler reaches the ingest step.',
+      severity: 'error',
+      from: { path: '^apps/(web|ui|pii-vault|site)/', pathNot: '^apps/web/src/website[^/]*\\.ts$' },
+      to: { path: '^packages/order-ingest/' },
+    },
+    {
       name: 'pii-db-only-from-vault',
       comment: 'Invariant 5: db-pii is reachable only through pii-vault.',
       severity: 'error',

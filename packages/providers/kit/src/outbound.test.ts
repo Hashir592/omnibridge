@@ -29,19 +29,37 @@ interface Row {
 
 /** In-memory ports with the db repositories' contracts, and a provider that counts its sends. */
 function harness(
-  options: { governor?: ProviderGovernor; send?: () => Promise<Record<string, unknown>> } = {},
+  options: {
+    governor?: ProviderGovernor;
+    send?: () => Promise<Record<string, unknown>>;
+    /** A website write, with WEB-5's retries (1 minute up to 24 hours) and its alert. */
+    website?: true;
+    /** The provider of the write's account, when it is not the write's own. */
+    accountProvider?: 'ebay' | 'website';
+  } = {},
 ) {
+  const provider = options.website === true ? 'website' : 'ebay';
+  const operation = `${provider}.stock_push`;
   const row: Row = { state: 'pending', pausedReason: null, attempts: 0, dispatchSeq: 0 };
   const switches = { maintenance: false, paused: false };
   const sent: unknown[] = [];
   const dispatched: { seq: number; startAfter: Date | undefined }[] = [];
   const raised: RaiseInput[] = [];
+  const resolved: string[] = [];
+  /** The write id each send was given (the receiver's idempotency key, WEB-2). */
+  const keys: (string | undefined)[] = [];
   const usage: { api: string; calls: number }[] = [];
   const ctx: TenantContext = { workspaceId: WS, companyIds: [COMPANY] };
   const op: OutboundOperation<{ levels: { sku: string; quantity: number }[] }> = {
-    operation: 'ebay.stock_push',
-    provider: 'ebay',
-    api: 'sell.inventory',
+    operation,
+    provider,
+    api: provider === 'website' ? 'api.stock' : 'sell.inventory',
+    ...(options.website === true
+      ? {
+          retry: { maxAttempts: 13, maxDelayMs: 24 * 60 * 60_000 },
+          deadLetterAlert: 'website.delivery_failed',
+        }
+      : {}),
     payload: z.object({
       levels: z.array(z.object({ sku: z.string(), quantity: z.number().int() })),
     }),
@@ -50,8 +68,9 @@ function harness(
         token: new Secret('access'),
         expiresAt: new Date(NOW.getTime() + 7_200_000),
       }),
-    send: (_token, payload) => {
+    send: (...[, payload, write]) => {
       sent.push(payload);
+      keys.push(write?.id);
       return options.send?.() ?? Promise.resolve({ accepted: payload.levels.length });
     },
   };
@@ -62,8 +81,8 @@ function harness(
         Promise.resolve({
           id: WRITE,
           channelAccountId: ACCOUNT,
-          provider: 'ebay',
-          operation: 'ebay.stock_push',
+          provider,
+          operation,
           urgent: false,
           payload: { levels: [{ sku: 'MOCK-SKU-1', quantity: 3 }] },
           state: row.state,
@@ -105,7 +124,12 @@ function harness(
       return Promise.resolve();
     },
     accounts: {
-      get: () => Promise.resolve({ provider: 'ebay', companyId: COMPANY, status: 'active' }),
+      get: () =>
+        Promise.resolve({
+          provider: options.accountProvider ?? provider,
+          companyId: COMPANY,
+          status: 'active',
+        }),
     },
     credentials: { read: () => Promise.resolve(new Secret('TOKENMARK-refresh')) },
     health: {
@@ -128,7 +152,10 @@ function harness(
           reopened: false,
         });
       },
-      resolve: () => Promise.resolve(true),
+      resolve: (...[, type]) => {
+        resolved.push(type);
+        return Promise.resolve(true);
+      },
       raisePlatform: (_c, input) => {
         raised.push(input);
         return Promise.resolve({
@@ -145,11 +172,69 @@ function harness(
     now: () => NOW,
   };
   const run = () =>
-    runOutboundSend(ports, { 'ebay.stock_push': op }, { workspaceId: WS, writeId: WRITE });
-  return { row, switches, sent, dispatched, raised, usage, run };
+    runOutboundSend(ports, { [operation]: op }, { workspaceId: WS, writeId: WRITE });
+  return { row, switches, sent, dispatched, raised, resolved, keys, usage, run };
 }
 
 describe('the outbound send path (SAFE-2, SAFE-3, INT-2)', () => {
+  it('[WEB-5][AT-14] a website write that keeps failing backs off from 1 minute up to 24 hours, then is dead-lettered with one alert', async () => {
+    const h = harness({
+      website: true,
+      send: () => Promise.reject(new ProviderUnavailable('website', 503)),
+    });
+    const waits: number[] = [];
+    for (let n = 0; n < 30 && h.row.state !== 'failed'; n += 1) {
+      const result = await h.run();
+      const last = h.dispatched.at(-1);
+      if ('deferred' in result && last?.startAfter !== undefined) {
+        waits.push((last.startAfter.getTime() - NOW.getTime()) / 60_000);
+      }
+    }
+    expect(waits).toEqual([1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1440]);
+    // The dead letter: the write stays, failed, with its code, after its 13th attempt.
+    expect(h.row).toMatchObject({ state: 'failed', attempts: 13 });
+    expect(h.row.lastError).toBeDefined();
+    const alerts = h.raised.filter((r) => r.type === 'website.delivery_failed');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      record: { kind: 'channel_account', id: ACCOUNT },
+      companyId: COMPANY,
+      channelAccountId: ACCOUNT,
+    });
+  });
+
+  it('[WEB-5] a website write the receiver refuses is dead-lettered at once with its alert; a sent one clears it', async () => {
+    const refused = harness({
+      website: true,
+      send: () => Promise.reject(new ProviderRejected('website', 'website.refused')),
+    });
+    expect(await refused.run()).toEqual({ failed: 'provider.rejected' });
+    expect(refused.raised.map((r) => r.type)).toEqual(['website.delivery_failed']);
+    const ok = harness({ website: true });
+    expect(await ok.run()).toEqual({ sent: true });
+    expect(ok.resolved).toEqual(['website.delivery_failed']);
+  });
+
+  it('[WEB-6] a website write is sent only for a website account: any other is refused before a send', async () => {
+    const h = harness({ website: true, accountProvider: 'ebay' });
+    expect(await h.run()).toEqual({ failed: 'outbound.wrong_provider' });
+    expect(h.sent).toEqual([]);
+  });
+
+  it('[WEB-2] every attempt of one write is sent with the same write id, the receiver idempotency key', async () => {
+    let calls = 0;
+    const h = harness({
+      website: true,
+      send: () =>
+        calls++ === 0
+          ? Promise.reject(new ProviderUnavailable('website', 503))
+          : Promise.resolve({}),
+    });
+    await h.run();
+    await h.run();
+    expect(h.keys).toEqual([WRITE, WRITE]);
+  });
+
   it('[SAFE-2] a write to a paused account is not sent and spends no attempt; once resumed it is sent once', async () => {
     const h = harness();
     h.switches.paused = true;

@@ -214,6 +214,21 @@ interface OrderRow {
   cancel_requested: boolean;
 }
 
+/** The lifecycle state a stored status stands for, so an update built from it moves nothing. */
+function storedState(row: Pick<OrderRow, 'status' | 'delivered_at'>): IncomingState {
+  switch (row.status) {
+    case 'pending_payment':
+    case 'cancelled':
+    case 'delivered':
+      return row.status;
+    case 'awaiting_dispatch':
+    case 'label_created':
+      return 'awaiting_dispatch';
+    default:
+      return row.delivered_at === null ? 'dispatched' : 'delivered';
+  }
+}
+
 /** ORD-9 (C3.1): the orders a recompute considers (OrderReads.groupCandidates). */
 const canGroup = (
   o: Pick<OrderRow, 'status' | 'fba' | 'cancel_requested' | 'pii_ref' | 'pii_deleted_at'>,
@@ -673,7 +688,8 @@ export class OrderIngest implements UnmappedDemand {
    * is inserted with its own reservation and the snapshot of the placed date. After that, a
    * different total or line set changes nothing: it marks the order and raises the notice, until a
    * newer update agrees again. The lines of an unpaid order that has shipped stay too: what left
-   * cannot be released. An update with no lines says nothing about them.
+   * cannot be released. An update with no lines says nothing about them: it is read with the
+   * stored lines, so only its discount, shipping and total count, paid or not (F-M10-end-25).
    */
   async #amounts(
     trx: Transaction<MainDb>,
@@ -686,9 +702,19 @@ export class OrderIngest implements UnmappedDemand {
     if (o.updatedAt <= existing.source_updated_at) return existing;
     const now = this.#now();
     const stored = await this.#lines(trx, ctx, existing.id);
+    const lines: readonly IncomingLine[] =
+      o.lines.length > 0
+        ? o.lines
+        : stored.map((l) => ({
+            lineId: l.external_line_id,
+            sku: l.external_sku,
+            quantity: Number(l.quantity),
+            title: null,
+            linePrice: pence(big(l.line_gross_pence)),
+          }));
     const kept: { row: LineRow; line: IncomingLine }[] = [];
     const added: IncomingLine[] = [];
-    for (const line of o.lines) {
+    for (const line of lines) {
       const row = stored.find((l) => l.external_line_id === line.lineId);
       const same =
         row !== undefined &&
@@ -700,7 +726,7 @@ export class OrderIngest implements UnmappedDemand {
     const closed = stored.filter((l) => !kept.some((k) => k.row.id === l.id));
     const sameLines = closed.length === 0 && added.length === 0;
     const repriced = kept.filter((k) => big(k.row.line_gross_pence) !== k.line.linePrice);
-    const want = amountsOf(o);
+    const want = amountsOf({ ...o, lines });
     const sameTotals =
       want.discount === big(existing.discount_pence) &&
       want.shipping === big(existing.shipping_pence);
@@ -708,7 +734,6 @@ export class OrderIngest implements UnmappedDemand {
     const open =
       existing.vat_recorded_at === null &&
       existing.status !== 'cancelled' &&
-      o.lines.length > 0 &&
       (sameLines || existing.dispatched_at === null);
 
     let gross = big(existing.gross_pence);
@@ -1152,6 +1177,80 @@ export class OrderIngest implements UnmappedDemand {
     await sql`UPDATE app.orders SET fba = true
                WHERE workspace_id = ${ctx.workspaceId}::uuid
                  AND id = ANY (${sql.val(fba)}::uuid[])`.execute(trx);
+  }
+
+  /** The OmniBridge IDs of an account's orders, by external order ID (the website push answers it). */
+  async orderIds(
+    ctx: TenantContext,
+    channelAccountId: string,
+    externalIds: readonly string[],
+  ): Promise<Map<string, string>> {
+    if (externalIds.length === 0) return new Map();
+    const { rows } = await withTenantTransaction(this.#db, ctx, (trx) =>
+      sql<{ id: string; external_order_id: string }>`
+        SELECT id, external_order_id FROM app.orders
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid
+           AND external_order_id = ANY (${sql.val(externalIds)}::text[])`.execute(trx),
+    );
+    return new Map(rows.map((r) => [r.external_order_id, r.id]));
+  }
+
+  /**
+   * WEB-3: a stored order as an update that changes nothing, for a website call that changes one
+   * thing (a cancel, a refund) through `apply`. It carries the stored change time, so the amounts
+   * and lines stay as they are (an update with no lines never touches lines, F-M10-end-25), and the
+   * refunds already recorded, so a status counts them all. Undefined when the order is not stored.
+   */
+  async asStored(
+    ctx: TenantContext,
+    channelAccountId: string,
+    externalId: string,
+  ): Promise<{ id: string; order: IncomingOrder } | undefined> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<OrderRow & { placed_at: Date }>`
+        SELECT placed_at, ${ORDER_COLUMNS} FROM app.orders
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid
+           AND external_order_id = ${externalId}`.execute(trx);
+      const row = rows[0];
+      if (row === undefined) return undefined;
+      const { rows: refunds } = await sql<{ id: string; at: Date; amount: string }>`
+        SELECT external_refund_id AS id, refunded_at AS at, amount_pence::text AS amount
+          FROM app.refunds
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${row.id}::uuid
+         ORDER BY refunded_at, external_refund_id`.execute(trx);
+      return {
+        id: row.id,
+        order: {
+          externalId,
+          rawStatus: row.raw_status,
+          state: storedState(row),
+          updatedAt: row.source_updated_at,
+          placedAt: row.placed_at,
+          paidAt: row.paid_at,
+          shipBy: row.ship_by,
+          // The stored dates stand; null here never clears one.
+          dispatchedAt: null,
+          deliveredAt: null,
+          cancelledAt: row.cancelled_at,
+          discount: pence(big(row.discount_pence)),
+          shipping: pence(big(row.shipping_pence)),
+          channelTotal: null,
+          shipToCountry: null,
+          fba: row.fba,
+          cancelRequested: row.cancel_requested,
+          lines: [],
+          refunds: refunds.map((r) => ({
+            refundId: r.id,
+            refundedAt: r.at,
+            amount: pence(big(r.amount)),
+            lines: null,
+          })),
+          pii: { kind: 'unchanged' },
+        },
+      };
+    });
   }
 
   /**

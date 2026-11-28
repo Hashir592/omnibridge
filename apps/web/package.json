@@ -28,6 +28,7 @@
     "@omnibridge/files": "workspace:*",
     "@omnibridge/governor-ebay": "workspace:*",
     "@omnibridge/logger": "workspace:*",
+    "@omnibridge/order-ingest": "workspace:*",
     "@omnibridge/provider-amazon": "workspace:*",
     "@omnibridge/provider-ebay": "workspace:*",
     "@omnibridge/provider-kit": "workspace:*",

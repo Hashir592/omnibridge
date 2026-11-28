@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,6 +37,7 @@ import {
   UserRepository,
   WorkspaceRepository,
   type MainDbHandle,
+  WebsiteConnectionRepository,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore, signFileLink } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
@@ -108,6 +109,8 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     invite: '',
     review: '',
     account: '',
+    /** B's website account, set up with a key A never has (M11). */
+    website: '',
     erasure: '',
     notification: '',
   };
@@ -282,6 +285,21 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         displayName: `${MARKER} ebay`,
       }),
     );
+    b.website = await tenancy.runWorkspace({ workspaceId: B }, async (ctx) => {
+      const id = await new ChannelAccountRepository(main.db).create(ctx, {
+        companyId: b.company,
+        provider: 'website',
+        displayName: `${MARKER} website`,
+      });
+      await new WebsiteConnectionRepository(main.db).create(ctx, {
+        channelAccountId: id,
+        companyId: b.company,
+        baseUrl: 'https://website-b.example.test',
+        keyHash: createHash('sha256').update(`obw_${MARKER}-b-key`).digest(),
+        keyHint: 'bkey',
+      });
+      return id;
+    });
     // M08: B's Master SKU with a COGS, and a listing of B's account mapped to it.
     await tenancy.runWorkspace({ workspaceId: B }, async (ctx) => {
       const catalogue = new CatalogueRepository(main.db);
@@ -422,6 +440,10 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
     const su = new pg.Client({ connectionString: cluster.container.getConnectionUri() });
     await su.connect();
     try {
+      // M11: the website module on in both workspaces, so the walk reaches the website handlers.
+      for (const ws of [A, B]) {
+        await su.query(`SELECT app.workspace_set_module($1, 'website_connector', true)`, [ws]);
+      }
       await su.query(
         `INSERT INTO app.users (id, email, name, platform_admin)
          VALUES ($1, $2, 'Platform admin', true)`,
@@ -547,6 +569,40 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
             },
           },
         },
+        logger,
+      },
+      modules: r.workspaces,
+      // T-1101: the website connector and Disconnect. Storing an order or a product in the walk
+      // would be a write to B: those steps fail.
+      website: {
+        connections: new WebsiteConnectionRepository(main.db),
+        accounts: new ChannelAccountRepository(main.db),
+        view: new ConnectionRepository(main.db),
+        credentials: new AccountCredentials(
+          main.db,
+          new CredentialRepository({
+            keyring: parseKeyring('secrets', generateKekLine(1)),
+            logger,
+          }),
+        ),
+        audit: new AuditLog(main.db),
+        tenancy,
+        appOrigin: 'https://app.omnibridge.test',
+        ingest: {
+          steps: { sink: () => Promise.reject(new Error('a website order stored in the walk')) },
+          orders: {
+            orderIds: () => Promise.reject(new Error('a website order read in the walk')),
+            asStored: () => Promise.reject(new Error('a website order read in the walk')),
+            apply: () => Promise.reject(new Error('a website order stored in the walk')),
+          },
+        },
+        products: {
+          listings: {
+            upsertDiscovered: () => Promise.reject(new Error('a product stored in the walk')),
+          },
+          mapped: () => Promise.reject(new Error('a mapping changed in the walk')),
+        },
+        disconnect: { listings: new CatalogueRepository(main.db), stock: stockEngine() },
         logger,
       },
       // T-0801: the catalogue. A mapping change in the walk would be a write to B: it fails.
@@ -856,20 +912,20 @@ ${MARKER}-SKU,99`,
             outbound_api_key: `${MARKER}-outbound-key`,
           },
         },
-        getWebsiteSettings: { params: { accountId: b.account } },
+        getWebsiteSettings: { params: { accountId: b.website } },
         updateWebsiteSettings: {
-          params: { accountId: b.account },
+          params: { accountId: b.website },
           body: { base_url: 'https://website.example.test' },
         },
-        reissueWebsiteKeys: { params: { accountId: b.account } },
-        disconnectAccount: { params: { accountId: b.account } },
-        websitePushOrder: { params: { connectionId: b.account }, body: websiteOrder(MARKER) },
+        reissueWebsiteKeys: { params: { accountId: b.website } },
+        disconnectAccount: { params: { accountId: b.website } },
+        websitePushOrder: { params: { connectionId: b.website }, body: websiteOrder(MARKER) },
         websiteCancelOrder: {
-          params: { connectionId: b.account, externalOrderId: MARKER },
+          params: { connectionId: b.website, externalOrderId: MARKER },
           body: { cancelledAt: '2026-11-20T10:00:00Z', reason: MARKER },
         },
         websiteRefundOrder: {
-          params: { connectionId: b.account, externalOrderId: MARKER },
+          params: { connectionId: b.website, externalOrderId: MARKER },
           body: {
             refundId: MARKER,
             amountGross: 100,
@@ -878,7 +934,7 @@ ${MARKER}-SKU,99`,
           },
         },
         websitePushProducts: {
-          params: { connectionId: b.account },
+          params: { connectionId: b.website },
           body: { products: [{ externalSku: MARKER, title: MARKER }] },
         },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
@@ -1085,7 +1141,8 @@ ${MARKER}-SKU,99`,
       .items.find((w) => w.id === B);
     expect(row).toMatchObject({
       status: 'archived',
-      counts: { users: 1, channel_accounts: 1, orders_per_day: null },
+      // B's eBay account and its website account (M11).
+      counts: { users: 1, channel_accounts: 2, orders_per_day: null },
     });
     const usage = await server.inject({
       method: 'GET',

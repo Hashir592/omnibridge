@@ -56,6 +56,7 @@ These are not Docker secrets. Each value is encrypted with AES-256-GCM under a p
 | `ebay.refresh_token` | eBay user refresh token per account | workspace admin | mock only | `app.credentials` | worker, web | 18-month eBay expiry; re-authorise before it | per account |
 | `evri.api_key`, `dpd.api_key` | Carrier API credentials per account | workspace admin | mock only | `app.credentials` | worker | 12 months | per account |
 | `website.api_key` | Website connector API key per account (M11) | workspace admin | mock only | `app.credentials` | worker | 12 months | per account |
+| `website.signing_secret` | Website connector HMAC signing secret per account, both directions (WEB-2, M11); shown once when issued | workspace admin | mock only | `app.credentials` | web (checks pushes), worker (signs calls) | on demand (new keys) | per account |
 
 ## App secrets (platform store, `app.app_secrets`)
 

@@ -13,6 +13,7 @@ import {
   RateLimited,
   type AccessToken,
 } from '@omnibridge/provider-kit';
+import { websiteChannelOrder } from '@omnibridge/order-ingest';
 import { createWebsiteAdapter } from '@omnibridge/provider-website';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ScenarioStore, type MockProvider, type Scenario } from './scenarios.ts';
@@ -224,17 +225,37 @@ describe('adapters against provider-mocks (INT-1)', () => {
   });
 
   it('[INT-1] website and Amazon Ads: one read and one write each', async () => {
-    const site = createWebsiteAdapter({ http });
+    // M11: the website's key, the signing secret and its base URL, as db-main assembles them.
+    const site = createWebsiteAdapter({ http, toChannelOrder: websiteChannelOrder });
     const key = account();
-    const token = await site.authenticate(key);
+    const token = await site.authenticate(
+      new Secret(
+        JSON.stringify({
+          apiKey: key.reveal(),
+          signingSecret: 'obs_mock-secret',
+          baseUrl: 'https://shop.example.test',
+        }),
+      ),
+    );
     const orders = await site.ordersUpdatedSince(token, since);
     expect(orders.items.map((o) => o.externalId)).toEqual(['MOCK-1002', 'MOCK-1003']);
     expect(JSON.stringify(withoutBuyer(orders))).not.toContain('PIIMARK');
     expect(orders.items.every((o) => o.buyer?.name?.startsWith('PIIMARK'))).toBe(true);
-    expect(await site.pushStock(token, [{ sku: 'MOCK-SKU-2', quantity: 1 }])).toEqual({
+    expect(await site.pushStock(token, [{ sku: 'MOCK-SKU-2', quantity: 1 }], 'write-1')).toEqual({
       accepted: ['MOCK-SKU-2'],
       refused: [],
     });
+    await site.pushShipment(
+      token,
+      'MOCK-1002',
+      {
+        carrier: 'evri',
+        service: '48h',
+        trackingNumbers: ['T123'],
+        shippedAt: since.toISOString(),
+      },
+      'write-2',
+    );
     on('website', key, 'revoked');
     await expect(site.ordersUpdatedSince(token, since)).rejects.toBeInstanceOf(AuthFailed);
 

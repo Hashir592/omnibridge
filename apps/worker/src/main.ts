@@ -1,4 +1,10 @@
-import { Notifier, providerModeFrom, readSecretFile, requireEnv } from '@omnibridge/core';
+import {
+  Notifier,
+  providerModeFrom,
+  readSecretFile,
+  requireEnv,
+  type TenantContext,
+} from '@omnibridge/core';
 import { loadKeyring } from '@omnibridge/crypto';
 import {
   AccessReviewRepository,
@@ -87,6 +93,7 @@ import {
   ordersGroupRecomputeHandler,
   ordersPiiExpiryHandler,
   ordersSyncAccountsHandler,
+  websiteChannelOrder,
 } from './orders.ts';
 import { createProviderGovernor } from './governor.ts';
 import {
@@ -179,6 +186,9 @@ const deletionDeps = {
   log: new DeletionLog(handlerDb.db),
   erasures: new ErasureRequestRepository(handlerDb.db),
   notifier,
+  // ADR-086 (3): an erased buyer leaves its same-buyer group at once, with F-M10-end-08's key.
+  regroup: (ctx: TenantContext, input: { channelAccountId: string }) =>
+    orderIngestPorts(queue, { notifier, logger: log }).regroup(ctx, input),
   logger: log,
 };
 // The platform console's jobs (T-0504): workspace closure, notification retention, the digest.
@@ -258,7 +268,10 @@ const orderStream = orderIngestStream({
   vault: workerVault,
   logger: log,
 });
-const websiteAdapter = () => Promise.resolve(createWebsiteAdapter({ http: providerHttp }));
+const websiteAdapter = () =>
+  Promise.resolve(
+    createWebsiteAdapter({ http: providerHttp, toChannelOrder: websiteChannelOrder }),
+  );
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -324,7 +337,7 @@ await registerHandlers(queue, {
     },
     operations: outboundOperations({
       ebay: ebayAdapter,
-      website: () => Promise.resolve(createWebsiteAdapter({ http: providerHttp })),
+      website: websiteAdapter,
     }),
     // INV-8: a settled stock write records what was sent, or sets Sync failed.
     settled: (ctx, writeId) => stockEngine.recordPushResult(ctx, writeId),
@@ -350,7 +363,7 @@ await registerHandlers(queue, {
   }),
   'listings.discover': listingsDiscoverHandler({
     ports: syncPorts,
-    adapters: { ebay: ebayAdapter, website: websiteAdapter },
+    adapters: { ebay: ebayAdapter },
     catalogue: catalogueRepo,
     queue,
     // C7.3 and INV-7: ended listings lose their manual settings; the nightly scan reconciles.

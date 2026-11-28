@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseEbayOrders } from './adapter.ts';
+import { parseEbayOrderPage, parseEbayOrders } from './adapter.ts';
 
 const gbp = (value: string) => ({ value, currency: 'GBP' });
 const order = (over: Record<string, unknown> = {}) => ({
@@ -105,19 +105,76 @@ describe('eBay getOrders parser (M10)', () => {
     expect(more).toMatchObject({ discountPence: 0, shippingPence: 350, totalPence: 1550 });
   });
 
-  it('[FIN-1] a negative line or refund fails the parser: its sign is never dropped', () => {
+  it('[FIN-1] a negative line or refund is set aside, never stored: its sign is never dropped', () => {
+    const unreadable = { orders: [], setAside: [{ externalId: 'EB-1', reason: 'unreadable' }] };
     const line = { lineItemId: 'L1', quantity: 1, lineItemCost: gbp('-5.00') };
-    expect(() => parseEbayOrders(page(order({ lineItems: [line] })))).toThrow();
+    expect(parseEbayOrderPage(page(order({ lineItems: [line] })))).toEqual(unreadable);
     const refunds = [{ refundId: 'R1', refundDate: '2026-11-20T10:00:00Z', amount: gbp('-4.00') }];
-    expect(() => parseEbayOrders(page(order({ paymentSummary: { refunds } })))).toThrow();
+    expect(parseEbayOrderPage(page(order({ paymentSummary: { refunds } })))).toEqual(unreadable);
   });
 
-  it('[ORD-4] an ID or SKU longer than db-main keeps fails the parser, not the insert', () => {
-    expect(() => parseEbayOrders(page(order({ orderId: 'x'.repeat(201) })))).toThrow();
-    expect(() =>
-      parseEbayOrders(
-        page(order({ pricingSummary: { total: { value: '1.00', currency: 'EUR' } } })),
+  // F-M10-end-14, F-M10-end-17, S5-20261124-07: one order never stops its account's sync.
+  it('[INT-5][ORD-4] an order that cannot be stored is set aside and the rest of its page is kept', () => {
+    const fits = 'x'.repeat(163);
+    const tooLong = 'y'.repeat(164);
+    const { orders, setAside } = parseEbayOrderPage(
+      page(
+        order({ orderId: 'EB-OK' }),
+        order({ orderId: 'EB-EUR', pricingSummary: { total: { value: '1.00', currency: 'EUR' } } }),
+        order({ orderId: 'EB-NOLINES', lineItems: [] }),
+        order({ orderId: tooLong }),
+        order({ orderId: fits }),
+        order({
+          orderId: 'EB-NUL',
+          lineItems: [
+            {
+              lineItemId: 'L1',
+              sku: 'SKU-\u00001',
+              title: 'Mug\u0000 blue',
+              quantity: 1,
+              lineItemCost: gbp('12.00'),
+            },
+          ],
+        }),
+        order({
+          orderId: 'EB-LONGTEXT',
+          lineItems: [
+            {
+              lineItemId: 'L1',
+              sku: 'SKU-1',
+              title: 't'.repeat(600),
+              quantity: 1,
+              lineItemCost: gbp('12.00'),
+            },
+          ],
+          fulfillmentStartInstructions: [
+            {
+              shippingStep: {
+                shipTo: {
+                  fullName: `PIIMARK-${'n'.repeat(5000)}`,
+                  contactAddress: { addressLine1: 'PIIMARK-1 Street', postalCode: 'TE1 1ST' },
+                },
+              },
+            },
+          ],
+        }),
+        { orderId: 'EB-BROKEN' },
+        { nothing: true },
       ),
-    ).toThrow();
+    );
+    expect(orders.map((o) => o.externalId)).toEqual(['EB-OK', fits, 'EB-NUL', 'EB-LONGTEXT']);
+    expect(setAside).toEqual([
+      { externalId: 'EB-EUR', reason: 'not_gbp' },
+      { externalId: 'EB-NOLINES', reason: 'no_lines' },
+      { externalId: tooLong, reason: 'id_too_long' },
+      { externalId: 'EB-BROKEN', reason: 'unreadable' },
+      { externalId: null, reason: 'unreadable' },
+    ]);
+    // Free text is cut to its limit and NUL removed, never refused.
+    expect(orders[2]?.lines[0]).toMatchObject({ sku: 'SKU-1', title: 'Mug blue' });
+    expect(orders[3]?.lines[0]?.title).toHaveLength(500);
+    expect(orders[3]?.buyer?.name).toHaveLength(4000);
+    // A page the parser cannot read at all still fails, with its parser notice (INT-5).
+    expect(() => parseEbayOrderPage({ offset: 0, limit: 50 })).toThrow();
   });
 });

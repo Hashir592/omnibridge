@@ -78,7 +78,8 @@ export interface ConnectionOptions {
 const notFound = () => Promise.reject(new ApiError({ status: 404, code: 'not_found' }));
 const iso = (d: Date | null) => (d === null ? null : d.toISOString());
 
-function body(c: Connection) {
+/** One account as the Connections page shows it (INT-4); the website setup answers it too. */
+export function connectionBody(c: Connection) {
   return {
     id: c.id,
     provider: c.provider,
@@ -95,7 +96,7 @@ function body(c: Connection) {
 
 function detail(c: ConnectionDetail) {
   return {
-    ...body(c),
+    ...connectionBody(c),
     needs_reauth_at: iso(c.needsReauthAt),
     last_error:
       c.lastError === null ? null : { code: c.lastError.code, at: c.lastError.at.toISOString() },
@@ -146,7 +147,7 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
       return {
         status: 200,
         body: {
-          items: items.map(body),
+          items: items.map(connectionBody),
           maintenance: { on: maintenance.on, since: iso(maintenance.since) },
         },
       };
@@ -175,7 +176,7 @@ export function connectionHandlers(options?: ConnectionOptions): Handlers<typeof
       }
       const after = await o.connections.get(tenant, found.id, now());
       if (after === undefined) throw new ApiError({ status: 404, code: 'not_found' });
-      return { status: 200, body: body(after) };
+      return { status: 200, body: connectionBody(after) };
     },
 
     startAuthorisation: async ({ tenant, session, params }) => {

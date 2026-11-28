@@ -1,287 +1,211 @@
 /**
- * The seller's own website as a ChannelAdapter (INT-1), thin in M07: an API key, the "updated
- * since" order read and the stock write. M11 defines the connector protocol in full; buyer fields
- * leave the parser only in an order's `buyer` block, which M10's ingest gives to pii-vault.
+ * The seller's own website (WEB-2, WEB-4, OPS-12): OmniBridge's side of the signed website
+ * contract (`@omnibridge/contract` routes/website.ts). Every call carries the website's key, a
+ * timestamp, an HMAC-SHA256 signature of `<timestamp>.<raw body>` under the shared secret, and an
+ * Idempotency-Key that is the same on every attempt of one write. Buyer fields leave the parser
+ * only in an order's `buyer` block, which ingest gives to pii-vault.
  */
+import { createHmac, randomUUID } from 'node:crypto';
+import {
+  WEBSITE_HEADERS,
+  WEBSITE_ORDER_ID_MAX,
+  WEBSITE_STOCK_BATCH_MAX,
+  WebsiteOrderSchema,
+  type WebsiteShipmentSchema,
+} from '@omnibridge/contract';
 import { Secret } from '@omnibridge/crypto';
 import {
+  AuthFailed,
   defineParser,
-  PenceAmount,
-  PenceDiscount,
+  parseEach,
   readJson,
-  type BuyerDetails,
-  type ChannelAdapter,
+  type AccessToken,
   type ChannelOrder,
-  type ChannelOrderState,
   type OrderSource,
+  type Page,
   type ProviderHttp,
+  type SetAside,
+  type StockLevel,
   type SyncStream,
+  type WriteResult,
 } from '@omnibridge/provider-kit';
 import { z } from 'zod';
 
 export const PACKAGE_NAME = '@omnibridge/provider-website';
 
-/** An API key does not expire; the cache renews it daily anyway. */
+/** A key does not expire; the cache renews it daily anyway. */
 const KEY_TTL_MS = 86_400_000;
 
-const Text = z.string().max(4000).nullable().optional();
-const When = z.iso.datetime({ offset: true });
-/** IDs and SKUs: db-main keeps at most 200 characters, so a longer one is a parser failure. */
-const Id = z.string().min(1).max(200);
-/** ISO 3166 alpha-2, upper-cased (db-main checks ^[A-Z]{2}$). */
-const Country = z
-  .string()
-  .regex(/^[A-Za-z]{2}$/)
-  .transform((c) => c.toUpperCase());
+/** WEB-5: website writes retry from 1 minute up to 24 hours, then dead-letter with an alert. */
+export const WEBSITE_RETRY = { maxAttempts: 13, maxDelayMs: 24 * 60 * 60_000 } as const;
 
-/** Version 2 (M10): money, dates, refunds and the buyer block. Provisional until M11. */
-const OrdersV1 = defineParser(
+/** The website's credential as db-main assembles it (AccountCredentials.read). */
+const Credential = z.object({
+  apiKey: z.string().min(1),
+  signingSecret: z.string().min(1),
+  baseUrl: z.string().min(1),
+});
+type Credential = z.infer<typeof Credential>;
+
+/** Never the value: an unreadable credential is the account's problem, like a revoked key. */
+function readCredential(text: string): Credential {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new AuthFailed('website', false);
+  }
+  const parsed = Credential.safeParse(json);
+  if (!parsed.success) throw new AuthFailed('website', false);
+  return parsed.data;
+}
+const credentialOf = (token: AccessToken): Credential => readCredential(token.token.reveal());
+
+/** WEB-4: one page of `GET /omnibridge/orders`; each order is read on its own. */
+const OrdersPage = defineParser(
   'website',
   'orders',
-  2,
-  z.object({
-    orders: z.array(
-      z.object({
-        id: Id,
-        created_at: When,
-        updated_at: When,
-        paid_at: When.nullable().optional(),
-        shipped_at: When.nullable().optional(),
-        delivered_at: When.nullable().optional(),
-        cancelled_at: When.nullable().optional(),
-        ship_by: When.nullable().optional(),
-        status: z.string().min(1),
-        currency: z.literal('GBP'),
-        shipping_total: PenceAmount,
-        discount_total: PenceDiscount.optional(),
-        customer: z
-          .object({ id: Text, email: Text, phone: Text, name: Text })
-          .nullable()
-          .optional(),
-        shipping_address: z
-          .object({
-            name: Text,
-            line1: Text,
-            line2: Text,
-            city: Text,
-            county: Text,
-            postcode: Text,
-            country: Country.nullable().optional(),
-            instructions: Text,
-          })
-          .nullable()
-          .optional(),
-        lines: z.array(
-          z.object({
-            id: Id,
-            sku: Id.nullable(),
-            quantity: z.number().int().min(1),
-            name: z.string().max(500).nullable().optional(),
-            total: PenceAmount,
-          }),
-        ),
-        refunds: z
-          .array(
-            z.object({
-              id: Id,
-              created_at: When,
-              amount: PenceAmount,
-              lines: z
-                .array(
-                  z.object({
-                    line_id: Id,
-                    quantity: z.number().int().min(0),
-                    amount: PenceAmount,
-                  }),
-                )
-                .nullable()
-                .optional(),
-            }),
-          )
-          .optional(),
-      }),
-    ),
-    next_cursor: z.string().nullable(),
-  }),
+  4,
+  z.object({ orders: z.array(z.unknown()), nextCursor: z.string().nullable() }),
 );
+const Order = defineParser('website', 'order', 4, WebsiteOrderSchema);
+export type WebsiteOrder = z.output<typeof WebsiteOrderSchema>;
+export type WebsiteShipment = z.input<typeof WebsiteShipmentSchema>;
 
-type WebsiteOrder = ReturnType<typeof OrdersV1.parse>['orders'][number];
-
-/** FA-10: the website's status onto the channel lifecycle (provisional until M11). */
-function websiteState(o: WebsiteOrder): ChannelOrderState {
-  if (o.status === 'cancelled') return 'cancelled';
-  if (o.delivered_at !== null && o.delivered_at !== undefined) return 'delivered';
-  if (o.status === 'shipped' || o.status === 'completed') return 'dispatched';
-  if (o.shipped_at !== null && o.shipped_at !== undefined) return 'dispatched';
-  const paid = o.paid_at !== null && o.paid_at !== undefined;
-  if (o.status === 'pending' && !paid) return 'pending_payment';
-  return 'awaiting_dispatch';
+/** S5-20261124-07: NUL, which PostgreSQL cannot store, is removed from every text, not refused. */
+function withoutNul(value: unknown): unknown {
+  if (typeof value === 'string') return value.replaceAll('\u0000', '');
+  if (Array.isArray(value)) return value.map(withoutNul);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withoutNul(v)]));
+  }
+  return value;
 }
 
-/** The buyer block for pii-vault only (ORD-4); blank values are left out. */
-function websiteBuyer(o: WebsiteOrder): BuyerDetails | null {
-  const a = o.shipping_address;
-  const entries = Object.entries({
-    name: a?.name ?? o.customer?.name,
-    email: o.customer?.email,
-    phone: o.customer?.phone,
-    address_line1: a?.line1,
-    address_line2: a?.line2,
-    city: a?.city,
-    county: a?.county,
-    postcode: a?.postcode,
-    country: a?.country,
-    delivery_instructions: a?.instructions,
-    channel_buyer_id: o.customer?.id,
-  }).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].trim() !== '');
-  return entries.length === 0 ? null : Object.fromEntries(entries);
+/**
+ * One orders page: the orders that can be stored, as channel orders, and those set aside (one bad
+ * order never stops the account, F-M10-end-14, -17). A page the parser cannot read throws, with its
+ * parser notice (INT-5). `toChannelOrder` is the website push's own mapping (order-ingest).
+ */
+export function parseWebsiteOrderPage(
+  body: unknown,
+  toChannelOrder: (o: WebsiteOrder) => ChannelOrder,
+): { orders: ChannelOrder[]; setAside: SetAside[]; next: string | undefined } {
+  const page = OrdersPage.parse(body);
+  const { items, setAside } = parseEach(Order, page.orders.map(withoutNul), {
+    id: { field: 'externalOrderId', max: WEBSITE_ORDER_ID_MAX },
+    linesField: 'lines',
+  });
+  return { orders: items.map(toChannelOrder), setAside, next: page.nextCursor ?? undefined };
 }
 
-const at = (v: string | null | undefined) => (v === null || v === undefined ? null : new Date(v));
-
-/** One orders page as whole channel orders (M10); the buyer block is PII. */
-export function parseWebsiteOrders(body: unknown): ChannelOrder[] {
-  return OrdersV1.parse(body).orders.map(websiteOrder);
+export interface WebsiteAdapter extends OrderSource {
+  readonly provider: 'website';
+  authenticate(credential: Secret): Promise<AccessToken>;
+  /** WEB-4: `PUT /omnibridge/stock`, at most 100 SKUs; a 2xx takes them all. */
+  pushStock(token: AccessToken, levels: readonly StockLevel[], key?: string): Promise<WriteResult>;
+  /** WEB-4: `POST /omnibridge/orders/{externalOrderId}/shipment`. */
+  pushShipment(
+    token: AccessToken,
+    externalOrderId: string,
+    shipment: WebsiteShipment,
+    key: string,
+  ): Promise<void>;
 }
-
-function websiteOrder(o: WebsiteOrder): ChannelOrder {
-  const state = websiteState(o);
-  return {
-    externalId: o.id,
-    updatedAt: new Date(o.updated_at),
-    status: o.status,
-    state,
-    placedAt: new Date(o.created_at),
-    paidAt: at(o.paid_at),
-    shipBy: at(o.ship_by),
-    dispatchedAt: at(o.shipped_at),
-    deliveredAt: at(o.delivered_at),
-    cancelledAt: state === 'cancelled' ? (at(o.cancelled_at) ?? new Date(o.updated_at)) : null,
-    discountPence: o.discount_total ?? 0,
-    shippingPence: o.shipping_total,
-    // The protocol states no order total yet (M11).
-    totalPence: null,
-    shipToCountry: o.shipping_address?.country ?? null,
-    fba: false,
-    cancelRequested: false,
-    lines: o.lines.map((l) => ({
-      lineId: l.id,
-      sku: l.sku,
-      quantity: l.quantity,
-      title: l.name ?? null,
-      linePricePence: l.total,
-    })),
-    refunds: (o.refunds ?? []).map((r) => ({
-      refundId: r.id,
-      refundedAt: new Date(r.created_at),
-      amountPence: r.amount,
-      lines:
-        r.lines === null || r.lines === undefined
-          ? null
-          : r.lines.map((l) => ({
-              lineId: l.line_id,
-              quantity: l.quantity,
-              amountPence: l.amount,
-            })),
-    })),
-    buyer: websiteBuyer(o),
-  };
-}
-/** CAT-5: the products the website sells (provisional until M11 defines the protocol). */
-const ProductsV1 = defineParser(
-  'website',
-  'products',
-  1,
-  z.object({
-    products: z.array(
-      z.object({
-        id: z.string().min(1),
-        sku: z.string().min(1),
-        title: z.string().nullable().optional(),
-        quantity: z.number().int().min(0).nullable().optional(),
-      }),
-    ),
-    next_cursor: z.string().nullable(),
-  }),
-);
-const StockV1 = defineParser('website', 'stock', 1, z.object({ updated: z.array(z.string()) }));
 
 export function createWebsiteAdapter(options: {
   http: ProviderHttp;
+  /** The website push's own order mapping (order-ingest `websiteChannelOrder`). */
+  toChannelOrder: (o: WebsiteOrder) => ChannelOrder;
   now?: () => Date;
-}): Omit<ChannelAdapter, 'ordersUpdatedSince'> & OrderSource {
+}): WebsiteAdapter {
   const now = options.now ?? (() => new Date());
-  const base = options.http.base('website', 'api');
+
+  /** One signed call (WEB-2). The key is the same on every attempt of one write. */
+  const signed = async (
+    token: AccessToken,
+    method: 'GET' | 'PUT' | 'POST',
+    path: string,
+    input: { query?: Record<string, string>; body?: unknown; key?: string } = {},
+  ): Promise<unknown> => {
+    const c = credentialOf(token);
+    const url = new URL(path, options.http.site(c.baseUrl));
+    for (const [k, v] of Object.entries(input.query ?? {})) url.searchParams.set(k, v);
+    const raw = input.body === undefined ? '' : JSON.stringify(input.body);
+    const at = String(Math.floor(now().getTime() / 1000));
+    const signature = createHmac('sha256', c.signingSecret).update(`${at}.${raw}`).digest('hex');
+    const res = await options.http.request('website', {
+      url,
+      method,
+      headers: {
+        authorization: `Bearer ${c.apiKey}`,
+        [WEBSITE_HEADERS.timestamp]: at,
+        [WEBSITE_HEADERS.signature]: signature,
+        [WEBSITE_HEADERS.idempotencyKey]: input.key ?? randomUUID(),
+        ...(raw === '' ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(raw === '' ? {} : { body: raw }),
+    });
+    return readJson('website', res);
+  };
+
   return {
     provider: 'website',
 
     authenticate(credential) {
-      return Promise.resolve({
-        token: new Secret(credential.reveal()),
-        expiresAt: new Date(now().getTime() + KEY_TTL_MS),
+      // Read now, so a bad credential fails the token call, not the first write; a throw in the
+      // executor rejects the promise.
+      return new Promise((resolve) => {
+        readCredential(credential.reveal());
+        resolve({
+          token: new Secret(credential.reveal()),
+          expiresAt: new Date(now().getTime() + KEY_TTL_MS),
+        });
       });
     },
 
-    async ordersUpdatedSince(token, since, page) {
-      const url = new URL('api/orders', base);
-      url.searchParams.set('updated_since', since.toISOString());
-      if (page !== undefined) url.searchParams.set('cursor', page);
-      const res = await options.http.request('website', {
-        url,
-        headers: { 'x-api-key': token.token.reveal() },
+    async ordersUpdatedSince(token, since, page): Promise<Page<ChannelOrder>> {
+      const body = await signed(token, 'GET', 'omnibridge/orders', {
+        query: {
+          updatedSince: since.toISOString(),
+          ...(page === undefined ? {} : { cursor: page }),
+        },
       });
-      const body = OrdersV1.parse(await readJson('website', res));
-      return { items: body.orders.map(websiteOrder), next: body.next_cursor ?? undefined };
+      const { orders, setAside, next } = parseWebsiteOrderPage(body, options.toChannelOrder);
+      return { items: orders, next, setAside };
     },
 
-    async listListings(token, page) {
-      const url = new URL('api/products', base);
-      if (page !== undefined) url.searchParams.set('cursor', page);
-      const res = await options.http.request('website', {
-        url,
-        headers: { 'x-api-key': token.token.reveal() },
+    async pushStock(token, levels, key) {
+      if (levels.length > WEBSITE_STOCK_BATCH_MAX) {
+        throw new Error(`a website stock batch holds at most ${String(WEBSITE_STOCK_BATCH_MAX)}`);
+      }
+      await signed(token, 'PUT', 'omnibridge/stock', {
+        body: levels.map((l) => ({ externalSku: l.sku, quantity: l.quantity })),
+        ...(key === undefined ? {} : { key }),
       });
-      const body = ProductsV1.parse(await readJson('website', res));
-      return {
-        items: body.products.map((p) => ({
-          externalSku: p.sku,
-          externalId: p.id,
-          title: p.title ?? null,
-          fulfilment: null,
-          inventoryApi: null,
-          quantity: p.quantity ?? null,
-        })),
-        next: body.next_cursor ?? undefined,
-      };
+      return { accepted: levels.map((l) => l.sku), refused: [] };
     },
 
-    async pushStock(token, levels) {
-      const res = await options.http.request('website', {
-        url: new URL('api/stock', base),
-        method: 'POST',
-        headers: { 'x-api-key': token.token.reveal(), 'content-type': 'application/json' },
-        body: JSON.stringify({ items: levels.map((l) => ({ sku: l.sku, quantity: l.quantity })) }),
-      });
-      const updated = new Set(StockV1.parse(await readJson('website', res)).updated);
-      return {
-        accepted: levels.filter((l) => updated.has(l.sku)).map((l) => l.sku),
-        refused: levels
-          .filter((l) => !updated.has(l.sku))
-          .map((l) => ({ sku: l.sku, code: 'website.not_updated' })),
-      };
+    async pushShipment(token, externalOrderId, shipment, key) {
+      await signed(
+        token,
+        'POST',
+        `omnibridge/orders/${encodeURIComponent(externalOrderId)}/shipment`,
+        { body: shipment, key },
+      );
     },
   };
 }
 
-/** FA-16: how far back the first order poll of a new website account reads. */
+/** FA-16: how far back the first order read of a new website account goes. */
 export const WEBSITE_ORDER_BACKFILL_MS = 90 * 86_400_000;
 
 /**
- * The `website.orders` stream (INT-8, M10): the website's "updated since" read through the same
- * vault-first prepare and sink as eBay. M11 adds the signed push alongside it.
+ * The `website.orders` stream (WEB-4): the nightly `GET /omnibridge/orders?updatedSince=` that
+ * catches calls that never arrived, through the same vault-first prepare and sink as the push.
  */
 export function websiteOrderStream(
-  adapter: Pick<ChannelAdapter, 'authenticate'> & OrderSource,
+  adapter: Pick<WebsiteAdapter, 'authenticate'> & OrderSource,
   ingest: Pick<SyncStream<ChannelOrder>, 'sink' | 'prepare'>,
 ): SyncStream<ChannelOrder> {
   return {

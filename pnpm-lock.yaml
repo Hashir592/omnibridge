@@ -376,6 +376,9 @@ importers:
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@omnibridge/order-ingest':
+        specifier: workspace:*
+        version: link:../../packages/order-ingest
       '@omnibridge/provider-amazon':
         specifier: workspace:*
         version: link:../../packages/providers/amazon
@@ -431,6 +434,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@omnibridge/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
       '@omnibridge/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -455,6 +461,9 @@ importers:
       '@omnibridge/mail':
         specifier: workspace:*
         version: link:../../packages/mail
+      '@omnibridge/order-ingest':
+        specifier: workspace:*
+        version: link:../../packages/order-ingest
       '@omnibridge/provider-ebay':
         specifier: workspace:*
         version: link:../../packages/providers/ebay
@@ -517,6 +526,9 @@ importers:
       '@omnibridge/governor-amazon':
         specifier: workspace:*
         version: link:../../packages/governors/amazon
+      '@omnibridge/order-ingest':
+        specifier: workspace:*
+        version: link:../../packages/order-ingest
       '@omnibridge/provider-ads':
         specifier: workspace:*
         version: link:../../packages/providers/ads
@@ -636,6 +648,33 @@ importers:
         specifier: 12.2.1
         version: 12.2.1(supports-color@10.2.2)
 
+  packages/order-ingest:
+    dependencies:
+      '@omnibridge/contract':
+        specifier: workspace:*
+        version: link:../contract
+      '@omnibridge/core':
+        specifier: workspace:*
+        version: link:../core
+      '@omnibridge/db':
+        specifier: workspace:*
+        version: link:../db
+      '@omnibridge/logger':
+        specifier: workspace:*
+        version: link:../logger
+      '@omnibridge/provider-kit':
+        specifier: workspace:*
+        version: link:../providers/kit
+      '@omnibridge/queue':
+        specifier: workspace:*
+        version: link:../queue
+      '@omnibridge/vault-client':
+        specifier: workspace:*
+        version: link:../vault-client
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   packages/pii-db:
     dependencies:
       '@omnibridge/core':
@@ -729,6 +768,9 @@ importers:
 
   packages/providers/website:
     dependencies:
+      '@omnibridge/contract':
+        specifier: workspace:*
+        version: link:../../contract
       '@omnibridge/crypto':
         specifier: workspace:*
         version: link:../../crypto

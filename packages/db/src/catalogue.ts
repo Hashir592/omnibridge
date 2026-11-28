@@ -942,6 +942,24 @@ export class CatalogueRepository {
     return rows.map((r) => r.id);
   }
 
+  /**
+   * Disconnect (T-1101): every listing of the account still live has ended. Returns their IDs, so
+   * M09 clears their manual settings (C7.3). A repeat ends nothing.
+   */
+  async endAll(ctx: TenantContext, channelAccountId: string, now: Date): Promise<string[]> {
+    const rows = await this.#write(ctx, (trx) =>
+      trx
+        .updateTable('app.listings')
+        .set({ ended_at: now, updated_at: now })
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('channel_account_id', '=', channelAccountId)
+        .where('ended_at', 'is', null)
+        .returning('id')
+        .execute(),
+    );
+    return rows.map((r) => r.id);
+  }
+
   async #detail(
     trx: Transaction<MainDb>,
     ctx: TenantContext,

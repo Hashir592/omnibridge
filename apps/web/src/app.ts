@@ -6,7 +6,9 @@ import {
   type AuditFilters,
   type Company,
   type Health,
+  type AnyRoute,
   type JobProgress,
+  type ModuleToggle,
 } from '@omnibridge/contract';
 import {
   ApiError,
@@ -33,7 +35,7 @@ import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
 import { deletionCertificateText } from './deletion-certificate.ts';
 import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
-import { websiteHandlers } from './website.ts';
+import { websiteHandlers, websiteVerifier, type WebsiteOptions } from './website.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
 import { catalogueHandlers, type CatalogueOptions } from './catalogue.ts';
@@ -142,10 +144,31 @@ export interface WebAppOptions {
   stock?: StockOptions;
   /** Orders (T-1002); without it those routes answer 404. */
   orders?: OrdersOptions;
+  /** The website connector (T-1101); without it those routes answer 404. */
+  website?: WebsiteOptions;
+  /** ADR-059: reads a workspace's module toggles; without it every route behind one answers 404. */
+  modules?: Pick<WorkspaceRepository, 'moduleOn'>;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
   spa?: SpaFiles;
+}
+
+/**
+ * The check of a signed route: the website's own (WEB-2) for its routes, eBay's for the deletion
+ * notice (EBAY-2). A route whose check is not configured is refused.
+ */
+function signedCheck(ebay: EbayWebhook | undefined, website: WebsiteOptions | undefined) {
+  const ebayCheck = ebay === undefined ? undefined : webhookVerifier(ebay);
+  const websiteCheck = website === undefined ? undefined : websiteVerifier(website);
+  return (request: FastifyRequest, route: AnyRoute): Promise<boolean> => {
+    const verify = route.module === 'website_connector' ? websiteCheck : ebayCheck;
+    // A route whose sender is not set up answers as if no verifier were given at all: 401.
+    if (verify === undefined) {
+      return Promise.reject(new ApiError({ status: 401, code: 'unauthorized' }));
+    }
+    return verify(request, route);
+  };
 }
 
 async function check(fn: () => Promise<boolean>): Promise<Health['db_main']> {
@@ -182,6 +205,8 @@ export function buildWebApp({
   catalogue,
   stock,
   orders,
+  website,
+  modules,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
@@ -239,7 +264,7 @@ export function buildWebApp({
     ...catalogueHandlers(catalogue),
     ...stockHandlers(stock),
     ...ordersHandlers(orders),
-    ...websiteHandlers(),
+    ...websiteHandlers(website),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';
@@ -488,7 +513,15 @@ export function buildWebApp({
               checkRequest: auth.checkRequest,
             }),
         ...(tenancy === undefined ? {} : { tenancy }),
-        ...(ebay === undefined ? {} : { verifyWebhook: webhookVerifier(ebay) }),
+        ...(modules === undefined
+          ? {}
+          : {
+              moduleOn: (tenant: TenantContext, module: ModuleToggle) =>
+                modules.moduleOn(tenant, module),
+            }),
+        ...(ebay === undefined && website === undefined
+          ? {}
+          : { verifyWebhook: signedCheck(ebay, website) }),
       },
     }),
   );
