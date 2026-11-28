@@ -208,7 +208,7 @@ describe('the outbound send path (SAFE-2, SAFE-3, INT-2)', () => {
       website: true,
       send: () => Promise.reject(new ProviderRejected('website', 'website.refused')),
     });
-    expect(await refused.run()).toEqual({ failed: 'website.refused' });
+    expect(await refused.run()).toEqual({ failed: 'provider.rejected' });
     expect(refused.raised.map((r) => r.type)).toEqual(['website.delivery_failed']);
     const ok = harness({ website: true });
     expect(await ok.run()).toEqual({ sent: true });
