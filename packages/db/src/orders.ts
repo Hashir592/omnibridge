@@ -1169,6 +1169,23 @@ export class OrderIngest implements UnmappedDemand {
    * a line stored while the event ran (or while the scan added the listing) was not visible to it.
    * Read only here, so ingest takes no listing lock. Returns how many listings it reported.
    */
+  /** The OmniBridge IDs of an account's orders, by external order ID (the website push answers it). */
+  async orderIds(
+    ctx: TenantContext,
+    channelAccountId: string,
+    externalIds: readonly string[],
+  ): Promise<Map<string, string>> {
+    if (externalIds.length === 0) return new Map();
+    const { rows } = await withTenantTransaction(this.#db, ctx, (trx) =>
+      sql<{ id: string; external_order_id: string }>`
+        SELECT id, external_order_id FROM app.orders
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid
+           AND external_order_id = ANY (${sql.val(externalIds)}::text[])`.execute(trx),
+    );
+    return new Map(rows.map((r) => [r.external_order_id, r.id]));
+  }
+
   async reportLateMapped(ctx: TenantContext, channelAccountId: string): Promise<number> {
     return withBoundTenant(this.#db, ctx, async (trx, ctx) => {
       const { rows } = await sql<{ listing_id: string; master_sku_id: string; lines: string[] }>`

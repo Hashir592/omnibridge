@@ -7,9 +7,11 @@ import type {
   AuditLog,
   ChannelAccountRepository,
   ConnectionRepository,
+  OrderIngest,
   WebsiteConnectionRepository,
 } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
+import type { OrderIngestSteps } from '@omnibridge/order-ingest';
 import { connectionBody } from './connections.ts';
 import type { Handlers } from './contract.ts';
 
@@ -34,6 +36,14 @@ export interface WebsiteOptions {
   tenancy: TenantRunner;
   /** https://app.example: the website calls `<origin>/api/v1/website/<connection>`. */
   appOrigin: string;
+  /**
+   * Website calls (WEB-3): the order ingest step (vault first, then db-main) and the IDs it
+   * answers. Without it the inbound routes answer 404.
+   */
+  ingest?: {
+    steps: OrderIngestSteps;
+    orders: Pick<OrderIngest, 'orderIds'>;
+  };
   logger: Logger;
   now?: () => Date;
 }

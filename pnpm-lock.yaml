@@ -376,6 +376,9 @@ importers:
       '@omnibridge/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@omnibridge/order-ingest':
+        specifier: workspace:*
+        version: link:../../packages/order-ingest
       '@omnibridge/provider-amazon':
         specifier: workspace:*
         version: link:../../packages/providers/amazon

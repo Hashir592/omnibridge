@@ -95,9 +95,18 @@ export interface OrderStreamDeps {
   ingest: Pick<OrderIngest, 'piiState' | 'apply'>;
   /** The worker's token: `ingest` (and `subjects` for the sweep). */
   vault: Pick<VaultClient, 'ingest' | 'replace'>;
+  /**
+   * How a newer buyer block reaches a stored record (ORD-4): the worker's `replace` (default), or
+   * `ingest`, whose conflict branch applies it with the same checks (S5-20261124-11), for the web
+   * app's token, which may not replace (ADR-083).
+   */
+  corrections?: 'replace' | 'ingest';
   logger: Logger;
   now?: () => Date;
 }
+
+/** The two steps a caller runs: vault first with no transaction open, then db-main. */
+export type OrderIngestSteps = Pick<SyncStream<ChannelOrder>, 'prepare' | 'sink'>;
 
 /**
  * The prepare and sink of an order stream (eBay and website). `prepare` runs between the page
