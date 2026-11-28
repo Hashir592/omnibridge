@@ -38,8 +38,21 @@ export interface OutboundOperation<P> {
   /** The API name of the token call (eBay counts it against identity). */
   readonly authApi?: string;
   readonly payload: z.ZodType<P>;
+  /**
+   * WEB-5: how long a write that may pass is retried: the n-th wait is 2^(n-1) minutes, at most
+   * `maxDelayMs`, and it is given up after `maxAttempts`. Left out, MAX_SEND_ATTEMPTS and
+   * MAX_DEFER_MS.
+   */
+  readonly retry?: { readonly maxAttempts: number; readonly maxDelayMs: number };
+  /**
+   * WEB-5: a write given up after a provider failure raises this notice on its account (one per
+   * account, updated in place), and the next write sent clears it. The given-up write stays in
+   * app.outbound_writes as failed, with its code: the dead letter.
+   */
+  readonly deadLetterAlert?: string;
   authenticate(credential: Secret): Promise<AccessToken>;
-  send(token: AccessToken, payload: P): Promise<Record<string, unknown>>;
+  /** `write.id` is the same on every attempt of one write: the receiver's idempotency key. */
+  send(token: AccessToken, payload: P, write?: { id: string }): Promise<Record<string, unknown>>;
 }
 
 export interface OutboundWriteView {

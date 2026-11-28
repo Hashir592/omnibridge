@@ -175,7 +175,8 @@ interface ProviderAdapter {
 export interface ChannelAdapter extends ProviderAdapter {
   readonly provider: 'amazon' | 'ebay' | 'website';
   ordersUpdatedSince(token: AccessToken, since: Date, page?: string): Promise<Page<OrderSummary>>;
-  pushStock(token: AccessToken, levels: readonly StockLevel[]): Promise<WriteResult>;
+  /** `key`: the same for every attempt of one write, where the channel takes one (WEB-2). */
+  pushStock(token: AccessToken, levels: readonly StockLevel[], key?: string): Promise<WriteResult>;
   /** One page of the account's listings (CAT-5); a complete scan reads every page. */
   listListings(token: AccessToken, page?: string): Promise<Page<ListingInfo>>;
 }

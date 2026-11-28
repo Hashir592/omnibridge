@@ -183,6 +183,14 @@ export const NOTIFICATION_TYPES: readonly NotificationType[] = [
     'INT-5',
   ),
   t(
+    'website.delivery_failed',
+    'Website calls failed after a day of retries',
+    ['critical'],
+    ['derived'],
+    'connections',
+    'WEB-5',
+  ),
+  t(
     'finance.bill_due',
     'Unpaid bill due or overdue',
     ['info', 'warning'],
