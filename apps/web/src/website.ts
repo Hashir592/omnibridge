@@ -487,7 +487,16 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
           const account = caller.connectionId;
           const found = await orders.asStored(ctx, account, ext);
           if (found === undefined) throw missing();
-          // The state table decides, as for a poll: a dispatched order stays dispatched (FA-10).
+          // A parcel has left: the cancel changes nothing, and the website is told so it never
+          // refunds a shipped order as cancelled (ADR-088).
+          const shipped = found.order.state === 'dispatched' || found.order.state === 'delivered';
+          if (shipped) {
+            throw new ApiError({
+              status: 409,
+              code: 'order_shipped',
+              detail: 'The order has already shipped; it was not cancelled.',
+            });
+          }
           // A cancellation deletes the buyer's record (DEL-1) through ingest's own port.
           await orders.apply(ctx, account, [
             {

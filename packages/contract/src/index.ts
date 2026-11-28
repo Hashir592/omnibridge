@@ -111,3 +111,4 @@ export * from './routes/catalogue.ts';
 export * from './routes/stock.ts';
 export * from './routes/orders.ts';
 export * from './routes/website.ts';
+export * from './routes/shipping.ts';

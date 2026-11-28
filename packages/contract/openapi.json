@@ -30,7 +30,10 @@
               "internal_error",
               "service_unavailable",
               "too_many_matches",
-              "version_conflict"
+              "version_conflict",
+              "order_shipped",
+              "tracking_sent",
+              "order_changed"
             ]
           },
           "detail": { "type": "string" },
@@ -1214,7 +1217,14 @@
       },
       "OrderFlagInput": {
         "type": "string",
-        "enum": ["oversold", "unmapped", "address_shortened", "tracking_not_confirmed", "fba"]
+        "enum": [
+          "oversold",
+          "unmapped",
+          "address_shortened",
+          "tracking_not_confirmed",
+          "fba",
+          "address_changed_after_label"
+        ]
       },
       "SaleVatTypeInput": { "type": "string", "enum": ["standard", "reduced", "zero", "no_vat"] },
       "CustomerStateInput": { "type": "string", "enum": ["present", "deleted", "none"] },
@@ -1285,7 +1295,7 @@
           "shipping_status": { "type": ["string", "null"] },
           "tracking_state": {
             "anyOf": [
-              { "type": "string", "enum": ["pending", "confirmed", "not_confirmed"] },
+              { "type": "string", "enum": ["pending", "sent", "confirmed", "failed"] },
               { "type": "null" }
             ]
           },
@@ -1571,7 +1581,7 @@
           "shipping_status": { "type": ["string", "null"] },
           "tracking_state": {
             "anyOf": [
-              { "type": "string", "enum": ["pending", "confirmed", "not_confirmed"] },
+              { "type": "string", "enum": ["pending", "sent", "confirmed", "failed"] },
               { "type": "null" }
             ]
           },
@@ -2384,6 +2394,542 @@
           "jobId",
           "matches",
           "truncated"
+        ]
+      },
+      "CarrierInput": { "type": "string", "enum": ["evri", "dpd"] },
+      "LabelFormatInput": {
+        "type": "string",
+        "enum": ["THERMAL", "DEFAULT", "TWO_PER_PAGE", "LARGE_SINGLE", "LARGE_MULTI"]
+      },
+      "CarrierServiceInput": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "name": { "type": "string" },
+          "rank": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["code", "name", "rank"]
+      },
+      "CarrierAccountInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/CarrierInput" },
+          "display_name": { "type": "string" },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "needs_reauth", "paused", "error", "disconnected"]
+          },
+          "services": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CarrierServiceInput" }
+          }
+        },
+        "required": ["id", "provider", "display_name", "company_id", "status", "services"]
+      },
+      "ServiceCostInput": {
+        "type": "object",
+        "properties": {
+          "service_code": { "type": "string", "minLength": 1, "maxLength": 50 },
+          "cost_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        },
+        "required": ["service_code", "cost_pence", "vat_rate_bp"]
+      },
+      "ShippingSettingsInput": {
+        "type": "object",
+        "properties": {
+          "auto_dispatch_on_label": { "type": "boolean" },
+          "label_format": { "$ref": "#/components/schemas/LabelFormatInput" },
+          "packaging_allowance_g": { "type": "integer", "minimum": 0, "maximum": 50000 },
+          "packing_slip_enabled": { "type": "boolean" },
+          "tracking_hold_minutes": { "type": "integer", "minimum": 0, "maximum": 240 }
+        },
+        "required": [
+          "auto_dispatch_on_label",
+          "label_format",
+          "packaging_allowance_g",
+          "packing_slip_enabled",
+          "tracking_hold_minutes"
+        ]
+      },
+      "ShippingRuleConditionsInput": {
+        "type": "object",
+        "properties": {
+          "provider": { "$ref": "#/components/schemas/ProviderInput" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "weight_min_g": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+          "weight_max_g": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+          "item_count_min": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "item_count_max": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "postcode_prefixes": {
+            "maxItems": 50,
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[A-Z0-9]{1,4}$" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ShippingRuleInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "enabled": { "type": "boolean" },
+          "conditions": { "$ref": "#/components/schemas/ShippingRuleConditionsInput" },
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "service_code": { "type": "string", "minLength": 1, "maxLength": 50 }
+        },
+        "required": ["id", "name", "enabled", "conditions", "carrier_account_id", "service_code"]
+      },
+      "ServiceSuggestionInput": {
+        "type": "object",
+        "properties": {
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "service_code": { "type": "string" },
+          "rule_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "rule_name": { "type": "string" }
+        },
+        "required": ["carrier_account_id", "service_code", "rule_id", "rule_name"]
+      },
+      "DeskRowInput": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "provider": { "$ref": "#/components/schemas/ProviderInput" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "item_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "total_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "flags": { "type": "array", "items": { "$ref": "#/components/schemas/OrderFlagInput" } },
+          "buyer": {
+            "anyOf": [{ "$ref": "#/components/schemas/MaskedBuyerInput" }, { "type": "null" }]
+          },
+          "group": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderGroupRefInput" }, { "type": "null" }]
+          },
+          "default_weight_g": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "suggestion": {
+            "anyOf": [{ "$ref": "#/components/schemas/ServiceSuggestionInput" }, { "type": "null" }]
+          },
+          "partial_dispatch": { "type": "boolean" }
+        },
+        "required": [
+          "order_id",
+          "order_ref",
+          "provider",
+          "channel_account_id",
+          "company_id",
+          "placed_at",
+          "ship_by",
+          "item_count",
+          "total_gross_pence",
+          "flags",
+          "buyer",
+          "group",
+          "default_weight_g",
+          "suggestion",
+          "partial_dispatch"
+        ]
+      },
+      "CarrierErrorInput": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "fields": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["code", "message", "fields"]
+      },
+      "LabelOrderRequestInput": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "service_code": { "type": "string", "minLength": 1, "maxLength": 50 },
+          "parcels": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "weight_g": { "type": "integer", "minimum": 1, "maximum": 1000000 } },
+              "required": ["weight_g"],
+              "additionalProperties": false
+            }
+          },
+          "line_ids": {
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "confirm_shortened": { "type": "boolean" }
+        },
+        "required": ["order_id", "carrier_account_id", "service_code", "parcels"],
+        "additionalProperties": false
+      },
+      "LabelItemStateInput": {
+        "type": "string",
+        "enum": ["queued", "creating", "created", "failed", "refused"]
+      },
+      "LabelRefusalInput": {
+        "type": "string",
+        "enum": [
+          "not_awaiting_dispatch",
+          "already_labelled",
+          "address_not_confirmed",
+          "address_changed_after_label",
+          "no_buyer_details",
+          "carrier_needs_reauth",
+          "unknown_service",
+          "partial_not_allowed"
+        ]
+      },
+      "LabelBatchItemInput": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "shipment_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "state": { "$ref": "#/components/schemas/LabelItemStateInput" },
+          "tracking_number": { "type": ["string", "null"] },
+          "refusal": {
+            "anyOf": [{ "$ref": "#/components/schemas/LabelRefusalInput" }, { "type": "null" }]
+          },
+          "error": {
+            "anyOf": [{ "$ref": "#/components/schemas/CarrierErrorInput" }, { "type": "null" }]
+          }
+        },
+        "required": [
+          "order_id",
+          "order_ref",
+          "shipment_id",
+          "state",
+          "tracking_number",
+          "refusal",
+          "error"
+        ]
+      },
+      "LabelBatchInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "done": { "type": "boolean" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LabelBatchItemInput" }
+          }
+        },
+        "required": ["id", "created_at", "done", "items"]
+      },
+      "ParcelStateInput": {
+        "type": "string",
+        "enum": ["pending", "requesting", "created", "invalid", "unknown", "voided"]
+      },
+      "ShipmentInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/CarrierInput" },
+          "service_code": { "type": "string" },
+          "status": { "type": "string", "enum": ["requested", "created", "failed", "voided"] },
+          "tracking_number": { "type": ["string", "null"] },
+          "parcels": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parcel_no": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                "weight_g": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                "state": { "$ref": "#/components/schemas/ParcelStateInput" },
+                "barcode": { "type": ["string", "null"] },
+                "error": {
+                  "anyOf": [
+                    { "$ref": "#/components/schemas/CarrierErrorInput" },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["parcel_no", "weight_g", "state", "barcode", "error"]
+            }
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "order_ref": { "type": ["string", "null"] },
+                "cost_share_pence": {
+                  "anyOf": [
+                    { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["order_id", "order_ref", "cost_share_pence"]
+            }
+          },
+          "cost_pence": {
+            "anyOf": [
+              { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              { "type": "null" }
+            ]
+          },
+          "vat_rate_bp": {
+            "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 10000 }, { "type": "null" }]
+          },
+          "label_stored": { "type": "boolean" },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "voided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "carrier_account_id",
+          "provider",
+          "service_code",
+          "status",
+          "tracking_number",
+          "parcels",
+          "orders",
+          "cost_pence",
+          "vat_rate_bp",
+          "label_stored",
+          "created_at",
+          "voided_at"
+        ]
+      },
+      "ReconcileItemInput": {
+        "type": "object",
+        "properties": {
+          "parcel_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "shipment_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "barcode": { "type": ["string", "null"] },
+          "client_uid": { "type": "string" },
+          "reason": { "type": "string", "enum": ["voided", "unknown"] },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "order_refs": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": [
+          "parcel_id",
+          "shipment_id",
+          "carrier_account_id",
+          "barcode",
+          "client_uid",
+          "reason",
+          "since",
+          "order_refs"
+        ]
+      },
+      "TrackingPushInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "state": { "type": "string", "enum": ["pending", "sent", "confirmed", "failed"] },
+          "tracking_number": { "type": "string" },
+          "attempts": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": { "type": "string" },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  }
+                },
+                "required": ["code", "at"]
+              },
+              { "type": "null" }
+            ]
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "channel_account_id",
+          "state",
+          "tracking_number",
+          "attempts",
+          "last_error",
+          "next_attempt_at",
+          "confirmed_at"
         ]
       },
       "StockModeInput": { "type": "string", "enum": ["auto", "manual"] },
@@ -3555,7 +4101,10 @@
               "internal_error",
               "service_unavailable",
               "too_many_matches",
-              "version_conflict"
+              "version_conflict",
+              "order_shipped",
+              "tracking_sent",
+              "order_changed"
             ]
           },
           "detail": { "type": "string" },
@@ -4778,7 +5327,14 @@
       },
       "OrderFlag": {
         "type": "string",
-        "enum": ["oversold", "unmapped", "address_shortened", "tracking_not_confirmed", "fba"]
+        "enum": [
+          "oversold",
+          "unmapped",
+          "address_shortened",
+          "tracking_not_confirmed",
+          "fba",
+          "address_changed_after_label"
+        ]
       },
       "SaleVatType": { "type": "string", "enum": ["standard", "reduced", "zero", "no_vat"] },
       "CustomerState": { "type": "string", "enum": ["present", "deleted", "none"] },
@@ -4851,7 +5407,7 @@
           "shipping_status": { "type": ["string", "null"] },
           "tracking_state": {
             "anyOf": [
-              { "type": "string", "enum": ["pending", "confirmed", "not_confirmed"] },
+              { "type": "string", "enum": ["pending", "sent", "confirmed", "failed"] },
               { "type": "null" }
             ]
           },
@@ -5152,7 +5708,7 @@
           "shipping_status": { "type": ["string", "null"] },
           "tracking_state": {
             "anyOf": [
-              { "type": "string", "enum": ["pending", "confirmed", "not_confirmed"] },
+              { "type": "string", "enum": ["pending", "sent", "confirmed", "failed"] },
               { "type": "null" }
             ]
           },
@@ -6000,6 +6556,552 @@
           "jobId",
           "matches",
           "truncated"
+        ],
+        "additionalProperties": false
+      },
+      "Carrier": { "type": "string", "enum": ["evri", "dpd"] },
+      "LabelFormat": {
+        "type": "string",
+        "enum": ["THERMAL", "DEFAULT", "TWO_PER_PAGE", "LARGE_SINGLE", "LARGE_MULTI"]
+      },
+      "CarrierService": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "name": { "type": "string" },
+          "rank": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "required": ["code", "name", "rank"],
+        "additionalProperties": false
+      },
+      "CarrierAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/Carrier" },
+          "display_name": { "type": "string" },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "needs_reauth", "paused", "error", "disconnected"]
+          },
+          "services": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CarrierService" }
+          }
+        },
+        "required": ["id", "provider", "display_name", "company_id", "status", "services"],
+        "additionalProperties": false
+      },
+      "ServiceCost": {
+        "type": "object",
+        "properties": {
+          "service_code": { "type": "string", "minLength": 1, "maxLength": 50 },
+          "cost_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "vat_rate_bp": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        },
+        "required": ["service_code", "cost_pence", "vat_rate_bp"],
+        "additionalProperties": false
+      },
+      "ShippingSettings": {
+        "type": "object",
+        "properties": {
+          "auto_dispatch_on_label": { "type": "boolean" },
+          "label_format": { "$ref": "#/components/schemas/LabelFormat" },
+          "packaging_allowance_g": { "type": "integer", "minimum": 0, "maximum": 50000 },
+          "packing_slip_enabled": { "type": "boolean" },
+          "tracking_hold_minutes": { "type": "integer", "minimum": 0, "maximum": 240 }
+        },
+        "required": [
+          "auto_dispatch_on_label",
+          "label_format",
+          "packaging_allowance_g",
+          "packing_slip_enabled",
+          "tracking_hold_minutes"
+        ],
+        "additionalProperties": false
+      },
+      "ShippingRuleConditions": {
+        "type": "object",
+        "properties": {
+          "provider": { "$ref": "#/components/schemas/Provider" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "weight_min_g": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+          "weight_max_g": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+          "item_count_min": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "item_count_max": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "postcode_prefixes": {
+            "maxItems": 50,
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[A-Z0-9]{1,4}$" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ShippingRule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "enabled": { "type": "boolean" },
+          "conditions": { "$ref": "#/components/schemas/ShippingRuleConditions" },
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "service_code": { "type": "string", "minLength": 1, "maxLength": 50 }
+        },
+        "required": ["id", "name", "enabled", "conditions", "carrier_account_id", "service_code"],
+        "additionalProperties": false
+      },
+      "ServiceSuggestion": {
+        "type": "object",
+        "properties": {
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "service_code": { "type": "string" },
+          "rule_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "rule_name": { "type": "string" }
+        },
+        "required": ["carrier_account_id", "service_code", "rule_id", "rule_name"],
+        "additionalProperties": false
+      },
+      "DeskRow": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "provider": { "$ref": "#/components/schemas/Provider" },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "company_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "ship_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "item_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "total_gross_pence": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+          "flags": { "type": "array", "items": { "$ref": "#/components/schemas/OrderFlag" } },
+          "buyer": {
+            "anyOf": [{ "$ref": "#/components/schemas/MaskedBuyer" }, { "type": "null" }]
+          },
+          "group": {
+            "anyOf": [{ "$ref": "#/components/schemas/OrderGroupRef" }, { "type": "null" }]
+          },
+          "default_weight_g": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "suggestion": {
+            "anyOf": [{ "$ref": "#/components/schemas/ServiceSuggestion" }, { "type": "null" }]
+          },
+          "partial_dispatch": { "type": "boolean" }
+        },
+        "required": [
+          "order_id",
+          "order_ref",
+          "provider",
+          "channel_account_id",
+          "company_id",
+          "placed_at",
+          "ship_by",
+          "item_count",
+          "total_gross_pence",
+          "flags",
+          "buyer",
+          "group",
+          "default_weight_g",
+          "suggestion",
+          "partial_dispatch"
+        ],
+        "additionalProperties": false
+      },
+      "CarrierError": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "fields": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["code", "message", "fields"],
+        "additionalProperties": false
+      },
+      "LabelOrderRequest": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "service_code": { "type": "string", "minLength": 1, "maxLength": 50 },
+          "parcels": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "weight_g": { "type": "integer", "minimum": 1, "maximum": 1000000 } },
+              "required": ["weight_g"],
+              "additionalProperties": false
+            }
+          },
+          "line_ids": {
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "confirm_shortened": { "type": "boolean" }
+        },
+        "required": ["order_id", "carrier_account_id", "service_code", "parcels"],
+        "additionalProperties": false
+      },
+      "LabelItemState": {
+        "type": "string",
+        "enum": ["queued", "creating", "created", "failed", "refused"]
+      },
+      "LabelRefusal": {
+        "type": "string",
+        "enum": [
+          "not_awaiting_dispatch",
+          "already_labelled",
+          "address_not_confirmed",
+          "address_changed_after_label",
+          "no_buyer_details",
+          "carrier_needs_reauth",
+          "unknown_service",
+          "partial_not_allowed"
+        ]
+      },
+      "LabelBatchItem": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_ref": { "type": "string" },
+          "shipment_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "state": { "$ref": "#/components/schemas/LabelItemState" },
+          "tracking_number": { "type": ["string", "null"] },
+          "refusal": {
+            "anyOf": [{ "$ref": "#/components/schemas/LabelRefusal" }, { "type": "null" }]
+          },
+          "error": {
+            "anyOf": [{ "$ref": "#/components/schemas/CarrierError" }, { "type": "null" }]
+          }
+        },
+        "required": [
+          "order_id",
+          "order_ref",
+          "shipment_id",
+          "state",
+          "tracking_number",
+          "refusal",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "LabelBatch": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "done": { "type": "boolean" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/LabelBatchItem" } }
+        },
+        "required": ["id", "created_at", "done", "items"],
+        "additionalProperties": false
+      },
+      "ParcelState": {
+        "type": "string",
+        "enum": ["pending", "requesting", "created", "invalid", "unknown", "voided"]
+      },
+      "Shipment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "provider": { "$ref": "#/components/schemas/Carrier" },
+          "service_code": { "type": "string" },
+          "status": { "type": "string", "enum": ["requested", "created", "failed", "voided"] },
+          "tracking_number": { "type": ["string", "null"] },
+          "parcels": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parcel_no": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                "weight_g": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                "state": { "$ref": "#/components/schemas/ParcelState" },
+                "barcode": { "type": ["string", "null"] },
+                "error": {
+                  "anyOf": [{ "$ref": "#/components/schemas/CarrierError" }, { "type": "null" }]
+                }
+              },
+              "required": ["parcel_no", "weight_g", "state", "barcode", "error"],
+              "additionalProperties": false
+            }
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "order_ref": { "type": ["string", "null"] },
+                "cost_share_pence": {
+                  "anyOf": [
+                    { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["order_id", "order_ref", "cost_share_pence"],
+              "additionalProperties": false
+            }
+          },
+          "cost_pence": {
+            "anyOf": [
+              { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              { "type": "null" }
+            ]
+          },
+          "vat_rate_bp": {
+            "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 10000 }, { "type": "null" }]
+          },
+          "label_stored": { "type": "boolean" },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "voided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "carrier_account_id",
+          "provider",
+          "service_code",
+          "status",
+          "tracking_number",
+          "parcels",
+          "orders",
+          "cost_pence",
+          "vat_rate_bp",
+          "label_stored",
+          "created_at",
+          "voided_at"
+        ],
+        "additionalProperties": false
+      },
+      "ReconcileItem": {
+        "type": "object",
+        "properties": {
+          "parcel_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "shipment_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "carrier_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "barcode": { "type": ["string", "null"] },
+          "client_uid": { "type": "string" },
+          "reason": { "type": "string", "enum": ["voided", "unknown"] },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "order_refs": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": [
+          "parcel_id",
+          "shipment_id",
+          "carrier_account_id",
+          "barcode",
+          "client_uid",
+          "reason",
+          "since",
+          "order_refs"
+        ],
+        "additionalProperties": false
+      },
+      "TrackingPush": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channel_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "state": { "type": "string", "enum": ["pending", "sent", "confirmed", "failed"] },
+          "tracking_number": { "type": "string" },
+          "attempts": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": { "type": "string" },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  }
+                },
+                "required": ["code", "at"],
+                "additionalProperties": false
+              },
+              { "type": "null" }
+            ]
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "channel_account_id",
+          "state",
+          "tracking_number",
+          "attempts",
+          "last_error",
+          "next_attempt_at",
+          "confirmed_at"
         ],
         "additionalProperties": false
       },
@@ -14119,6 +15221,1361 @@
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/WebsiteProductsReceived" }
               }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/carriers": {
+      "get": {
+        "operationId": "listCarrierAccounts",
+        "summary": "Carrier accounts and their services",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CarrierAccount" }
+                    }
+                  },
+                  "required": ["items"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/evri/authorise-url": {
+      "get": {
+        "operationId": "getEvriAuthoriseUrl",
+        "summary": "Where to get an Evri authorisation code",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "url": { "type": "string", "format": "uri" } },
+                  "required": ["url"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/evri": {
+      "post": {
+        "operationId": "connectEvri",
+        "summary": "Connect an Evri account",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "company_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "display_name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "auth_code": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  }
+                },
+                "required": ["company_id", "display_name", "auth_code"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Connection" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{accountId}/evri/reauthorise": {
+      "post": {
+        "operationId": "reauthoriseEvri",
+        "summary": "Re-authorise an Evri account",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "auth_code": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  }
+                },
+                "required": ["auth_code"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Connection" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{accountId}/service-costs": {
+      "get": {
+        "operationId": "getServiceCosts",
+        "summary": "A carrier account's label cost per service",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ServiceCost" }
+                    }
+                  },
+                  "required": ["items"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putServiceCosts",
+        "summary": "Set a carrier account's label cost per service",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/ServiceCostInput" }
+                  }
+                },
+                "required": ["items"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "connections",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ServiceCost" }
+                    }
+                  },
+                  "required": ["items"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/settings": {
+      "get": {
+        "operationId": "getShippingSettings",
+        "summary": "Shipping settings",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ShippingSettings" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putShippingSettings",
+        "summary": "Change the shipping settings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "auto_dispatch_on_label": { "type": "boolean" },
+                  "label_format": { "$ref": "#/components/schemas/LabelFormatInput" },
+                  "packaging_allowance_g": { "type": "integer", "minimum": 0, "maximum": 50000 },
+                  "packing_slip_enabled": { "type": "boolean" },
+                  "tracking_hold_minutes": { "type": "integer", "minimum": 0, "maximum": 240 }
+                },
+                "required": [
+                  "auto_dispatch_on_label",
+                  "label_format",
+                  "packaging_allowance_g",
+                  "packing_slip_enabled",
+                  "tracking_hold_minutes"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ShippingSettings" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/rules": {
+      "get": {
+        "operationId": "getShippingRules",
+        "summary": "Shipping rules, first match wins",
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ShippingRule" }
+                    }
+                  },
+                  "required": ["items"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putShippingRules",
+        "summary": "Replace the shipping rules",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                        "enabled": { "type": "boolean" },
+                        "conditions": {
+                          "$ref": "#/components/schemas/ShippingRuleConditionsInput"
+                        },
+                        "carrier_account_id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "service_code": { "type": "string", "minLength": 1, "maxLength": 50 }
+                      },
+                      "required": [
+                        "name",
+                        "enabled",
+                        "conditions",
+                        "carrier_account_id",
+                        "service_code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["items"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": true,
+          "companyScoped": false
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ShippingRule" }
+                    }
+                  },
+                  "required": ["items"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/desk": {
+      "get": {
+        "operationId": "getShippingDesk",
+        "summary": "Orders awaiting dispatch",
+        "parameters": [
+          {
+            "schema": { "default": 1, "type": "integer", "minimum": 1, "maximum": 500 },
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "description": "Page number, from 1 to 500"
+          },
+          {
+            "schema": { "default": 50, "type": "number" },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Rows per page: 20, 50, 100 (default 50)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "company_id",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "channel_account_id",
+            "required": false
+          },
+          {
+            "schema": { "$ref": "#/components/schemas/ProviderInput" },
+            "in": "query",
+            "name": "provider",
+            "required": false
+          },
+          {
+            "schema": { "type": "string", "enum": ["today", "overdue", "tomorrow"] },
+            "in": "query",
+            "name": "ship_by",
+            "required": false
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/DeskRow" }
+                    },
+                    "page": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "total": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    "totalCapped": { "type": "boolean" }
+                  },
+                  "required": ["items", "page", "limit", "total", "totalCapped"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/labels": {
+      "post": {
+        "operationId": "createLabels",
+        "summary": "Create labels for orders",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "orders": {
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/LabelOrderRequestInput" }
+                  }
+                },
+                "required": ["orders"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LabelBatch" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/ship-together": {
+      "post": {
+        "operationId": "shipTogether",
+        "summary": "One label for several orders of the same buyer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "group_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "order_ids": {
+                    "minItems": 2,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "carrier_account_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "service_code": { "type": "string", "minLength": 1, "maxLength": 50 },
+                  "parcels": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "weight_g": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+                      },
+                      "required": ["weight_g"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "confirm_shortened": { "type": "boolean" }
+                },
+                "required": [
+                  "group_id",
+                  "order_ids",
+                  "carrier_account_id",
+                  "service_code",
+                  "parcels"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LabelBatch" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/batches/{batchId}": {
+      "get": {
+        "operationId": "getLabelBatch",
+        "summary": "Where a label request stands",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "batchId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LabelBatch" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/labels/print": {
+      "post": {
+        "operationId": "printLabels",
+        "summary": "Download labels as one PDF",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shipment_ids": {
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  }
+                },
+                "required": ["shipment_ids"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary", "description": "File bytes" }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/shipments/{shipmentId}": {
+      "get": {
+        "operationId": "getShipment",
+        "summary": "One shipment with its parcels and orders",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "shipmentId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Shipment" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/shipments/{shipmentId}/reprint": {
+      "post": {
+        "operationId": "reprintShipment",
+        "summary": "Reprint a label",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "null" } } }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "shipmentId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary", "description": "File bytes" }
+              }
+            }
+          },
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Shipment" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/shipments/{shipmentId}/void": {
+      "post": {
+        "operationId": "voidShipment",
+        "summary": "Void a label",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "null" } } }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "shipmentId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Shipment" } }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/reconcile": {
+      "get": {
+        "operationId": "listReconcile",
+        "summary": "Voided and unknown labels to check with the carrier",
+        "parameters": [
+          {
+            "schema": { "default": 1, "type": "integer", "minimum": 1, "maximum": 500 },
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "description": "Page number, from 1 to 500"
+          },
+          {
+            "schema": { "default": 50, "type": "number" },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Rows per page: 20, 50, 100 (default 50)"
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ReconcileItem" }
+                    },
+                    "page": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "total": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    "totalCapped": { "type": "boolean" }
+                  },
+                  "required": ["items", "page", "limit", "total", "totalCapped"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/reconcile/{parcelId}/done": {
+      "post": {
+        "operationId": "markReconciled",
+        "summary": "Take a label off the reconcile list",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "null" } } }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "parcelId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{orderId}/address-check": {
+      "post": {
+        "operationId": "confirmAddressCheck",
+        "summary": "Confirm a changed address was checked",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "null" } } }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "orderId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "204": { "description": "Default Response" },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/packing-slips": {
+      "post": {
+        "operationId": "packingSlips",
+        "summary": "Download packing slips as one PDF",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "order_ids": {
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  }
+                },
+                "required": ["order_ids"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary", "description": "File bytes" }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{orderId}/tracking": {
+      "get": {
+        "operationId": "listOrderTracking",
+        "summary": "An order's tracking pushes",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "orderId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": false,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TrackingPush" }
+                    }
+                  },
+                  "required": ["items"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Client error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          },
+          "5XX": {
+            "description": "Server error (RFC 9457 problem)",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      }
+    },
+    "/shipping/tracking/{pushId}/resend": {
+      "post": {
+        "operationId": "resendTracking",
+        "summary": "Send a failed tracking push again",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "null" } } }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "pushId",
+            "required": true
+          }
+        ],
+        "x-permissions": {
+          "auth": "session",
+          "tab": "shipping",
+          "adminOnly": true,
+          "companyScoped": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/TrackingPush" } }
             }
           },
           "4XX": {

@@ -35,6 +35,7 @@ import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
 import { deletionCertificateText } from './deletion-certificate.ts';
 import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
+import { shippingHandlers } from './shipping.ts';
 import { websiteHandlers, websiteVerifier, type WebsiteOptions } from './website.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
@@ -265,6 +266,7 @@ export function buildWebApp({
     ...stockHandlers(stock),
     ...ordersHandlers(orders),
     ...websiteHandlers(website),
+    ...shippingHandlers(),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';

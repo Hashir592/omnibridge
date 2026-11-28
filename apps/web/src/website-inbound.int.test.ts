@@ -393,6 +393,27 @@ describe('website calls, signed and idempotent (T-1101)', () => {
     expect((await send(`/orders/W-NONE-${tag}/cancel`, cancel)).status).toBe(404);
   });
 
+  it('[WEB-3][DEL-1] a cancel of an order already shipped answers 409 order_shipped and changes nothing (ADR-088)', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const ext = `W-CS-${tag}`;
+    const shipped = order(ext, { status: 'shipped', shippedAt: '2026-11-20T12:00:00Z' });
+    const id = (await push(shipped)).json().omnibridgeOrderId;
+    const before = await root.query<{ status: string }>(
+      'SELECT status FROM app.orders WHERE id = $1',
+      [id],
+    );
+    expect(before.rows[0]?.status).toBe('dispatched');
+    const res = await send(`/orders/${ext}/cancel`, { cancelledAt: '2026-11-20T13:00:00Z' });
+    expect(res.status, res.body).toBe(409);
+    expect(res.json().code).toBe('order_shipped');
+    const after = await root.query<{ status: string; cancelled_at: Date | null }>(
+      'SELECT status, cancelled_at FROM app.orders WHERE id = $1',
+      [id],
+    );
+    expect(after.rows[0]).toEqual({ status: 'dispatched', cancelled_at: null });
+    expect(cancelled).not.toContain(id);
+  });
+
   it('[WEB-3][ORD-9][VAT-6] a refund is recorded once per refundId: 201, then 200; an unknown order is 404', async () => {
     const tag = randomUUID().slice(0, 8);
     const ext = `W-R-${tag}`;
