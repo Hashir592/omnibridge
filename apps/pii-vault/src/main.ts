@@ -5,6 +5,7 @@ import { createPiiPool, piiDbConfig, pingPii } from '@omnibridge/pii-db';
 import { buildVaultApp } from './app.ts';
 import { ServiceTokens } from './auth.ts';
 import { DeletionJournal, DeletionService } from './deletion.ts';
+import { LabelStore } from './labels.ts';
 import { Vault } from './vault.ts';
 
 const version = process.env.APP_VERSION ?? '0.0.0-dev';
@@ -74,9 +75,12 @@ try {
     'name and match re-index failed',
   );
 }
+// Invariant 11: label files live in the vault's own volume (never backed up), encrypted.
+const labels = new LabelStore({ pool, dir: requireEnv('LABELS_DIR'), vault });
 const deletion = new DeletionService({
   pool,
   journal,
+  labels,
   onWorkspaceClosed: (workspaceId) => {
     vault.forgetKeys(workspaceId);
   },
@@ -129,6 +133,7 @@ const app = buildVaultApp({
   vault,
   tokens,
   deletion,
+  labels,
 });
 await app.listen({ host: '0.0.0.0', port: Number(process.env.PORT ?? '8080') });
 

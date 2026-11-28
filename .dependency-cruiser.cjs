@@ -83,11 +83,11 @@ module.exports = {
     {
       name: 'oauth-exchange-only-oauth-providers',
       comment:
-        'INT-2: the web OAuth exchange may use the provider kit and the OAuth providers (eBay, ' +
-        'Amazon) to exchange a code, nothing else.',
+        'INT-2: the web OAuth exchange may use the provider kit and the code-exchange providers ' +
+        '(eBay, Amazon, and Evri for EVRI-2) to exchange a code, nothing else.',
       severity: 'error',
       from: { path: '^apps/web/src/oauth-exchange\\.ts$' },
-      to: { path: '^packages/providers/(?!(kit|ebay|amazon)/)' },
+      to: { path: '^packages/providers/(?!(kit|ebay|amazon|evri)/)' },
     },
     {
       name: 'provider-kit-is-generic',

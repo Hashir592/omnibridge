@@ -106,7 +106,7 @@ export interface WebsiteOptions {
 export function websiteIngest(deps: {
   ingest: (ports: OrderIngestPorts) => OrderIngest;
   queue: Pick<JobQueue, 'send'>;
-  notifier: Pick<Notifier, 'raisePlatform'>;
+  notifier: Pick<Notifier, 'raisePlatform' | 'raise'>;
   tenancy: Pick<TenantRunner, 'runWorkspace'>;
   vault: Pick<VaultClient, 'ingest' | 'replace'>;
   logger: Logger;

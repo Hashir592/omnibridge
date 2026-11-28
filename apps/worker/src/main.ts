@@ -38,6 +38,7 @@ import {
   CatalogueRepository,
   OrderIngest,
   OrderReads,
+  ShippingRepository,
   StockEngine,
 } from '@omnibridge/db';
 import { createLogger } from '@omnibridge/logger';
@@ -46,8 +47,10 @@ import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
 import { AmazonGovernor } from '@omnibridge/governor-amazon';
 import { EbayGovernor } from '@omnibridge/governor-ebay';
 import { createEbayAdapter, ebayOrderStream } from '@omnibridge/provider-ebay';
+import { createEvriAdapter } from '@omnibridge/provider-evri';
 import { createWebsiteAdapter, websiteOrderStream } from '@omnibridge/provider-website';
 import { AccessTokenCache, ProviderHttp } from '@omnibridge/provider-kit';
+import { withCarrierSlot } from '@omnibridge/provider-kit/carrier';
 import {
   emailOnRaise,
   JOBS,
@@ -96,6 +99,7 @@ import {
   websiteChannelOrder,
 } from './orders.ts';
 import { createProviderGovernor } from './governor.ts';
+import { labelsCreateHandler, labelsDiscardHandler, labelsFetchHandler } from './labels.ts';
 import {
   outboundOperations,
   outboundRecoverHandler,
@@ -272,6 +276,21 @@ const websiteAdapter = () =>
   Promise.resolve(
     createWebsiteAdapter({ http: providerHttp, toChannelOrder: websiteChannelOrder }),
   );
+// M12 labels (T-1201): one slot of the carrier's 4 around each call (RL-4); a full cap waits.
+const carrierSlots = new JobLeaseRepository(handlerDb.db);
+const labelDeps = {
+  tenancy: syncPorts.tenancy,
+  shipping: new ShippingRepository(handlerDb.db),
+  credentials: syncPorts.credentials,
+  connections,
+  notifier,
+  vault: workerVault,
+  evri: () => Promise.resolve(createEvriAdapter({ http: providerHttp })),
+  slot: <T>(workspaceId: string, carrierAccountId: string, fn: () => Promise<T>) =>
+    withCarrierSlot(carrierSlots, { workspaceId, companyIds: [] }, carrierAccountId, fn, {
+      provider: 'evri',
+    }),
+};
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -391,6 +410,7 @@ await registerHandlers(queue, {
     tenancy: syncPorts.tenancy,
     reads: new OrderReads(handlerDb.db),
     vault: workerVault,
+    notifier,
   }),
   'orders.orphan_sweep': ordersOrphanSweepHandler({
     tenancy: syncPorts.tenancy,
@@ -398,6 +418,9 @@ await registerHandlers(queue, {
     vault: workerVault,
     logger: log,
   }),
+  'labels.create': labelsCreateHandler(labelDeps),
+  'labels.fetch': labelsFetchHandler(labelDeps),
+  'labels.discard': labelsDiscardHandler(labelDeps),
   'notify.email': notifyEmailHandler({
     tenancy: new Tenancy(handlerDb.db),
     notifications,

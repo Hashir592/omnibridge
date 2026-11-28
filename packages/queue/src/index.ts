@@ -50,6 +50,7 @@ export {
 } from './job.ts';
 export {
   JobQueue,
+  GovernorWait,
   PermanentJobError,
   type ConcurrencyLimiter,
   type JobHandler,
@@ -84,6 +85,9 @@ export {
   ordersPiiExpiryJob,
   ordersOrphanSweepJob,
   ordersGroupRecomputeJob,
+  labelsCreateJob,
+  labelsFetchJob,
+  labelsDiscardJob,
   ordersSyncSweepJob,
   ordersOrphanSweepPlatformJob,
   notifyEmailJob,

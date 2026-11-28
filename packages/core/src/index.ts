@@ -28,6 +28,16 @@ export {
 } from './money.ts';
 export { parseCsv, toCsv, type CsvRow } from './csv.ts';
 export { allocateLargestRemainder } from './allocate.ts';
+export {
+  CARRIER_ERROR_WORDS,
+  CARRIER_SERVICES,
+  carrierErrorWords,
+  clientUid,
+  isCarrierService,
+  labelCostShares,
+  SHIP_TOGETHER_MAX,
+  type CarrierServiceInfo,
+} from './shipping.ts';
 export { GROUP_CAP, ordersLink, sameBuyerGroups, type GroupCandidate } from './order-groups.ts';
 export {
   computeOrderVat,

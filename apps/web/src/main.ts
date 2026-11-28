@@ -32,6 +32,7 @@ import {
   StockEngine,
   OrderIngest,
   OrderReads,
+  ShippingRepository,
   WebsiteConnectionRepository,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore } from '@omnibridge/files';
@@ -55,7 +56,7 @@ import { queueNotifier } from './auth/notifier.ts';
 import { Passwords } from './auth/passwords.ts';
 import { PlatformKeys } from './auth/platform-keys.ts';
 import { AuthService } from './auth/service.ts';
-import { createOAuthFlows } from './oauth-exchange.ts';
+import { createEvriFlow, createOAuthFlows } from './oauth-exchange.ts';
 import { loadSpa } from './spa.ts';
 import { ebayWebhookFromEnv } from './webhooks/ebay.ts';
 import { websiteIngest, websiteMapped } from './website.ts';
@@ -282,6 +283,33 @@ const app = buildWebApp({
       },
       disconnect: { listings: catalogue, stock: stockEngine },
       logger,
+    };
+  })(),
+  // Shipping, Evri and labels (T-1201): label jobs queued in the request; files from the vault.
+  shipping: (() => {
+    const mode = providerModeFrom(process.env.PROVIDER_MODE);
+    const secrets = new AppSecretStore(main.db, new PlatformKeys(authStore, secretsKeyring));
+    return {
+      shipping: new ShippingRepository(main.db),
+      vault,
+      queue,
+      audit: new AuditLog(main.db),
+      evri: createEvriFlow({
+        mode,
+        ...(process.env.PROVIDER_MOCKS_URL ? { mocksUrl: process.env.PROVIDER_MOCKS_URL } : {}),
+        ...(process.env.PROVIDER_MOCKS_PUBLIC_URL
+          ? { mocksPublicUrl: process.env.PROVIDER_MOCKS_PUBLIC_URL }
+          : {}),
+        ...(process.env.EVRI_REDIRECT_URI ? { redirectUri: process.env.EVRI_REDIRECT_URI } : {}),
+        secrets: (name) => secrets.get(name),
+      }),
+      accounts: new ChannelAccountRepository(main.db),
+      credentials: new AccountCredentials(
+        main.db,
+        new CredentialRepository({ keyring: secretsKeyring, logger, environment: mode }),
+      ),
+      connections: new ConnectionRepository(main.db, { environment: mode }),
+      notifier: new Notifier({ store: new NotificationRepository(main.db) }),
     };
   })(),
   // The stock engine (T-0901): movements, targets and pushes through the outbound path.

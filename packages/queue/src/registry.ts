@@ -271,6 +271,35 @@ export const ordersOrphanSweepJob = defineJob({
  * for each one as ob_owner (ADR-032), and the worker registers a handler for each. Provider
  * modules add their job types here (M07 onwards).
  */
+/**
+ * SHIP-3, EVRI-3 (T-1201): buy the labels of one shipment, then store their files in pii-vault.
+ * The envelope's account is the carrier account. Each parcel row exists before the call and is
+ * moved on from the state it is in, so a retry never buys a parcel twice; a full carrier cap is a
+ * governor wait (RL-4). IDs only.
+ */
+export const labelsCreateJob = defineJob({
+  type: 'labels.create',
+  payload: z.object({ shipment_id: z.uuid() }).strict(),
+  retry: { limit: 8, delaySeconds: 30, backoff: true, maxDelaySeconds: 900 },
+  expireInSeconds: 900,
+});
+
+/** SHP-5, EVRI-5: fetch a stored shipment's labels again by barcode. Never buys a parcel. */
+export const labelsFetchJob = defineJob({
+  type: 'labels.fetch',
+  payload: z.object({ shipment_id: z.uuid() }).strict(),
+  retry: { limit: 5, delaySeconds: 30, backoff: true, maxDelaySeconds: 600 },
+  expireInSeconds: 600,
+});
+
+/** SHP-5: a voided shipment's label files go from the vault at once (invariant 11). */
+export const labelsDiscardJob = defineJob({
+  type: 'labels.discard',
+  payload: z.object({ shipment_id: z.uuid() }).strict(),
+  retry: { limit: 10, delaySeconds: 60, backoff: true, maxDelaySeconds: 3_600 },
+  expireInSeconds: 300,
+});
+
 export const JOBS: readonly JobDefinition[] = [
   filesScanJob,
   auditRetentionJob,
@@ -296,6 +325,9 @@ export const JOBS: readonly JobDefinition[] = [
   ordersPiiExpiryJob,
   ordersOrphanSweepJob,
   ordersGroupRecomputeJob,
+  labelsCreateJob,
+  labelsFetchJob,
+  labelsDiscardJob,
 ];
 
 /**

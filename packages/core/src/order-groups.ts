@@ -39,7 +39,13 @@ export function ordersLink(
  */
 export function sameBuyerGroups(
   candidates: readonly GroupCandidate[],
-  options: { graceHours: number; excluded?: (a: string, b: string) => boolean; cap?: number },
+  options: {
+    graceHours: number;
+    excluded?: (a: string, b: string) => boolean;
+    cap?: number;
+    /** ADR-087: called once per group that would take more than `cap` orders, with its first part. */
+    onFull?: (members: readonly string[]) => void;
+  },
 ): string[][] {
   const excluded = options.excluded ?? (() => false);
   const cap = options.cap ?? GROUP_CAP;
@@ -91,6 +97,7 @@ export function sameBuyerGroups(
     const sorted = [...component].sort(
       (x, y) => x.placedAt.getTime() - y.placedAt.getTime() || (x.id < y.id ? -1 : 1),
     );
+    if (sorted.length > cap) options.onFull?.(sorted.slice(0, cap).map((c) => c.id));
     for (let k = 0; k < sorted.length; k += cap) {
       const chunk = sorted.slice(k, k + cap).map((c) => c.id);
       if (chunk.length >= 2) groups.push(chunk);

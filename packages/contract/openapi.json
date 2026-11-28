@@ -2072,7 +2072,9 @@
               "ebay.client_id",
               "ebay.client_secret",
               "ebay.dev_id",
-              "ebay.verification_token"
+              "ebay.verification_token",
+              "evri.client_id",
+              "evri.client_secret"
             ]
           },
           "current": {
@@ -6230,7 +6232,9 @@
               "ebay.client_id",
               "ebay.client_secret",
               "ebay.dev_id",
-              "ebay.verification_token"
+              "ebay.verification_token",
+              "evri.client_id",
+              "evri.client_secret"
             ]
           },
           "current": {
@@ -8678,6 +8682,9 @@
                 "connection.added",
                 "connection.removed",
                 "connection.reauthorised",
+                "shipping.settings_changed",
+                "shipping.costs_changed",
+                "label.voided",
                 "website.settings_changed",
                 "website.keys_reissued",
                 "workspace.status_changed",
@@ -8725,6 +8732,7 @@
                 "membership",
                 "channel_account",
                 "workspace",
+                "shipment",
                 "master_sku",
                 "stock_take",
                 "stock_buffer",
@@ -8849,6 +8857,9 @@
                 "connection.added",
                 "connection.removed",
                 "connection.reauthorised",
+                "shipping.settings_changed",
+                "shipping.costs_changed",
+                "label.voided",
                 "website.settings_changed",
                 "website.keys_reissued",
                 "workspace.status_changed",
@@ -8896,6 +8907,7 @@
                 "membership",
                 "channel_account",
                 "workspace",
+                "shipment",
                 "master_sku",
                 "stock_take",
                 "stock_buffer",
@@ -11786,7 +11798,9 @@
                 "ebay.client_id",
                 "ebay.client_secret",
                 "ebay.dev_id",
-                "ebay.verification_token"
+                "ebay.verification_token",
+                "evri.client_id",
+                "evri.client_secret"
               ]
             },
             "in": "path",
@@ -11839,7 +11853,9 @@
                 "ebay.client_id",
                 "ebay.client_secret",
                 "ebay.dev_id",
-                "ebay.verification_token"
+                "ebay.verification_token",
+                "evri.client_id",
+                "evri.client_secret"
               ]
             },
             "in": "path",

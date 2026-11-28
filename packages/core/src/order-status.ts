@@ -55,8 +55,26 @@ export function canMoveOrder(from: OrderStatus, to: OrderStatus): boolean {
   return false;
 }
 
-/** The status after an update: the incoming one when the table allows it, else the current one. */
-export function nextOrderStatus(current: OrderStatus | null, incoming: OrderStatus): OrderStatus {
+/** The backward moves only OmniBridge's own label void makes (SHP-5); never a channel update. */
+const VOID_MOVES: readonly (readonly [OrderStatus, OrderStatus])[] = [
+  ['label_created', 'awaiting_dispatch'],
+];
+
+const isVoidMove = (from: OrderStatus, to: OrderStatus) =>
+  VOID_MOVES.some(([f, t]) => f === from && t === to);
+
+/**
+ * The status after an update: the incoming one when the table allows it, else the current one.
+ * A void move is made only with `labelVoid` (OmniBridge voided its own label), so a poll that
+ * still says "awaiting dispatch" never undoes a label (SHP-5).
+ */
+export function nextOrderStatus(
+  current: OrderStatus | null,
+  incoming: OrderStatus,
+  options: { labelVoid?: boolean } = {},
+): OrderStatus {
   if (current === null) return incoming;
+  if (isVoidMove(current, incoming)) return options.labelVoid === true ? incoming : current;
+  if (options.labelVoid === true) return current;
   return canMoveOrder(current, incoming) ? incoming : current;
 }

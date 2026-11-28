@@ -28,6 +28,7 @@
     "@omnibridge/mail": "workspace:*",
     "@omnibridge/order-ingest": "workspace:*",
     "@omnibridge/provider-ebay": "workspace:*",
+    "@omnibridge/provider-evri": "workspace:*",
     "@omnibridge/provider-kit": "workspace:*",
     "@omnibridge/provider-website": "workspace:*",
     "@omnibridge/queue": "workspace:*",
