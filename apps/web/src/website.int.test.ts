@@ -3,6 +3,7 @@ import { generateKekLine, parseKeyring } from '@omnibridge/crypto';
 import {
   AccountCredentials,
   AuditLog,
+  CatalogueRepository,
   ChannelAccountRepository,
   CompanyRepository,
   ConnectionRepository,
@@ -46,6 +47,8 @@ describe('website connector setup (T-1101)', () => {
   let companyB = '';
   let ebay = '';
   const keyring = parseKeyring('secrets', generateKekLine(1));
+  /** Listings whose manual stock settings Disconnect asked to clear (C7.3). */
+  const cleared: string[] = [];
 
   const app = () =>
     buildWebApp({
@@ -63,6 +66,15 @@ describe('website connector setup (T-1101)', () => {
         audit: new AuditLog(db.db),
         tenancy,
         appOrigin: APP,
+        disconnect: {
+          listings: new CatalogueRepository(db.db),
+          stock: {
+            onListingsEnded: (...[, ids]) => {
+              cleared.push(...ids);
+              return Promise.resolve();
+            },
+          },
+        },
         logger,
       },
     });
@@ -292,5 +304,67 @@ describe('website connector setup (T-1101)', () => {
     } finally {
       await moduleOn(A, true);
     }
+  });
+
+  it('[WEB-1][INT-4] Disconnect ends the listings, deletes the credentials and stops the account; history stays; a repeat changes nothing', async () => {
+    const { connection } = (await connect()).json() as { connection: { id: string } };
+    const id = connection.id;
+    await tenancy.runWorkspace({ workspaceId: A }, (c) =>
+      new CatalogueRepository(db.db).upsertDiscovered(
+        c,
+        id,
+        'website',
+        [
+          {
+            externalSku: 'D-SKU-1',
+            externalId: 'D-1',
+            title: 'Mug',
+            fulfilment: null,
+            inventoryApi: null,
+            quantity: 3,
+          },
+        ],
+        new Date(),
+      ),
+    );
+    const url = `/api/connections/${id}/disconnect`;
+    expect((await call('POST', url, as(A, child))).status).toBe(403);
+    expect((await call('POST', url, as(B, adminB))).status).toBe(404);
+    const res = await call('POST', url, as(A, admin));
+    expect(res.status, res.body).toBe(200);
+    const body = res.json() as {
+      connection: { id: string; status: string };
+      listings_ended: number;
+    };
+    expect(body.connection).toMatchObject({ id, status: 'disconnected' });
+    expect(body.listings_ended).toBe(1);
+    const listing = await root.query<{ id: string; ended: boolean }>(
+      'SELECT id, ended_at IS NOT NULL AS ended FROM app.listings WHERE channel_account_id = $1',
+      [id],
+    );
+    expect(listing.rows.map((r) => r.ended)).toEqual([true]);
+    expect(cleared).toEqual(listing.rows.map((r) => r.id));
+    const creds = await root.query('SELECT 1 FROM app.credentials WHERE channel_account_id = $1', [
+      id,
+    ]);
+    expect(creds.rowCount).toBe(0);
+    const again = await call('POST', url, as(A, admin));
+    expect(again.status).toBe(200);
+    expect((again.json() as { listings_ended: number }).listings_ended).toBe(0);
+    const audit = await root.query<{ action: string }>(
+      `SELECT action FROM app.audit_events WHERE entity_id = $1 AND action = 'connection.removed'`,
+      [id],
+    );
+    expect(audit.rowCount).toBe(1);
+    // The account stays, archived, with its history.
+    const account = await root.query<{ archived: boolean }>(
+      'SELECT archived_at IS NOT NULL AS archived FROM app.channel_accounts WHERE id = $1',
+      [id],
+    );
+    expect(account.rows).toEqual([{ archived: true }]);
+    // Any channel account, not only a website's.
+    expect((await call('POST', `/api/connections/${ebay}/disconnect`, as(A, admin))).status).toBe(
+      200,
+    );
   });
 });

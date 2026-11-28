@@ -66,12 +66,17 @@ describe('website calls, signed and idempotent (T-1101)', () => {
   let connection = '';
   let keys = { inbound_api_key: '', signing_secret: '' };
   const keyring = parseKeyring('secrets', generateKekLine(1));
+  /** Orders whose buyer deletion ingest asked for (DEL-1). */
+  const cancelled: string[] = [];
 
   const app = () => {
     const ingest = new OrderIngest(db.db, {
       catalogue: new CatalogueRepository(db.db),
       ports: {
-        cancelPii: () => Promise.resolve(),
+        cancelPii: (...[, input]) => {
+          cancelled.push(input.orderId);
+          return Promise.resolve();
+        },
         shortenPii: () => Promise.resolve(),
         totalMismatch: () => Promise.resolve(),
         lateMapped: () => Promise.resolve(),
@@ -355,6 +360,67 @@ describe('website calls, signed and idempotent (T-1101)', () => {
         ])
       ).rows,
     ).toEqual([]);
+  });
+
+  it('[WEB-3][DEL-1] a cancel cancels the stored order and asks for its buyer details to go; an unknown order is 404', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const ext = `W-C-${tag}`;
+    const id = (await push(order(ext))).json().omnibridgeOrderId;
+    const cancel = { cancelledAt: '2026-11-20T10:00:00Z', reason: 'Changed mind' };
+    const res = await send(`/orders/${ext}/cancel`, cancel);
+    expect(res.status, res.body).toBe(200);
+    expect(res.json()).toEqual({ omnibridgeOrderId: id });
+    const row = await root.query<{ status: string; cancelled_at: Date }>(
+      'SELECT status, cancelled_at FROM app.orders WHERE id = $1',
+      [id],
+    );
+    expect(row.rows[0]?.status).toBe('cancelled');
+    expect(row.rows[0]?.cancelled_at.toISOString()).toBe('2026-11-20T10:00:00.000Z');
+    expect(cancelled).toContain(id);
+    // A repeat under another key changes nothing and answers the same.
+    expect((await send(`/orders/${ext}/cancel`, cancel)).json()).toEqual({ omnibridgeOrderId: id });
+    expect(cancelled.filter((c) => c === id)).toHaveLength(1);
+    expect((await send(`/orders/W-NONE-${tag}/cancel`, cancel)).status).toBe(404);
+  });
+
+  it('[WEB-3][ORD-9][VAT-6] a refund is recorded once per refundId: 201, then 200; an unknown order is 404', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const ext = `W-R-${tag}`;
+    const id = (await push(order(ext))).json().omnibridgeOrderId;
+    const refund = { refundId: 'R-1', amountGross: 650, refundedAt: '2026-11-21T10:00:00Z' };
+    const first = await send(`/orders/${ext}/refunds`, refund);
+    expect(first.status, first.body).toBe(201);
+    expect(first.json()).toEqual({ omnibridgeOrderId: id });
+    const again = await send(`/orders/${ext}/refunds`, refund);
+    expect(again.status).toBe(200);
+    const rows = await root.query<{ amount: string }>(
+      'SELECT amount_pence::text AS amount FROM app.refunds WHERE order_id = $1',
+      [id],
+    );
+    expect(rows.rows).toEqual([{ amount: '650' }]);
+    expect((await send(`/orders/W-NONE-${tag}/refunds`, refund)).status).toBe(404);
+  });
+
+  it('[WEB-3][CAT-5] products are stored as the account listings, by SKU, and a repeat updates them', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const res = await send('/products', {
+      products: [
+        { externalSku: `P1-${tag}`, title: 'Mug', quantity: 4 },
+        { externalSku: `P2-${tag}`, title: null },
+      ],
+    });
+    expect(res.status, res.body).toBe(200);
+    expect(res.json()).toEqual({ received: 2 });
+    await send('/products', { products: [{ externalSku: `P1-${tag}`, title: 'Big mug' }] });
+    const rows = await root.query<{ external_sku: string; title: string | null; provider: string }>(
+      `SELECT external_sku, title, provider FROM app.listings
+        WHERE channel_account_id = $1 AND external_sku LIKE $2 ORDER BY external_sku`,
+      [connection, `%-${tag}`],
+    );
+    expect(rows.rows).toEqual([
+      { external_sku: `P1-${tag}`, title: 'Big mug', provider: 'website' },
+      { external_sku: `P2-${tag}`, title: null, provider: 'website' },
+    ]);
   });
 
   it('[WEB-1][PLAT-2] with the website module off, every website call answers 404, even when signed', async () => {
