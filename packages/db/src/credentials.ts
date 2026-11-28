@@ -28,6 +28,8 @@ export const CREDENTIAL_KINDS = [
   'evri.api_key',
   'dpd.api_key',
   'website.api_key',
+  // T-1101 (WEB-2): the HMAC secret a website and OmniBridge sign their calls with.
+  'website.signing_secret',
 ] as const;
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
@@ -455,6 +457,32 @@ export class AccountCredentials {
   ): Promise<Secret | undefined> {
     return withTenantTransaction(this.#db, ctx, (trx) =>
       this.#repo.get(trx, ctx, { kind: CREDENTIAL_KIND_BY_PROVIDER[provider], channelAccountId }),
+    );
+  }
+
+  /** Another credential of the account than its provider token (the website signing secret). */
+  readKind(
+    ctx: TenantContext,
+    channelAccountId: string,
+    kind: CredentialKind,
+  ): Promise<Secret | undefined> {
+    return withTenantTransaction(this.#db, ctx, (trx) =>
+      this.#repo.get(trx, ctx, { kind, channelAccountId }),
+    );
+  }
+
+  /**
+   * Stores a new value of that credential as current; the old one stops at once (kept inactive
+   * until the purge, never read again).
+   */
+  replaceKind(
+    ctx: TenantContext,
+    channelAccountId: string,
+    kind: CredentialKind,
+    value: Secret,
+  ): Promise<string> {
+    return withTenantTransaction(this.#db, ctx, (trx) =>
+      this.#repo.replaceCurrent(trx, ctx, { kind, channelAccountId }, value, { retainOldForMs: 0 }),
     );
   }
 

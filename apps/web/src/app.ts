@@ -33,7 +33,7 @@ import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
 import { deletionCertificateText } from './deletion-certificate.ts';
 import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
-import { websiteHandlers } from './website.ts';
+import { websiteHandlers, type WebsiteOptions } from './website.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
 import { catalogueHandlers, type CatalogueOptions } from './catalogue.ts';
@@ -142,6 +142,8 @@ export interface WebAppOptions {
   stock?: StockOptions;
   /** Orders (T-1002); without it those routes answer 404. */
   orders?: OrdersOptions;
+  /** The website connector (T-1101); without it those routes answer 404. */
+  website?: WebsiteOptions;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
@@ -182,6 +184,7 @@ export function buildWebApp({
   catalogue,
   stock,
   orders,
+  website,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
@@ -239,7 +242,7 @@ export function buildWebApp({
     ...catalogueHandlers(catalogue),
     ...stockHandlers(stock),
     ...ordersHandlers(orders),
-    ...websiteHandlers(),
+    ...websiteHandlers(website),
     getHealth: async () => {
       const [dbMain, dbPii] = await Promise.all([check(checks.dbMain), check(checks.dbPii)]);
       const healthy = dbMain === 'ok' && dbPii === 'ok';
