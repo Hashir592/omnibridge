@@ -7,6 +7,7 @@ import {
   type Company,
   type Health,
   type JobProgress,
+  type ModuleToggle,
 } from '@omnibridge/contract';
 import {
   ApiError,
@@ -144,6 +145,8 @@ export interface WebAppOptions {
   orders?: OrdersOptions;
   /** The website connector (T-1101); without it those routes answer 404. */
   website?: WebsiteOptions;
+  /** ADR-059: reads a workspace's module toggles; without it every route behind one answers 404. */
+  modules?: Pick<WorkspaceRepository, 'moduleOn'>;
   /** Collect the OpenAPI document; set by the contract generator and tests only. */
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
@@ -185,6 +188,7 @@ export function buildWebApp({
   stock,
   orders,
   website,
+  modules,
 }: WebAppOptions) {
   const app = Fastify({ loggerInstance: logger, trustProxy: trustedProxies ?? false });
   installContract(app, { openapi: openapi ?? false, ...(spa === undefined ? {} : { spa }) });
@@ -491,6 +495,12 @@ export function buildWebApp({
               checkRequest: auth.checkRequest,
             }),
         ...(tenancy === undefined ? {} : { tenancy }),
+        ...(modules === undefined
+          ? {}
+          : {
+              moduleOn: (tenant: TenantContext, module: ModuleToggle) =>
+                modules.moduleOn(tenant, module),
+            }),
         ...(ebay === undefined ? {} : { verifyWebhook: webhookVerifier(ebay) }),
       },
     }),

@@ -58,6 +58,9 @@ export const AUDIT_EVENTS = {
   'connection.added': spec('channel_account', ['provider', 'company_id', 'display_name']),
   'connection.removed': spec('channel_account', ['provider', 'company_id', 'display_name']),
   'connection.reauthorised': spec('channel_account', ['provider', 'expires_at']),
+  // The website connector (T-1101, WEB-1): never a key, only that one changed.
+  'website.settings_changed': spec('channel_account', ['base_url', 'outbound_key_changed']),
+  'website.keys_reissued': spec('channel_account', ['keys_issued_at']),
   // The platform console (PLAT-2, T-0504): a platform admin changed the workspace.
   'workspace.status_changed': spec('workspace', ['status']),
   'workspace.module_changed': spec('workspace', ['module', 'enabled']),

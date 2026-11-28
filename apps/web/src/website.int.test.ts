@@ -54,6 +54,7 @@ describe('website connector setup (T-1101)', () => {
       checks,
       tenancy,
       ...stubAuth({ OB_ENV: 'test' }),
+      modules: new WorkspaceRepository(db.db),
       website: {
         connections: new WebsiteConnectionRepository(db.db),
         accounts: new ChannelAccountRepository(db.db),
@@ -267,7 +268,7 @@ describe('website connector setup (T-1101)', () => {
       inbound_key_hint: next.inbound_api_key.slice(-4),
     });
     const audit = await root.query<{ action: string }>(
-      'SELECT action FROM app.audit_events WHERE entity_id = $1 ORDER BY created_at, action',
+      'SELECT action FROM app.audit_events WHERE entity_id = $1 ORDER BY occurred_at, action',
       [connection.id],
     );
     expect(audit.rows.map((r) => r.action)).toEqual([

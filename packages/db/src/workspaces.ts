@@ -71,6 +71,16 @@ export class WorkspaceRepository {
     );
   }
 
+  /** PLAT-2, ADR-059: whether a module of the context's workspace is on (off when unset). */
+  async moduleOn(ctx: TenantContext, module: WorkspaceModule): Promise<boolean> {
+    const { rows } = await withTenantTransaction(this.#db, ctx, (trx) =>
+      sql<{ on: boolean | null }>`
+        SELECT (modules ->> ${module})::boolean AS on FROM app.workspaces
+         WHERE id = ${ctx.workspaceId}::uuid`.execute(trx),
+    );
+    return rows[0]?.on === true;
+  }
+
   async get(ctx: TenantContext): Promise<Workspace | undefined> {
     const row = await withTenantTransaction(this.#db, ctx, (trx) =>
       trx

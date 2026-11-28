@@ -13,6 +13,7 @@ import {
   PROBLEM_CONTENT_TYPE,
   ProblemSchema,
   type AnyRoute,
+  type ModuleToggle,
   type Problem,
   type RouteInput,
   type RouteResult,
@@ -100,6 +101,11 @@ export interface AuthOptions {
    * (EBAY-2). Without it those routes answer 401; a false answer is 412.
    */
   verifyWebhook?: (request: FastifyRequest, route: AnyRoute) => Promise<boolean>;
+  /**
+   * ADR-059: whether a module of the caller's workspace is on, read in the request's transaction.
+   * A session route that names a module answers 404 while it is off, and when this is missing.
+   */
+  moduleOn?: (tenant: TenantContext, module: ModuleToggle) => Promise<boolean>;
   /**
    * Opens the request's one tenant transaction (required with resolveSession). Session routes
    * run through runMember, so the member's role and ticks are checked in that transaction.
@@ -466,6 +472,12 @@ export function registerRoutes<const R extends readonly AnyRoute[], L extends Fa
                 // admin-only route needs an admin, a tab route needs that tab ticked, and the
                 // companies in scope are already only the permitted ones (invariant 4).
                 if (!allowed(route, access)) throw new ApiError({ status: 403, code: 'forbidden' });
+                if (
+                  route.module !== undefined &&
+                  (await auth.moduleOn?.(tenant, route.module)) !== true
+                ) {
+                  throw new ApiError({ status: 404, code: 'not_found' });
+                }
                 return call({ ...input, session, tenant, access });
               },
             );
