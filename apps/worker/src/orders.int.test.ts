@@ -26,7 +26,7 @@ import {
   type ChannelOrder,
   type CursorState,
 } from '@omnibridge/provider-kit';
-import { parseWebsiteOrders } from '@omnibridge/provider-website';
+import { parseWebsiteOrderPage } from '@omnibridge/provider-website';
 import { JobQueue, JOBS, type PreparingJob } from '@omnibridge/queue';
 import {
   PII_MARKER,
@@ -47,6 +47,7 @@ import {
   ordersGroupRecomputeHandler,
   ordersPiiExpiryHandler,
   piiDeleteAfter,
+  websiteChannelOrder,
 } from './orders.ts';
 
 const DAY = 86_400_000;
@@ -229,34 +230,38 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect((await orderRow(o.externalId))?.pii_ref).toBe(record?.pii_ref);
   });
 
-  /** A website order as its API sends it, with markers on every buyer field. */
+  /**
+   * A website order as the website sends it (WEB-3, WEB-4), with markers on every buyer field. The
+   * cases were written in M10's provisional shape, so `over` still names its fields (created_at,
+   * updated_at, shipped_at, status, customer, shipping_address); `asM11` maps them onto the M11
+   * protocol with the meaning they had, and the order goes through the website's own parser.
+   */
   const websiteOrders = (...over: Record<string, unknown>[]) =>
-    parseWebsiteOrders({
-      orders: over.map((o) => ({
-        id: `WEB-${randomUUID().slice(0, 8)}`,
-        created_at: new Date(Date.now() - 2 * DAY).toISOString(),
-        updated_at: new Date(Date.now() - DAY).toISOString(),
-        paid_at: new Date(Date.now() - 2 * DAY).toISOString(),
-        status: 'processing',
-        currency: 'GBP',
-        shipping_total: '3.00',
-        customer: { id: `${PII_MARKER}cust`, email: `${PII_MARKER}web@example.test` },
-        shipping_address: {
-          name: `${PII_MARKER}Web Buyer`,
-          line1: `${PII_MARKER}2 Road`,
-          city: 'Testville',
-          postcode: 'TE2 2ND',
-          country: 'GB',
-          instructions: `${PII_MARKER}leave by the gate`,
-        },
-        // Fields no parser asked for: they must go nowhere.
-        billing_address: { line1: `${PII_MARKER}billing` },
-        notes: `${PII_MARKER}notes`,
-        lines: [{ id: 'L1', sku: 'MOCK-SKU-1', quantity: 1, total: '12.00' }],
-        ...o,
-      })),
-      next_cursor: null,
-    });
+    parseWebsiteOrderPage(
+      {
+        orders: over.map((o) =>
+          asM11({
+            id: `WEB-${randomUUID().slice(0, 8)}`,
+            created_at: new Date(Date.now() - 2 * DAY).toISOString(),
+            updated_at: new Date(Date.now() - DAY).toISOString(),
+            paid_at: new Date(Date.now() - 2 * DAY).toISOString(),
+            status: 'processing',
+            customer: { id: `${PII_MARKER}cust`, email: `${PII_MARKER}web@example.test` },
+            shipping_address: {
+              name: `${PII_MARKER}Web Buyer`,
+              line1: `${PII_MARKER}2 Road`,
+              city: 'Testville',
+              postcode: 'TE2 2ND',
+              country: 'GB',
+              instructions: `${PII_MARKER}leave by the gate`,
+            },
+            ...o,
+          }),
+        ),
+        nextCursor: null,
+      },
+      websiteChannelOrder,
+    ).orders;
   /** An eBay order as getOrders sends it, with markers on every buyer field. */
   const ebayOrders = (...over: Record<string, unknown>[]) => {
     const gbp = (value: string) => ({ value, currency: 'GBP' });
@@ -1491,3 +1496,70 @@ describe('order ingest across the PII boundary (T-1001)', () => {
     expect(await scanDatabaseForMarkers(main)).toEqual([]);
   });
 });
+
+/** M10's provisional website order, as these cases name its fields. */
+interface M10WebsiteOrder {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  paid_at?: string | null;
+  shipped_at?: string | null;
+  delivered_at?: string | null;
+  status: string;
+  customer?: { id?: string; email?: string; phone?: string; name?: string };
+  shipping_address: {
+    name: string;
+    line1: string;
+    city: string;
+    postcode?: string;
+    country: string;
+    instructions?: string;
+  };
+}
+
+/** The same order in the M11 protocol (WEB-3): its status means what M10's dates and words did. */
+function asM11(raw: Record<string, unknown>) {
+  const o = raw as unknown as M10WebsiteOrder;
+  const paidAt = o.paid_at ?? null;
+  const status =
+    o.status === 'cancelled'
+      ? 'cancelled'
+      : (o.delivered_at ?? null) !== null
+        ? 'delivered'
+        : o.status === 'shipped' || o.status === 'completed' || (o.shipped_at ?? null) !== null
+          ? 'shipped'
+          : o.status === 'pending' && paidAt === null
+            ? 'pending'
+            : 'paid';
+  return {
+    externalOrderId: o.id,
+    status,
+    currency: 'GBP',
+    placedAt: o.created_at,
+    updatedAt: o.updated_at,
+    paidAt,
+    shippedAt: o.shipped_at ?? null,
+    deliveredAt: o.delivered_at ?? null,
+    lines: [
+      {
+        externalLineId: 'L1',
+        externalSku: 'MOCK-SKU-1',
+        title: null,
+        quantity: 1,
+        unitPriceGross: 1200,
+      },
+    ],
+    shippingGross: 300,
+    discountGross: 0,
+    buyer: {
+      customerId: o.customer?.id ?? null,
+      name: o.shipping_address.name,
+      email: o.customer?.email ?? null,
+      phone: o.customer?.phone ?? null,
+    },
+    shippingAddress: o.shipping_address,
+    // Fields no parser asked for: they must go nowhere.
+    billingAddress: { line1: `${PII_MARKER}billing` },
+    notes: `${PII_MARKER}notes`,
+  };
+}

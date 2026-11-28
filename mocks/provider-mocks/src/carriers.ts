@@ -3,7 +3,6 @@ import {
   accessToken,
   accountOf,
   form,
-  MOCK_LISTINGS,
   MOCK_ORDERS,
   type MockApp,
   type ScenarioStore,
@@ -157,69 +156,92 @@ export function dpdRoutes(app: MockApp, scenarios: ScenarioStore): void {
   );
 }
 
+/** Decimal pounds as a mock order holds them, in integer pence (the website protocol, WEB-3). */
+const pence = (pounds: string) => Math.round(Number(pounds) * 100);
+
+/**
+ * The website side of the signed contract (M11, `@omnibridge/contract` routes/website.ts): what a
+ * seller's website answers OmniBridge. A call must carry the Bearer key, a timestamp within 5
+ * minutes, a hex signature and an Idempotency-Key. The mock holds no signing secret, so it checks
+ * the signature's form only; the web app's own tests check real signatures both ways.
+ */
 export function websiteRoutes(app: MockApp, scenarios: ScenarioStore): void {
-  const key = (h: unknown, reply: FastifyReply): string | undefined => {
-    const value = typeof h === 'string' ? h : undefined;
-    if (value === undefined || scenarios.on('website', value, 'revoked')) {
+  const signed = (headers: Record<string, unknown>, reply: FastifyReply): string | undefined => {
+    const auth = headers.authorization;
+    const key = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    const at = Number(headers['x-ob-timestamp']);
+    const signature = headers['x-ob-signature'];
+    const fresh = Number.isFinite(at) && Math.abs(Date.now() / 1000 - at) <= 300;
+    const signedOk = typeof signature === 'string' && /^[0-9a-f]{64}$/.test(signature);
+    const keyed = typeof headers['idempotency-key'] === 'string';
+    if (key === '' || !fresh || !signedOk || !keyed || scenarios.on('website', key, 'revoked')) {
       void reply.code(401).send({ error: 'unauthorised' });
       return undefined;
     }
-    if (scenarios.take('website', value, 'rate_limit_storm')) {
+    if (scenarios.take('website', key, 'rate_limit_storm')) {
       void reply.code(429).header('retry-after', '1').send({ error: 'too_many_requests' });
       return undefined;
     }
-    return value;
+    return key;
   };
-  app.get<{ Querystring: { updated_since?: string } }>('/website/api/orders', (request, reply) => {
-    if (key(request.headers['x-api-key'], reply) === undefined) return reply;
-    const since = request.query.updated_since;
-    return {
-      orders: MOCK_ORDERS.filter((o) => since === undefined || o.updatedAt >= since).map((o) => ({
-        id: o.id,
-        created_at: o.placedAt,
-        updated_at: o.updatedAt,
-        paid_at: o.placedAt,
-        status: 'processing',
-        currency: 'GBP',
-        shipping_total: o.shipping,
-        discount_total: '0.00',
-        customer: { id: `cust-${o.id}`, email: 'PIIMARK-web@example.test', phone: '07700900456' },
-        shipping_address: {
-          name: 'PIIMARK-Web Buyer',
-          line1: 'PIIMARK-2 Mock Road',
-          city: 'Testville',
-          postcode: 'TE2 2ND',
-          country: 'GB',
-        },
-        lines: [
-          {
-            id: `${o.id}-1`,
-            sku: o.sku,
-            quantity: o.quantity,
-            name: 'Mock item',
-            total: o.lineTotal,
+  // WEB-4: the nightly read of orders changed since a time (the shape of the push, WEB-3).
+  app.get<{ Querystring: { updatedSince?: string } }>(
+    '/website/omnibridge/orders',
+    (request, reply) => {
+      if (signed(request.headers, reply) === undefined) return reply;
+      const since = request.query.updatedSince;
+      return {
+        orders: MOCK_ORDERS.filter((o) => since === undefined || o.updatedAt >= since).map((o) => ({
+          externalOrderId: o.id,
+          status: 'paid',
+          currency: 'GBP',
+          placedAt: o.placedAt,
+          updatedAt: o.updatedAt,
+          paidAt: o.placedAt,
+          lines: [
+            {
+              externalLineId: `${o.id}-1`,
+              externalSku: o.sku,
+              title: 'Mock item',
+              quantity: o.quantity,
+              unitPriceGross: Math.round(pence(o.lineTotal) / o.quantity),
+            },
+          ],
+          shippingGross: pence(o.shipping),
+          discountGross: 0,
+          buyer: {
+            customerId: `cust-${o.id}`,
+            name: 'PIIMARK-Web Buyer',
+            email: 'PIIMARK-web@example.test',
+            phone: '07700900456',
           },
-        ],
-        refunds: [],
-      })),
-      next_cursor: null,
-    };
+          shippingAddress: {
+            name: 'PIIMARK-Web Buyer',
+            line1: 'PIIMARK-2 Mock Road',
+            city: 'Testville',
+            postcode: 'TE2 2ND',
+            country: 'GB',
+          },
+        })),
+        nextCursor: null,
+      };
+    },
+  );
+  // WEB-4: stock levels, at most 100 per call.
+  app.put<{ Body: unknown }>('/website/omnibridge/stock', (request, reply) => {
+    if (signed(request.headers, reply) === undefined) return reply;
+    const body = request.body;
+    if (!Array.isArray(body) || body.length === 0 || body.length > 100) {
+      return reply.code(422).send({ error: 'invalid' });
+    }
+    return {};
   });
-  // CAT-5: the products the website sells (provisional until M11).
-  app.get('/website/api/products', (request, reply) => {
-    if (key(request.headers['x-api-key'], reply) === undefined) return reply;
-    return {
-      products: MOCK_LISTINGS.filter((l) => !l.fba).map((l) => ({
-        id: l.id,
-        sku: l.sku,
-        title: l.title,
-        quantity: l.quantity,
-      })),
-      next_cursor: null,
-    };
-  });
-  app.post<{ Body: { items?: { sku?: string }[] } }>('/website/api/stock', (request, reply) => {
-    if (key(request.headers['x-api-key'], reply) === undefined) return reply;
-    return { updated: (request.body.items ?? []).map((i) => i.sku ?? '') };
-  });
+  // WEB-4: a shipment of one order.
+  app.post<{ Params: { id: string } }>(
+    '/website/omnibridge/orders/:id/shipment',
+    (request, reply) => {
+      if (signed(request.headers, reply) === undefined) return reply;
+      return {};
+    },
+  );
 }

@@ -80,6 +80,12 @@ export interface WebsiteOptions {
   products?: {
     listings: Pick<CatalogueRepository, 'upsertDiscovered'>;
     mapped: (ctx: TenantContext, change: MappingChange) => Promise<unknown>;
+    /**
+     * INV-7, FA-16: the products just sent are a website's listing read, so their quantities are
+     * compared with their targets; a first run with no drift switches the account's stock writes
+     * on (a new website account holds them until then).
+     */
+    reconcile?: (ctx: TenantContext, channelAccountId: string, seenAt: Date) => Promise<unknown>;
   };
   disconnect?: {
     listings: Pick<CatalogueRepository, 'endAll'>;
@@ -542,6 +548,7 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
       if (products === undefined) return notFound();
       return once(o, request, 'websitePushProducts', (caller) =>
         Promise.resolve(async (ctx: TenantContext) => {
+          const seenAt = now();
           const { autoMapped } = await products.listings.upsertDiscovered(
             ctx,
             caller.connectionId,
@@ -555,9 +562,10 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
               inventoryApi: null,
               quantity: p.quantity ?? null,
             })),
-            now(),
+            seenAt,
           );
           for (const change of autoMapped) await products.mapped(ctx, change);
+          await products.reconcile?.(ctx, caller.connectionId, seenAt);
           return { status: 200 as const, body: { received: body.products.length } };
         }),
       );

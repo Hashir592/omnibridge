@@ -68,6 +68,8 @@ describe('website calls, signed and idempotent (T-1101)', () => {
   const keyring = parseKeyring('secrets', generateKekLine(1));
   /** Orders whose buyer deletion ingest asked for (DEL-1). */
   const cancelled: string[] = [];
+  /** Accounts whose products were reconciled after a push (INV-7, FA-16). */
+  const reconciled: string[] = [];
 
   const app = () => {
     const ingest = new OrderIngest(db.db, {
@@ -102,7 +104,14 @@ describe('website calls, signed and idempotent (T-1101)', () => {
           steps: orderIngestStream({ tenancy, ingest, vault: web, logger, corrections: 'ingest' }),
           orders: ingest,
         },
-        products: { listings: new CatalogueRepository(db.db), mapped: () => Promise.resolve() },
+        products: {
+          listings: new CatalogueRepository(db.db),
+          mapped: () => Promise.resolve(),
+          reconcile: (...[, account]) => {
+            reconciled.push(account);
+            return Promise.resolve();
+          },
+        },
         logger,
       },
     });
@@ -412,6 +421,9 @@ describe('website calls, signed and idempotent (T-1101)', () => {
     });
     expect(res.status, res.body).toBe(200);
     expect(res.json()).toEqual({ received: 2 });
+    // FA-16, INV-7: the products are the website's listing read, so they are reconciled, which
+    // switches a new account's held stock writes on when nothing drifts.
+    expect(reconciled).toEqual([connection]);
     await send('/products', { products: [{ externalSku: `P1-${tag}`, title: 'Big mug' }] });
     const rows = await root.query<{ external_sku: string; title: string | null; provider: string }>(
       `SELECT external_sku, title, provider FROM app.listings

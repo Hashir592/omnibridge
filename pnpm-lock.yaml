@@ -434,6 +434,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@omnibridge/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
       '@omnibridge/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -523,6 +526,9 @@ importers:
       '@omnibridge/governor-amazon':
         specifier: workspace:*
         version: link:../../packages/governors/amazon
+      '@omnibridge/order-ingest':
+        specifier: workspace:*
+        version: link:../../packages/order-ingest
       '@omnibridge/provider-ads':
         specifier: workspace:*
         version: link:../../packages/providers/ads
@@ -762,6 +768,9 @@ importers:
 
   packages/providers/website:
     dependencies:
+      '@omnibridge/contract':
+        specifier: workspace:*
+        version: link:../../contract
       '@omnibridge/crypto':
         specifier: workspace:*
         version: link:../../crypto

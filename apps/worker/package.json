@@ -17,6 +17,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@omnibridge/contract": "workspace:*",
     "@omnibridge/core": "workspace:*",
     "@omnibridge/crypto": "workspace:*",
     "@omnibridge/db": "workspace:*",

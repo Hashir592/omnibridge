@@ -22,6 +22,7 @@ export {
   piiDeleteAfter,
   piiExpiryDate,
   toIncoming,
+  websiteChannelOrder,
   type OrderStreamDeps,
 } from '@omnibridge/order-ingest';
 
@@ -191,7 +192,28 @@ export function pollSlot(at: Date): string {
   return new Date(slot).toISOString().slice(0, 16);
 }
 
-/** orders.sync_accounts: one sync.poll per connected eBay and website account, per slot. */
+/**
+ * WEB-4: a website pushes its orders as they happen, so its read only catches calls that never
+ * arrived: once a night, from 02:00 London time, keyed by the London day.
+ */
+export function websiteNightSlot(at: Date): string | undefined {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(at);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  if (Number(part('hour')) < 2) return undefined;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+/**
+ * orders.sync_accounts: one sync.poll per connected eBay account per 5-minute slot, and one per
+ * website account per night (WEB-4).
+ */
 export function ordersSyncAccountsHandler(deps: {
   connections: { list(ctx: TenantContext, now: Date): Promise<readonly Connection[]> };
   queue: Pick<JobQueue, 'send'>;
@@ -200,14 +222,17 @@ export function ordersSyncAccountsHandler(deps: {
   const now = deps.now ?? (() => new Date());
   return async ({ ctx }) => {
     const slot = pollSlot(now());
+    const night = websiteNightSlot(now());
     let sent = 0;
     for (const account of await deps.connections.list(ctx, now())) {
       const stream = ORDER_STREAMS[account.provider];
       if (stream === undefined || account.status === 'disconnected') continue;
+      const key = account.provider === 'website' ? night : slot;
+      if (key === undefined) continue;
       await deps.queue.send(syncPollJob, {
         ctx,
         channelAccountId: account.id,
-        idempotencyKey: `sync.poll:${stream}:${account.id}:${slot}`,
+        idempotencyKey: `sync.poll:${stream}:${account.id}:${key}`,
         payload: { stream },
       });
       sent += 1;

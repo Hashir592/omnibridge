@@ -3,8 +3,9 @@ import { EgressRefused, ProviderUnavailable } from './errors.ts';
 
 /**
  * Provider hosts per mode (invariant 17). The only place real provider hostnames are written.
- * Carrier and website hosts are added with their modules (M11, M12, M13); until then a live call
- * to them is refused. Production hosts are confirmed in M22.
+ * Carrier hosts are added with their modules (M12, M13); until then a live call
+ * to them is refused. A website is called at its own base URL (`site`, M11). Production hosts
+ * are confirmed in M22.
  */
 type Hosts = Readonly<Partial<Record<Provider, Readonly<Record<string, string>>>>>;
 const HOSTS: Readonly<Record<'sandbox' | 'live', Hosts>> = {
@@ -21,6 +22,21 @@ const HOSTS: Readonly<Record<'sandbox' | 'live', Hosts>> = {
 };
 
 const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
+
+/** HTTPS to a dotted host name that is not an IP address or a local name (a website, WEB-4). */
+function publicHttps(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return (
+    url.protocol === 'https:' &&
+    url.username === '' &&
+    url.password === '' &&
+    host.includes('.') &&
+    !host.startsWith('[') &&
+    !/^[\d.]+$/.test(host) &&
+    !/\.(localhost|local|internal|lan)$/.test(host) &&
+    !LOOPBACK.includes(host)
+  );
+}
 
 export interface ProviderHttpOptions {
   mode: ProviderMode;
@@ -65,6 +81,18 @@ export class ProviderHttp {
     return new URL(`https://${host}/`);
   }
 
+  /**
+   * WEB-4: a seller's own website, at the base URL its admin set (WEB-1). Under the mocks in mock
+   * mode, whatever the setting; else only HTTPS to a named host (no IP address, no localhost, no
+   * single-label internal name), so a setting can never point a call at an internal service.
+   */
+  site(baseUrl: string): URL {
+    if (this.#mocks !== undefined) return new URL('website/', this.#mocks);
+    const url = new URL(baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
+    if (!publicHttps(url)) throw new EgressRefused('website', url.host);
+    return url;
+  }
+
   #hosts(provider: Provider): Readonly<Record<string, string>> {
     return HOSTS[this.#mode === 'live' ? 'live' : 'sandbox'][provider] ?? {};
   }
@@ -73,6 +101,7 @@ export class ProviderHttp {
     if (this.#mode === 'mock') {
       return url.host === this.#mocks?.host || LOOPBACK.includes(url.hostname);
     }
+    if (provider === 'website') return publicHttps(url);
     return url.protocol === 'https:' && Object.values(this.#hosts(provider)).includes(url.hostname);
   }
 

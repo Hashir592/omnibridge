@@ -450,14 +450,34 @@ export class AccountCredentials {
     this.#repo = repo;
   }
 
+  /**
+   * The account's credential for its provider calls. A website's (WEB-2, WEB-4) is the three
+   * things its calls need, as one JSON secret: `{ apiKey, signingSecret, baseUrl }`, the website's
+   * key, the signing secret both sides share and its base URL. Undefined when one is missing.
+   */
   read(
     ctx: TenantContext,
     channelAccountId: string,
     provider: keyof typeof CREDENTIAL_KIND_BY_PROVIDER,
   ): Promise<Secret | undefined> {
-    return withTenantTransaction(this.#db, ctx, (trx) =>
-      this.#repo.get(trx, ctx, { kind: CREDENTIAL_KIND_BY_PROVIDER[provider], channelAccountId }),
-    );
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const kind = CREDENTIAL_KIND_BY_PROVIDER[provider];
+      const key = await this.#repo.get(trx, ctx, { kind, channelAccountId });
+      if (provider !== 'website' || key === undefined) return key;
+      const secret = await this.#repo.get(trx, ctx, {
+        kind: 'website.signing_secret',
+        channelAccountId,
+      });
+      const { rows } = await sql<{ base_url: string }>`
+        SELECT base_url FROM app.website_connections
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid`.execute(trx);
+      const baseUrl = rows[0]?.base_url;
+      if (secret === undefined || baseUrl === undefined) return undefined;
+      return new Secret(
+        JSON.stringify({ apiKey: key.reveal(), signingSecret: secret.reveal(), baseUrl }),
+      );
+    });
   }
 
   /** Another credential of the account than its provider token (the website signing secret). */

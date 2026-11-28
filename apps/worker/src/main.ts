@@ -93,6 +93,7 @@ import {
   ordersGroupRecomputeHandler,
   ordersPiiExpiryHandler,
   ordersSyncAccountsHandler,
+  websiteChannelOrder,
 } from './orders.ts';
 import { createProviderGovernor } from './governor.ts';
 import {
@@ -267,7 +268,10 @@ const orderStream = orderIngestStream({
   vault: workerVault,
   logger: log,
 });
-const websiteAdapter = () => Promise.resolve(createWebsiteAdapter({ http: providerHttp }));
+const websiteAdapter = () =>
+  Promise.resolve(
+    createWebsiteAdapter({ http: providerHttp, toChannelOrder: websiteChannelOrder }),
+  );
 await registerHandlers(queue, {
   'files.scan': scanFileHandler({
     files,
@@ -333,7 +337,7 @@ await registerHandlers(queue, {
     },
     operations: outboundOperations({
       ebay: ebayAdapter,
-      website: () => Promise.resolve(createWebsiteAdapter({ http: providerHttp })),
+      website: websiteAdapter,
     }),
     // INV-8: a settled stock write records what was sent, or sets Sync failed.
     settled: (ctx, writeId) => stockEngine.recordPushResult(ctx, writeId),
@@ -359,7 +363,7 @@ await registerHandlers(queue, {
   }),
   'listings.discover': listingsDiscoverHandler({
     ports: syncPorts,
-    adapters: { ebay: ebayAdapter, website: websiteAdapter },
+    adapters: { ebay: ebayAdapter },
     catalogue: catalogueRepo,
     queue,
     // C7.3 and INV-7: ended listings lose their manual settings; the nightly scan reconciles.

@@ -20,19 +20,16 @@ import {
   withTenantTransaction,
   WorkspaceRepository,
   type MainDbHandle,
+  WebsiteConnectionRepository,
 } from '@omnibridge/db';
 import { AmazonGovernor } from '@omnibridge/governor-amazon';
 import { EbayGovernor } from '@omnibridge/governor-ebay';
 import { createLogger } from '@omnibridge/logger';
 import { createEbayAdapter } from '@omnibridge/provider-ebay';
-import {
-  AccessTokenCache,
-  MAX_SEND_ATTEMPTS,
-  ProviderHttp,
-  type OutboundPorts,
-} from '@omnibridge/provider-kit';
+import { AccessTokenCache, ProviderHttp, type OutboundPorts } from '@omnibridge/provider-kit';
 import { buildMockServer, ScenarioStore } from '@omnibridge/provider-mocks';
-import { createWebsiteAdapter } from '@omnibridge/provider-website';
+import { createWebsiteAdapter, WEBSITE_RETRY } from '@omnibridge/provider-website';
+import { websiteChannelOrder } from './orders.ts';
 import { OutboundQueue, type PreparingJob } from '@omnibridge/queue';
 import { startRoleCluster, type RoleCluster } from '@omnibridge/testkit';
 import { sql } from 'kysely';
@@ -88,7 +85,8 @@ describe('stock pushes through the outbound path to the mocks (AT-4, INV-4, INV-
               clientSecret: new Secret('synthetic-client-secret'),
             }),
           ),
-        website: () => Promise.resolve(createWebsiteAdapter({ http })),
+        website: () =>
+          Promise.resolve(createWebsiteAdapter({ http, toChannelOrder: websiteChannelOrder })),
       }),
       settled: (ctx, writeId) => engine.recordPushResult(ctx, writeId),
       logger,
@@ -136,7 +134,7 @@ describe('stock pushes through the outbound path to the mocks (AT-4, INV-4, INV-
     mock.addHook('preHandler', (request, _reply, done) => {
       if (
         request.url.includes('bulk_update_price_quantity') ||
-        request.url.includes('/website/api/stock')
+        request.url.includes('/website/omnibridge/stock')
       ) {
         received.push({ url: request.url, body: request.body });
       }
@@ -196,6 +194,22 @@ describe('stock pushes through the outbound path to the mocks (AT-4, INV-4, INV-
         credentials.replace(c, W[provider], provider, new Secret(`TOKENMARK-${randomUUID()}`)),
       );
     }
+    // M11: a website account has its connection (base URL) and the signing secret both sides use.
+    await inW(async (c) => {
+      await new WebsiteConnectionRepository(db.db).create(c, {
+        channelAccountId: W.website,
+        companyId: W.company,
+        baseUrl: 'https://shop.example.test',
+        keyHash: Buffer.alloc(32),
+        keyHint: 'test',
+      });
+      await credentials.replaceKind(
+        c,
+        W.website,
+        'website.signing_secret',
+        new Secret(`obs_${randomUUID()}`),
+      );
+    });
     const catalogue = new CatalogueRepository(db.db);
     W.sku = await inW((c) =>
       catalogue.createSku(
@@ -261,7 +275,7 @@ describe('stock pushes through the outbound path to the mocks (AT-4, INV-4, INV-
     expect(elapsed).toBeLessThan(120_000);
     // Only the other channel was written (the eBay listing counted down itself, INV-4).
     expect(received).toEqual([
-      { url: '/website/api/stock', body: { items: [{ sku: 'MOCK-SKU-1', quantity: 9 }] } },
+      { url: '/website/omnibridge/stock', body: [{ externalSku: 'MOCK-SKU-1', quantity: 9 }] },
     ]);
     expect(await siteListing()).toMatchObject({
       lastSentQty: 9,
@@ -276,7 +290,7 @@ describe('stock pushes through the outbound path to the mocks (AT-4, INV-4, INV-
     const lastTry = () =>
       inW((ctx) =>
         withTenantTransaction(db.db, ctx, (trx) =>
-          sql`UPDATE app.outbound_writes SET attempts = ${MAX_SEND_ATTEMPTS - 1}
+          sql`UPDATE app.outbound_writes SET attempts = ${WEBSITE_RETRY.maxAttempts - 1}
                WHERE workspace_id = ${ctx.workspaceId}::uuid AND state = 'pending'`.execute(trx),
         ),
       );

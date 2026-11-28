@@ -19,7 +19,6 @@ import { createLogger } from '@omnibridge/logger';
 import { createEbayAdapter } from '@omnibridge/provider-ebay';
 import { AccessTokenCache, ProviderHttp, type SyncPorts } from '@omnibridge/provider-kit';
 import { buildMockServer, ScenarioStore } from '@omnibridge/provider-mocks';
-import { createWebsiteAdapter } from '@omnibridge/provider-website';
 import type { JobDefinition, PreparingJob, SendInput } from '@omnibridge/queue';
 import { startRoleCluster, TOKEN_MARKER, type RoleCluster } from '@omnibridge/testkit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -95,7 +94,6 @@ describe('listings.discover against the eBay and website mocks (CAT-5, CAT-6)', 
               clientSecret: new Secret('synthetic-client-secret'),
             }),
           ),
-        website: () => Promise.resolve(createWebsiteAdapter({ http })),
       },
       catalogue,
       queue,
@@ -270,17 +268,9 @@ describe('listings.discover against the eBay and website mocks (CAT-5, CAT-6)', 
     expect(lateChecks).toEqual([accounts.ebay]);
   });
 
-  it('[CAT-5] the website scan stores its products the same way', async () => {
-    const result = await handler().prepare(job(accounts.website));
-    expect(result).toMatchObject({ listings: 3, complete: true });
-    const queue = await inA((c) =>
-      catalogue.listListings(
-        c,
-        { channelAccountId: accounts.website, mapped: false, offset: 0, limit: 50 },
-        100,
-      ),
-    );
-    expect(queue.items.map((l) => l.externalSku)).toEqual(['MOCK-UNMATCHED-1']);
+  it('[CAT-5][WEB-4] a website account has no listing read: its products come by push (WEB-3)', async () => {
+    // M11: the website protocol has no product list; POST /products stores and reconciles them.
+    expect(await handler().prepare(job(accounts.website))).toEqual({ skipped: 'disconnected' });
   });
 
   it('[CAT-5] the daily fan-out sends one discovery per connected sales account, once a day', async () => {
@@ -313,10 +303,10 @@ describe('listings.discover against the eBay and website mocks (CAT-5, CAT-6)', 
           account: accounts.ebay,
           key: `listings.discover:${accounts.ebay}:2026-11-21`,
         }),
-        expect.objectContaining({ type: 'listings.discover', account: accounts.website }),
       ]),
     );
-    expect(sent).toHaveLength(2);
+    // A website sends its products itself (WEB-3): no discovery for it.
+    expect(sent).toHaveLength(1);
   });
 
   it('[CAT-6] the mapped job runs every registered listener with the change', async () => {

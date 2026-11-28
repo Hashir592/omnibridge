@@ -269,7 +269,13 @@ const app = buildWebApp({
         vault,
         logger,
       }),
-      products: { listings: catalogue, mapped: websiteMapped(queue) },
+      products: {
+        listings: catalogue,
+        mapped: websiteMapped(queue),
+        // The request's own transaction: `run` hands every step the same bound context.
+        reconcile: (ctx, accountId, seenAt) =>
+          stockEngine.reconcile((fn) => fn(ctx), accountId, seenAt),
+      },
       disconnect: { listings: catalogue, stock: stockEngine },
       logger,
     };
