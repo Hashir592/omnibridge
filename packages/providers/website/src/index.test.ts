@@ -1,10 +1,11 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { Secret } from '@omnibridge/crypto';
 import { EgressRefused, ProviderHttp, type ChannelOrder } from '@omnibridge/provider-kit';
 import { describe, expect, it } from 'vitest';
 import { createWebsiteAdapter, parseWebsiteOrderPage, type WebsiteOrder } from './index.ts';
 
-const SECRET = 'obs_test-secret';
+/** Made per run: no signing secret is ever written in the repo, not even a test one. */
+const SECRET = `obs_${randomUUID()}`;
 const NOW = new Date('2026-11-28T09:00:00.000Z');
 const credential = new Secret(
   JSON.stringify({
