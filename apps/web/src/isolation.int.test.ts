@@ -58,6 +58,15 @@ import { buildWebApp } from './app.ts';
 const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
 const checks = { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resolve(true) };
 const MARKER = 'WSB-MARKER';
+/** An Evri code of the documented form (EVRI-2); the walk never exchanges one for B. */
+const EVRI_CODE = '0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d';
+/** B's shipping rows (M12): unknown IDs until T-1201 seeds them; every route answers 404 now. */
+const shipB = {
+  carrier: randomUUID(),
+  batch: randomUUID(),
+  shipment: randomUUID(),
+  parcel: randomUUID(),
+};
 const PDF = Buffer.from('%PDF-1.7\n% synthetic marker file\n%%EOF\n');
 const address = { line1: '1 Example Street', city: 'Testville', postcode: 'TE1 1ST' };
 /** A whole website order (WEB-3) whose every free field carries the marker. */
@@ -937,6 +946,64 @@ ${MARKER}-SKU,99`,
           params: { connectionId: b.website },
           body: { products: [{ externalSku: MARKER, title: MARKER }] },
         },
+        // Shipping (M12): B's carrier account, costs, orders, groups, shipments and parcels are
+        // never read, bought for, voided or changed from A.
+        listCarrierAccounts: {},
+        getEvriAuthoriseUrl: {},
+        connectEvri: {
+          body: { company_id: b.company, display_name: MARKER, auth_code: EVRI_CODE },
+        },
+        reauthoriseEvri: { params: { accountId: shipB.carrier }, body: { auth_code: EVRI_CODE } },
+        getServiceCosts: { params: { accountId: shipB.carrier } },
+        putServiceCosts: {
+          params: { accountId: shipB.carrier },
+          body: { items: [{ service_code: 'standard', cost_pence: 1, vat_rate_bp: 2000 }] },
+        },
+        getShippingSettings: {},
+        putShippingSettings: {
+          body: {
+            auto_dispatch_on_label: false,
+            label_format: 'DEFAULT',
+            packaging_allowance_g: 1,
+            packing_slip_enabled: true,
+            tracking_hold_minutes: 1,
+          },
+        },
+        getShippingRules: {},
+        putShippingRules: { body: { items: [] } },
+        getShippingDesk: { query: { channel_account_id: b.account } },
+        createLabels: {
+          body: {
+            orders: [
+              {
+                order_id: ordersB.first,
+                carrier_account_id: shipB.carrier,
+                service_code: 'standard',
+                parcels: [{ weight_g: 500 }],
+              },
+            ],
+          },
+        },
+        shipTogether: {
+          body: {
+            group_id: ordersB.group,
+            order_ids: [ordersB.first, ordersB.second],
+            carrier_account_id: shipB.carrier,
+            service_code: 'standard',
+            parcels: [{ weight_g: 500 }],
+          },
+        },
+        getLabelBatch: { params: { batchId: shipB.batch } },
+        printLabels: { body: { shipment_ids: [shipB.shipment] } },
+        getShipment: { params: { shipmentId: shipB.shipment } },
+        reprintShipment: { params: { shipmentId: shipB.shipment } },
+        voidShipment: { params: { shipmentId: shipB.shipment } },
+        listReconcile: {},
+        markReconciled: { params: { parcelId: shipB.parcel } },
+        confirmAddressCheck: { params: { orderId: ordersB.first } },
+        packingSlips: { body: { order_ids: [ordersB.first] } },
+        listOrderTracking: { params: { orderId: ordersB.first } },
+        resendTracking: { params: { pushId: shipB.parcel } },
         // eBay webhook (T-0602): unconfigured here, so it answers 503 or 401 and leaks nothing.
         ebayAccountDeletionChallenge: { query: { challenge_code: MARKER } },
         ebayAccountDeletion: {
