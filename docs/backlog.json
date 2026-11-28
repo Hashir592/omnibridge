@@ -2451,7 +2451,7 @@
         "CI full gate green at merge (Semgrep included)"
       ],
       "risk": "high",
-      "status": "review"
+      "status": "done"
     },
     {
       "id": "T-0319",

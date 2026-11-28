@@ -60,7 +60,7 @@ const signedRight = (c: { headers: Record<string, string>; body: string }) =>
     .digest('hex');
 
 describe('the website protocol, OmniBridge side (T-1101)', () => {
-  it('[WEB-2][WEB-4] stock goes as PUT /omnibridge/stock, signed with the shared secret and keyed by the write', async () => {
+  it('[WEB-2][WEB-4][OPS-12] stock goes as PUT /omnibridge/stock, signed with the shared secret and keyed by the write', async () => {
     const { calls, adapter } = site();
     const token = await adapter.authenticate(credential);
     const result = await adapter.pushStock(token, [{ sku: 'S1', quantity: 4 }], 'write-1');

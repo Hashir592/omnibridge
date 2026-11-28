@@ -6,7 +6,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 
 - **Phase:** B, local Docker only. Plan of 12 Nov 2026 (ADR-054), fast lane from M07 (ADR-077), halfway pause (ADR-080). Module order is in `docs/plan/MODULES.md`.
 - **Closed:** M01 to M05, M07 to M10 (M06 still waits on the client's legal details). M09 + M10 milestone APPROVED by S4 (`docs/reviews/M10-end.md`).
-- **M11 built** (`docs/reviews/M11-end-report.md`): #175 contract merged; T-1101 (risk high) on `task/T-1101-website-connector`, PR with auto-merge. It closes F-M10-end-14, -17, -25, -26, -27 and S5-20261124-07, and PS-037 (2), (3) as ADR-086 rules them.
+- **M11 built** (`docs/reviews/M11-end-report.md`): #175 contract and #178 T-1101 (risk high) merged, CI green (main d83d184). It closes F-M10-end-14, -17, -25, -26, -27 and S5-20261124-07, and PS-037 (2), (3) as ADR-086 rules them.
 - **Review:** S4 reviews M11 with M12 (S1's M11 paste); no S4 block for T-1101 alone.
 - **Open for S1:** PS-038 (`packages/order-ingest` in ARCHITECTURE), PS-039 (website listings by push; where a website may be called).
 - **Fault runs (ADR-085):** S3 proves tests by red-first commits and plants a fault by hand only for a guard, on that test alone; task-wide runs are S4's.
