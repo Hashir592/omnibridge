@@ -1,17 +1,8 @@
-import type { Notifier, Provider, TenantContext, TenantRunner } from '@omnibridge/core';
+import type { Provider, TenantContext, TenantRunner } from '@omnibridge/core';
 import type { Secret } from '@omnibridge/crypto';
 import type { AccessToken, Page, SetAside, SetAsideReason } from './adapters.ts';
 import { applyPart, applyRun, pollSince, type CursorState, type SyncItem } from './cursor.ts';
-import {
-  AuthFailed,
-  isProviderError,
-  ProviderParserError,
-  providerErrorCode,
-  RateLimited,
-} from './errors.ts';
-import type { ProviderGovernor } from './governor.ts';
-import { parserRecordKind } from './parser.ts';
-import type { AccessTokenCache } from './tokens.ts';
+import { callSession, type CallSessionPorts } from './session.ts';
 
 /** The most pages one run reads; the rest wait for the next run (the cursor has moved on). */
 const MAX_PAGES = 50;
@@ -23,7 +14,7 @@ const MAX_READ_MS = 4 * 60_000;
 const MAX_RUN_MS = 8 * 60_000;
 
 /** The db repositories the sync uses, each taking the tenant context of a short transaction. */
-export interface SyncPorts {
+export interface SyncPorts extends CallSessionPorts {
   tenancy: Pick<TenantRunner, 'runWorkspace'>;
   accounts: {
     get(
@@ -51,31 +42,6 @@ export interface SyncPorts {
       options?: { failed: true },
     ): Promise<void>;
   };
-  health: {
-    recordSuccess(
-      ctx: TenantContext,
-      id: string,
-      at: Date,
-      options?: { tokenRefreshed?: boolean },
-    ): Promise<{ reauthCleared: boolean }>;
-    recordAuthFailure(
-      ctx: TenantContext,
-      id: string,
-      at: Date,
-      options: { revoked: boolean },
-    ): Promise<{ failures: number; marked: boolean }>;
-    recordError(ctx: TenantContext, id: string, code: string, at: Date): Promise<void>;
-    recordCalls(
-      ctx: TenantContext,
-      input: { channelAccountId: string; provider: Provider; api: string; calls: number },
-      at: Date,
-    ): Promise<void>;
-  };
-  notifier: Pick<Notifier, 'raise' | 'resolve' | 'raisePlatform'>;
-  tokens: AccessTokenCache;
-  /** The rate governors (T-0702); left out, nothing waits. */
-  governor?: ProviderGovernor;
-  now?: () => Date;
 }
 
 /** One "updated since" stream of one provider (INT-8). */
@@ -137,58 +103,15 @@ export async function runIncrementalSync<T extends SyncItem>(
   if (start === undefined) return { skipped: 'disconnected' };
   const { account, credential, cursor } = start;
 
-  const calls = new Map<string, number>();
-  const count = (api: string) => calls.set(api, (calls.get(api) ?? 0) + 1);
-  const input = (api: string) => ({
+  const session = callSession(ports, {
     workspaceId: job.workspaceId,
     channelAccountId: accountId,
+    companyId: account.companyId,
     provider: stream.provider,
-    api,
-    urgent: false,
+    ...(stream.authApi === undefined ? {} : { authApi: stream.authApi }),
+    credential,
+    authenticate: (c) => stream.authenticate(c),
   });
-  // A governor's own wait: retried like a rate limit, but not the account's fault (INT-4).
-  let held: RateLimited | undefined;
-  const governed = async (api: string) => {
-    const decision = (await ports.governor?.admit(input(api))) ?? {
-      ok: true,
-      usageRecorded: false,
-    };
-    if (!decision.ok) {
-      // INT-2: told to wait (an empty Amazon bucket, eBay's budget): nothing is sent this run.
-      held = new RateLimited(stream.provider, {
-        retryAfterMs: Math.max(0, decision.retryAt.getTime() - now().getTime()),
-        daily: stream.provider === 'ebay',
-      });
-      throw held;
-    }
-    // eBay's reservation already wrote the usage row (RL-5): never count it twice.
-    if (!decision.usageRecorded) count(api);
-  };
-  const fetchPage = (access: AccessToken, since: Date, page: string | undefined) =>
-    ports.governor === undefined
-      ? stream.fetchPage(access, since, page)
-      : ports.governor.run(input(stream.api), () => stream.fetchPage(access, since, page));
-  // An object, not a let: it changes inside the token closure. `issued` is set before the call,
-  // so a refresh that fails is never tried a second time in the same run.
-  const auth = { refreshed: false, issued: false };
-  const token = async () => {
-    const got = await ports.tokens.get(accountId, async () => {
-      auth.issued = true;
-      await governed(stream.authApi ?? 'auth');
-      return stream.authenticate(credential);
-    });
-    auth.refreshed ||= got.refreshed;
-    return got.token;
-  };
-  const recordCalls = async (ctx: TenantContext) => {
-    for (const [api, n] of calls) {
-      await ports.health.recordCalls(
-        ctx,
-        { channelAccountId: accountId, provider: stream.provider, api, calls: n },
-        now(),
-      );
-    }
-  };
 
   const items: T[] = [];
   const stored: T[] = [];
@@ -196,16 +119,7 @@ export async function runIncrementalSync<T extends SyncItem>(
   const setAside: SetAside[] = [];
   const recordSuccess = async (ctx: TenantContext, next: CursorState) => {
     await ports.cursors.save(ctx, accountId, stream.stream, next, now());
-    const { reauthCleared } = await ports.health.recordSuccess(ctx, accountId, now(), {
-      tokenRefreshed: auth.refreshed,
-    });
-    if (reauthCleared) {
-      await ports.notifier.resolve(ctx, 'channel.auth_lost', {
-        kind: 'channel_account',
-        id: accountId,
-      });
-    }
-    await recordCalls(ctx);
+    await session.succeeded(ctx);
     await noticeSetAside(ctx);
   };
   /**
@@ -243,19 +157,9 @@ export async function runIncrementalSync<T extends SyncItem>(
   try {
     let page: string | undefined = resume === null || resume.page === '' ? undefined : resume.page;
     for (let n = 0; n < MAX_PAGES; n += 1) {
-      let result: Page<T>;
-      try {
-        const access = await token();
-        await governed(stream.api);
-        result = await fetchPage(access, since, page);
-      } catch (err) {
-        // One 401 with a cached token: it may just have expired early. Renew once and retry.
-        if (!(err instanceof AuthFailed) || err.revoked || auth.issued) throw err;
-        ports.tokens.invalidate(accountId);
-        const access = await token();
-        await governed(stream.api);
-        result = await fetchPage(access, since, page);
-      }
+      const result: Page<T> = await session.call(stream.api, (access) =>
+        stream.fetchPage(access, since, page),
+      );
       items.push(...result.items);
       setAside.push(...(result.setAside ?? []));
       page = result.next;
@@ -298,38 +202,10 @@ export async function runIncrementalSync<T extends SyncItem>(
         const part = applyPart(cursor, items, stored, since);
         await ports.cursors.save(ctx, accountId, stream.stream, part, now(), { failed: true });
       }
-      if (err instanceof AuthFailed) {
-        ports.tokens.invalidate(accountId);
-        const { marked } = await ports.health.recordAuthFailure(ctx, accountId, now(), {
-          revoked: err.revoked,
-        });
-        if (marked) {
-          // AMZ-12, EBAY-5: one critical notice to the workspace's admins, resolved on success.
-          await ports.notifier.raise(ctx, {
-            type: 'channel.auth_lost',
-            record: { kind: 'channel_account', id: accountId },
-            signal: err.revoked ? 'native' : 'derived',
-            companyId: account.companyId,
-            channelAccountId: accountId,
-          });
-        }
-      } else if (isProviderError(err) && err !== held) {
-        // A provider failure only: a db-main error after a good call is not the account's fault.
-        await ports.health.recordError(ctx, accountId, providerErrorCode(err), now());
-      }
-      await recordCalls(ctx);
+      await session.failed(ctx, err);
     });
-    if (err instanceof ProviderParserError) {
-      // INT-5: one platform notice per parser and version (repeats update it); the path is logged
-      // by the caller, never a value.
-      await ports.notifier.raisePlatform(null, {
-        type: 'platform.report_failure',
-        record: {
-          kind: parserRecordKind({ provider: err.provider, name: err.parser }),
-          id: String(err.version),
-        },
-      });
-    }
+    // INT-5: the path is logged by the caller, never a value.
+    await session.reportParser(err);
     throw err;
   }
 }
