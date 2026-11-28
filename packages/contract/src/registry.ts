@@ -10,6 +10,7 @@ import { notificationRoutes } from './routes/notifications.ts';
 import { ordersRoutes } from './routes/orders.ts';
 import { platformRoutes } from './routes/platform.ts';
 import { privacyRoutes } from './routes/privacy.ts';
+import { shippingRoutes } from './routes/shipping.ts';
 import { stockRoutes } from './routes/stock.ts';
 import { createCompany, createWorkspace, listCompanies } from './routes/tenancy.ts';
 import { userRoutes } from './routes/users.ts';
@@ -41,6 +42,7 @@ export const contractRoutes = [
   ...stockRoutes,
   ...ordersRoutes,
   ...websiteRoutes,
+  ...shippingRoutes,
 ] as const;
 
 export type ContractRoutes = typeof contractRoutes;

@@ -20,6 +20,12 @@ export const ERROR_CODES = [
   'too_many_matches',
   // C7.2 (T-0901): the record changed while the user was editing; read it again and review.
   'version_conflict',
+  // ADR-088 (M12): a website cancel of an order that has already shipped changes nothing.
+  'order_shipped',
+  // ADR-089 (M12): a label whose tracking has been sent to the channel cannot be voided.
+  'tracking_sent',
+  // C3.4 (M12): a Ship together member changed after the dialog opened; nothing was bought.
+  'order_changed',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

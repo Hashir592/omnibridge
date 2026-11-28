@@ -720,6 +720,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/connections/{accountId}/evri/reauthorise': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Re-authorise an Evri account */
+    post: operations['reauthoriseEvri'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/connections/{accountId}/kill-switch': {
     parameters: {
       query?: never;
@@ -730,6 +747,24 @@ export interface paths {
     get?: never;
     /** Pause or resume an account's automated writes */
     put: operations['setKillSwitch'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/{accountId}/service-costs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** A carrier account's label cost per service */
+    get: operations['getServiceCosts'];
+    /** Set a carrier account's label cost per service */
+    put: operations['putServiceCosts'];
     post?: never;
     delete?: never;
     options?: never;
@@ -766,6 +801,40 @@ export interface paths {
     put?: never;
     /** Issue a new key and signing secret */
     post: operations['reissueWebsiteKeys'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/evri': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Connect an Evri account */
+    post: operations['connectEvri'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/connections/evri/authorise-url': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Where to get an Evri authorisation code */
+    get: operations['getEvriAuthoriseUrl'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1080,6 +1149,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/orders/{orderId}/address-check': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Confirm a changed address was checked */
+    post: operations['confirmAddressCheck'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/orders/{orderId}/customer': {
     parameters: {
       query?: never;
@@ -1107,6 +1193,23 @@ export interface paths {
     get?: never;
     /** Save the internal notes on an order */
     put: operations['setOrderNotes'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/{orderId}/tracking': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** An order's tracking pushes */
+    get: operations['listOrderTracking'];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -1572,6 +1675,263 @@ export interface paths {
     get: operations['listReturns'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/batches/{batchId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Where a label request stands */
+    get: operations['getLabelBatch'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/carriers': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Carrier accounts and their services */
+    get: operations['listCarrierAccounts'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/desk': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Orders awaiting dispatch */
+    get: operations['getShippingDesk'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/labels': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create labels for orders */
+    post: operations['createLabels'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/labels/print': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Download labels as one PDF */
+    post: operations['printLabels'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/packing-slips': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Download packing slips as one PDF */
+    post: operations['packingSlips'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/reconcile': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Voided and unknown labels to check with the carrier */
+    get: operations['listReconcile'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/reconcile/{parcelId}/done': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Take a label off the reconcile list */
+    post: operations['markReconciled'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/rules': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Shipping rules, first match wins */
+    get: operations['getShippingRules'];
+    /** Replace the shipping rules */
+    put: operations['putShippingRules'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/settings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Shipping settings */
+    get: operations['getShippingSettings'];
+    /** Change the shipping settings */
+    put: operations['putShippingSettings'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/ship-together': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** One label for several orders of the same buyer */
+    post: operations['shipTogether'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/shipments/{shipmentId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One shipment with its parcels and orders */
+    get: operations['getShipment'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/shipments/{shipmentId}/reprint': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Reprint a label */
+    post: operations['reprintShipment'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/shipments/{shipmentId}/void': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Void a label */
+    post: operations['voidShipment'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/shipping/tracking/{pushId}/resend': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Send a failed tracking push again */
+    post: operations['resendTracking'];
     delete?: never;
     options?: never;
     head?: never;
@@ -2219,6 +2579,52 @@ export interface components {
       phone?: string;
       postcode?: string;
     };
+    /** @enum {string} */
+    Carrier: 'evri' | 'dpd';
+    CarrierAccount: {
+      /** Format: uuid */
+      company_id: string;
+      display_name: string;
+      /** Format: uuid */
+      id: string;
+      provider: components['schemas']['Carrier'];
+      services: components['schemas']['CarrierService'][];
+      /** @enum {string} */
+      status: 'active' | 'needs_reauth' | 'paused' | 'error' | 'disconnected';
+    };
+    CarrierAccountInput: {
+      /** Format: uuid */
+      company_id: string;
+      display_name: string;
+      /** Format: uuid */
+      id: string;
+      provider: components['schemas']['CarrierInput'];
+      services: components['schemas']['CarrierServiceInput'][];
+      /** @enum {string} */
+      status: 'active' | 'needs_reauth' | 'paused' | 'error' | 'disconnected';
+    };
+    CarrierError: {
+      code: string;
+      fields: string[];
+      message: string;
+    };
+    CarrierErrorInput: {
+      code: string;
+      fields: string[];
+      message: string;
+    };
+    /** @enum {string} */
+    CarrierInput: 'evri' | 'dpd';
+    CarrierService: {
+      code: string;
+      name: string;
+      rank: number;
+    };
+    CarrierServiceInput: {
+      code: string;
+      name: string;
+      rank: number;
+    };
     CogsEntry: {
       cogs_pence: number;
       /** Format: date-time */
@@ -2460,6 +2866,48 @@ export interface components {
       id: string;
       type: string;
       workspace_id: string | null;
+    };
+    DeskRow: {
+      buyer: components['schemas']['MaskedBuyer'] | null;
+      /** Format: uuid */
+      channel_account_id: string;
+      /** Format: uuid */
+      company_id: string;
+      default_weight_g: number;
+      flags: components['schemas']['OrderFlag'][];
+      group: components['schemas']['OrderGroupRef'] | null;
+      item_count: number;
+      /** Format: uuid */
+      order_id: string;
+      order_ref: string;
+      partial_dispatch: boolean;
+      /** Format: date-time */
+      placed_at: string;
+      provider: components['schemas']['Provider'];
+      ship_by: string | null;
+      suggestion: components['schemas']['ServiceSuggestion'] | null;
+      total_gross_pence: number;
+    };
+    DeskRowInput: {
+      buyer: components['schemas']['MaskedBuyerInput'] | null;
+      /** Format: uuid */
+      channel_account_id: string;
+      /** Format: uuid */
+      company_id: string;
+      default_weight_g: number;
+      flags: components['schemas']['OrderFlagInput'][];
+      group: components['schemas']['OrderGroupRefInput'] | null;
+      item_count: number;
+      /** Format: uuid */
+      order_id: string;
+      order_ref: string;
+      partial_dispatch: boolean;
+      /** Format: date-time */
+      placed_at: string;
+      provider: components['schemas']['ProviderInput'];
+      ship_by: string | null;
+      suggestion: components['schemas']['ServiceSuggestionInput'] | null;
+      total_gross_pence: number;
     };
     Dimensions: {
       height_mm: number;
@@ -2747,6 +3195,94 @@ export interface components {
       paused: boolean;
       paused_at: string | null;
     };
+    LabelBatch: {
+      /** Format: date-time */
+      created_at: string;
+      done: boolean;
+      /** Format: uuid */
+      id: string;
+      items: components['schemas']['LabelBatchItem'][];
+    };
+    LabelBatchInput: {
+      /** Format: date-time */
+      created_at: string;
+      done: boolean;
+      /** Format: uuid */
+      id: string;
+      items: components['schemas']['LabelBatchItemInput'][];
+    };
+    LabelBatchItem: {
+      error: components['schemas']['CarrierError'] | null;
+      /** Format: uuid */
+      order_id: string;
+      order_ref: string;
+      refusal: components['schemas']['LabelRefusal'] | null;
+      shipment_id: string | null;
+      state: components['schemas']['LabelItemState'];
+      tracking_number: string | null;
+    };
+    LabelBatchItemInput: {
+      error: components['schemas']['CarrierErrorInput'] | null;
+      /** Format: uuid */
+      order_id: string;
+      order_ref: string;
+      refusal: components['schemas']['LabelRefusalInput'] | null;
+      shipment_id: string | null;
+      state: components['schemas']['LabelItemStateInput'];
+      tracking_number: string | null;
+    };
+    /** @enum {string} */
+    LabelFormat: 'THERMAL' | 'DEFAULT' | 'TWO_PER_PAGE' | 'LARGE_SINGLE' | 'LARGE_MULTI';
+    /** @enum {string} */
+    LabelFormatInput: 'THERMAL' | 'DEFAULT' | 'TWO_PER_PAGE' | 'LARGE_SINGLE' | 'LARGE_MULTI';
+    /** @enum {string} */
+    LabelItemState: 'queued' | 'creating' | 'created' | 'failed' | 'refused';
+    /** @enum {string} */
+    LabelItemStateInput: 'queued' | 'creating' | 'created' | 'failed' | 'refused';
+    LabelOrderRequest: {
+      /** Format: uuid */
+      carrier_account_id: string;
+      confirm_shortened?: boolean;
+      line_ids?: string[];
+      /** Format: uuid */
+      order_id: string;
+      parcels: {
+        weight_g: number;
+      }[];
+      service_code: string;
+    };
+    LabelOrderRequestInput: {
+      /** Format: uuid */
+      carrier_account_id: string;
+      confirm_shortened?: boolean;
+      line_ids?: string[];
+      /** Format: uuid */
+      order_id: string;
+      parcels: {
+        weight_g: number;
+      }[];
+      service_code: string;
+    };
+    /** @enum {string} */
+    LabelRefusal:
+      | 'not_awaiting_dispatch'
+      | 'already_labelled'
+      | 'address_not_confirmed'
+      | 'address_changed_after_label'
+      | 'no_buyer_details'
+      | 'carrier_needs_reauth'
+      | 'unknown_service'
+      | 'partial_not_allowed';
+    /** @enum {string} */
+    LabelRefusalInput:
+      | 'not_awaiting_dispatch'
+      | 'already_labelled'
+      | 'address_not_confirmed'
+      | 'address_changed_after_label'
+      | 'no_buyer_details'
+      | 'carrier_needs_reauth'
+      | 'unknown_service'
+      | 'partial_not_allowed';
     Listing: {
       /** Format: uuid */
       channel_account_id: string;
@@ -3260,7 +3796,7 @@ export interface components {
       /** Format: date */
       tax_point_date: string;
       total_gross_pence: number;
-      tracking_state: ('pending' | 'confirmed' | 'not_confirmed') | null;
+      tracking_state: ('pending' | 'sent' | 'confirmed' | 'failed') | null;
     };
     OrderDetailInput: {
       buyer: components['schemas']['MaskedBuyerInput'] | null;
@@ -3313,13 +3849,24 @@ export interface components {
       /** Format: date */
       tax_point_date: string;
       total_gross_pence: number;
-      tracking_state: ('pending' | 'confirmed' | 'not_confirmed') | null;
+      tracking_state: ('pending' | 'sent' | 'confirmed' | 'failed') | null;
     };
     /** @enum {string} */
-    OrderFlag: 'oversold' | 'unmapped' | 'address_shortened' | 'tracking_not_confirmed' | 'fba';
+    OrderFlag:
+      | 'oversold'
+      | 'unmapped'
+      | 'address_shortened'
+      | 'tracking_not_confirmed'
+      | 'fba'
+      | 'address_changed_after_label';
     /** @enum {string} */
     OrderFlagInput:
-      'oversold' | 'unmapped' | 'address_shortened' | 'tracking_not_confirmed' | 'fba';
+      | 'oversold'
+      | 'unmapped'
+      | 'address_shortened'
+      | 'tracking_not_confirmed'
+      | 'fba'
+      | 'address_changed_after_label';
     OrderGroup: {
       /** Format: uuid */
       channel_account_id: string;
@@ -3450,7 +3997,7 @@ export interface components {
       shipping_status: string | null;
       status: components['schemas']['OrderStatus'];
       total_gross_pence: number;
-      tracking_state: ('pending' | 'confirmed' | 'not_confirmed') | null;
+      tracking_state: ('pending' | 'sent' | 'confirmed' | 'failed') | null;
     };
     OrderRowInput: {
       buyer: components['schemas']['MaskedBuyerInput'] | null;
@@ -3476,7 +4023,7 @@ export interface components {
       shipping_status: string | null;
       status: components['schemas']['OrderStatusInput'];
       total_gross_pence: number;
-      tracking_state: ('pending' | 'confirmed' | 'not_confirmed') | null;
+      tracking_state: ('pending' | 'sent' | 'confirmed' | 'failed') | null;
     };
     /** @enum {string} */
     OrderStatus:
@@ -3500,6 +4047,10 @@ export interface components {
       | 'partly_refunded'
       | 'refunded'
       | 'returned';
+    /** @enum {string} */
+    ParcelState: 'pending' | 'requesting' | 'created' | 'invalid' | 'unknown' | 'voided';
+    /** @enum {string} */
+    ParcelStateInput: 'pending' | 'requesting' | 'created' | 'invalid' | 'unknown' | 'voided';
     PlatformFlags: {
       public_signup: boolean;
       updated_at: string | null;
@@ -3565,7 +4116,10 @@ export interface components {
         | 'internal_error'
         | 'service_unavailable'
         | 'too_many_matches'
-        | 'version_conflict';
+        | 'version_conflict'
+        | 'order_shipped'
+        | 'tracking_sent'
+        | 'order_changed';
       detail?: string;
       errors?: {
         /** @enum {string} */
@@ -3595,7 +4149,10 @@ export interface components {
         | 'internal_error'
         | 'service_unavailable'
         | 'too_many_matches'
-        | 'version_conflict';
+        | 'version_conflict'
+        | 'order_shipped'
+        | 'tracking_sent'
+        | 'order_changed';
       detail?: string;
       errors?: {
         /** @enum {string} */
@@ -3629,6 +4186,36 @@ export interface components {
       failed: number;
       queued: number;
       type: string;
+    };
+    ReconcileItem: {
+      barcode: string | null;
+      /** Format: uuid */
+      carrier_account_id: string;
+      client_uid: string;
+      order_refs: string[];
+      /** Format: uuid */
+      parcel_id: string;
+      /** @enum {string} */
+      reason: 'voided' | 'unknown';
+      /** Format: uuid */
+      shipment_id: string;
+      /** Format: date-time */
+      since: string;
+    };
+    ReconcileItemInput: {
+      barcode: string | null;
+      /** Format: uuid */
+      carrier_account_id: string;
+      client_uid: string;
+      order_refs: string[];
+      /** Format: uuid */
+      parcel_id: string;
+      /** @enum {string} */
+      reason: 'voided' | 'unknown';
+      /** Format: uuid */
+      shipment_id: string;
+      /** Format: date-time */
+      since: string;
     };
     Refund: {
       amount_pence: number;
@@ -3738,6 +4325,32 @@ export interface components {
     SaleVatType: 'standard' | 'reduced' | 'zero' | 'no_vat';
     /** @enum {string} */
     SaleVatTypeInput: 'standard' | 'reduced' | 'zero' | 'no_vat';
+    ServiceCost: {
+      cost_pence: number;
+      service_code: string;
+      vat_rate_bp: number;
+    };
+    ServiceCostInput: {
+      cost_pence: number;
+      service_code: string;
+      vat_rate_bp: number;
+    };
+    ServiceSuggestion: {
+      /** Format: uuid */
+      carrier_account_id: string;
+      /** Format: uuid */
+      rule_id: string;
+      rule_name: string;
+      service_code: string;
+    };
+    ServiceSuggestionInput: {
+      /** Format: uuid */
+      carrier_account_id: string;
+      /** Format: uuid */
+      rule_id: string;
+      rule_name: string;
+      service_code: string;
+    };
     SessionInfo: {
       incident: components['schemas']['Incident'] | null;
       modules: components['schemas']['WorkspaceModules'];
@@ -3775,6 +4388,124 @@ export interface components {
         /** @enum {string} */
         role: 'admin' | 'member';
       } | null;
+    };
+    Shipment: {
+      /** Format: uuid */
+      carrier_account_id: string;
+      cost_pence: number | null;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: uuid */
+      id: string;
+      label_stored: boolean;
+      orders: {
+        cost_share_pence: number | null;
+        /** Format: uuid */
+        order_id: string;
+        order_ref: string | null;
+      }[];
+      parcels: {
+        barcode: string | null;
+        error: components['schemas']['CarrierError'] | null;
+        parcel_no: number;
+        state: components['schemas']['ParcelState'];
+        weight_g: number;
+      }[];
+      provider: components['schemas']['Carrier'];
+      service_code: string;
+      /** @enum {string} */
+      status: 'requested' | 'created' | 'failed' | 'voided';
+      tracking_number: string | null;
+      vat_rate_bp: number | null;
+      voided_at: string | null;
+    };
+    ShipmentInput: {
+      /** Format: uuid */
+      carrier_account_id: string;
+      cost_pence: number | null;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: uuid */
+      id: string;
+      label_stored: boolean;
+      orders: {
+        cost_share_pence: number | null;
+        /** Format: uuid */
+        order_id: string;
+        order_ref: string | null;
+      }[];
+      parcels: {
+        barcode: string | null;
+        error: components['schemas']['CarrierErrorInput'] | null;
+        parcel_no: number;
+        state: components['schemas']['ParcelStateInput'];
+        weight_g: number;
+      }[];
+      provider: components['schemas']['CarrierInput'];
+      service_code: string;
+      /** @enum {string} */
+      status: 'requested' | 'created' | 'failed' | 'voided';
+      tracking_number: string | null;
+      vat_rate_bp: number | null;
+      voided_at: string | null;
+    };
+    ShippingRule: {
+      /** Format: uuid */
+      carrier_account_id: string;
+      conditions: components['schemas']['ShippingRuleConditions'];
+      enabled: boolean;
+      /** Format: uuid */
+      id: string;
+      name: string;
+      service_code: string;
+    };
+    ShippingRuleConditions: {
+      /** Format: uuid */
+      channel_account_id?: string;
+      /** Format: uuid */
+      company_id?: string;
+      item_count_max?: number;
+      item_count_min?: number;
+      postcode_prefixes?: string[];
+      provider?: components['schemas']['Provider'];
+      weight_max_g?: number;
+      weight_min_g?: number;
+    };
+    ShippingRuleConditionsInput: {
+      /** Format: uuid */
+      channel_account_id?: string;
+      /** Format: uuid */
+      company_id?: string;
+      item_count_max?: number;
+      item_count_min?: number;
+      postcode_prefixes?: string[];
+      provider?: components['schemas']['ProviderInput'];
+      weight_max_g?: number;
+      weight_min_g?: number;
+    };
+    ShippingRuleInput: {
+      /** Format: uuid */
+      carrier_account_id: string;
+      conditions: components['schemas']['ShippingRuleConditionsInput'];
+      enabled: boolean;
+      /** Format: uuid */
+      id: string;
+      name: string;
+      service_code: string;
+    };
+    ShippingSettings: {
+      auto_dispatch_on_label: boolean;
+      label_format: components['schemas']['LabelFormat'];
+      packaging_allowance_g: number;
+      packing_slip_enabled: boolean;
+      tracking_hold_minutes: number;
+    };
+    ShippingSettingsInput: {
+      auto_dispatch_on_label: boolean;
+      label_format: components['schemas']['LabelFormatInput'];
+      packaging_allowance_g: number;
+      packing_slip_enabled: boolean;
+      tracking_hold_minutes: number;
     };
     SignInResult: {
       /** @enum {string} */
@@ -4033,6 +4764,44 @@ export interface components {
       /** Format: uri */
       termsUrl: string;
       version: string;
+    };
+    TrackingPush: {
+      attempts: number;
+      /** Format: uuid */
+      channel_account_id: string;
+      confirmed_at: string | null;
+      /** Format: uuid */
+      id: string;
+      last_error: {
+        /** Format: date-time */
+        at: string;
+        code: string;
+      } | null;
+      next_attempt_at: string | null;
+      /** Format: uuid */
+      order_id: string;
+      /** @enum {string} */
+      state: 'pending' | 'sent' | 'confirmed' | 'failed';
+      tracking_number: string;
+    };
+    TrackingPushInput: {
+      attempts: number;
+      /** Format: uuid */
+      channel_account_id: string;
+      confirmed_at: string | null;
+      /** Format: uuid */
+      id: string;
+      last_error: {
+        /** Format: date-time */
+        at: string;
+        code: string;
+      } | null;
+      next_attempt_at: string | null;
+      /** Format: uuid */
+      order_id: string;
+      /** @enum {string} */
+      state: 'pending' | 'sent' | 'confirmed' | 'failed';
+      tracking_number: string;
     };
     UnreadCount: {
       unread: number;
@@ -6602,6 +7371,52 @@ export interface operations {
       };
     };
   };
+  reauthoriseEvri: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          auth_code: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Connection'];
+        };
+      };
+    };
+  };
   setKillSwitch: {
     parameters: {
       query?: never;
@@ -6644,6 +7459,96 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['Connection'];
+        };
+      };
+    };
+  };
+  getServiceCosts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['ServiceCost'][];
+          };
+        };
+      };
+    };
+  };
+  putServiceCosts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        accountId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          items: components['schemas']['ServiceCostInput'][];
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['ServiceCost'][];
+          };
         };
       };
     };
@@ -6772,6 +7677,94 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['WebsiteKeys'];
+        };
+      };
+    };
+  };
+  connectEvri: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          auth_code: string;
+          /** Format: uuid */
+          company_id: string;
+          display_name: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Connection'];
+        };
+      };
+    };
+  };
+  getEvriAuthoriseUrl: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** Format: uri */
+            url: string;
+          };
         };
       };
     };
@@ -7648,6 +8641,48 @@ export interface operations {
       };
     };
   };
+  confirmAddressCheck: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        orderId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': null;
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   viewOrderCustomer: {
     parameters: {
       query?: never;
@@ -7733,6 +8768,48 @@ export interface operations {
             notes: string | null;
             /** Format: date-time */
             notes_updated_at: string;
+          };
+        };
+      };
+    };
+  };
+  listOrderTracking: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        orderId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['TrackingPush'][];
           };
         };
       };
@@ -9138,6 +10215,777 @@ export interface operations {
             total: number;
             totalCapped: boolean;
           };
+        };
+      };
+    };
+  };
+  getLabelBatch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        batchId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelBatch'];
+        };
+      };
+    };
+  };
+  listCarrierAccounts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['CarrierAccount'][];
+          };
+        };
+      };
+    };
+  };
+  getShippingDesk: {
+    parameters: {
+      query?: {
+        channel_account_id?: string;
+        company_id?: string;
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+        provider?: components['schemas']['ProviderInput'];
+        ship_by?: 'today' | 'overdue' | 'tomorrow';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['DeskRow'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
+        };
+      };
+    };
+  };
+  createLabels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          orders: components['schemas']['LabelOrderRequestInput'][];
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelBatch'];
+        };
+      };
+    };
+  };
+  printLabels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          shipment_ids: string[];
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description File content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+    };
+  };
+  packingSlips: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          order_ids: string[];
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description File content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+    };
+  };
+  listReconcile: {
+    parameters: {
+      query?: {
+        /** @description Rows per page: 20, 50, 100 (default 50) */
+        limit?: number;
+        /** @description Page number, from 1 to 500 */
+        page?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['ReconcileItem'][];
+            limit: number;
+            page: number;
+            total: number;
+            totalCapped: boolean;
+          };
+        };
+      };
+    };
+  };
+  markReconciled: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        parcelId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': null;
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getShippingRules: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['ShippingRule'][];
+          };
+        };
+      };
+    };
+  };
+  putShippingRules: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          items: {
+            /** Format: uuid */
+            carrier_account_id: string;
+            conditions: components['schemas']['ShippingRuleConditionsInput'];
+            enabled: boolean;
+            /** Format: uuid */
+            id?: string;
+            name: string;
+            service_code: string;
+          }[];
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['ShippingRule'][];
+          };
+        };
+      };
+    };
+  };
+  getShippingSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShippingSettings'];
+        };
+      };
+    };
+  };
+  putShippingSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          auto_dispatch_on_label: boolean;
+          label_format: components['schemas']['LabelFormatInput'];
+          packaging_allowance_g: number;
+          packing_slip_enabled: boolean;
+          tracking_hold_minutes: number;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShippingSettings'];
+        };
+      };
+    };
+  };
+  shipTogether: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uuid */
+          carrier_account_id: string;
+          confirm_shortened?: boolean;
+          /** Format: uuid */
+          group_id: string;
+          order_ids: string[];
+          parcels: {
+            weight_g: number;
+          }[];
+          service_code: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelBatch'];
+        };
+      };
+    };
+  };
+  getShipment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        shipmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Shipment'];
+        };
+      };
+    };
+  };
+  reprintShipment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        shipmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': null;
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description File content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description Default Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Shipment'];
+        };
+      };
+    };
+  };
+  voidShipment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        shipmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': null;
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Shipment'];
+        };
+      };
+    };
+  };
+  resendTracking: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pushId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': null;
+      };
+    };
+    responses: {
+      /** @description Client error (RFC 9457 problem) */
+      '4XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Server error (RFC 9457 problem) */
+      '5XX': {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description Default Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TrackingPush'];
         };
       };
     };

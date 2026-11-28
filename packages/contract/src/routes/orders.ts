@@ -42,9 +42,20 @@ export const OrderStatusSchema = z
   ])
   .meta({ id: 'OrderStatus' });
 
-/** ORD-1 flags. `tracking_not_confirmed` is set from M12. */
+/**
+ * ORD-1 flags. `tracking_not_confirmed`: a channel has not confirmed tracking 4 hours after the
+ * label (TRK-2). `address_changed_after_label`: the buyer's address changed after the label was
+ * printed; it must be checked before dispatch (ADR-081).
+ */
 export const OrderFlagSchema = z
-  .enum(['oversold', 'unmapped', 'address_shortened', 'tracking_not_confirmed', 'fba'])
+  .enum([
+    'oversold',
+    'unmapped',
+    'address_shortened',
+    'tracking_not_confirmed',
+    'fba',
+    'address_changed_after_label',
+  ])
   .meta({ id: 'OrderFlag' });
 
 /** VAT-4: zero-rated and No VAT both carry 0 VAT but are always reported apart. */
@@ -98,9 +109,10 @@ export const OrderRowSchema = z
     item_count: z.number().int().min(0),
     total_gross_pence: Pence,
     ship_by: At.nullable(),
-    /** M12 fills these; null until then. */
+    /** The live label's carrier and service, for example "Evri · Next day"; null without one. */
     shipping_status: z.string().nullable(),
-    tracking_state: z.enum(['pending', 'confirmed', 'not_confirmed']).nullable(),
+    /** TRK-3: the least advanced of the order's tracking pushes; null before any label. */
+    tracking_state: z.enum(['pending', 'sent', 'confirmed', 'failed']).nullable(),
     flags: z.array(OrderFlagSchema),
     customer_state: CustomerStateSchema,
     /** Null unless `customer_state` is `present`. */

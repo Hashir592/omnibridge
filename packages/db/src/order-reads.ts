@@ -20,7 +20,12 @@ import { withTenantTransaction } from './tenant.ts';
  */
 
 export type OrderFlag =
-  'oversold' | 'unmapped' | 'address_shortened' | 'tracking_not_confirmed' | 'fba';
+  | 'oversold'
+  | 'unmapped'
+  | 'address_shortened'
+  | 'tracking_not_confirmed'
+  | 'fba'
+  | 'address_changed_after_label';
 
 /** Why an order's pence differ from the channel's (ADR-081 3). */
 export type AmountsDiffer = 'channel_total' | 'late_change' | 'refund_above';
@@ -224,8 +229,10 @@ function orderWhere(
   if (f.flag === 'unmapped') parts.push(sql`${o}.unmapped`);
   if (f.flag === 'address_shortened') parts.push(sql`${o}.address_shortened`);
   if (f.flag === 'fba') parts.push(sql`${o}.fba`);
-  // Tracking confirmation arrives with M12: no order carries the flag yet.
+  // Tracking confirmation and the label address check arrive with M12 (T-1201, T-1202): no
+  // order carries these flags yet.
   if (f.flag === 'tracking_not_confirmed') parts.push(sql`FALSE`);
+  if (f.flag === 'address_changed_after_label') parts.push(sql`FALSE`);
   if (f.piiRefs !== undefined) parts.push(sql`${o}.pii_ref = ANY (${sql.val(f.piiRefs)}::uuid[])`);
   return sql.join(parts, sql` AND `);
 }

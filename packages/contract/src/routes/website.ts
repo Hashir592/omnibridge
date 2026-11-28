@@ -332,7 +332,11 @@ export const websitePushOrder = defineRoute({
   ...websiteInbound,
 });
 
-/** Cancels an order OmniBridge holds; its buyer details are deleted (DEL-1). 404 if unknown. */
+/**
+ * Cancels an order OmniBridge holds; its buyer details are deleted (DEL-1). 404 if unknown. An
+ * order already shipped answers 409 `order_shipped` and changes nothing, so the website never
+ * refunds a parcel that has left (ADR-088).
+ */
 export const websiteCancelOrder = defineRoute({
   id: 'websiteCancelOrder',
   method: 'POST',
