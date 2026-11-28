@@ -80,6 +80,7 @@ packages/queue      job envelope, policies, scheduler helpers
 packages/governors/amazon   reactive token bucket (RL-1)
 packages/governors/ebay     count-before-send budgets (RL-2)
 packages/providers/*        adapters: amazon, ads, ebay, evri, dpd, website
+packages/order-ingest       vault-first order ingest step, shared by worker and website push; no provider calls (ADR-088)
 packages/logger     pino with field allowlist and redaction
 packages/files      FileStore interface + encrypted local implementation
 packages/mail       SMTP adapter + templates
@@ -238,7 +239,7 @@ The shared layer is owned by the `edge` project (Linux user `edge`). It contains
 
 ### Fixed IP (OPS-2)
 
-All carrier and website egress leaves through a netcup failover IPv4 using an nftables SNAT rule. Carriers allowlist that address, and it can be moved to a replacement server.
+All carrier and website egress leaves through a netcup failover IPv4 using an nftables SNAT rule. Carriers allowlist that address, and it can be moved to a replacement server. Outside mock mode a website is called only at its admin-set base URL, over HTTPS, at a dotted public name (no IP address, localhost, single-label or `.internal`/`.local`/`.lan` name, no user info), so a setting can never aim a signed call at an internal service; an internal name for OPS-12 is a configured exception added in M22 if needed (ADR-088).
 
 ### Deploy (OPS-3)
 
