@@ -644,6 +644,9 @@ importers:
 
   packages/order-ingest:
     dependencies:
+      '@omnibridge/contract':
+        specifier: workspace:*
+        version: link:../contract
       '@omnibridge/core':
         specifier: workspace:*
         version: link:../core
@@ -662,6 +665,9 @@ importers:
       '@omnibridge/vault-client':
         specifier: workspace:*
         version: link:../vault-client
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/pii-db:
     dependencies:

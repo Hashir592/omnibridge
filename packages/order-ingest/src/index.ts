@@ -8,6 +8,7 @@ import {
   type StoredOrderPii,
 } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
+import type { WebsiteOrderSchema } from '@omnibridge/contract';
 import type { BuyerDetails, ChannelOrder, SyncStream } from '@omnibridge/provider-kit';
 import {
   listingMappedJob,
@@ -18,6 +19,7 @@ import {
 } from '@omnibridge/queue';
 import { VaultError, type VaultClient } from '@omnibridge/vault-client';
 import { hasDeliveryAddress } from '@omnibridge/vault-client/schemas';
+import type { z } from 'zod';
 
 /*
  * The order ingest step (M10, T-1001: ORD-4, DEL-1, FA-10, FA-16), shared by the worker's order
@@ -208,6 +210,25 @@ export function orderIngestStream(
         if (!waiting || stored.piiRef === null || !stored.live) return { kind: 'unchanged' };
         if (order.buyer === null || !hasDeliveryAddress(order.buyer)) return { kind: 'unchanged' };
         try {
+          if (deps.corrections === 'ingest') {
+            // The vault's ingest finds the record and applies a newer block with replace's own
+            // steps and checks (S5-20261124-11); a live record keeps its date. It does not say
+            // whether anything changed, so a recompute is asked for, collapsed per minute.
+            const cap = Math.min(order.placedAt.getTime(), now().getTime()) + PII_HARD_LIMIT_MS;
+            await deps.vault.ingest({
+              workspace_id: job.workspaceId,
+              kind: 'buyer_contact',
+              channel_account_id: job.channelAccountId,
+              subject_type: 'order',
+              subject_id: `${job.channelAccountId}:${order.externalId}`,
+              delete_after: new Date(cap).toISOString(),
+              placed_at: order.placedAt.toISOString(),
+              source_updated_at: order.updatedAt.toISOString(),
+              ...(provider === undefined ? {} : { channel: provider }),
+              fields: givenFields(order.buyer),
+            });
+            return { kind: 'replaced' };
+          }
           const { changed } = await deps.vault.replace({
             workspace_id: job.workspaceId,
             pii_ref: stored.piiRef,
@@ -356,5 +377,73 @@ export function orderIngestPorts(
         payload: {},
       });
     },
+  };
+}
+
+type WebsiteOrder = z.output<typeof WebsiteOrderSchema>;
+
+/** WEB-3: a website order's status onto the channel lifecycle (FA-10). */
+function websiteState(o: WebsiteOrder): ChannelOrder['state'] {
+  if (o.status === 'cancelled') return 'cancelled';
+  if (o.status === 'delivered') return 'delivered';
+  if (o.status === 'shipped') return 'dispatched';
+  if (o.status === 'pending' && (o.paidAt ?? null) === null) return 'pending_payment';
+  return 'awaiting_dispatch';
+}
+
+const at = (v: string | null | undefined) => (v === null || v === undefined ? null : new Date(v));
+
+/**
+ * WEB-3: one order as the website pushes it, in the stream's own terms. The buyer block is PII:
+ * it goes to pii-vault in `prepare` and never further. Address lines 3 and 4 share line 3.
+ */
+export function websiteChannelOrder(o: WebsiteOrder): ChannelOrder {
+  const a = o.shippingAddress;
+  const state = websiteState(o);
+  const line3 = [a.line3, a.line4]
+    .filter((l) => typeof l === 'string' && l.trim() !== '')
+    .join(', ');
+  const buyer = Object.fromEntries(
+    Object.entries({
+      name: a.name,
+      email: o.buyer.email,
+      phone: o.buyer.phone,
+      address_line1: a.line1,
+      address_line2: a.line2,
+      address_line3: line3,
+      city: a.city,
+      county: a.county,
+      postcode: a.postcode,
+      country: a.country,
+      delivery_instructions: a.instructions,
+      channel_buyer_id: o.buyer.customerId,
+    }).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].trim() !== ''),
+  );
+  return {
+    externalId: o.externalOrderId,
+    updatedAt: new Date(o.updatedAt),
+    status: o.status,
+    state,
+    placedAt: new Date(o.placedAt),
+    paidAt: at(o.paidAt) ?? (o.status === 'pending' ? null : new Date(o.placedAt)),
+    shipBy: at(o.shipBy),
+    dispatchedAt: at(o.shippedAt),
+    deliveredAt: at(o.deliveredAt),
+    cancelledAt: state === 'cancelled' ? (at(o.cancelledAt) ?? new Date(o.updatedAt)) : null,
+    discountPence: o.discountGross,
+    shippingPence: o.shippingGross,
+    totalPence: o.totalGross ?? null,
+    shipToCountry: a.country,
+    fba: false,
+    cancelRequested: false,
+    lines: o.lines.map((l) => ({
+      lineId: l.externalLineId,
+      sku: l.externalSku,
+      quantity: l.quantity,
+      title: l.title,
+      linePricePence: l.unitPriceGross * l.quantity,
+    })),
+    refunds: [],
+    buyer: Object.keys(buyer).length === 0 ? null : buyer,
   };
 }

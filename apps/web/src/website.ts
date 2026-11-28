@@ -1,6 +1,11 @@
-import { createHash, randomBytes } from 'node:crypto';
-import type { websiteRoutes } from '@omnibridge/contract';
-import { ApiError, type TenantContext, type TenantRunner } from '@omnibridge/core';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  WEBSITE_HEADERS,
+  WEBSITE_TIMESTAMP_WINDOW_S,
+  type AnyRoute,
+  type websiteRoutes,
+} from '@omnibridge/contract';
+import { ApiError, isUuid, type TenantContext, type TenantRunner } from '@omnibridge/core';
 import { Secret } from '@omnibridge/crypto';
 import type {
   AccountCredentials,
@@ -11,9 +16,10 @@ import type {
   WebsiteConnectionRepository,
 } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
-import type { OrderIngestSteps } from '@omnibridge/order-ingest';
+import { websiteChannelOrder, type OrderIngestSteps } from '@omnibridge/order-ingest';
+import type { FastifyRequest } from 'fastify';
 import { connectionBody } from './connections.ts';
-import type { Handlers } from './contract.ts';
+import { rawBodyOf, type Handlers } from './contract.ts';
 
 /*
  * M11 website connector and Disconnect (T-1101: WEB-1 to WEB-6, OPS-12, AT-14). Setup is for
@@ -57,6 +63,86 @@ const newKeys = () => ({
   signing_secret: `obs_${randomBytes(32).toString('base64url')}`,
 });
 export const keyHash = (key: string): Buffer => createHash('sha256').update(key).digest();
+
+/** Equal in constant time; buffers of another length are never equal. */
+const same = (a: Buffer, b: Buffer) => a.length === b.length && timingSafeEqual(a, b);
+
+/** Who a signed website call is from, once its key, timestamp and signature are checked. */
+interface WebsiteCaller {
+  connectionId: string;
+  workspaceId: string;
+  companyId: string;
+}
+const callers = new WeakMap<FastifyRequest, WebsiteCaller>();
+
+/**
+ * WEB-2, ADR-059, AT-14: the check of a website call, before its body is validated. An unknown
+ * connection, or one whose workspace has the module off, is not there (404); a wrong key, a
+ * timestamp more than 5 minutes off or a wrong signature of `<timestamp>.<raw body>` is 401.
+ * Logs say which check failed, never a value.
+ */
+export function websiteVerifier(o: WebsiteOptions) {
+  const now = o.now ?? (() => new Date());
+  return async (request: FastifyRequest, route: AnyRoute): Promise<boolean> => {
+    const refuse = (why: string) => {
+      o.logger.warn(
+        { event: 'website.call_refused', route: route.id, why },
+        'website call refused',
+      );
+      return new ApiError({ status: 401, code: 'unauthorized' });
+    };
+    const id = (request.params as { connectionId?: unknown }).connectionId;
+    if (typeof id !== 'string' || !isUuid(id)) throw missing();
+    const found = await o.connections.inbound(id);
+    if (found === undefined || !found.moduleOn) throw missing();
+    const header = request.headers.authorization;
+    const key = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (!same(keyHash(key), found.keyHash)) throw refuse('key');
+    const stamp = request.headers[WEBSITE_HEADERS.timestamp];
+    const at = typeof stamp === 'string' && /^\d{1,12}$/.test(stamp) ? Number(stamp) : Number.NaN;
+    if (!(Math.abs(now().getTime() / 1000 - at) <= WEBSITE_TIMESTAMP_WINDOW_S)) {
+      throw refuse('timestamp');
+    }
+    const secret = await o.tenancy.runWorkspace({ workspaceId: found.workspaceId }, (ctx) =>
+      o.credentials.readKind(ctx, id, 'website.signing_secret'),
+    );
+    const sent = request.headers[WEBSITE_HEADERS.signature];
+    if (secret === undefined || typeof sent !== 'string' || !/^[0-9a-f]{64}$/i.test(sent)) {
+      throw refuse('signature');
+    }
+    const expected = createHmac('sha256', secret.reveal())
+      .update(`${String(at)}.`)
+      .update(rawBodyOf(request) ?? Buffer.alloc(0))
+      .digest();
+    if (!same(Buffer.from(sent, 'hex'), expected)) throw refuse('signature');
+    callers.set(request, {
+      connectionId: id,
+      workspaceId: found.workspaceId,
+      companyId: found.companyId,
+    });
+    return true;
+  };
+}
+
+/** The checked caller of a website route; never absent once the verifier has run. */
+function callerOf(request: FastifyRequest): WebsiteCaller {
+  const caller = callers.get(request);
+  if (caller === undefined) throw new ApiError({ status: 401, code: 'unauthorized' });
+  return caller;
+}
+
+/** WEB-2: every website call names its Idempotency-Key. */
+function idempotencyKey(request: FastifyRequest): string {
+  const key = request.headers[WEBSITE_HEADERS.idempotencyKey];
+  if (typeof key !== 'string' || key.length === 0 || key.length > 200) {
+    throw new ApiError({
+      status: 400,
+      code: 'bad_request',
+      detail: 'Send an Idempotency-Key header of 1 to 200 characters',
+    });
+  }
+  return key;
+}
 
 export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websiteRoutes> {
   if (options === undefined) {
@@ -202,7 +288,65 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
     },
 
     disconnectAccount: notFound,
-    websitePushOrder: notFound,
+
+    websitePushOrder: async ({ body, request }) => {
+      if (o.ingest === undefined) throw missing();
+      const { steps, orders } = o.ingest;
+      const caller = callerOf(request);
+      const key = idempotencyKey(request);
+      const route = 'websitePushOrder';
+      const hash = createHash('sha256')
+        .update(`${route}\n`)
+        .update(rawBodyOf(request) ?? Buffer.alloc(0))
+        .digest();
+      const actor = { workspaceId: caller.workspaceId };
+      const account = caller.connectionId;
+      type Answer = { status: 200 | 201; body: { omnibridgeOrderId: string } };
+      // WEB-2: the same key and body give the same answer; another body under it is a conflict.
+      const replay = (prior: { requestHash: Buffer; status: number; response: object }): Answer => {
+        if (!prior.requestHash.equals(hash)) {
+          throw new ApiError({
+            status: 409,
+            code: 'conflict',
+            detail: 'Idempotency-Key used for another request',
+          });
+        }
+        return { status: prior.status === 201 ? 201 : 200, body: prior.response as Answer['body'] };
+      };
+      const prior = await o.tenancy.runWorkspace(actor, (ctx) =>
+        o.connections.answered(ctx, account, key),
+      );
+      if (prior !== undefined) return replay(prior);
+      // Vault first, with no transaction open (ADR-054 FA-04, invariant 3).
+      const order = websiteChannelOrder(body);
+      const job = { workspaceId: caller.workspaceId, channelAccountId: account };
+      const ready = (await steps.prepare?.(job, [order])) ?? [order];
+      return o.tenancy.runWorkspace(actor, async (ctx): Promise<Answer> => {
+        // Under the key's lock: a call with the same key that ran meanwhile has answered.
+        const meanwhile = await o.connections.answered(ctx, account, key);
+        if (meanwhile !== undefined) return replay(meanwhile);
+        const before = await orders.orderIds(ctx, account, [body.externalOrderId]);
+        await steps.sink(ctx, account, ready);
+        const stored = await orders.orderIds(ctx, account, [body.externalOrderId]);
+        const id = stored.get(body.externalOrderId);
+        if (id === undefined) throw new Error('website order not stored');
+        const answer: Answer = {
+          status: before.has(body.externalOrderId) ? 200 : 201,
+          body: { omnibridgeOrderId: id },
+        };
+        await o.connections.remember(ctx, {
+          channelAccountId: account,
+          companyId: caller.companyId,
+          key,
+          route,
+          requestHash: hash,
+          status: answer.status,
+          response: answer.body,
+        });
+        return answer;
+      });
+    },
+
     websiteCancelOrder: notFound,
     websiteRefundOrder: notFound,
     websitePushProducts: notFound,

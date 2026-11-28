@@ -17,11 +17,13 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@omnibridge/contract": "workspace:*",
     "@omnibridge/core": "workspace:*",
     "@omnibridge/db": "workspace:*",
     "@omnibridge/logger": "workspace:*",
     "@omnibridge/provider-kit": "workspace:*",
     "@omnibridge/queue": "workspace:*",
-    "@omnibridge/vault-client": "workspace:*"
+    "@omnibridge/vault-client": "workspace:*",
+    "zod": "4.6.7"
   }
 }

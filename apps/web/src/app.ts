@@ -6,6 +6,7 @@ import {
   type AuditFilters,
   type Company,
   type Health,
+  type AnyRoute,
   type JobProgress,
   type ModuleToggle,
 } from '@omnibridge/contract';
@@ -34,7 +35,7 @@ import { AUDIT_CSV_HEADER, auditCsvRows } from './audit-csv.ts';
 import { deletionCertificateText } from './deletion-certificate.ts';
 import { authHandlers } from './auth/routes.ts';
 import { ebayHandlers, webhookVerifier, type EbayWebhook } from './webhooks/ebay.ts';
-import { websiteHandlers, type WebsiteOptions } from './website.ts';
+import { websiteHandlers, websiteVerifier, type WebsiteOptions } from './website.ts';
 import { peopleHandlers, type PeopleOptions } from './users.ts';
 import { notificationHandlers, type NotificationOptions } from './notifications.ts';
 import { catalogueHandlers, type CatalogueOptions } from './catalogue.ts';
@@ -151,6 +152,18 @@ export interface WebAppOptions {
   openapi?: boolean;
   /** The built SPA, served for every page path (ADR-060). */
   spa?: SpaFiles;
+}
+
+/**
+ * The check of a signed route: the website's own (WEB-2) for its routes, eBay's for the deletion
+ * notice (EBAY-2). A route whose check is not configured is refused.
+ */
+function signedCheck(ebay: EbayWebhook | undefined, website: WebsiteOptions | undefined) {
+  const ebayCheck = ebay === undefined ? undefined : webhookVerifier(ebay);
+  const websiteCheck = website === undefined ? undefined : websiteVerifier(website);
+  return (request: FastifyRequest, route: AnyRoute): Promise<boolean> =>
+    (route.module === 'website_connector' ? websiteCheck : ebayCheck)?.(request, route) ??
+    Promise.resolve(false);
 }
 
 async function check(fn: () => Promise<boolean>): Promise<Health['db_main']> {
@@ -501,7 +514,9 @@ export function buildWebApp({
               moduleOn: (tenant: TenantContext, module: ModuleToggle) =>
                 modules.moduleOn(tenant, module),
             }),
-        ...(ebay === undefined ? {} : { verifyWebhook: webhookVerifier(ebay) }),
+        ...(ebay === undefined && website === undefined
+          ? {}
+          : { verifyWebhook: signedCheck(ebay, website) }),
       },
     }),
   );
