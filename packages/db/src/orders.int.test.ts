@@ -2038,6 +2038,23 @@ describe('order ingest (T-1001)', () => {
         SELECT address_changed_after_label FROM app.orders WHERE id = ${id}::uuid`.execute(trx),
     );
     expect(flag.rows[0]?.address_changed_after_label).toBe(true);
+    // SHP-5: the channel cancels it; its label stops being live and is listed to reconcile.
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      sql`INSERT INTO app.parcels (workspace_id, id, shipment_id, company_id, carrier_account_id,
+                                   parcel_no, client_uid, weight_g, state, barcode, created_at, updated_at)
+          VALUES (${w.ctx.workspaceId}::uuid, ${randomUUID()}::uuid, ${shipment}::uuid,
+                  ${w.company}::uuid, ${carrier}::uuid, 1, ${`${o.externalId}-1`}, 500, 'created',
+                  'H00TEST', now(), now())`.execute(trx),
+    );
+    await ingest.apply(w.ctx, w.account, [next(o, 4, { state: 'cancelled' })]);
+    const after = await withTenantTransaction(db, w.ctx, (trx) =>
+      sql<{ live: boolean; listed: boolean }>`
+        SELECT so.live, p.reconcile_since IS NOT NULL AS listed
+          FROM app.shipment_orders so JOIN app.parcels p
+            ON p.workspace_id = so.workspace_id AND p.shipment_id = so.shipment_id
+         WHERE so.order_id = ${id}::uuid`.execute(trx),
+    );
+    expect(after.rows).toEqual([{ live: false, listed: true }]);
   });
 
   it('[ORD-9] a group recompute is asked for only when an order enters or leaves the ones that can group', async () => {

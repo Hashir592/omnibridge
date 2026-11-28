@@ -348,7 +348,9 @@ export function createEvriAdapter(options: {
       url.searchParams.set('grant_type', 'authorization_code');
       url.searchParams.set('scope', 'all');
       const res = await options.http.request('evri', { url, method: 'POST' });
-      if (res.status === 400 || res.status === 401) {
+      // Any refusal of the code (used, expired, mistyped, an account Evri will not link) is the
+      // admin's to fix with a new code; only a 5xx or a 429 is Evri's own trouble.
+      if (res.status >= 400 && res.status < 500 && res.status !== 429) {
         await res.body?.cancel();
         throw new ProviderRejected('evri', 'evri.code_refused');
       }

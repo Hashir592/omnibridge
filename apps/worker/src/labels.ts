@@ -30,7 +30,7 @@ export interface LabelJobDeps {
   tenancy: Pick<TenantRunner, 'runWorkspace'>;
   shipping: Pick<
     ShippingRepository,
-    'work' | 'parcelSending' | 'parcelAnswered' | 'refuse' | 'settle' | 'labelStored'
+    'work' | 'parcelSending' | 'parcelAnswered' | 'refuse' | 'settle' | 'labelStored' | 'abandon'
   >;
   credentials: Pick<AccountCredentials, 'read'>;
   connections: Pick<ConnectionRepository, 'recordAuthFailure' | 'recordSuccess'>;
@@ -276,6 +276,10 @@ export function labelsCreateHandler(deps: LabelJobDeps): PhasedHandler<Payload, 
       return { status };
     },
     commit: (_job, prepared) => Promise.resolve(prepared),
+    // The retries ran out: nothing stays in flight, so the orders can be labelled again.
+    failed: async (job) => {
+      await deps.shipping.abandon(job.ctx, job.payload.shipment_id);
+    },
   };
 }
 

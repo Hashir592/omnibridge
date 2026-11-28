@@ -63,6 +63,10 @@ export const CARRIER_ERROR_WORDS: Readonly<Record<string, string>> = {
   'evri.label_not_printable': 'Evri says this label cannot be printed now (it may be delivered).',
   'evri.barcode_unknown': 'Evri does not recognise this barcode.',
   'evri.bad_label_format': 'Evri does not accept the label format setting.',
+  'carrier.no_answer':
+    'The carrier did not answer in time; it may hold this parcel. Check its account before relabelling.',
+  'carrier.unavailable': 'The carrier could not be reached. Nothing was bought; try again.',
+  'label.voided': 'This label was voided.',
 };
 
 export function carrierErrorWords(code: string): string {

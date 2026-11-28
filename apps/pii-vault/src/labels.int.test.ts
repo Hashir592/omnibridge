@@ -1,6 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, existsSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +24,8 @@ import { PII_MARKER, startRoleCluster, type RoleCluster } from '@omnibridge/test
 import { VaultClient, VaultError } from '@omnibridge/vault-client';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createPiiPool } from '@omnibridge/pii-db';
+import { LabelStore } from './labels.ts';
 import { startTestVault, type TestVault } from './testing.ts';
 
 const DAY = 86_400_000;
@@ -256,6 +265,36 @@ describe('label files in the vault (invariant 11)', () => {
     expect(files().some((f) => f.startsWith(ll))).toBe(false);
     expect((await rows()).some((r) => r.label_id === ll)).toBe(false);
     clock = new Date('2026-11-28T12:00:00.000Z');
+  });
+
+  it('[DP-8][DEL-1] the sweep deletes a file nobody points at, and any file past 30 days', async () => {
+    const ref = await ingest('o-sweep');
+    const kept = randomUUID();
+    await store(kept, [ref]);
+    // A file left behind by a restore or a failed write: no row points at it.
+    const stray = join(labelsDir, ws, `${randomUUID()}.bin`);
+    writeFileSync(stray, 'sealed bytes');
+    const hourAgo = new Date(Date.now() - 2 * 3_600_000);
+    utimesSync(stray, hourAgo, hourAgo);
+    const pool = createPiiPool({ ...cluster.connection('vault_app'), max: 1 }, () => undefined);
+    try {
+      const sweeper = new LabelStore({
+        pool,
+        dir: labelsDir,
+        vault: { withDataKey: () => Promise.reject(new Error('no key needed')) },
+      });
+      expect(await sweeper.sweepOrphans()).toBe(1);
+      expect(existsSync(stray)).toBe(false);
+      expect(files().some((f) => f.startsWith(kept))).toBe(true);
+      // Past 30 days even a stored label's file goes.
+      const old = new Date(Date.now() - 31 * DAY);
+      const keptFile = join(labelsDir, ws, `${kept}.bin`);
+      utimesSync(keptFile, old, old);
+      expect(await sweeper.sweepOrphans()).toBe(1);
+      expect(existsSync(keptFile)).toBe(false);
+    } finally {
+      await pool.end();
+    }
   });
 
   it('[SHP-5] a voided label is discarded at once, by the worker only', async () => {

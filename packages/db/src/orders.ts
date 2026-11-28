@@ -919,6 +919,20 @@ export class OrderIngest implements UnmappedDemand {
       }
     }
 
+    // SHP-5, EVRI-6: a label bought for an order the channel cancelled goes on the reconcile list,
+    // and the order holds no live label any more.
+    if (statusChanged && next === 'cancelled') {
+      const { rows: ended } = await sql<{ shipment_id: string }>`
+        UPDATE app.shipment_orders SET live = false
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${existing.id}::uuid AND live
+         RETURNING shipment_id`.execute(trx);
+      for (const { shipment_id } of ended) {
+        await sql`UPDATE app.parcels SET reconcile_since = coalesce(reconcile_since, ${now}), updated_at = ${now}
+                   WHERE workspace_id = ${ctx.workspaceId}::uuid AND shipment_id = ${shipment_id}::uuid
+                     AND state = 'created' AND reconciled_at IS NULL`.execute(trx);
+      }
+    }
+
     // DEL-1: cancellation deletes the buyer's record; dispatch and delivery move its expiry.
     if (piiRef !== null && existing.pii_deleted_at === null) {
       if (statusChanged && next === 'cancelled') {

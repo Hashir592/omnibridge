@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DataKey } from '@omnibridge/crypto';
 import type { Pool, PoolClient } from '@omnibridge/pii-db';
@@ -13,6 +13,8 @@ export const MERGE_MAX = 200;
 /** Invariant 11: a label goes 30 days after it was stored at the latest. */
 export const LABEL_DAYS = 30;
 const DAY_MS = 86_400_000;
+/** A file with no row is left this long, so a store still writing is never swept. */
+const ORPHAN_GRACE_MS = 3_600_000;
 const AAD_TABLE = 'label_files';
 
 export class NotPdf extends Error {}
@@ -107,12 +109,14 @@ export class LabelStore implements LabelFiles {
 
   /**
    * SHP-2, FA-15: one PDF of the labels, in the order asked for, built in memory and never
-   * written. NotFound when any label is not stored. Each label is logged as a full read.
+   * written. NotFound when any label is not stored. Each label is logged as a full read, in a
+   * short transaction before the merge; the merge itself holds no db-pii connection, so prints
+   * never starve the vault's pool.
    */
   async merge(workspaceId: string, labelIds: readonly string[], actor: Actor): Promise<Uint8Array> {
     if (labelIds.length === 0 || labelIds.length > MERGE_MAX) throw new NotFound();
     const paths = labelIds.map((id) => this.#path(workspaceId, id));
-    return this.#vault.withDataKey(workspaceId, async (key, c) => {
+    const key = await this.#vault.withDataKey(workspaceId, async (dataKey, c) => {
       const { rows } = await c.query<{ label_id: string; pii_refs: string[] }>(
         `SELECT label_id, pii_refs FROM vault.label_files
           WHERE workspace_id = $1 AND label_id = ANY($2::uuid[])`,
@@ -120,13 +124,6 @@ export class LabelStore implements LabelFiles {
       );
       const byId = new Map(rows.map((r) => [r.label_id, r.pii_refs]));
       if (labelIds.some((id) => !byId.has(id))) throw new NotFound();
-      const merged = await mergeLabelPdfs(labelIds.length, async (i) => {
-        const id = labelIds[i] ?? '';
-        const sealed = await readFile(paths[i] ?? '').catch(() => {
-          throw new NotFound();
-        });
-        return key.decrypt(sealed, { workspaceId, table: AAD_TABLE, column: 'file', rowId: id });
-      });
       const at = this.#now();
       for (const id of labelIds) {
         for (const ref of byId.get(id) ?? []) {
@@ -137,8 +134,45 @@ export class LabelStore implements LabelFiles {
           );
         }
       }
-      return merged;
+      return dataKey;
     });
+    return mergeLabelPdfs(labelIds.length, async (i) => {
+      const id = labelIds[i] ?? '';
+      const sealed = await readFile(paths[i] ?? '').catch(() => {
+        throw new NotFound();
+      });
+      return key.decrypt(sealed, { workspaceId, table: AAD_TABLE, column: 'file', rowId: id });
+    });
+  }
+
+  /**
+   * Invariant 11's safety net, at start and daily: a file nobody points at (a restore dropped its
+   * row, or a write failed after the file landed) is deleted once it is an hour old, and every
+   * file goes at 30 days whatever its row says. A file being written is never that old.
+   */
+  async sweepOrphans(): Promise<number> {
+    const now = this.#now().getTime();
+    let removed = 0;
+    const workspaces = await readdir(this.#dir).catch(() => [] as string[]);
+    for (const ws of workspaces) {
+      if (!isUuid(ws)) continue;
+      const names = await readdir(join(this.#dir, ws)).catch(() => [] as string[]);
+      const ids = names
+        .map((n) => /^([0-9a-f-]{36})\.bin$/.exec(n)?.[1])
+        .filter((id): id is string => id !== undefined && isUuid(id));
+      const known = new Set(ids.length === 0 ? [] : await this.stored(ws, ids));
+      for (const name of names) {
+        const file = join(this.#dir, ws, name);
+        const age = now - (await stat(file).catch(() => ({ mtimeMs: now }))).mtimeMs;
+        const id = /^([0-9a-f-]{36})\.bin$/.exec(name)?.[1];
+        const orphan = id === undefined || !known.has(id);
+        if (age >= LABEL_DAYS * DAY_MS || (orphan && age >= ORPHAN_GRACE_MS)) {
+          await rm(file, { force: true });
+          removed += 1;
+        }
+      }
+    }
+    return removed;
   }
 
   /** Whether each label is stored, for a reprint (IDs only). */

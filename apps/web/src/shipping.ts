@@ -238,7 +238,8 @@ export function shippingHandlers(options?: ShippingOptions): Handlers<typeof shi
       throw new ApiError({
         status: 409,
         code: 'conflict',
-        detail: 'This label is still being bought or was already voided. Try again shortly.',
+        detail:
+          'This label is still being bought, was already voided, or one of its orders changed. Read it again.',
       });
     }
     throw err;
@@ -606,6 +607,11 @@ export function shippingHandlers(options?: ShippingOptions): Handlers<typeof shi
 
     confirmAddressCheck: async ({ params, tenant }) => {
       if (!(await o.shipping.confirmAddressCheck(tenant, params.orderId))) throw missing();
+      // ADR-081: the warning goes once the order has been checked.
+      await o.notifier.resolve(tenant, 'shipping.address_changed', {
+        kind: 'order',
+        id: params.orderId,
+      });
       return { status: 204, body: null };
     },
   };

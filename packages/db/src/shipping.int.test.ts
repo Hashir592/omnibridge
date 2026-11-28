@@ -237,6 +237,63 @@ describe('labels and shipments in db-main (T-1201)', () => {
     expect((await repo.work(w.all, next))?.parcels[0]?.clientUid).toBe(`${o.ref}-2`);
   });
 
+  it('[EVRI-3] a label job that gave up frees its orders: a sent parcel is unknown, an unsent one refused', async () => {
+    const w = await world();
+    const o = await order(w, w.a, w.ebayA);
+    const { batchId } = await repo.requestLabels(
+      w.all,
+      {
+        userId: null,
+        orders: [label(o.id, w.evri, { parcels: [{ weightG: 500 }, { weightG: 600 }] })],
+      },
+      ports,
+    );
+    const shipmentId = (await repo.batch(w.all, batchId))?.[0]?.shipmentId ?? '';
+    const parcels = (await repo.work(w.all, shipmentId))?.parcels ?? [];
+    await repo.parcelSending(w.all, parcels[0]?.id ?? '');
+    expect(await repo.abandon(w.all, shipmentId)).toBe('failed');
+    const view = await repo.shipment(w.all, shipmentId);
+    expect(view?.parcels.map((p) => [p.state, p.errorCode])).toEqual([
+      ['unknown', 'carrier.no_answer'],
+      ['invalid', 'carrier.unavailable'],
+    ]);
+    const list = await repo.reconcile(w.all, { limit: 20, offset: 0 });
+    expect(list.rows.map((r) => r.parcelId)).toEqual([parcels[0]?.id]);
+    const again = await repo.requestLabels(
+      w.all,
+      { userId: null, orders: [label(o.id, w.evri)] },
+      ports,
+    );
+    expect((await repo.batch(w.all, again.batchId))?.[0]?.state).toBe('queued');
+  });
+
+  it('[EVRI-3] two channels with the same order reference never share a client UID on one carrier account', async () => {
+    const w = await world();
+    const first = await order(w, w.a, w.ebayA);
+    // The same reference from the other company's account.
+    const other = randomUUID();
+    await root.query(
+      `INSERT INTO app.orders
+         (workspace_id, id, company_id, provider, origin, channel_account_id, external_order_id,
+          pii_subject, pii_ref, status, raw_status, placed_at, source_updated_at, tax_point_date,
+          goods_pence, gross_pence, stock_moves, created_at, updated_at)
+       VALUES ($1, $2, $3, 'ebay', 'ebay', $4::uuid, $5::text, $4::uuid::text || ':' || $5,
+               gen_random_uuid(), 'awaiting_dispatch', 'x', now(), now(), now()::date, 1, 1,
+               false, now(), now())`,
+      [w.workspaceId, other, w.b, w.ebayB, first.ref],
+    );
+    const { batchId } = await repo.requestLabels(
+      w.all,
+      { userId: null, orders: [label(first.id, w.evri), label(other, w.evri)] },
+      ports,
+    );
+    const items = (await repo.batch(w.all, batchId)) ?? [];
+    const uids = await Promise.all(
+      items.map(async (i) => (await repo.work(w.all, i.shipmentId ?? ''))?.parcels[0]?.clientUid),
+    );
+    expect(uids).toEqual([`${first.ref}-1`, `${first.ref}-2`]);
+  });
+
   it('[AT-12][SHIP-4] an INVALID parcel fails its order with the carrier code and paths; the batch shows it', async () => {
     const w = await world();
     const good = await order(w, w.a, w.ebayA);

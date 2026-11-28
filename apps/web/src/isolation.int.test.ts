@@ -62,7 +62,7 @@ const MARKER = 'WSB-MARKER';
 /** An Evri code of the documented form (EVRI-2); the walk never exchanges one for B. */
 const EVRI_CODE = '0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d';
 /** B's shipping rows (M12, T-1201): an Evri account, a bought label, its batch and parcel. */
-const shipB = {
+const shipB: Record<'carrier' | 'batch' | 'shipment' | 'parcel', string> = {
   carrier: randomUUID(),
   batch: randomUUID(),
   shipment: randomUUID(),

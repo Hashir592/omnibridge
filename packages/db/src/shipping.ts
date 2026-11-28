@@ -530,9 +530,9 @@ export class ShippingRepository {
         const state: BatchItemView['state'] =
           r.refusal !== null
             ? 'refused'
-            : r.status === 'created' || r.status === 'voided'
+            : r.status === 'created'
               ? 'created'
-              : r.status === 'failed'
+              : r.status === 'failed' || r.status === 'voided'
                 ? 'failed'
                 : r.requesting
                   ? 'creating'
@@ -545,9 +545,11 @@ export class ShippingRepository {
           trackingNumber: r.tracking_number,
           refusal: r.refusal,
           error:
-            state === 'failed' && r.error_code !== null
-              ? { code: r.error_code, fields: r.error_fields ?? [] }
-              : null,
+            r.status === 'voided'
+              ? { code: 'label.voided', fields: [] }
+              : state === 'failed' && r.error_code !== null
+                ? { code: r.error_code, fields: r.error_fields ?? [] }
+                : null,
         };
       });
     });
@@ -694,6 +696,27 @@ export class ShippingRepository {
     );
   }
 
+  /**
+   * The label job gave up (its retries ran out): no parcel stays in flight. A parcel that was sent
+   * may exist at the carrier, so it is `unknown` and goes on the reconcile list; one never sent is
+   * refused. The shipment then fails, freeing its orders to be labelled again.
+   */
+  async abandon(ctx: TenantContext, shipmentId: string): Promise<ShipmentStatus | undefined> {
+    const now = this.#now();
+    await withTenantTransaction(this.#db, ctx, async (trx) => {
+      await sql`UPDATE app.parcels
+                   SET state = 'unknown', error_code = 'carrier.no_answer',
+                       reconcile_since = coalesce(reconcile_since, ${now}), updated_at = ${now}
+                 WHERE workspace_id = ${ctx.workspaceId}::uuid AND shipment_id = ${shipmentId}::uuid
+                   AND state = 'requesting'`.execute(trx);
+      await sql`UPDATE app.parcels
+                   SET state = 'invalid', error_code = 'carrier.unavailable', updated_at = ${now}
+                 WHERE workspace_id = ${ctx.workspaceId}::uuid AND shipment_id = ${shipmentId}::uuid
+                   AND state = 'pending'`.execute(trx);
+    });
+    return this.settle(ctx, shipmentId);
+  }
+
   /** The worker found a reason not to buy (EVRI-4: the address had to be shortened). */
   async refuse(ctx: TenantContext, shipmentId: string, refusal: LabelRefusal): Promise<void> {
     const now = this.#now();
@@ -818,9 +841,20 @@ export class ShippingRepository {
         trx,
       );
       if (rows[0]?.status !== 'created') throw new ShipmentRefused('conflict');
-      if ([...orders.values()].some((o) => o.status !== 'label_created')) {
+      const statuses = [...orders.values()].map((o) => o.status);
+      // A dispatched order (or later) has had its tracking sent; anything else changed under it.
+      if (
+        statuses.some(
+          (st) =>
+            st !== 'label_created' &&
+            st !== 'awaiting_dispatch' &&
+            st !== 'cancelled' &&
+            st !== 'pending_payment',
+        )
+      ) {
         throw new ShipmentRefused('tracking_sent');
       }
+      if (statuses.some((st) => st !== 'label_created')) throw new ShipmentRefused('conflict');
       await sql`UPDATE app.shipments SET status = 'voided', voided_at = ${now}, updated_at = ${now}
                  WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ${shipmentId}::uuid`.execute(
         trx,
@@ -1031,14 +1065,16 @@ export class ShippingRepository {
         VALUES (${ctx.workspaceId}::uuid, ${id}::uuid, ${m.id}::uuid, ${m.company_id}::uuid,
                 ${i + 1}, ${shares?.[i]?.toString() ?? null}::bigint)`.execute(trx);
     }
-    // The client UID runs on per order across its shipments, so a relabel never repeats one.
+    // The client UID runs on per reference on this carrier account, so a relabel, or an order of
+    // another channel with the same reference, never repeats one (EVRI-3).
+    const ref = lead.external_order_id.slice(0, 240);
     const { rows: used } = await sql<{ n: string }>`
-      SELECT count(*)::text AS n FROM app.parcels p
-        JOIN app.shipment_orders so ON so.workspace_id = p.workspace_id
-                                   AND so.shipment_id = p.shipment_id AND so.position = 1
-       WHERE p.workspace_id = ${ctx.workspaceId}::uuid AND so.order_id = ${lead.id}::uuid`.execute(
-      trx,
-    );
+      SELECT coalesce(max(substring(client_uid FROM char_length(${ref}) + 2)::bigint), 0)::text AS n
+        FROM app.parcels
+       WHERE workspace_id = ${ctx.workspaceId}::uuid
+         AND carrier_account_id = ${input.carrier.id}::uuid
+         AND left(client_uid, char_length(${ref}) + 1) = ${`${ref}-`}
+         AND substring(client_uid FROM char_length(${ref}) + 2) ~ '^[0-9]{1,9}$'`.execute(trx);
     let seq = Number(used[0]?.n ?? 0);
     for (const [i, p] of input.parcels.entries()) {
       seq += 1;
@@ -1047,9 +1083,7 @@ export class ShippingRepository {
                                  parcel_no, client_uid, weight_g, state, created_at, updated_at)
         VALUES (${ctx.workspaceId}::uuid, ${randomUUID()}::uuid, ${id}::uuid,
                 ${lead.company_id}::uuid, ${input.carrier.id}::uuid, ${i + 1},
-                ${clientUid(lead.external_order_id, seq)}, ${p.weightG}, 'pending', ${now}, ${now})`.execute(
-        trx,
-      );
+                ${clientUid(ref, seq)}, ${p.weightG}, 'pending', ${now}, ${now})`.execute(trx);
     }
     return id;
   }

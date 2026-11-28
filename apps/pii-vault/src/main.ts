@@ -118,9 +118,22 @@ const purgeDeletedBuyers = async () => {
     );
   }
 };
+// Invariant 11: label files nobody points at, or older than 30 days, go (IDs only in the log).
+const sweepLabels = async () => {
+  try {
+    const count = await labels.sweepOrphans();
+    logger.info({ event: 'vault.label_sweep', count }, 'label files swept');
+  } catch (err) {
+    logger.error(
+      { event: 'vault.label_sweep_failed', error: err instanceof Error ? err.name : 'unknown' },
+      'label file sweep failed',
+    );
+  }
+};
 const dailyPurge = () => {
   void purgeSecurityLogs();
   void purgeDeletedBuyers();
+  void sweepLabels();
 };
 dailyPurge();
 const purgeTimer = setInterval(dailyPurge, DAY_MS);
