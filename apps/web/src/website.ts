@@ -83,9 +83,12 @@ export interface WebsiteOptions {
     /**
      * INV-7, FA-16: the products just sent are a website's listing read, so their quantities are
      * compared with their targets; a first run with no drift switches the account's stock writes
-     * on (a new website account holds them until then).
+     * on (a new website account holds them until then). Called after the call's own transaction
+     * has committed, as the worker reconciles after a scan: it opens short transactions of its own,
+     * so its stock-row locks never come after the listing locks of the upsert (lock order,
+     * F-M10-end-10).
      */
-    reconcile?: (ctx: TenantContext, channelAccountId: string, seenAt: Date) => Promise<unknown>;
+    reconcile?: (workspaceId: string, channelAccountId: string, seenAt: Date) => Promise<unknown>;
   };
   disconnect?: {
     listings: Pick<CatalogueRepository, 'endAll'>;
@@ -546,9 +549,10 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
     websitePushProducts: ({ body, request }) => {
       const products = o.products;
       if (products === undefined) return notFound();
-      return once(o, request, 'websitePushProducts', (caller) =>
+      const seenAt = now();
+      const caller = callerOf(request);
+      const stored = once(o, request, 'websitePushProducts', () =>
         Promise.resolve(async (ctx: TenantContext) => {
-          const seenAt = now();
           const { autoMapped } = await products.listings.upsertDiscovered(
             ctx,
             caller.connectionId,
@@ -565,10 +569,21 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
             seenAt,
           );
           for (const change of autoMapped) await products.mapped(ctx, change);
-          await products.reconcile?.(ctx, caller.connectionId, seenAt);
           return { status: 200 as const, body: { received: body.products.length } };
         }),
       );
+      return stored.then(async (answer) => {
+        // The products are stored: a reconcile failure is logged, and the next push runs it again.
+        try {
+          await products.reconcile?.(caller.workspaceId, caller.connectionId, seenAt);
+        } catch (err) {
+          o.logger.error(
+            { event: 'stock.reconcile_failed', channelAccountId: caller.connectionId, err },
+            'reconciliation failed after a website products call',
+          );
+        }
+        return answer;
+      });
     },
   };
 }

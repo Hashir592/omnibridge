@@ -272,9 +272,13 @@ const app = buildWebApp({
       products: {
         listings: catalogue,
         mapped: websiteMapped(queue),
-        // The request's own transaction: `run` hands every step the same bound context.
-        reconcile: (ctx, accountId, seenAt) =>
-          stockEngine.reconcile((fn) => fn(ctx), accountId, seenAt),
+        // After the call's transaction, in short transactions of its own (one per SKU).
+        reconcile: (workspaceId, accountId, seenAt) =>
+          stockEngine.reconcile(
+            (fn) => tenancy.runWorkspace({ workspaceId }, fn),
+            accountId,
+            seenAt,
+          ),
       },
       disconnect: { listings: catalogue, stock: stockEngine },
       logger,
