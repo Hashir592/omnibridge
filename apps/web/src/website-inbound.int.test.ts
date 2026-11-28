@@ -259,7 +259,7 @@ describe('website calls, signed and idempotent (T-1101)', () => {
     await Promise.all([main.container.stop(), pii.container.stop()]);
   });
 
-  it('[AT-14][WEB-2] a signed push stores the order; a wrong key, signature or a timestamp over 5 minutes off is refused', async () => {
+  it('[AT-14][WEB-2][OPS-12] a signed push stores the order; a wrong key, signature or a timestamp over 5 minutes off is refused', async () => {
     const tag = randomUUID().slice(0, 8);
     const ok = await push(order(`W-OK-${tag}`));
     expect(ok.status).toBe(201);
