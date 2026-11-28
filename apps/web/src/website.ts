@@ -54,8 +54,8 @@ export interface WebsiteOptions {
   now?: () => Date;
 }
 
-const notFound = () => Promise.reject(new ApiError({ status: 404, code: 'not_found' }));
 const missing = () => new ApiError({ status: 404, code: 'not_found' });
+const notFound = () => Promise.reject(missing());
 
 /** WEB-1: 32 random bytes, URL-safe; shown once and kept only as a hash or encrypted. */
 const newKeys = () => ({
@@ -142,6 +142,65 @@ function idempotencyKey(request: FastifyRequest): string {
     });
   }
   return key;
+}
+
+/** What a website call answers, and what its Idempotency-Key replays. */
+interface Answer<B extends Readonly<Record<string, unknown>>> {
+  status: 200 | 201;
+  body: B;
+}
+
+/**
+ * WEB-2: a website call runs once per Idempotency-Key. The same key and body give the kept
+ * answer; another body under it is 409. `prepare` runs with no transaction open (the vault step,
+ * ADR-054 FA-04) and returns the work of one tenant transaction, which runs under the key's lock
+ * and whose answer is kept.
+ */
+async function once<B extends Readonly<Record<string, unknown>>>(
+  o: WebsiteOptions,
+  request: FastifyRequest,
+  route: string,
+  prepare: (caller: WebsiteCaller) => Promise<(ctx: TenantContext) => Promise<Answer<B>>>,
+): Promise<Answer<B>> {
+  const caller = callerOf(request);
+  const key = idempotencyKey(request);
+  const hash = createHash('sha256')
+    .update(`${route}\n`)
+    .update(rawBodyOf(request) ?? Buffer.alloc(0))
+    .digest();
+  const actor = { workspaceId: caller.workspaceId };
+  const account = caller.connectionId;
+  const replay = (prior: { requestHash: Buffer; status: number; response: object }): Answer<B> => {
+    if (!prior.requestHash.equals(hash)) {
+      throw new ApiError({
+        status: 409,
+        code: 'conflict',
+        detail: 'Idempotency-Key used for another request',
+      });
+    }
+    return { status: prior.status === 201 ? 201 : 200, body: prior.response as B };
+  };
+  const prior = await o.tenancy.runWorkspace(actor, (ctx) =>
+    o.connections.answered(ctx, account, key),
+  );
+  if (prior !== undefined) return replay(prior);
+  const work = await prepare(caller);
+  return o.tenancy.runWorkspace(actor, async (ctx) => {
+    // Under the key's lock: a call with the same key that ran meanwhile has answered.
+    const meanwhile = await o.connections.answered(ctx, account, key);
+    if (meanwhile !== undefined) return replay(meanwhile);
+    const answer = await work(ctx);
+    await o.connections.remember(ctx, {
+      channelAccountId: account,
+      companyId: caller.companyId,
+      key,
+      route,
+      requestHash: hash,
+      status: answer.status,
+      response: answer.body,
+    });
+    return answer;
+  });
 }
 
 export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websiteRoutes> {
@@ -289,61 +348,23 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
 
     disconnectAccount: notFound,
 
-    websitePushOrder: async ({ body, request }) => {
-      if (o.ingest === undefined) throw missing();
+    websitePushOrder: ({ body, request }) => {
+      if (o.ingest === undefined) return notFound();
       const { steps, orders } = o.ingest;
-      const caller = callerOf(request);
-      const key = idempotencyKey(request);
-      const route = 'websitePushOrder';
-      const hash = createHash('sha256')
-        .update(`${route}\n`)
-        .update(rawBodyOf(request) ?? Buffer.alloc(0))
-        .digest();
-      const actor = { workspaceId: caller.workspaceId };
-      const account = caller.connectionId;
-      type Answer = { status: 200 | 201; body: { omnibridgeOrderId: string } };
-      // WEB-2: the same key and body give the same answer; another body under it is a conflict.
-      const replay = (prior: { requestHash: Buffer; status: number; response: object }): Answer => {
-        if (!prior.requestHash.equals(hash)) {
-          throw new ApiError({
-            status: 409,
-            code: 'conflict',
-            detail: 'Idempotency-Key used for another request',
-          });
-        }
-        return { status: prior.status === 201 ? 201 : 200, body: prior.response as Answer['body'] };
-      };
-      const prior = await o.tenancy.runWorkspace(actor, (ctx) =>
-        o.connections.answered(ctx, account, key),
-      );
-      if (prior !== undefined) return replay(prior);
-      // Vault first, with no transaction open (ADR-054 FA-04, invariant 3).
-      const order = websiteChannelOrder(body);
-      const job = { workspaceId: caller.workspaceId, channelAccountId: account };
-      const ready = (await steps.prepare?.(job, [order])) ?? [order];
-      return o.tenancy.runWorkspace(actor, async (ctx): Promise<Answer> => {
-        // Under the key's lock: a call with the same key that ran meanwhile has answered.
-        const meanwhile = await o.connections.answered(ctx, account, key);
-        if (meanwhile !== undefined) return replay(meanwhile);
-        const before = await orders.orderIds(ctx, account, [body.externalOrderId]);
-        await steps.sink(ctx, account, ready);
-        const stored = await orders.orderIds(ctx, account, [body.externalOrderId]);
-        const id = stored.get(body.externalOrderId);
-        if (id === undefined) throw new Error('website order not stored');
-        const answer: Answer = {
-          status: before.has(body.externalOrderId) ? 200 : 201,
-          body: { omnibridgeOrderId: id },
+      const id = body.externalOrderId;
+      return once(o, request, 'websitePushOrder', async (caller) => {
+        const account = caller.connectionId;
+        // Vault first, with no transaction open (ADR-054 FA-04, invariant 3).
+        const order = websiteChannelOrder(body);
+        const job = { workspaceId: caller.workspaceId, channelAccountId: account };
+        const ready = (await steps.prepare?.(job, [order])) ?? [order];
+        return async (ctx) => {
+          const before = await orders.orderIds(ctx, account, [id]);
+          await steps.sink(ctx, account, ready);
+          const stored = (await orders.orderIds(ctx, account, [id])).get(id);
+          if (stored === undefined) throw new Error('website order not stored');
+          return { status: before.has(id) ? 200 : 201, body: { omnibridgeOrderId: stored } };
         };
-        await o.connections.remember(ctx, {
-          channelAccountId: account,
-          companyId: caller.companyId,
-          key,
-          route,
-          requestHash: hash,
-          status: answer.status,
-          response: answer.body,
-        });
-        return answer;
       });
     },
 
