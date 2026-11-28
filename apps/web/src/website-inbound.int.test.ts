@@ -102,6 +102,7 @@ describe('website calls, signed and idempotent (T-1101)', () => {
           steps: orderIngestStream({ tenancy, ingest, vault: web, logger, corrections: 'ingest' }),
           orders: ingest,
         },
+        products: { listings: new CatalogueRepository(db.db), mapped: () => Promise.resolve() },
         logger,
       },
     });

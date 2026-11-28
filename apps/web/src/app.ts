@@ -161,9 +161,14 @@ export interface WebAppOptions {
 function signedCheck(ebay: EbayWebhook | undefined, website: WebsiteOptions | undefined) {
   const ebayCheck = ebay === undefined ? undefined : webhookVerifier(ebay);
   const websiteCheck = website === undefined ? undefined : websiteVerifier(website);
-  return (request: FastifyRequest, route: AnyRoute): Promise<boolean> =>
-    (route.module === 'website_connector' ? websiteCheck : ebayCheck)?.(request, route) ??
-    Promise.resolve(false);
+  return (request: FastifyRequest, route: AnyRoute): Promise<boolean> => {
+    const verify = route.module === 'website_connector' ? websiteCheck : ebayCheck;
+    // A route whose sender is not set up answers as if no verifier were given at all: 401.
+    if (verify === undefined) {
+      return Promise.reject(new ApiError({ status: 401, code: 'unauthorized' }));
+    }
+    return verify(request, route);
+  };
 }
 
 async function check(fn: () => Promise<boolean>): Promise<Health['db_main']> {

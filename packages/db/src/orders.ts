@@ -214,6 +214,21 @@ interface OrderRow {
   cancel_requested: boolean;
 }
 
+/** The lifecycle state a stored status stands for, so an update built from it moves nothing. */
+function storedState(row: Pick<OrderRow, 'status' | 'delivered_at'>): IncomingState {
+  switch (row.status) {
+    case 'pending_payment':
+    case 'cancelled':
+    case 'delivered':
+      return row.status;
+    case 'awaiting_dispatch':
+    case 'label_created':
+      return 'awaiting_dispatch';
+    default:
+      return row.delivered_at === null ? 'dispatched' : 'delivered';
+  }
+}
+
 /** ORD-9 (C3.1): the orders a recompute considers (OrderReads.groupCandidates). */
 const canGroup = (
   o: Pick<OrderRow, 'status' | 'fba' | 'cancel_requested' | 'pii_ref' | 'pii_deleted_at'>,
@@ -1164,11 +1179,6 @@ export class OrderIngest implements UnmappedDemand {
                  AND id = ANY (${sql.val(fba)}::uuid[])`.execute(trx);
   }
 
-  /**
-   * CAT-6: mapped listings of the account that still have provisional lines get their event again:
-   * a line stored while the event ran (or while the scan added the listing) was not visible to it.
-   * Read only here, so ingest takes no listing lock. Returns how many listings it reported.
-   */
   /** The OmniBridge IDs of an account's orders, by external order ID (the website push answers it). */
   async orderIds(
     ctx: TenantContext,
@@ -1186,6 +1196,68 @@ export class OrderIngest implements UnmappedDemand {
     return new Map(rows.map((r) => [r.external_order_id, r.id]));
   }
 
+  /**
+   * WEB-3: a stored order as an update that changes nothing, for a website call that changes one
+   * thing (a cancel, a refund) through `apply`. It carries the stored change time, so the amounts
+   * and lines stay as they are (an update with no lines never touches lines, F-M10-end-25), and the
+   * refunds already recorded, so a status counts them all. Undefined when the order is not stored.
+   */
+  async asStored(
+    ctx: TenantContext,
+    channelAccountId: string,
+    externalId: string,
+  ): Promise<{ id: string; order: IncomingOrder } | undefined> {
+    return withTenantTransaction(this.#db, ctx, async (trx) => {
+      const { rows } = await sql<OrderRow & { placed_at: Date }>`
+        SELECT placed_at, ${ORDER_COLUMNS} FROM app.orders
+         WHERE workspace_id = ${ctx.workspaceId}::uuid
+           AND channel_account_id = ${channelAccountId}::uuid
+           AND external_order_id = ${externalId}`.execute(trx);
+      const row = rows[0];
+      if (row === undefined) return undefined;
+      const { rows: refunds } = await sql<{ id: string; at: Date; amount: string }>`
+        SELECT external_refund_id AS id, refunded_at AS at, amount_pence::text AS amount
+          FROM app.refunds
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${row.id}::uuid
+         ORDER BY refunded_at, external_refund_id`.execute(trx);
+      return {
+        id: row.id,
+        order: {
+          externalId,
+          rawStatus: row.raw_status,
+          state: storedState(row),
+          updatedAt: row.source_updated_at,
+          placedAt: row.placed_at,
+          paidAt: row.paid_at,
+          shipBy: row.ship_by,
+          // The stored dates stand; null here never clears one.
+          dispatchedAt: null,
+          deliveredAt: null,
+          cancelledAt: row.cancelled_at,
+          discount: pence(big(row.discount_pence)),
+          shipping: pence(big(row.shipping_pence)),
+          channelTotal: null,
+          shipToCountry: null,
+          fba: row.fba,
+          cancelRequested: row.cancel_requested,
+          lines: [],
+          refunds: refunds.map((r) => ({
+            refundId: r.id,
+            refundedAt: r.at,
+            amount: pence(big(r.amount)),
+            lines: null,
+          })),
+          pii: { kind: 'unchanged' },
+        },
+      };
+    });
+  }
+
+  /**
+   * CAT-6: mapped listings of the account that still have provisional lines get their event again:
+   * a line stored while the event ran (or while the scan added the listing) was not visible to it.
+   * Read only here, so ingest takes no listing lock. Returns how many listings it reported.
+   */
   async reportLateMapped(ctx: TenantContext, channelAccountId: string): Promise<number> {
     return withBoundTenant(this.#db, ctx, async (trx, ctx) => {
       const { rows } = await sql<{ listing_id: string; master_sku_id: string; lines: string[] }>`

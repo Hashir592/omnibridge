@@ -486,6 +486,21 @@ export class AccountCredentials {
     );
   }
 
+  /**
+   * Disconnect (T-1101): every credential of the account, of every kind and environment, current
+   * or retired, is deleted. Returns how many rows went.
+   */
+  async removeAll(ctx: TenantContext, channelAccountId: string): Promise<number> {
+    const result = await withTenantTransaction(this.#db, ctx, (trx) =>
+      trx
+        .deleteFrom('app.credentials')
+        .where('workspace_id', '=', ctx.workspaceId)
+        .where('channel_account_id', '=', channelAccountId)
+        .executeTakeFirst(),
+    );
+    return Number(result.numDeletedRows);
+  }
+
   /** Stores a new token as current (a connect or re-authorisation); the old one is retired. */
   replace(
     ctx: TenantContext,

@@ -5,7 +5,14 @@ import {
   type AnyRoute,
   type websiteRoutes,
 } from '@omnibridge/contract';
-import { ApiError, isUuid, type TenantContext, type TenantRunner } from '@omnibridge/core';
+import {
+  ApiError,
+  isUuid,
+  pence,
+  type Notifier,
+  type TenantContext,
+  type TenantRunner,
+} from '@omnibridge/core';
 import { Secret } from '@omnibridge/crypto';
 import type {
   AccountCredentials,
@@ -13,12 +20,22 @@ import type {
   CatalogueRepository,
   ChannelAccountRepository,
   ConnectionRepository,
+  MappingChange,
   OrderIngest,
+  OrderIngestPorts,
   StockEngine,
   WebsiteConnectionRepository,
 } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
-import { websiteChannelOrder, type OrderIngestSteps } from '@omnibridge/order-ingest';
+import type { JobQueue } from '@omnibridge/queue';
+import type { VaultClient } from '@omnibridge/vault-client';
+import {
+  orderIngestPorts,
+  orderIngestStream,
+  sendMappingChanged,
+  websiteChannelOrder,
+  type OrderIngestSteps,
+} from '@omnibridge/order-ingest';
 import type { FastifyRequest } from 'fastify';
 import { connectionBody } from './connections.ts';
 import { rawBodyOf, type Handlers } from './contract.ts';
@@ -35,10 +52,10 @@ export interface WebsiteOptions {
     WebsiteConnectionRepository,
     'create' | 'settings' | 'setBaseUrl' | 'setKeys' | 'inbound' | 'answered' | 'remember'
   >;
-  accounts: Pick<ChannelAccountRepository, 'create'>;
+  accounts: Pick<ChannelAccountRepository, 'create' | 'archive'>;
   /** The Connection row an answer carries (INT-4). */
   view: Pick<ConnectionRepository, 'get'>;
-  credentials: Pick<AccountCredentials, 'readKind' | 'replaceKind'>;
+  credentials: Pick<AccountCredentials, 'readKind' | 'replaceKind' | 'removeAll'>;
   audit: Pick<AuditLog, 'record'>;
   /** Opens the tenant transactions of website calls, which have no session. */
   tenancy: TenantRunner;
@@ -50,12 +67,20 @@ export interface WebsiteOptions {
    */
   ingest?: {
     steps: OrderIngestSteps;
-    orders: Pick<OrderIngest, 'orderIds'>;
+    orders: Pick<OrderIngest, 'orderIds' | 'asStored' | 'apply'>;
   };
   /**
    * Disconnect (any channel account): ends its listings and clears their manual stock settings
    * (C7.3). Without it the route answers 404.
    */
+  /**
+   * WEB-3, CAT-5: the website's products become the account's listings; a new listing matched on
+   * its exact code sends the mapped event (CAT-6). Without it the route answers 404.
+   */
+  products?: {
+    listings: Pick<CatalogueRepository, 'upsertDiscovered'>;
+    mapped: (ctx: TenantContext, change: MappingChange) => Promise<unknown>;
+  };
   disconnect?: {
     listings: Pick<CatalogueRepository, 'endAll'>;
     stock: Pick<StockEngine, 'onListingsEnded'>;
@@ -63,6 +88,39 @@ export interface WebsiteOptions {
   logger: Logger;
   now?: () => Date;
 }
+
+/**
+ * The website push's ingest (WEB-3): the worker's own order steps, vault first, with the web
+ * token's corrections path (ADR-083). Built here because only the website files of the web app
+ * may reach the ingest step (dependency rule order-ingest-only-website-in-web).
+ */
+export function websiteIngest(deps: {
+  ingest: (ports: OrderIngestPorts) => OrderIngest;
+  queue: Pick<JobQueue, 'send'>;
+  notifier: Pick<Notifier, 'raisePlatform'>;
+  tenancy: Pick<TenantRunner, 'runWorkspace'>;
+  vault: Pick<VaultClient, 'ingest' | 'replace'>;
+  logger: Logger;
+}): NonNullable<WebsiteOptions['ingest']> {
+  const ingest = deps.ingest(
+    orderIngestPorts(deps.queue, { notifier: deps.notifier, logger: deps.logger }),
+  );
+  return {
+    steps: orderIngestStream({
+      tenancy: deps.tenancy,
+      ingest,
+      vault: deps.vault,
+      logger: deps.logger,
+      corrections: 'ingest',
+    }),
+    orders: ingest,
+  };
+}
+
+/** CAT-6: a product the website sent that matched a Master SKU is told to M09 and M10. */
+export const websiteMapped =
+  (queue: Pick<JobQueue, 'send'>) => (ctx: TenantContext, change: MappingChange) =>
+    sendMappingChanged(queue, ctx, change, 'auto');
 
 const missing = () => new ApiError({ status: 404, code: 'not_found' });
 const notFound = () => Promise.reject(missing());
@@ -155,9 +213,9 @@ function idempotencyKey(request: FastifyRequest): string {
 }
 
 /** What a website call answers, and what its Idempotency-Key replays. */
-interface Answer<B extends Readonly<Record<string, unknown>>> {
+interface Answer {
   status: 200 | 201;
-  body: B;
+  body: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -166,12 +224,12 @@ interface Answer<B extends Readonly<Record<string, unknown>>> {
  * ADR-054 FA-04) and returns the work of one tenant transaction, which runs under the key's lock
  * and whose answer is kept.
  */
-async function once<B extends Readonly<Record<string, unknown>>>(
+async function once<A extends Answer>(
   o: WebsiteOptions,
   request: FastifyRequest,
   route: string,
-  prepare: (caller: WebsiteCaller) => Promise<(ctx: TenantContext) => Promise<Answer<B>>>,
-): Promise<Answer<B>> {
+  prepare: (caller: WebsiteCaller) => Promise<(ctx: TenantContext) => Promise<A>>,
+): Promise<A> {
   const caller = callerOf(request);
   const key = idempotencyKey(request);
   const hash = createHash('sha256')
@@ -180,7 +238,7 @@ async function once<B extends Readonly<Record<string, unknown>>>(
     .digest();
   const actor = { workspaceId: caller.workspaceId };
   const account = caller.connectionId;
-  const replay = (prior: { requestHash: Buffer; status: number; response: object }): Answer<B> => {
+  const replay = (prior: { requestHash: Buffer; status: number; response: object }): A => {
     if (!prior.requestHash.equals(hash)) {
       throw new ApiError({
         status: 409,
@@ -188,7 +246,8 @@ async function once<B extends Readonly<Record<string, unknown>>>(
         detail: 'Idempotency-Key used for another request',
       });
     }
-    return { status: prior.status === 201 ? 201 : 200, body: prior.response as B };
+    // The kept answer is one this route gave, so it has this route's shape.
+    return { status: prior.status === 201 ? 201 : 200, body: prior.response } as A;
   };
   const prior = await o.tenancy.runWorkspace(actor, (ctx) =>
     o.connections.answered(ctx, account, key),
@@ -356,7 +415,39 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
       return { status: 200, body: keys };
     },
 
-    disconnectAccount: notFound,
+    disconnectAccount: async ({ params, tenant, session, request }) => {
+      const d = o.disconnect;
+      if (d === undefined) throw missing();
+      const id = params.accountId;
+      const before = await o.view.get(tenant, id, now());
+      if (before === undefined) throw missing();
+      // One transaction (the request's): its writes stop as it is archived; the website's own calls
+      // find no connection (app.website_inbound skips archived accounts); syncs and outbound writes
+      // see it disconnected.
+      const archived = await o.accounts.archive(tenant, id);
+      const ended = await d.listings.endAll(tenant, id, now());
+      if (ended.length > 0) await d.stock.onListingsEnded(tenant, ended);
+      await o.credentials.removeAll(tenant, id);
+      if (archived) {
+        await o.audit.record(tenant, {
+          action: 'connection.removed',
+          actor: { kind: 'user', userId: session.userId },
+          entityId: id,
+          before: {
+            provider: before.provider,
+            company_id: before.companyId,
+            display_name: before.displayName,
+          },
+          ip: request.ip,
+        });
+      }
+      const after = await o.view.get(tenant, id, now());
+      if (after === undefined) throw missing();
+      return {
+        status: 200,
+        body: { connection: connectionBody(after), listings_ended: ended.length },
+      };
+    },
 
     websitePushOrder: ({ body, request }) => {
       if (o.ingest === undefined) return notFound();
@@ -378,8 +469,98 @@ export function websiteHandlers(options?: WebsiteOptions): Handlers<typeof websi
       });
     },
 
-    websiteCancelOrder: notFound,
-    websiteRefundOrder: notFound,
-    websitePushProducts: notFound,
+    websiteCancelOrder: ({ params, body, request }) => {
+      if (o.ingest === undefined) return notFound();
+      const { orders } = o.ingest;
+      const ext = params.externalOrderId;
+      return once(o, request, 'websiteCancelOrder', (caller) =>
+        Promise.resolve(async (ctx: TenantContext) => {
+          const account = caller.connectionId;
+          const found = await orders.asStored(ctx, account, ext);
+          if (found === undefined) throw missing();
+          // The state table decides, as for a poll: a dispatched order stays dispatched (FA-10).
+          // A cancellation deletes the buyer's record (DEL-1) through ingest's own port.
+          await orders.apply(ctx, account, [
+            {
+              ...found.order,
+              state: 'cancelled',
+              rawStatus: 'cancelled',
+              cancelledAt: new Date(body.cancelledAt),
+            },
+          ]);
+          return { status: 200 as const, body: { omnibridgeOrderId: found.id } };
+        }),
+      );
+    },
+
+    websiteRefundOrder: ({ params, body, request }) => {
+      if (o.ingest === undefined) return notFound();
+      const { orders } = o.ingest;
+      const ext = params.externalOrderId;
+      return once(o, request, 'websiteRefundOrder', (caller) =>
+        Promise.resolve(async (ctx: TenantContext) => {
+          const account = caller.connectionId;
+          const found = await orders.asStored(ctx, account, ext);
+          if (found === undefined) throw missing();
+          const answer = { omnibridgeOrderId: found.id };
+          // A refund ID already recorded changes nothing (VAT-6 rows are keyed per refund).
+          if (found.order.refunds.some((r) => r.refundId === body.refundId)) {
+            return { status: 200 as const, body: answer };
+          }
+          const refund = {
+            refundId: body.refundId,
+            refundedAt: new Date(body.refundedAt),
+            amount: pence(BigInt(body.amountGross)),
+            lines:
+              body.lines === null || body.lines === undefined
+                ? null
+                : body.lines.map((l) => ({
+                    lineId: l.externalLineId,
+                    quantity: l.quantity,
+                    amount: pence(BigInt(l.amountGross)),
+                  })),
+          };
+          await orders.apply(ctx, account, [
+            { ...found.order, refunds: [...found.order.refunds, refund] },
+          ]);
+          // Ingest books a refund only on a paid order; anything else was not recorded.
+          const after = await orders.asStored(ctx, account, ext);
+          if (!after?.order.refunds.some((r) => r.refundId === body.refundId)) {
+            throw new ApiError({
+              status: 422,
+              code: 'validation_failed',
+              detail: 'The order has no payment to refund',
+            });
+          }
+          return { status: 201 as const, body: answer };
+        }),
+      );
+    },
+
+    websitePushProducts: ({ body, request }) => {
+      const products = o.products;
+      if (products === undefined) return notFound();
+      return once(o, request, 'websitePushProducts', (caller) =>
+        Promise.resolve(async (ctx: TenantContext) => {
+          const { autoMapped } = await products.listings.upsertDiscovered(
+            ctx,
+            caller.connectionId,
+            'website',
+            body.products.map((p) => ({
+              externalSku: p.externalSku,
+              // The website names a product by its SKU alone.
+              externalId: p.externalSku,
+              title: p.title ?? null,
+              fulfilment: null,
+              inventoryApi: null,
+              quantity: p.quantity ?? null,
+            })),
+            now(),
+          );
+          for (const change of autoMapped) await products.mapped(ctx, change);
+          return { status: 200 as const, body: { received: body.products.length } };
+        }),
+      );
+    },
   };
 }
