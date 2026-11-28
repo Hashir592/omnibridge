@@ -7,7 +7,7 @@ import {
   withCarrierSlot,
   type SlotLimiter,
 } from './carrier.ts';
-import { ProviderRejected, ProviderUnavailable, RateLimited } from './errors.ts';
+import { ProviderRejected, ProviderUnavailable, RateLimited, SlotsFull } from './errors.ts';
 
 const ctx: TenantContext = { workspaceId: '00000000-0000-4000-8000-000000000001', companyIds: [] };
 const ACCOUNT = '00000000-0000-4000-8000-0000000000aa';
@@ -61,6 +61,28 @@ describe('carrier and website concurrency cap (RL-4)', () => {
     for (const release of releases.splice(0)) release();
     expect(await Promise.all(five)).toEqual(['done', 'done', 'done', 'done', 'done']);
     expect(peak).toBe(4);
+  });
+
+  it('[RL-4] a caller that finds every slot taken for too long gets a governor wait, never a failure', async () => {
+    const full: SlotLimiter = {
+      acquire: () => Promise.resolve(false),
+      release: () => Promise.resolve(),
+    };
+    const at = new Date('2026-11-28T12:00:00.000Z');
+    let ran = false;
+    const err = await withCarrierSlot(
+      full,
+      ctx,
+      ACCOUNT,
+      () => {
+        ran = true;
+        return Promise.resolve('never');
+      },
+      { pollMs: 1, maxWaitMs: 5, now: () => at },
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SlotsFull);
+    expect((err as SlotsFull).until.getTime()).toBeGreaterThan(at.getTime());
+    expect(ran).toBe(false);
   });
 
   it('[RL-4] a carrier 429 or 5xx is retried with growing waits; a rejection is not', async () => {

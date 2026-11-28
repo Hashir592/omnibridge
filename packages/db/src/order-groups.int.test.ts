@@ -410,10 +410,14 @@ describe('same-buyer groups and recomputes at once (T-1004)', () => {
     expect(await groupIds(w)).toEqual([null]);
     const many = await world();
     const big = await sameBuyer(many, 21);
-    await reads.applyGroups(many.ctx, many.account, big.classes);
+    const result = await reads.applyGroups(many.ctx, many.account, big.classes);
     const rows = [...(await links(many)).values()].filter((r) => r.order_group_id !== null);
     expect(rows).toHaveLength(20);
     expect(new Set(rows.map((r) => r.order_group_id)).size).toBe(1);
+    // ADR-087: the full group is reported, so the recompute raises its one notice.
+    expect(result.full).toEqual([
+      { groupId: rows[0]?.order_group_id, companyId: expect.any(String) as string },
+    ]);
   });
 
   it('[ORD-9] a group says what differs between its members, and the earliest ship-by', async () => {

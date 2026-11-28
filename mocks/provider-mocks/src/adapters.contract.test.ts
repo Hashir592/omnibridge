@@ -158,41 +158,69 @@ describe('adapters against provider-mocks (INT-1)', () => {
     expect(learned).toEqual([0.0167, 0.0167, 0.0167]);
   });
 
-  it('[INT-1] Evri: services, parcel, label and tracking; an INVALID parcel is a typed rejection', async () => {
-    const adapter = createEvriAdapter({ http, clientId: id });
-    const credential = account();
-    const token: AccessToken = await adapter.authenticate(credential);
-    expect((await adapter.listServices(token, 'GB', 'GB', [])).map((s) => s.code)).toContain(
-      'EVRI-48',
-    );
-    const order = {
-      reference: 'MOCK-1001',
-      address: {
-        name: 'PIIMARK-Name',
-        line1: 'PIIMARK-1 Street',
-        city: 'Testville',
-        postcode: 'TE1 1ST',
-        country: 'GB',
-      },
+  it('[INT-1][EVRI-2][EVRI-3][EVRI-5] Evri: code exchange, parcels, labels by barcode, as its specification', async () => {
+    const adapter = createEvriAdapter({ http, clientId: id, clientSecret: secret });
+    // The mock's account key is the code the admin pasted.
+    const code = `TOKENMARK-evri-${String((n += 1))}`;
+    const grant = await adapter.exchangeCode(code);
+    const token: AccessToken = await adapter.authenticate(grant.token);
+    const recipient = {
+      firstName: 'PIIMARK-Jo',
+      lastName: 'PIIMARK-Bloggs',
+      lines: ['PIIMARK-1 Street', 'Testville'],
+      postcode: 'TE1 1ST',
     };
-    const shipment = await adapter.createShipment(token, order, [{ weightGrams: 500 }], 'EVRI-48');
-    expect(shipment).toEqual({
-      trackingNumbers: ['H00MOCK0000001'],
-      carrierShipmentRef: 'EVRI-P-1',
-      labels: [{ format: 'pdf', ref: 'EVRI-L-1' }],
-    });
-    expect(Buffer.from(await adapter.getLabel(token, 'EVRI-L-1', 'pdf')).toString()).toContain(
-      '%PDF',
-    );
-    expect(await adapter.tracking(token, 'H00MOCK0000001')).toHaveLength(1);
+    const parcel = {
+      clientUid: 'MOCK-1001-1',
+      deliveryReference: 'MOCK-1001',
+      itemDescription: 'Mug',
+      weightGrams: 500,
+      valuePence: 1299n,
+      service: 'standard' as const,
+      recipient,
+    };
+    const created = await adapter.createParcel(token, parcel);
+    expect(created.state).toBe('created');
+    const barcode = created.state === 'created' ? created.barcode : '';
+    const pdf = Buffer.from(await adapter.fetchLabel(token, barcode, 'THERMAL')).toString('latin1');
+    expect(pdf.startsWith('%PDF-')).toBe(true);
+    // The same clientUID again is a 400: never a second parcel.
+    expect(await adapter.createParcel(token, parcel)).toEqual({ state: 'duplicate' });
 
-    on('evri', credential, 'invalid_parcel', 1);
-    const err = await adapter
-      .createShipment(token, order, [{ weightGrams: 500 }], 'EVRI-48')
+    // AT-12: an INVALID parcel inside a 200, with its code and path; nothing personal comes out.
+    scenarios.set('evri', code, 'invalid_parcel', 1);
+    const invalid = await adapter.createParcel(token, { ...parcel, clientUid: 'MOCK-1001-2' });
+    expect(invalid).toEqual({
+      state: 'invalid',
+      errors: [
+        { code: 'evri.delivery_unavailable', fields: ['deliveryDetails.deliveryAddress.postcode'] },
+      ],
+    });
+    expect(JSON.stringify(invalid)).not.toContain('PIIMARK');
+    // A line over 32 characters is refused by Evri itself.
+    const long = await adapter.createParcel(token, {
+      ...parcel,
+      clientUid: 'MOCK-1001-3',
+      recipient: { ...recipient, lines: ['x'.repeat(33)] },
+    });
+    expect(long.state).toBe('invalid');
+
+    // EVRI-5: a 403 is a label that cannot be printed; an unknown barcode is a 404.
+    scenarios.set('evri', code, 'not_printable', 1);
+    const notPrintable = await adapter
+      .fetchLabel(token, barcode, 'THERMAL')
       .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ProviderRejected);
-    expect((err as ProviderRejected).code).toBe('evri.invalid');
-    expect(JSON.stringify(err)).not.toContain('PIIMARK');
+    expect((notPrintable as ProviderRejected).code).toBe('evri.label_not_printable');
+    const unknown = await adapter
+      .fetchLabel(token, 'H00UNKNOWN', 'THERMAL')
+      .catch((e: unknown) => e);
+    expect((unknown as ProviderRejected).code).toBe('evri.barcode_unknown');
+
+    // EVRI-2: a revoked account answers 401, a lost authorisation.
+    scenarios.set('evri', code, 'revoked');
+    expect(await adapter.createParcel(token, parcel).catch((e: unknown) => e)).toBeInstanceOf(
+      AuthFailed,
+    );
   });
 
   it('[INT-1] DPD: login, services, shipment and label; an invalid parcel is a typed rejection', async () => {

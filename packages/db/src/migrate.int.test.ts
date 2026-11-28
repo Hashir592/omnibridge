@@ -119,6 +119,7 @@ describe('db-main roles and migrations', () => {
       '0059_search_columns',
       '0060_search_indexes',
       '0061_website_connector',
+      '0062_shipping',
     ]);
     expect((await migrateMain(owner)).applied).toEqual([]);
   });

@@ -32,6 +32,19 @@ describe('order state table (FA-10)', () => {
       expect({ from, to, ok: canMoveOrder(from, to) }).toEqual({ from, to, ok: false });
   });
 
+  it('[ORD-3][SHP-5] a channel update never undoes a label: only the label void moves it back', () => {
+    // A poll that still says "awaiting dispatch" keeps the label.
+    expect(nextOrderStatus('label_created', 'awaiting_dispatch')).toBe('label_created');
+    // The void itself returns the order to awaiting dispatch (SHP-5).
+    expect(nextOrderStatus('label_created', 'awaiting_dispatch', { labelVoid: true })).toBe(
+      'awaiting_dispatch',
+    );
+    // A void moves nothing else backwards.
+    expect(nextOrderStatus('delivered', 'awaiting_dispatch', { labelVoid: true })).toBe(
+      'delivered',
+    );
+  });
+
   it('[ORD-3] skipping forward is allowed (a late poll may miss a step)', () => {
     expect(canMoveOrder('pending_payment', 'dispatched')).toBe(true);
     expect(canMoveOrder('awaiting_dispatch', 'delivered')).toBe(true);
