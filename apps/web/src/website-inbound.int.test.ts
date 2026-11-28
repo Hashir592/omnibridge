@@ -140,14 +140,15 @@ describe('website calls, signed and idempotent (T-1101)', () => {
     options: {
       key?: string;
       secret?: string;
-      at?: number;
+      /** Seconds the timestamp is off, from the moment the call is signed. */
+      skew?: number;
       idempotency?: string;
       tamper?: boolean;
       to?: string;
     } = {},
   ) => {
     const raw = JSON.stringify(body);
-    const at = options.at ?? Math.floor(Date.now() / 1000);
+    const at = Math.floor(Date.now() / 1000) + (options.skew ?? 0);
     const signature = createHmac('sha256', options.secret ?? keys.signing_secret)
       .update(`${String(at)}.${raw}`)
       .digest('hex');
@@ -249,12 +250,11 @@ describe('website calls, signed and idempotent (T-1101)', () => {
     expect(ok.status).toBe(201);
     const id = ok.json().omnibridgeOrderId;
     expect((await stored(`W-OK-${tag}`)).map((r) => r.id)).toEqual([id]);
-    const now = Math.floor(Date.now() / 1000);
     const refused: [string, Parameters<typeof send>[2]][] = [
       ['wrong key', { key: `obw_${'x'.repeat(43)}` }],
       ['wrong secret', { secret: `obs_${'y'.repeat(43)}` }],
-      ['too old', { at: now - 301 }],
-      ['too far ahead', { at: now + 301 }],
+      ['too old', { skew: -310 }],
+      ['too far ahead', { skew: 310 }],
       ['body changed after signing', { tamper: true }],
     ];
     for (const [why, options] of refused) {
@@ -265,7 +265,7 @@ describe('website calls, signed and idempotent (T-1101)', () => {
     // A connection that is not there is not there.
     expect((await push(order(`W-NONE-${tag}`), { to: randomUUID() })).status).toBe(404);
     // Four minutes off is inside the window.
-    expect((await push(order(`W-EDGE-${tag}`), { at: now - 240 })).status).toBe(201);
+    expect((await push(order(`W-EDGE-${tag}`), { skew: -240 })).status).toBe(201);
   });
 
   it('[AT-14][WEB-2] the same idempotency key gives the same answer and stores nothing twice; with another body it is 409', async () => {
