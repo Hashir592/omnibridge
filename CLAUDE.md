@@ -34,7 +34,7 @@ OmniBridge is a multi-tenant SaaS back office for UK sellers on Amazon, eBay and
 | `docs/handoffs/` | Every message between sessions, as `<YYYYMMDD-HHMM>-S<from>-to-S<to>.md`. |
 | `docs/ops/` | Runbooks, secrets register, asset inventory. |
 | `apps/` | `web` (API + SPA host), `ui` (React SPA), `worker`, `pii-vault`, `site` (public site). |
-| `packages/` | `contract`, `core`, `db`, `pii-db`, `crypto`, `queue`, `governors/*`, `providers/*`, `logger`, `files`, `mail`, `testkit`. |
+| `packages/` | `contract`, `core`, `db`, `pii-db`, `crypto`, `queue`, `governors/*`, `providers/*`, `order-ingest`, `logger`, `files`, `mail`, `testkit`. |
 | `mocks/provider-mocks` | Mock Amazon, Ads, eBay, Evri, DPD and website servers. The only provider endpoints dev and CI may call. |
 | `infra/` | Compose files, the shared edge project, host scripts, backup jobs, observability configs. |
 | `scripts/verify.sh` | The single quality gate. |

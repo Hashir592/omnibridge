@@ -367,7 +367,7 @@ OmniBridge and JeezMart keep **separate databases**. JeezMart tells OmniBridge a
   - `PUT /omnibridge/stock` with `[ {externalSku, quantity} ]`, in batches of up to 100.
   - `POST /omnibridge/orders/{externalOrderId}/shipment` with `{carrier, service, trackingNumbers[], shippedAt}`.
   - `GET /omnibridge/orders?updatedSince=` is used for nightly reconciliation of missed calls.
-- **WEB-5** Delivery: outbound retries back off from 1 min up to 24 h, then go to the dead-letter queue with an alert. Inbound calls are processed asynchronously after a fast 2xx.
+- **WEB-5** Delivery: outbound retries back off from 1 min up to 24 h, then go to the dead-letter queue with an alert. Inbound calls are processed in the request, buyer details to the PII vault first, and then answered; nothing with PII is queued (v1.4 addendum, ADR-088).
 - **WEB-6** The JeezMart side of this contract is built by the dev team in the JeezMart codebase. No eBay data is ever sent to the website.
 
 ### 3.8 Tracking push loop (all channels)
@@ -411,7 +411,7 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
   Mixed-product bundles cannot be created.
 - **CAT-4** COGS is entered by hand per Master SKU, **excluding VAT**, one value per SKU, with an effective-from date. Its purchase VAT rate (used only for inc-VAT views, PRF-6) follows the SKU's VAT type unless a different purchase VAT rate is set on the SKU. Each order line stores a snapshot of the COGS in effect when the order was placed. Changing COGS never changes past profit. COGS can be bulk-imported by CSV.
 - **CAT-5** Channel listing mapping:
-  - On connect and daily, each channel's listings are discovered (channel account, external SKU, listing ID/ASIN/item ID, title, MFN or FBA, Inventory-API-managed flag for eBay).
+  - On connect and daily, each channel's listings are discovered (channel account, external SKU, listing ID/ASIN/item ID, title, MFN or FBA, Inventory-API-managed flag for eBay). A website has no listing read: its listings arrive by WEB-3 `POST /products` (v1.4 addendum, ADR-088).
   - A listing is matched automatically to a Master SKU when its external SKU equals the Master SKU code exactly. Everything else goes to an **Unmapped listings** queue for manual mapping.
   - One listing maps to exactly one Master SKU. A Master SKU can have many listings.
   - Mappings can be bulk-imported and exported by CSV.
@@ -433,7 +433,7 @@ Each module below is one tab, except Catalogue and Inventory, which share the St
 - **INV-4** After any movement, stock is recalculated and the new quantities are queued for every affected listing on every other channel. Target: 95% of pushes sent within 2 minutes, not counting eBay revision holds and provider throttling.
 - **INV-5** Change log: every movement records timestamp, Master SKU, change, new on hand, reason, source (order ref or user), and the channel listings pushed with their result. It can be filtered and exported. It is kept 3 years **\[Claude default\]**.
 - **INV-6** If an order makes available fall below 0, the order is flagged **Oversold** and an alert is raised.
-- **INV-7** A nightly reconciliation compares each listing's quantity on the channel with its target quantity (INV-2 or INV-10). Drift is corrected automatically, logged and reported. Repeated drift on the same listing raises an alert.
+- **INV-7** A nightly reconciliation compares each listing's quantity on the channel with its target quantity (INV-2 or INV-10). Drift is corrected automatically, logged and reported. Repeated drift on the same listing raises an alert. A website's products are reconciled when it pushes them (WEB-3 `POST /products`), as it has no listing read (v1.4 addendum, ADR-088).
 - **INV-8** A failed stock push retries (3.0 rules). After the last retry the listing gets a "Sync failed" badge and an alert.
 - **INV-9** FBA stock is not managed by OmniBridge. FBA listings show "Fulfilled by Amazon" and are excluded from pushes.
 - **INV-10** **Manual allocation.** Stock sync can be switched from Auto to Manual per Master SKU or per listing. In Manual mode the user types the quantity each listing (each Amazon account, eBay account, website) shows, and the listing receives max(0, min(manual quantity − units sold on it since set, available − buffer)), so a manual number can limit a channel but never show more than real stock. Master stock is still moved by every order. Writes happen only when the target changes. Switching back to Auto pushes available − buffer to every listing at once. Every change is audited and in the change log. Full rules and edge cases: `docs/plan/client-changes-20261112.md` C7.
@@ -1374,3 +1374,5 @@ Nothing below blocks coding. Open items are built as settings, or behind adapter
 **v1.4, 12 Nov 2026:** client review of the preview (P-014, Hashir). Added HOME-3, INV-10, ORD-9, SHP-9, CS-6, HLT-6, HLT-7 (SHOULD), PRF-6, AT-26 to AT-28. Amended ORD-1 (SKU column), INV-2 and INV-7 (target per mode), CAT-4 (COGS ex VAT), SHP-7 (label cost ex VAT plus rate), §1.3 and §1.4 (Amazon buyer messages through the email relay). Designs: `docs/plan/client-changes-20261112.md`.
 
 **v1.4 addendum, 17 Nov 2026:** WEB-1: the website connector is a per-workspace module toggle, off by default and on only for the client's workspace at launch; the public site does not advertise it (ADR-059).
+
+**v1.4 addendum, 28 Nov 2026:** WEB-5 inbound is processed in the request, vault first; CAT-5 and INV-7: a website's listings arrive and are reconciled by `POST /products` (ADR-088). No scope change.
