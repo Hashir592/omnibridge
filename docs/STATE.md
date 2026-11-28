@@ -1,32 +1,32 @@
 # STATE
 
-This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 26 Nov 2026 by S3 (T-1004).
+This file is overwritten at each update, never appended. Keep it under 100 lines. Last updated: 28 Nov 2026 by S3 (T-1101).
 
 ## Now
 
 - **Phase:** B, local Docker only. Plan of 12 Nov 2026 (ADR-054), fast lane from M07 (ADR-077), halfway pause (ADR-080). Module order is in `docs/plan/MODULES.md`.
-- **Closed:** M01 to M05 (S4 M05 end APPROVED). The M06 site pieces are merged; it waits on the client's legal details.
-- **M07, M08, M09 built** (end reports in `docs/reviews/`). The M08 milestone fix (#146) and the T-0901 review fixes (#151) are merged, for the M09 + M10 milestone to verify.
-- **M10 built** (`docs/reviews/M10-end-report.md`):
-  - #156 T-1000, #157 contract, #158 T-1001 (critical), #159 T-1002: merged;
-  - #160 T-1001 fixes (S5's critical check): merged;
-  - #164 F-M10-end-01, S4's Blocker: merged and confirmed by S4;
-  - #167 T-1003 buyer data and F-M10-end-22: merged, confirmed by S4 and S5 (#169);
-  - T-1004 amounts, grouping, speed and test gaps (critical, branch `task/T-1004-m10-fixes-2`): auto-merge on. Closes F-05, F-07 to F-11, F-12, F-13, F-15, F-20, F-21, F-24 and S5-20261124-11 to -13.
-- **Review (S4, 27 Nov 2026):** #173 (T-1004) CONTINUE, no Blocker or Major; S5's part and PS-036 (a) confirmed. **M09 + M10 milestone APPROVED** (`docs/reviews/M10-end.md`). New Minors F-25 to F-27 go to T-1101's first commits.
-- **Waiting on reviews:**
-  - S4 M09 + M10 milestone: BLOCKED (`docs/reviews/M10-end.md`) until S4 confirms T-1004 (T-1003 is confirmed);
-  - S5 confirmed T-1003 (#169). For T-1004 there is no S5 session now: S4 also confirms its first commits (S5's -11, -12 and the hardening) and PS-036 (a) (S1, 25 Nov).
-- **PS-037 accepted (ADR-085):** `vault.deleted_buyers` is retired by db-pii 0012 (no role keeps any right; a test checks it); M22's first db-pii migration drops it. PS-037's four smaller points wait for S1.
-- **Fault runs (ADR-085):** S3 proves tests by red-first commits, plants a fault by hand only for a guard, on that test alone; task-wide runs are S4's.
-- **Next (S3):** M11 on S1's M11 paste. Not before.
-- **S2:** T-0318 orders screens, on the #157 contract (handoff `docs/handoffs/20261122-1850-S3-to-S2.md`).
+- **Closed:** M01 to M05, M07 to M10 (M06 still waits on the client's legal details). M09 + M10 milestone APPROVED by S4 (`docs/reviews/M10-end.md`).
+- **M11 built** (`docs/reviews/M11-end-report.md`): #175 contract merged; T-1101 (risk high) on `task/T-1101-website-connector`, PR with auto-merge. It closes F-M10-end-14, -17, -25, -26, -27 and S5-20261124-07, and PS-037 (2), (3) as ADR-086 rules them.
+- **Review:** S4 reviews M11 with M12 (S1's M11 paste); no S4 block for T-1101 alone.
+- **Open for S1:** PS-038 (`packages/order-ingest` in ARCHITECTURE), PS-039 (website listings by push; where a website may be called).
+- **Fault runs (ADR-085):** S3 proves tests by red-first commits and plants a fault by hand only for a guard, on that test alone; task-wide runs are S4's.
+- **Next (S3):** M12 on S1's M12 paste. Not before.
+- **S2:** T-0318 orders screens; T-0319 website screens on the #175 contract.
+
+## M11 in short (what later modules use)
+
+- **Website routes:** setup and Disconnect are session routes (Connections tab, admins); the website's own calls are signed routes under `/api/v1/website/{connectionId}` (`apps/web/src/website.ts`). Every one is behind the `website_connector` module (404 when off).
+- **Inbound:** `once()` gives a call its Idempotency-Key handling (`app.website_idempotency`); the push runs `orderIngestStream`'s prepare with no transaction open, then `OrderIngest.apply`. Cancel and refund use `OrderIngest.asStored` and `apply`. Products upsert listings and reconcile them (FA-16 hold released on a clean first run).
+- **Outbound:** `website.stock_push` and `website.shipment` (worker `outbound.ts`), signed by `@omnibridge/provider-website`. **M12 queues `website.shipment`** when a website order ships. Website writes retry 1 minute to 24 hours (13 attempts), then fail with one `website.delivery_failed` alert.
+- **Credential:** `AccountCredentials.read(ctx, id, 'website')` gives `{ apiKey, signingSecret, baseUrl }` as one secret. `ProviderHttp.site(baseUrl)` allows HTTPS to a dotted public name only.
+- **Reads:** website orders are read nightly from 02:00 London; a website has no listing scan (its products come by push).
+- **Disconnect:** archive, end listings (C7.3), delete credentials, audit once; history stays.
+- **Kit:** `callSession` is the one place for token, governor, usage and health code of a run of reads.
 
 ## M10 in short (what later modules use)
 
 - **Ingest:** `OrderIngest.apply(ctx, account, orders)` (`packages/db/src/orders.ts`) runs in the sync transaction, after the vault-first `prepare` (`apps/worker/src/orders.ts`, `orderIngestStream`).
-  - Streams: `ebay.orders` and `website.orders`, polled every 5 minutes (`orders.sync-sweep`).
-  - M11's website push should reuse `orderIngestStream`'s vault-first step and `OrderIngest.apply`.
+  - Streams: `ebay.orders` every 5 minutes, `website.orders` nightly (`orders.sync-sweep`).
 - **PII:**
   - one vault record per order, subject `<channel_account_id>:<external_order_id>` (`orders.pii_subject`);
   - a record is written only once the order is paid and has a delivery address;
@@ -45,7 +45,7 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 - **Sync:** `runIncrementalSync` stores 25 orders a transaction. Lock order everywhere: orders by id, then stock rows by component id (`StockEngine.lockFor`), then the rest; listings `FOR NO KEY UPDATE`.
 - **Stock:** reserve, release and dispatch run with the order line id.
   - `stock_moves` is false for orders placed before the account was connected.
-  - `stock_push_held_since` holds a new account's writes until a clean reconciliation; T-1101's Connect route passes `holdStockPush: true`.
+  - `stock_push_held_since` holds a new account's writes until a clean reconciliation.
 - **Reads and groups:** `OrderReads` (`packages/db/src/order-reads.ts`) handles the list, detail, returns, export and groups.
   - `orders.group_recompute` makes one batched `vault.match` call, then calls `applyGroups`; it is queued once a minute per account at most, and only when an order joins or leaves the ones that can group;
   - the list pages through `orders_placed`; search is by prefix on the `search_*` columns (0059, 0060);
@@ -68,8 +68,6 @@ This file is overwritten at each update, never appended. Keep it under 100 lines
 ## Follow-ups noted (for S1 to place)
 
 - **From M07 and M08:**
-  - Connect-new-account and Disconnect routes (T-1101): hold stock pushes, end the account's listings;
-  - the shared call-session helper (T-1101);
   - the carrier-cap wait (T-1201);
   - Amazon 429 metering and CS-6 (M18);
   - token refresh race, eBay stock-push batching, F-M07-T0702-02 (T-1501);
