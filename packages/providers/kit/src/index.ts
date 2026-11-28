@@ -57,9 +57,11 @@ export {
   ProviderUnavailable,
   providerErrorCode,
   RateLimited,
+  SlotsFull,
 } from './errors.ts';
 export {
   consentUrl,
+  evriAuthoriseUrl,
   ProviderHttp,
   type ProviderHttpOptions,
   type ProviderRequest,

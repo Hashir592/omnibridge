@@ -322,7 +322,7 @@ export function toIncoming(o: ChannelOrder): IncomingOrder {
 /** The jobs and notices of the ingest, inside its transaction (IDs only, invariant 7a). */
 export function orderIngestPorts(
   queue: Pick<JobQueue, 'send'>,
-  notices: { notifier: Pick<Notifier, 'raisePlatform'>; logger: Logger },
+  notices: { notifier: Pick<Notifier, 'raisePlatform' | 'raise'>; logger: Logger },
   now: () => Date = () => new Date(),
 ): OrderIngestPorts {
   return {
@@ -363,6 +363,15 @@ export function orderIngestPorts(
         // The first real dispatch date is a job of its own: the stand-in's key is taken.
         idempotencyKey: `orders.pii_expiry:${input.orderId}:${input.reason}${input.real === true ? ':real' : ''}`,
         payload: { order_id: input.orderId, reason: input.reason },
+      });
+    },
+    addressChangedAfterLabel: async (ctx, input) => {
+      // ADR-081: the printed label still has the old address; check it before dispatch.
+      await notices.notifier.raise(ctx, {
+        type: 'shipping.address_changed',
+        record: { kind: 'order', id: input.orderId },
+        signal: 'derived',
+        companyId: input.companyId,
       });
     },
     regroup: async (ctx, input) => {

@@ -6,6 +6,7 @@ import { createPiiPool, migratePii, type PoolConfig } from '@omnibridge/pii-db';
 import { buildVaultApp } from './app.ts';
 import { ServiceTokens } from './auth.ts';
 import { DeletionJournal, DeletionService } from './deletion.ts';
+import { LabelStore } from './labels.ts';
 import type { Caller } from './vault.ts';
 import { Vault } from './vault.ts';
 
@@ -30,6 +31,8 @@ export async function startTestVault(options: {
   now?: () => Date;
   /** Two vaults over copies of one database (a restore) share the master key. */
   keyring?: Keyring;
+  /** The label files' volume stand-in (T-1201); without it the label routes answer 404. */
+  labelsDir?: string;
 }): Promise<TestVault> {
   await migratePii(options.owner);
   const pool = createPiiPool({ ...options.app, max: 4 }, (err) => {
@@ -61,10 +64,15 @@ export async function startTestVault(options: {
     },
   });
   await vault.ensureVaultKey();
+  const labels =
+    options.labelsDir === undefined
+      ? undefined
+      : new LabelStore({ pool, dir: options.labelsDir, vault, now });
   const deletion = new DeletionService({
     pool,
     journal,
     now,
+    ...(labels === undefined ? {} : { labels }),
     onWorkspaceClosed: (workspaceId) => {
       vault.forgetKeys(workspaceId);
     },
@@ -76,6 +84,7 @@ export async function startTestVault(options: {
     vault,
     tokens: new ServiceTokens(tokens),
     deletion,
+    ...(labels === undefined ? {} : { labels }),
   });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const { port } = app.server.address() as AddressInfo;

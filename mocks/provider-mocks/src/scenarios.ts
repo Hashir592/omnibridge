@@ -17,6 +17,10 @@ export const SCENARIOS = [
   'revoked',
   /** eBay's daily call limit is spent: 429 with error 2001. */
   'ebay_cap_exhausted',
+  /** Evri: a label cannot be printed now (403, for example delivered). */
+  'not_printable',
+  /** Evri: the parcel is created but the answer is lost (502), so a retry meets a duplicate. */
+  'lost_answer',
 ] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 

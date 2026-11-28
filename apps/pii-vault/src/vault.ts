@@ -207,6 +207,21 @@ export class Vault {
     this.#onVacuumFailed = options.onVacuumFailed ?? (() => undefined);
   }
 
+  /**
+   * Runs `fn` in one vault transaction with the workspace's data key (never created here), for
+   * the label files (T-1201). NotFound when the workspace holds no keys: it holds no PII either.
+   */
+  async withDataKey<T>(
+    workspaceId: string,
+    fn: (key: DataKey, c: PoolClient) => Promise<T>,
+  ): Promise<T> {
+    return this.#tx(workspaceId, async (c, tx) => {
+      const keys = await this.#loadKeys(tx, workspaceId, false);
+      if (keys === undefined) throw new NotFound();
+      return fn(keys.data, c);
+    });
+  }
+
   /** A closed workspace's keys are deleted with it; the cached copies go too. */
   forgetKeys(workspaceId: string): void {
     this.#keys.delete(workspaceId);

@@ -182,6 +182,24 @@ export const NOTIFICATION_TYPES: readonly NotificationType[] = [
     'orders',
     'INT-5',
   ),
+  // ADR-087 (M12): a same-buyer group that would take a 21st order; the rest start a new group.
+  t(
+    'orders.group_full',
+    'Same-buyer group full: 20 orders',
+    ['warning'],
+    ['derived'],
+    'orders',
+    'ORD-9',
+  ),
+  // ADR-081 (M12): the buyer's address changed after the label was printed; check before dispatch.
+  t(
+    'shipping.address_changed',
+    'Address changed after the label was printed',
+    ['warning'],
+    ['derived'],
+    'shipping',
+    'ORD-4, SHP-5',
+  ),
   t(
     'website.delivery_failed',
     'Website calls failed after a day of retries',

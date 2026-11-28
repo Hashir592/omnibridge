@@ -875,10 +875,12 @@ export class OrderReads {
     ctx: TenantContext,
     channelAccountId: string,
     classes: ReadonlyMap<string, string>,
-  ): Promise<{ groups: number }> {
+  ): Promise<{ groups: number; full: { groupId: string; companyId: string }[] }> {
     const now = this.#now();
     return withTenantTransaction(this.#db, ctx, async (trx) => {
       await this.#lockAccount(trx, ctx, channelAccountId);
+      // ADR-087: the first order of each group that would take a 21st member.
+      const fullFirst = new Set<string>();
       const { rows: cands } = await sql<{
         id: string;
         placed_at: Date;
@@ -914,8 +916,12 @@ export class OrderReads {
         {
           graceHours: Number(ws[0]?.grace ?? 3),
           excluded: (a, b) => excluded.has(a < b ? `${a}|${b}` : `${b}|${a}`),
+          onFull: (members) => {
+            if (members[0] !== undefined) fullFirst.add(members[0]);
+          },
         },
       );
+      const full: { groupId: string; companyId: string }[] = [];
       const byId = new Map(cands.map((c) => [c.id, c]));
       const company = cands[0]?.company_id;
       const grouped = new Set<string>();
@@ -938,6 +944,9 @@ export class OrderReads {
                             ${channelAccountId}::uuid, 'open', ${now})`.execute(trx);
         }
         usedIds.add(groupId);
+        if (fullFirst.has(members[0] ?? '')) {
+          full.push({ groupId, companyId: first?.company_id ?? company ?? '' });
+        }
         for (const m of members) grouped.add(m);
         await sql`UPDATE app.orders SET order_group_id = ${groupId}::uuid
                    WHERE workspace_id = ${ctx.workspaceId}::uuid AND id = ANY (${sql.val(members)}::uuid[])
@@ -951,7 +960,7 @@ export class OrderReads {
                    AND EXISTS (SELECT 1 FROM app.order_groups g WHERE g.workspace_id = o.workspace_id
                                  AND g.id = o.order_group_id AND g.state = 'open')`.execute(trx);
       await this.#closeSmall(trx, ctx, channelAccountId, now);
-      return { groups: groups.length };
+      return { groups: groups.length, full };
     });
   }
 

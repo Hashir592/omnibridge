@@ -158,6 +158,22 @@ export class PermanentJobError extends Error {
   }
 }
 
+/**
+ * A rate governor said wait (RL-4: a carrier account's 4 slots are all taken; ADR-079 2, ADR-089
+ * 4). Not the job's fault and not a failure: the job is sent again for `until` with the same
+ * envelope, and no attempt is spent. Thrown from a handler (usually its `prepare`, before any
+ * provider call), so nothing it stands for has happened yet.
+ */
+export class GovernorWait extends Error {
+  readonly until: Date;
+
+  constructor(until: Date) {
+    super('governor wait');
+    this.name = 'GovernorWait';
+    this.until = until;
+  }
+}
+
 /** Options a caller may tune per worker; the rest is fixed by the job definition. */
 export type WorkTuning = Pick<WorkOptions, 'localConcurrency' | 'pollingIntervalSeconds'>;
 
@@ -350,6 +366,22 @@ export class JobQueue {
       });
       this.#log.info({ event: 'job.completed', ...fields }, 'job completed');
     } catch (err) {
+      if (err instanceof GovernorWait) {
+        await this.#sendLater(def, envelope, job.data, err.until);
+        await this.#records
+          .update(ctx, key, { state: 'queued', errorCode: null })
+          .catch((updateErr: unknown) => {
+            this.#log.warn(
+              { event: 'job.record_update_failed', ...fields, err: updateErr },
+              'job record update failed',
+            );
+          });
+        this.#log.info(
+          { event: 'job.governor_wait', ...fields, until: err.until.toISOString() },
+          'job told to wait by a governor; sent again for later',
+        );
+        return;
+      }
       const permanent = err instanceof PermanentJobError;
       const last = permanent || job.retryCount >= job.retryLimit;
       // Log first and never let a failed record update replace the handler's error.
@@ -404,6 +436,20 @@ export class JobQueue {
     } finally {
       await release();
     }
+  }
+
+  /** GovernorWait: the same job data again, not before `until`, under the same ordering rules. */
+  async #sendLater<P extends z.ZodType>(
+    def: JobDefinition<P>,
+    envelope: JobEnvelope<z.infer<P>>,
+    data: unknown,
+    until: Date,
+  ): Promise<void> {
+    const options: SendOptions = { startAfter: until };
+    const account = envelope.channel_account_id;
+    if (def.serialPerAccount && account !== undefined) options.singletonKey = account;
+    if (def.perAccountCap !== undefined && account !== undefined) options.group = { id: account };
+    await this.#boss.send(def.type, isPlainObject(data) ? data : {}, options);
   }
 
   /** Marks the record of an invalid job failed, when the data still names its workspace and key. */

@@ -2433,7 +2433,9 @@ export interface components {
         | 'ebay.client_id'
         | 'ebay.client_secret'
         | 'ebay.dev_id'
-        | 'ebay.verification_token';
+        | 'ebay.verification_token'
+        | 'evri.client_id'
+        | 'evri.client_secret';
       next: {
         /** Format: date-time */
         set_at: string;
@@ -2453,7 +2455,9 @@ export interface components {
         | 'ebay.client_id'
         | 'ebay.client_secret'
         | 'ebay.dev_id'
-        | 'ebay.verification_token';
+        | 'ebay.verification_token'
+        | 'evri.client_id'
+        | 'evri.client_secret';
       next: {
         /** Format: date-time */
         set_at: string;
@@ -5352,6 +5356,9 @@ export interface operations {
           | 'connection.added'
           | 'connection.removed'
           | 'connection.reauthorised'
+          | 'shipping.settings_changed'
+          | 'shipping.costs_changed'
+          | 'label.voided'
           | 'website.settings_changed'
           | 'website.keys_reissued'
           | 'workspace.status_changed'
@@ -5393,6 +5400,7 @@ export interface operations {
           | 'membership'
           | 'channel_account'
           | 'workspace'
+          | 'shipment'
           | 'master_sku'
           | 'stock_take'
           | 'stock_buffer'
@@ -5472,6 +5480,9 @@ export interface operations {
           | 'connection.added'
           | 'connection.removed'
           | 'connection.reauthorised'
+          | 'shipping.settings_changed'
+          | 'shipping.costs_changed'
+          | 'label.voided'
           | 'website.settings_changed'
           | 'website.keys_reissued'
           | 'workspace.status_changed'
@@ -5511,6 +5522,7 @@ export interface operations {
           | 'membership'
           | 'channel_account'
           | 'workspace'
+          | 'shipment'
           | 'master_sku'
           | 'stock_take'
           | 'stock_buffer'
@@ -9076,7 +9088,9 @@ export interface operations {
           | 'ebay.client_id'
           | 'ebay.client_secret'
           | 'ebay.dev_id'
-          | 'ebay.verification_token';
+          | 'ebay.verification_token'
+          | 'evri.client_id'
+          | 'evri.client_secret';
         slot: 'current' | 'next';
       };
       cookie?: never;
@@ -9129,7 +9143,9 @@ export interface operations {
           | 'ebay.client_id'
           | 'ebay.client_secret'
           | 'ebay.dev_id'
-          | 'ebay.verification_token';
+          | 'ebay.verification_token'
+          | 'evri.client_id'
+          | 'evri.client_secret';
       };
       cookie?: never;
     };

@@ -113,6 +113,15 @@ export interface OrderIngestPorts {
    * record held, not FBA, no cancellation asked for), or its buyer was corrected: the account's groups are recomputed.
    */
   regroup(ctx: TenantContext, input: { channelAccountId: string }): Promise<void>;
+  /**
+   * ADR-081 (T-1201): the buyer's record changed after a label was bought: the printed label
+   * still has the old address. The order is marked for a check before dispatch; this raises the
+   * user's warning (once per order).
+   */
+  addressChangedAfterLabel?(
+    ctx: TenantContext,
+    input: { orderId: string; companyId: string },
+  ): Promise<void>;
 }
 
 /** The vault subject of an order: one buyer record per order, keyed by account and order ID. */
@@ -452,6 +461,7 @@ export class OrderIngest implements UnmappedDemand {
           id = await this.#create(trx, ctx, here, defaultRate, order);
         } else {
           await this.#update(trx, ctx, channelAccountId, defaultRate, existing, order);
+          if (order.pii.kind === 'replaced') await this.#labelAddressChanged(trx, ctx, existing);
         }
         const row = await this.#lock(trx, ctx, id ?? '');
         stored.set(order.externalId, row);
@@ -909,6 +919,20 @@ export class OrderIngest implements UnmappedDemand {
       }
     }
 
+    // SHP-5, EVRI-6: a label bought for an order the channel cancelled goes on the reconcile list,
+    // and the order holds no live label any more.
+    if (statusChanged && next === 'cancelled') {
+      const { rows: ended } = await sql<{ shipment_id: string }>`
+        UPDATE app.shipment_orders SET live = false
+         WHERE workspace_id = ${ctx.workspaceId}::uuid AND order_id = ${existing.id}::uuid AND live
+         RETURNING shipment_id`.execute(trx);
+      for (const { shipment_id } of ended) {
+        await sql`UPDATE app.parcels SET reconcile_since = coalesce(reconcile_since, ${now}), updated_at = ${now}
+                   WHERE workspace_id = ${ctx.workspaceId}::uuid AND shipment_id = ${shipment_id}::uuid
+                     AND state = 'created' AND reconciled_at IS NULL`.execute(trx);
+      }
+    }
+
     // DEL-1: cancellation deletes the buyer's record; dispatch and delivery move its expiry.
     if (piiRef !== null && existing.pii_deleted_at === null) {
       if (statusChanged && next === 'cancelled') {
@@ -930,6 +954,31 @@ export class OrderIngest implements UnmappedDemand {
     }
 
     await this.#settle(trx, ctx, await this.#lock(trx, ctx, existing.id), o);
+  }
+
+  /**
+   * ADR-081: a corrected buyer record on an order with a live label. The label already printed
+   * holds the old address, so the order needs a check before dispatch (T-1202 refuses to
+   * dispatch it until a user confirms) and the user is told.
+   */
+  async #labelAddressChanged(
+    trx: Transaction<MainDb>,
+    ctx: TenantContext,
+    order: OrderRow,
+  ): Promise<void> {
+    const { rows } = await sql<{ id: string }>`
+      UPDATE app.orders o SET address_changed_after_label = true, updated_at = ${this.#now()}
+       WHERE o.workspace_id = ${ctx.workspaceId}::uuid AND o.id = ${order.id}::uuid
+         AND NOT o.address_changed_after_label
+         AND EXISTS (SELECT 1 FROM app.shipment_orders so
+                      WHERE so.workspace_id = o.workspace_id AND so.order_id = o.id AND so.live)
+       RETURNING o.id`.execute(trx);
+    if (rows.length > 0) {
+      await this.#ports.addressChangedAfterLabel?.(ctx, {
+        orderId: order.id,
+        companyId: order.company_id,
+      });
+    }
   }
 
   async #event(

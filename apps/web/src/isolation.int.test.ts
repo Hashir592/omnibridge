@@ -38,6 +38,7 @@ import {
   WorkspaceRepository,
   type MainDbHandle,
   WebsiteConnectionRepository,
+  ShippingRepository,
 } from '@omnibridge/db';
 import { EncryptedLocalFileStore, FileKeyStore, signFileLink } from '@omnibridge/files';
 import { createLogger } from '@omnibridge/logger';
@@ -60,8 +61,8 @@ const checks = { dbMain: () => Promise.resolve(true), dbPii: () => Promise.resol
 const MARKER = 'WSB-MARKER';
 /** An Evri code of the documented form (EVRI-2); the walk never exchanges one for B. */
 const EVRI_CODE = '0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d';
-/** B's shipping rows (M12): unknown IDs until T-1201 seeds them; every route answers 404 now. */
-const shipB = {
+/** B's shipping rows (M12, T-1201): an Evri account, a bought label, its batch and parcel. */
+const shipB: Record<'carrier' | 'batch' | 'shipment' | 'parcel', string> = {
   carrier: randomUUID(),
   batch: randomUUID(),
   shipment: randomUUID(),
@@ -190,6 +191,16 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
           orders: await new OrderReads(main.db).list(ctx, {}, { offset: 0, limit: 100 }, 1000),
           order: await new OrderReads(main.db).detail(ctx, ordersB.first),
           group: await new OrderReads(main.db).group(ctx, ordersB.group),
+          // M12: B's carriers, costs, settings, label, batch and reconcile list.
+          carriers: await new ShippingRepository(main.db).carrierAccounts(ctx),
+          costs: await new ShippingRepository(main.db).costs(ctx, shipB.carrier),
+          shippingSettings: await new ShippingRepository(main.db).settings(ctx),
+          shipment: await new ShippingRepository(main.db).shipment(ctx, shipB.shipment),
+          batch: await new ShippingRepository(main.db).batch(ctx, shipB.batch),
+          reconcile: await new ShippingRepository(main.db).reconcile(ctx, {
+            limit: 100,
+            offset: 0,
+          }),
         },
         // Pence are bigint; the snapshot only needs them as text.
         (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value),
@@ -402,6 +413,45 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
       ordersB.second = grouped.items[1]?.id ?? '';
       ordersB.group = grouped.items[0]?.group?.id ?? '';
     });
+    // M12 (T-1201): B's Evri account, a label cost and a bought label for its first order, with
+    // its batch and parcel; the walk may neither read nor change any of them.
+    await tenancy.runWorkspace({ workspaceId: B }, async (raw) => {
+      const ctx = { ...raw, companyIds: [b.company] };
+      shipB.carrier = await new ChannelAccountRepository(main.db).create(ctx, {
+        companyId: b.company,
+        provider: 'evri',
+        displayName: `${MARKER} Evri`,
+      });
+      const shipping = new ShippingRepository(main.db);
+      await shipping.putCosts(ctx, shipB.carrier, [
+        { serviceCode: 'standard', costPence: 777n, vatRateBp: 2000 },
+      ]);
+      const { batchId } = await shipping.requestLabels(
+        ctx,
+        {
+          userId: null,
+          orders: [
+            {
+              orderId: ordersB.first,
+              carrierAccountId: shipB.carrier,
+              serviceCode: 'standard',
+              parcels: [{ weightG: 500 }],
+            },
+          ],
+        },
+        { validService: () => true, queue: () => Promise.resolve() },
+      );
+      shipB.batch = batchId;
+      shipB.shipment = (await shipping.batch(ctx, batchId))?.[0]?.shipmentId ?? '';
+      shipB.parcel = (await shipping.work(ctx, shipB.shipment))?.parcels[0]?.id ?? '';
+      await shipping.parcelSending(ctx, shipB.parcel);
+      await shipping.parcelAnswered(ctx, shipB.parcel, {
+        state: 'created',
+        barcode: `${MARKER}-BC`,
+      });
+      await shipping.settle(ctx, shipB.shipment);
+      await shipping.labelStored(ctx, shipB.shipment);
+    });
     await tenancy.runWorkspace({ workspaceId: A }, (ctx) =>
       new CatalogueRepository(main.db).createSku(
         ctx,
@@ -581,6 +631,31 @@ describe('cross-workspace isolation on every route (TEN-1, AT-1, SEC-3)', () => 
         logger,
       },
       modules: r.workspaces,
+      // T-1201: shipping. A label job, a label merge or an Evri exchange in the walk would act for
+      // B: each fails.
+      shipping: {
+        shipping: new ShippingRepository(main.db),
+        vault: {
+          mergeLabels: () => Promise.reject(new Error('a label merge in the isolation walk')),
+          storedLabels: () => Promise.resolve({ label_ids: [] }),
+        },
+        queue: { send: () => Promise.reject(new Error('a label job in the isolation walk')) },
+        audit: new AuditLog(main.db),
+        evri: {
+          authoriseUrl: () => Promise.resolve(undefined),
+          exchange: () => Promise.reject(new Error('an Evri exchange in the isolation walk')),
+        },
+        accounts: new ChannelAccountRepository(main.db),
+        credentials: new AccountCredentials(
+          main.db,
+          new CredentialRepository({
+            keyring: parseKeyring('secrets', generateKekLine(1)),
+            logger,
+          }),
+        ),
+        connections: new ConnectionRepository(main.db),
+        notifier: new Notifier({ store: new NotificationRepository(main.db) }),
+      },
       // T-1101: the website connector and Disconnect. Storing an order or a product in the walk
       // would be a write to B: those steps fail.
       website: {
@@ -968,9 +1043,11 @@ ${MARKER}-SKU,99`,
             packing_slip_enabled: true,
             tracking_hold_minutes: 1,
           },
+          // A's own settings: nothing of B's in the body (the snapshot proves B's are untouched).
+          searchText: true,
         },
         getShippingRules: {},
-        putShippingRules: { body: { items: [] } },
+        putShippingRules: { body: { items: [] }, searchText: true },
         getShippingDesk: { query: { channel_account_id: b.account } },
         createLabels: {
           body: {
@@ -1208,8 +1285,8 @@ ${MARKER}-SKU,99`,
       .items.find((w) => w.id === B);
     expect(row).toMatchObject({
       status: 'archived',
-      // B's eBay account and its website account (M11).
-      counts: { users: 1, channel_accounts: 2, orders_per_day: null },
+      // B's eBay account, its website account (M11) and its Evri account (M12).
+      counts: { users: 1, channel_accounts: 3, orders_per_day: null },
     });
     const usage = await server.inject({
       method: 'GET',

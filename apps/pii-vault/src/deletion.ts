@@ -14,13 +14,18 @@ interface Target {
 }
 
 /**
- * Label files are PII and live in the vault's volume (invariant 11). They arrive in M12; until
- * then this hook is called with every deleted ref and deletes nothing.
+ * Label files are PII and live in the vault's volume (invariant 11, T-1201's LabelStore). They go
+ * with their buyer records, whatever the trigger (`deleteFor`), and at their own 30-day date in
+ * each expiry run (`expire`), so each goes at the earlier of the two.
  */
 export interface LabelFiles {
   deleteFor(workspaceId: string, piiRefs: readonly string[]): Promise<number>;
+  expire(workspaceId: string, at: Date): Promise<number>;
 }
-export const NO_LABEL_FILES: LabelFiles = { deleteFor: () => Promise.resolve(0) };
+export const NO_LABEL_FILES: LabelFiles = {
+  deleteFor: () => Promise.resolve(0),
+  expire: () => Promise.resolve(0),
+};
 
 /**
  * The off-site tombstone journal (invariant 10): one JSON line per deleted ref (IDs only), expiry
@@ -206,6 +211,8 @@ export class DeletionService {
     });
     const { removed, ...answer } = result;
     if (removed.length > 0) await this.#labels.deleteFor(ws, removed);
+    // Invariant 11: a label also goes at its own date (30 days), whichever comes first.
+    if (expiry) await this.#labels.expire(ws, at);
     // Invariant 10: VACUUM cannot run in a transaction; it clears the dead tuples just made. It
     // runs whenever the run has tombstones, so a retry after a failed VACUUM runs it again even
     // though it finds nothing left to delete (ADR-065, F-M04h-03).

@@ -50,8 +50,13 @@ describe('order ingest (T-1001)', () => {
       regroups.push(input.channelAccountId);
       return Promise.resolve();
     },
+    addressChangedAfterLabel: (_ctx, input) => {
+      addressChanged.push(input.orderId);
+      return Promise.resolve();
+    },
   };
   const regroups: string[] = [];
+  const addressChanged: string[] = [];
   const late: { listingId: string; masterSkuId: string; key: string }[] = [];
   const oversold: string[] = [];
   let ingest: OrderIngest;
@@ -1997,6 +2002,59 @@ describe('order ingest (T-1001)', () => {
         sql<object>`UPDATE app.order_lines SET line_gross_pence = 1 WHERE order_id = ${cancelled}::uuid`,
       ),
     ).rejects.toThrow(/write-once/);
+  });
+
+  it('[ORD-4][SHP-5] a buyer record corrected after a label marks the order for a check and warns once (ADR-081)', async () => {
+    const w = await world();
+    const o = order();
+    await ingest.apply(w.ctx, w.account, [o]);
+    const id = String((await orderRow(w, o.externalId))?.id);
+    // A correction before any label changes nothing here.
+    await ingest.apply(w.ctx, w.account, [next(o, 1, { pii: { kind: 'replaced' } })]);
+    expect(addressChanged).not.toContain(id);
+    const carrier = randomUUID();
+    const shipment = randomUUID();
+    await withTenantTransaction(db, w.ctx, async (trx) => {
+      await sql`INSERT INTO app.channel_accounts (id, workspace_id, company_id, provider, display_name)
+                VALUES (${carrier}::uuid, ${w.ctx.workspaceId}::uuid, ${w.company}::uuid, 'evri', 'Evri')`.execute(
+        trx,
+      );
+      await sql`INSERT INTO app.shipments (workspace_id, id, company_id, carrier_account_id, provider,
+                                           service_code, status, idempotency_key, label_format,
+                                           created_at, updated_at)
+                VALUES (${w.ctx.workspaceId}::uuid, ${shipment}::uuid, ${w.company}::uuid,
+                        ${carrier}::uuid, 'evri', 'standard', 'created', ${`order:${id}#1`},
+                        'THERMAL', now(), now())`.execute(trx);
+      await sql`INSERT INTO app.shipment_orders (workspace_id, shipment_id, order_id, company_id, position)
+                VALUES (${w.ctx.workspaceId}::uuid, ${shipment}::uuid, ${id}::uuid, ${w.company}::uuid, 1)`.execute(
+        trx,
+      );
+    });
+    await ingest.apply(w.ctx, w.account, [next(o, 2, { pii: { kind: 'replaced' } })]);
+    await ingest.apply(w.ctx, w.account, [next(o, 3, { pii: { kind: 'replaced' } })]);
+    expect(addressChanged.filter((x) => x === id)).toHaveLength(1);
+    const flag = await withTenantTransaction(db, w.ctx, (trx) =>
+      sql<{ address_changed_after_label: boolean }>`
+        SELECT address_changed_after_label FROM app.orders WHERE id = ${id}::uuid`.execute(trx),
+    );
+    expect(flag.rows[0]?.address_changed_after_label).toBe(true);
+    // SHP-5: the channel cancels it; its label stops being live and is listed to reconcile.
+    await withTenantTransaction(db, w.ctx, (trx) =>
+      sql`INSERT INTO app.parcels (workspace_id, id, shipment_id, company_id, carrier_account_id,
+                                   parcel_no, client_uid, weight_g, state, barcode, created_at, updated_at)
+          VALUES (${w.ctx.workspaceId}::uuid, ${randomUUID()}::uuid, ${shipment}::uuid,
+                  ${w.company}::uuid, ${carrier}::uuid, 1, ${`${o.externalId}-1`}, 500, 'created',
+                  'H00TEST', now(), now())`.execute(trx),
+    );
+    await ingest.apply(w.ctx, w.account, [next(o, 4, { state: 'cancelled' })]);
+    const after = await withTenantTransaction(db, w.ctx, (trx) =>
+      sql<{ live: boolean; listed: boolean }>`
+        SELECT so.live, p.reconcile_since IS NOT NULL AS listed
+          FROM app.shipment_orders so JOIN app.parcels p
+            ON p.workspace_id = so.workspace_id AND p.shipment_id = so.shipment_id
+         WHERE so.order_id = ${id}::uuid`.execute(trx),
+    );
+    expect(after.rows).toEqual([{ live: false, listed: true }]);
   });
 
   it('[ORD-9] a group recompute is asked for only when an order enters or leaves the ones that can group', async () => {

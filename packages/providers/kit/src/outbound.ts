@@ -9,6 +9,7 @@ import {
   providerErrorCode,
   ProviderUnavailable,
   RateLimited,
+  SlotsFull,
 } from './errors.ts';
 import { parserRecordKind } from './parser.ts';
 import type { SyncPorts } from './sync.ts';
@@ -299,7 +300,8 @@ export async function runOutboundSend(
   } catch (err) {
     return ports.tenancy.runWorkspace(actor, async (ctx): Promise<OutboundResult> => {
       await recordCalls(ctx);
-      if (err instanceof Wait) {
+      // A governor's wait (an empty bucket, eBay's budget, RL-4's full slots): no attempt spent.
+      if (err instanceof Wait || err instanceof SlotsFull) {
         const { dispatchSeq } = await ports.writes.defer(ctx, write.id, {
           until: err.until,
           attempted: false,

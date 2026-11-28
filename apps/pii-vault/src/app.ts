@@ -4,6 +4,9 @@ import {
   EbayUserMatchRequest,
   ExpiryRequest,
   IngestRequest,
+  LabelIdsRequest,
+  LabelMergeRequest,
+  LabelStoreRequest,
   MaskRequest,
   MatchRequest,
   ReadFullRequest,
@@ -17,6 +20,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import { CALLER_READ_PURPOSES, can, type ServiceTokens } from './auth.ts';
 import type { DeletionService } from './deletion.ts';
+import { NotPdf, type LabelStore } from './labels.ts';
 import {
   BadExpiry,
   NotFound,
@@ -37,6 +41,8 @@ export interface VaultAppOptions {
   vault?: Vault;
   tokens?: ServiceTokens;
   deletion?: DeletionService;
+  /** Label files (invariant 11); without it the label routes answer 404. */
+  labels?: LabelStore;
 }
 
 class HttpError extends Error {
@@ -62,6 +68,7 @@ export function buildVaultApp({
   vault,
   tokens,
   deletion,
+  labels,
 }: VaultAppOptions) {
   // disableRequestLogging: request lines would hold nothing personal, but errors would carry
   // bodies, so the vault logs only what it chooses to, with IDs and codes.
@@ -106,6 +113,7 @@ export function buildVaultApp({
     if (err instanceof WorkspaceClosed) return reply.code(409).send({ error: 'workspace_closed' });
     if (err instanceof VaultBusy) return reply.code(503).send({ error: 'busy' });
     if (err instanceof BuyerDeleted) return reply.code(409).send({ error: 'buyer_deleted' });
+    if (err instanceof NotPdf) return reply.code(422).send({ error: 'not_a_pdf' });
     const status = (err as { statusCode?: number }).statusCode;
     if (status !== undefined && status >= 400 && status < 500) {
       return reply.code(status).send({ error: 'bad_request' });
@@ -196,6 +204,59 @@ export function buildVaultApp({
     authorise(request, 'delete');
     return deletion.delete(parse(DeleteRequest, request.body));
   });
+
+  // ---- Label files (T-1201, invariant 11) ----------------------------------------------------
+  if (labels !== undefined) {
+    // The worker stores the carrier's PDF, base64 in JSON (a label is at most 2 MB).
+    app.post('/v1/labels/store', { bodyLimit: 3 * 1024 * 1024 }, async (request, reply) => {
+      const caller = authorise(request, 'ingest');
+      if (caller !== 'worker') throw new HttpError(403, 'capability_missing');
+      const body = parse(LabelStoreRequest, request.body);
+      const result = await labels.store({
+        workspaceId: body.workspace_id,
+        labelId: body.label_id,
+        piiRefs: body.pii_refs,
+        pdf: Buffer.from(body.pdf_base64, 'base64'),
+      });
+      return reply.code(result.stored ? 201 : 200).send(result);
+    });
+
+    // SHP-2, FA-15: one PDF, built in memory, streamed back and never written.
+    app.post('/v1/labels/merge', async (request, reply) => {
+      // Printing labels (web, SHP-2) and the worker; never a field read: web still may not read
+      // a record in full for a label (DP-7), it only gets the carrier's file back, merged.
+      const caller = authorise(request, 'read_full');
+      if (caller !== 'web' && caller !== 'worker') throw new HttpError(403, 'purpose_not_allowed');
+      const body = parse(LabelMergeRequest, request.body);
+      const pdf = await labels.merge(body.workspace_id, body.label_ids, {
+        caller,
+        userId: body.actor_user_id,
+      });
+      return reply
+        .header('cache-control', 'no-store')
+        .type('application/pdf')
+        .send(Buffer.from(pdf.buffer, pdf.byteOffset, pdf.byteLength));
+    });
+
+    // IDs only: which of these labels are stored (a reprint fetches the rest by barcode).
+    app.post('/v1/labels/stored', async (request) => {
+      authorise(request, 'read_full');
+      const body = parse(LabelIdsRequest, request.body);
+      return { label_ids: await labels.stored(body.workspace_id, body.label_ids) };
+    });
+
+    // SHP-5: a voided label's file goes at once; the worker's token only.
+    app.post('/v1/labels/discard', async (request) => {
+      const caller = authorise(request, 'ingest');
+      if (caller !== 'worker') throw new HttpError(403, 'capability_missing');
+      const body = parse(LabelIdsRequest, request.body);
+      const gone: string[] = [];
+      for (const id of body.label_ids) {
+        if ((await labels.discard(body.workspace_id, id)) > 0) gone.push(id);
+      }
+      return { label_ids: gone };
+    });
+  }
 
   return app;
 }

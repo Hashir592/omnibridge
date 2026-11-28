@@ -76,4 +76,20 @@ describe('same-buyer groups (ORD-9, C3.1)', () => {
     const out = groups(many);
     expect(out.map((g) => g.length)).toEqual([20, 2]);
   });
+
+  it('[ORD-9] a group that would take a 21st order is reported once, by its first 20 (ADR-087)', () => {
+    const many = Array.from({ length: GROUP_CAP + 3 }, (_, i) =>
+      at(new Date(Date.UTC(2026, 10, 23, 8, i)).toISOString(), `o${String(i).padStart(2, '0')}`),
+    );
+    const full: string[][] = [];
+    sameBuyerGroups(many, { graceHours: 3, onFull: (members) => full.push([...members]) });
+    expect(full).toHaveLength(1);
+    expect(full[0]).toHaveLength(20);
+    expect(full[0]?.[0]).toBe('o00');
+    // Exactly 20 is not full.
+    const twenty = many.slice(0, GROUP_CAP);
+    const none: string[][] = [];
+    sameBuyerGroups(twenty, { graceHours: 3, onFull: (members) => none.push([...members]) });
+    expect(none).toEqual([]);
+  });
 });

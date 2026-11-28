@@ -39,10 +39,12 @@ FROM ${NODE_IMAGE} AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=root:root /out ./
-# Mount points for the encrypted files volume (T-0105) and pii-vault's tombstone journal (T-0403).
+# Mount points for the encrypted files volume (T-0105), pii-vault's tombstone journal (T-0403) and
+# its label files (T-1201, never backed up).
 # A new named volume copies this ownership, so the non-root app can write there while the rest of
 # the filesystem stays read-only.
-RUN mkdir -p /data/files /data/journal && chown node:node /data/files /data/journal \
-  && chmod 0700 /data/files /data/journal
+RUN mkdir -p /data/files /data/journal /data/labels \
+  && chown node:node /data/files /data/journal /data/labels \
+  && chmod 0700 /data/files /data/journal /data/labels
 USER node
 CMD ["node", "dist/main.js"]

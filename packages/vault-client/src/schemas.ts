@@ -407,3 +407,43 @@ export const SubjectsResponse = z
   })
   .strict();
 export type SubjectsResponse = z.infer<typeof SubjectsResponse>;
+
+// ---- Label files (T-1201, invariant 11): the worker stores, web and worker print -------------
+
+/** A label PDF, base64, at most 2 MB once decoded. */
+const LABEL_BASE64_MAX = Math.ceil((2 * 1024 * 1024) / 3) * 4;
+
+export const LabelStoreRequest = z
+  .object({
+    workspace_id: uuid,
+    /** The db-main shipment. */
+    label_id: uuid,
+    /** The buyer records on the label: deleting any of them deletes the file (DEL-1). */
+    pii_refs: z.array(uuid).min(1).max(20),
+    pdf_base64: z
+      .string()
+      .min(8)
+      .max(LABEL_BASE64_MAX)
+      .regex(/^[A-Za-z0-9+/]+=*$/),
+  })
+  .strict();
+export type LabelStoreRequest = z.infer<typeof LabelStoreRequest>;
+export const LabelStoreResponse = z.object({ stored: z.boolean() }).strict();
+export type LabelStoreResponse = z.infer<typeof LabelStoreResponse>;
+
+/** SHP-2: up to 200 labels merged into one PDF, logged as reads for printing. */
+export const LabelMergeRequest = z
+  .object({
+    workspace_id: uuid,
+    label_ids: z.array(uuid).min(1).max(200),
+    actor_user_id: uuid.optional(),
+  })
+  .strict();
+export type LabelMergeRequest = z.infer<typeof LabelMergeRequest>;
+
+export const LabelIdsRequest = z
+  .object({ workspace_id: uuid, label_ids: z.array(uuid).min(1).max(200) })
+  .strict();
+export type LabelIdsRequest = z.infer<typeof LabelIdsRequest>;
+export const LabelIdsResponse = z.object({ label_ids: z.array(uuid) }).strict();
+export type LabelIdsResponse = z.infer<typeof LabelIdsResponse>;

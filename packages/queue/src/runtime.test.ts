@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { defineJob } from './job.ts';
 import {
+  GovernorWait,
   JobQueue,
   PermanentJobError,
   type ConcurrencyLimiter,
@@ -365,5 +366,80 @@ describe('JobQueue permanent failure (INT-5)', () => {
 
   it('[INT-5] a PermanentJobError code must be a stable dotted code', () => {
     expect(() => new PermanentJobError('Parser failed: field x')).toThrow(/code/);
+  });
+});
+
+// RL-4, ADR-079 2, ADR-089 4: a full carrier cap is a governor wait. The job is sent again for
+// later with the same data, completes without failing, and spends no attempt.
+describe('JobQueue governor wait (RL-4)', () => {
+  const waiting = defineJob({ type: 'test.waiting', payload: z.object({}), perAccountCap: 2 });
+  const logger = createLogger({ service: 'test', version: '0', destination: { write: () => 0 } });
+  const data = {
+    workspace_id: WORKSPACE,
+    channel_account_id: ACCOUNT,
+    idempotency_key: 'k-w',
+    attempt: 0,
+    type: waiting.type,
+    payload: {},
+  };
+  const waitingJob = {
+    id: 'job-w',
+    name: waiting.type,
+    data,
+    retryCount: 2,
+    retryLimit: 3,
+  } as unknown as JobWithMetadata<unknown>;
+
+  it('[RL-4] a GovernorWait sends the job again for later, unchanged, and nothing fails', async () => {
+    const patches: { state: string; errorCode?: string | null | undefined }[] = [];
+    const sent: { name: string; data: unknown; options: Record<string, unknown> }[] = [];
+    let run: ((jobs: JobWithMetadata<unknown>[]) => Promise<void>) | undefined;
+    const boss = {
+      work: (_name: string, _opts: unknown, cb: typeof run) => {
+        run = cb;
+        return Promise.resolve('worker-1');
+      },
+      send: (name: string, body: unknown, options: Record<string, unknown>) => {
+        sent.push({ name, data: body, options });
+        return Promise.resolve('job-later');
+      },
+    } as unknown as PgBoss;
+    const records: JobRecordStore = {
+      createAndEnqueue: () => Promise.reject(new Error('unused')),
+      update: (_ctx, _key, patch) => {
+        patches.push({ state: patch.state, errorCode: patch.errorCode });
+        return Promise.resolve();
+      },
+    };
+    const limiter: ConcurrencyLimiter = {
+      acquire: () => Promise.resolve(true),
+      renew: () => Promise.resolve(),
+      release: () => Promise.resolve(),
+    };
+    const { tenancy, opened } = spyTenancy();
+    const queue = new JobQueue({ boss, records, tenancy, limiter, logger });
+    const until = new Date('2026-11-28T12:00:30.000Z');
+    let failed = 0;
+    await queue.work(waiting, {
+      prepare: () => Promise.reject(new GovernorWait(until)),
+      commit: () => Promise.resolve({}),
+      failed: () => {
+        failed += 1;
+        return Promise.resolve();
+      },
+    });
+
+    // On its last attempt, still no failure: the wait is not the job's fault.
+    await expect(run?.([waitingJob])).resolves.toBeUndefined();
+    expect(sent).toEqual([
+      {
+        name: 'test.waiting',
+        data,
+        options: { startAfter: until, group: { id: ACCOUNT } },
+      },
+    ]);
+    expect(patches.at(-1)).toEqual({ state: 'queued', errorCode: null });
+    expect(failed).toBe(0);
+    expect(opened).toEqual([]);
   });
 });

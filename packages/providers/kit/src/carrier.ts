@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { TenantContext } from '@omnibridge/core';
-import { ProviderUnavailable, RateLimited } from './errors.ts';
+import { ProviderUnavailable, RateLimited, SlotsFull } from './errors.ts';
 
 /** RL-4: parallel requests per carrier or website account (default 4). */
 export const CARRIER_CONCURRENCY = 4;
@@ -20,9 +20,13 @@ export interface SlotLimiter {
   release(ctx: TenantContext, scopeKey: string, holder: string): Promise<void>;
 }
 
+/** How long a full account is left alone before its work is tried again (RL-4). */
+export const SLOTS_FULL_RETRY_MS = 15_000;
+
 /**
  * Runs `fn` while holding one of the account's slots (RL-4); a fifth caller waits for a free one,
- * polling, and gives up with ProviderUnavailable (retried later) after `maxWaitMs`.
+ * polling, for at most `maxWaitMs` (5 s). Still full, it throws SlotsFull: a governor wait, tried
+ * again later with no attempt spent (ADR-079 2), never a failure.
  */
 export async function withCarrierSlot<T>(
   limiter: SlotLimiter,
@@ -35,15 +39,24 @@ export async function withCarrierSlot<T>(
     maxWaitMs?: number;
     ttlSeconds?: number;
     provider?: 'evri' | 'dpd' | 'website';
+    now?: () => Date;
   } = {},
 ): Promise<T> {
   const scope = `http:${channelAccountId}`;
   const holder = randomUUID();
   const cap = options.cap ?? CARRIER_CONCURRENCY;
   const ttl = options.ttlSeconds ?? 120;
-  const deadline = Date.now() + (options.maxWaitMs ?? 30_000);
+  const now = options.now ?? (() => new Date());
+  const deadline = Date.now() + (options.maxWaitMs ?? 5_000);
   while (!(await limiter.acquire(ctx, scope, cap, holder, ttl))) {
-    if (Date.now() > deadline) throw new ProviderUnavailable(options.provider ?? 'evri');
+    if (Date.now() > deadline) {
+      const at = now();
+      throw new SlotsFull(
+        options.provider ?? 'evri',
+        new Date(at.getTime() + SLOTS_FULL_RETRY_MS),
+        at,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 100));
   }
   try {

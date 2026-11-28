@@ -6,6 +6,8 @@ import {
   EbayUserMatchResponse,
   ExpiryResponse,
   IngestResponse,
+  LabelIdsResponse,
+  LabelStoreResponse,
   MaskResponse,
   MatchResponse,
   ReadFullResponse,
@@ -139,6 +141,77 @@ export class VaultClient {
 
   match(request: MatchRequest): Promise<MatchResponse> {
     return this.#post('/v1/match', request, MatchResponse);
+  }
+
+  /** Invariant 11: stores a label PDF for buyer records (the worker's token only). */
+  storeLabel(request: {
+    workspaceId: string;
+    labelId: string;
+    piiRefs: readonly string[];
+    pdf: Uint8Array;
+  }): Promise<LabelStoreResponse> {
+    return this.#post(
+      '/v1/labels/store',
+      {
+        workspace_id: request.workspaceId,
+        label_id: request.labelId,
+        pii_refs: request.piiRefs,
+        pdf_base64: Buffer.from(request.pdf).toString('base64'),
+      },
+      LabelStoreResponse,
+    );
+  }
+
+  /** The labels of these shipments that are stored (IDs only). */
+  storedLabels(workspaceId: string, labelIds: readonly string[]): Promise<LabelIdsResponse> {
+    return this.#post(
+      '/v1/labels/stored',
+      { workspace_id: workspaceId, label_ids: labelIds },
+      LabelIdsResponse,
+    );
+  }
+
+  /** SHP-5: a voided label's file goes at once (the worker's token only). */
+  discardLabels(workspaceId: string, labelIds: readonly string[]): Promise<LabelIdsResponse> {
+    return this.#post(
+      '/v1/labels/discard',
+      { workspace_id: workspaceId, label_ids: labelIds },
+      LabelIdsResponse,
+    );
+  }
+
+  /**
+   * SHP-2, FA-15: one PDF of up to 200 labels, merged by the vault and never stored. Each label is
+   * logged as a full read for printing. The bytes are the caller's to stream, never to keep.
+   */
+  async mergeLabels(request: {
+    workspaceId: string;
+    labelIds: readonly string[];
+    actorUserId?: string;
+  }): Promise<Uint8Array> {
+    const response = await this.#fetch(`${this.#base}/v1/labels/merge`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.#token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: request.workspaceId,
+        label_ids: request.labelIds,
+        ...(request.actorUserId === undefined ? {} : { actor_user_id: request.actorUserId }),
+      }),
+      // A 200-label merge takes longer than a field read.
+      signal: AbortSignal.timeout(Math.max(this.#timeoutMs, 60_000)),
+    });
+    if (!response.ok) {
+      const json: unknown = await response.json().catch(() => ({}));
+      const code =
+        typeof json === 'object' &&
+        json !== null &&
+        'error' in json &&
+        typeof json.error === 'string'
+          ? json.error
+          : 'unknown';
+      throw new VaultError(response.status, code);
+    }
+    return new Uint8Array(await response.arrayBuffer());
   }
 
   async #post<S extends z.ZodType>(path: string, body: unknown, schema: S): Promise<z.infer<S>> {

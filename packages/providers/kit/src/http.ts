@@ -3,8 +3,8 @@ import { EgressRefused, ProviderUnavailable } from './errors.ts';
 
 /**
  * Provider hosts per mode (invariant 17). The only place real provider hostnames are written.
- * Carrier hosts are added with their modules (M12, M13); until then a live call
- * to them is refused. A website is called at its own base URL (`site`, M11). Production hosts
+ * Evri (M12) has its production host only: its test environment's host is not in its documents,
+ * so a sandbox call is refused until the client gives it (a verify-live task). DPD comes in M13. A website is called at its own base URL (`site`, M11). Production hosts
  * are confirmed in M22.
  */
 type Hosts = Readonly<Partial<Record<Provider, Readonly<Record<string, string>>>>>;
@@ -18,6 +18,8 @@ const HOSTS: Readonly<Record<'sandbox' | 'live', Hosts>> = {
     amazon: { api: 'sellingpartnerapi-eu.amazon.com', lwa: 'api.amazon.com' },
     amazon_ads: { api: 'advertising-api-eu.amazon.com', lwa: 'api.amazon.co.uk' },
     ebay: { api: 'api.ebay.com' },
+    // EVRI-1: the Evri Business Accounts (myHermes) API.
+    evri: { api: 'api.myhermes.co.uk' },
   },
 };
 
@@ -154,4 +156,33 @@ export function consentUrl(
   }
   const page = CONSENT[mode === 'live' ? 'live' : 'sandbox'][provider];
   return page === undefined ? undefined : new URL(page);
+}
+
+/**
+ * EVRI-2 step 1: the Evri page where the admin signs in and is sent back with a single-use code
+ * in the address bar (the page may show an error; the code is in the URL). In mock mode the
+ * provider-mocks page, which answers at once with a mock code.
+ */
+export function evriAuthoriseUrl(
+  mode: ProviderMode,
+  clientId: string,
+  redirectUri: string,
+  mocksPublicUrl?: string,
+): URL | undefined {
+  let page: URL;
+  if (mode === 'mock') {
+    if (mocksPublicUrl === undefined) return undefined;
+    page = new URL(
+      'evri/customer/authorize',
+      mocksPublicUrl.endsWith('/') ? mocksPublicUrl : `${mocksPublicUrl}/`,
+    );
+  } else if (mode === 'live') {
+    page = new URL('https://www.myhermes.co.uk/customer/authorize');
+  } else {
+    return undefined;
+  }
+  page.searchParams.set('response_type', 'code');
+  page.searchParams.set('client_id', clientId);
+  page.searchParams.set('redirect_uri', redirectUri);
+  return page;
 }

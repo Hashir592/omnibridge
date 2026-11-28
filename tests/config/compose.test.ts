@@ -39,7 +39,7 @@ describe('compose stack: limits (OPS-10)', () => {
     const budget: Record<string, [string, number]> = {
       web: ['384m', 1.0],
       worker: ['512m', 1.0],
-      'pii-vault': ['96m', 0.25],
+      'pii-vault': ['256m', 0.25],
       'db-main': ['1536m', 1.5],
       'db-pii': ['256m', 0.5],
       site: ['24m', 0.1],

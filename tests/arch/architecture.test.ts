@@ -78,15 +78,16 @@ describe('architecture rules (INT-1, INT-2)', () => {
     expect(await violations(kit)).toEqual(['provider-kit-is-generic']);
   });
 
-  it('[INT-2] web reaches a provider only from the OAuth exchange, and only an OAuth provider', async () => {
+  it('[INT-2] web reaches a provider only from the code exchange, and only a code-exchange provider', async () => {
+    // Evri's code exchange (EVRI-2) is allowed there; DPD, which has no code flow, is not.
     const root = tree({
       ...provider,
-      'packages/providers/evri/src/index.ts': 'export const evri = 1;\n',
+      'packages/providers/dpd/src/index.ts': 'export const dpd = 1;\n',
       'apps/web/src/connections.ts':
         "import { ebay } from '../../../packages/providers/ebay/src/index.ts';\nexport const a = ebay;\n",
       'apps/web/src/oauth-exchange.ts':
         "import { ebay } from '../../../packages/providers/ebay/src/index.ts';\n" +
-        "import { evri } from '../../../packages/providers/evri/src/index.ts';\nexport const b = [ebay, evri];\n",
+        "import { dpd } from '../../../packages/providers/dpd/src/index.ts';\nexport const b = [ebay, dpd];\n",
     });
     expect(await violations(root)).toEqual([
       'oauth-exchange-only-oauth-providers',

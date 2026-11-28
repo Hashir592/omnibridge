@@ -90,6 +90,10 @@ DELETE FROM vault.workspace_keys
 DELETE FROM vault.workspace_directory
  WHERE workspace_id IN (SELECT workspace_id FROM vault.closed_workspaces);
 
+-- Invariant 11 (T-1201): label files are never backed up, so the rows of a restored copy point at
+-- files that are not there. They are all dropped; a reprint fetches a label again by barcode.
+DELETE FROM vault.label_files;
+
 SELECT count(*) AS records_deleted FROM doomed;
 -- Entries whose key is not in this backup match nothing: 0 unless the key was made after it.
 SELECT count(*) AS ebay_entries_without_key FROM vault.ebay_deleted_buyers d
@@ -99,4 +103,4 @@ SELECT count(*) AS ebay_entries_without_key FROM vault.ebay_deleted_buyers d
 COMMIT;
 
 -- Outside the transaction: VACUUM cannot run inside one (invariant 10).
-VACUUM vault.record_fields, vault.blind_index, vault.records;
+VACUUM vault.record_fields, vault.blind_index, vault.records, vault.label_files;

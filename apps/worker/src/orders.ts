@@ -1,4 +1,4 @@
-import { londonDate, type TenantContext, type TenantRunner } from '@omnibridge/core';
+import { londonDate, type Notifier, type TenantContext, type TenantRunner } from '@omnibridge/core';
 import { type Connection, type OrderIngest, type OrderReads } from '@omnibridge/db';
 import type { Logger } from '@omnibridge/logger';
 import { PII_HARD_LIMIT_MS, piiExpiryDate } from '@omnibridge/order-ingest';
@@ -50,6 +50,8 @@ export function ordersGroupRecomputeHandler(deps: {
   tenancy: Pick<TenantRunner, 'runWorkspace'>;
   reads: Pick<OrderReads, 'groupCandidates' | 'applyGroups'>;
   vault: Pick<VaultClient, 'match'>;
+  /** ADR-087: a group that would take a 21st order raises one notice. */
+  notifier?: Pick<Notifier, 'raise'>;
 }): PhasedHandler<Record<string, never>, [string, string][]> {
   return {
     prepare: async (job) => {
@@ -74,7 +76,18 @@ export function ordersGroupRecomputeHandler(deps: {
     commit: async (job, classes) => {
       const accountId = job.envelope.channel_account_id;
       if (accountId === undefined) return { groups: 0 };
-      return deps.reads.applyGroups(job.ctx, accountId, new Map(classes));
+      const { groups, full } = await deps.reads.applyGroups(job.ctx, accountId, new Map(classes));
+      // One notice per full group (one per record): the orders beyond 20 start a new group.
+      for (const f of full) {
+        await deps.notifier?.raise(job.ctx, {
+          type: 'orders.group_full',
+          record: { kind: 'order_group', id: f.groupId },
+          signal: 'derived',
+          companyId: f.companyId,
+          channelAccountId: accountId,
+        });
+      }
+      return { groups, full: full.length };
     },
   };
 }

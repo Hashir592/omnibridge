@@ -48,6 +48,21 @@ export class RateLimited extends Error {
   }
 }
 
+/**
+ * RL-4: every one of the carrier or website account's slots is taken. A governor wait, not a
+ * failure (ADR-079 2): the work is tried again at `until` and no attempt is spent. A job turns it
+ * into the queue's GovernorWait; an outbound write is deferred unattempted.
+ */
+export class SlotsFull extends RateLimited {
+  readonly until: Date;
+
+  constructor(provider: Provider, until: Date, now: Date = new Date()) {
+    super(provider, { retryAfterMs: Math.max(0, until.getTime() - now.getTime()) });
+    this.name = 'SlotsFull';
+    this.until = until;
+  }
+}
+
 /** The provider refused the request itself (e.g. Evri INVALID parcel): a stable code, no retry. */
 export class ProviderRejected extends Error {
   readonly provider: Provider;

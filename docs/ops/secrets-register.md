@@ -69,6 +69,7 @@ OmniBridge's own app credentials (PLAT-4, T-0505). They are set only in the plat
 | `ads.client_id`, `ads.client_secret` | Amazon Ads API client credentials | Hashir | mock only | `app.app_secrets` | worker, web (OAuth exchange) | 12 months | set in M15 |
 | `ebay.client_id`, `ebay.client_secret`, `ebay.dev_id` | eBay production keyset (App ID, Cert ID, Dev ID) | Hashir | mock only | `app.app_secrets` | worker, web (OAuth exchange) | 12 months or at eBay's keyset rotation | set in M08 |
 | `ebay.verification_token` | eBay account deletion endpoint verification token (EBAY-2); the early deploy still reads the Docker secret of the same name until M15 moves the endpoint to the store | Hashir | mock only | `app.app_secrets` | web | when changed at eBay | set in M15 |
+| `evri.client_id`, `evri.client_secret` | Evri Business Accounts (myHermes) platform client credentials, the same for every Evri account (EVRI-1, EVRI-2); used only to exchange an admin's authorisation code. Evri's documents hold the values; they are entered in the console and nowhere else (never the repo, a log, a fixture or chat) | Hashir | mock only (synthetic) | `app.app_secrets` | web (code exchange) | when Evri issues new ones | set before the Evri verify-live task (M12) |
 
 ## Planned (not created yet)
 

@@ -17,6 +17,9 @@ export const APP_SECRET_NAMES = [
   'ebay.client_secret',
   'ebay.dev_id',
   'ebay.verification_token',
+  // EVRI-1, EVRI-2 (T-1201): the platform's client credentials, shared by every Evri account.
+  'evri.client_id',
+  'evri.client_secret',
 ] as const;
 export type AppSecretName = (typeof APP_SECRET_NAMES)[number];
 export type AppSecretSlot = 'current' | 'next';

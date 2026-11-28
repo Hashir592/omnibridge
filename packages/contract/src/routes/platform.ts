@@ -316,6 +316,8 @@ export const APP_SECRET_NAMES = [
   'ebay.client_secret',
   'ebay.dev_id',
   'ebay.verification_token',
+  'evri.client_id',
+  'evri.client_secret',
 ] as const;
 
 const SecretSlotSet = z.object({ set_at: z.iso.datetime() }).nullable();

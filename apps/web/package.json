@@ -31,6 +31,7 @@
     "@omnibridge/order-ingest": "workspace:*",
     "@omnibridge/provider-amazon": "workspace:*",
     "@omnibridge/provider-ebay": "workspace:*",
+    "@omnibridge/provider-evri": "workspace:*",
     "@omnibridge/provider-kit": "workspace:*",
     "@omnibridge/queue": "workspace:*",
     "@omnibridge/vault-client": "workspace:*",
