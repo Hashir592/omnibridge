@@ -18,6 +18,8 @@ describe('notification tabs', () => {
       'security.mass_pii_view',
       'security.unusual_login',
       'users.access_review_due',
+      // T-1101: a website's calls failing for a day are a Connections matter (WEB-5).
+      'website.delivery_failed',
     ]);
   });
 });
